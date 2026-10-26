@@ -512,6 +512,7 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert panel.confirm_btn.visible is True and panel.confirm_btn.disabled is False
 
     panel._confirm()
+    page._run_all_tasks()
     assert page.overlay and page.overlay[-1].title.value == "確認條目審核"
     dialog_text = "\n".join(texts_of(page.overlay[-1].content))
     assert "英文原文・en_us" in dialog_text
@@ -2653,6 +2654,7 @@ def test_review_dialog_sync_switch_defaults_on_and_recomputes_scope(db_path):
     panel._on_text_change()
 
     panel._confirm()
+    page._run_all_tasks()
     dialog = page.overlay[-1]
     switches = [c for c in _walk(dialog.content) if type(c).__name__ == "Switch"]
     assert len(switches) == 1 and switches[0].value is True
@@ -2661,6 +2663,7 @@ def test_review_dialog_sync_switch_defaults_on_and_recomputes_scope(db_path):
 
     switches[0].value = False
     switches[0].on_change(None)
+    page._run_all_tasks()
     assert dialog.actions[-1].content == "確認審核目前版本"
     assert "已選擇僅審核目前版本" in "\n".join(texts_of(dialog.content))
 

@@ -26,6 +26,7 @@ from app.ui.dialogs import (
 )
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, shorten
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
@@ -224,6 +225,7 @@ class BulkReviewDialog:
     def open(self) -> None:
         """開啟對話框；範圍選單查詢已在背景啟動，完成後會更新選項。"""
         try:
+            isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
             present_page_dialog(self.page, self.dialog)
             self._opened = True
         except (AttributeError, RuntimeError):
@@ -800,7 +802,4 @@ class BulkReviewDialog:
         self._safe_update()
 
     def _safe_update(self) -> None:
-        try:
-            self.page.update()
-        except RuntimeError:
-            pass  # 視窗已關閉
+        update_regions(self.dialog)  # 只重畫這個視窗；視窗已關閉時略過

@@ -23,7 +23,9 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.page_post import has_background_scheduler, post_to_ui
 from app.ui.snack import show_snack
+from app.ui.update_scope import update_regions
 from app.views.moddb import entry_writes
+from app.views.moddb.background_read import run_read
 from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import impact_text, shorten
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
@@ -115,16 +117,21 @@ class ReviewScopeController:
     def __init__(self, panel):
         self.panel = panel
         self._impact_ticket = 0
+        self._confirm_ticket = 0
         self._executing = False
 
     def update_impact(self) -> None:
-        """同步版本：格式提示、按鈕狀態與影響說明（查詢在呼叫端執行緒）。"""
+        """格式提示、按鈕狀態與影響說明：有背景排程時影響預覽在背景算，否則同步查詢。"""
         panel = self.panel
         panel._update_format_hints()
         entry, db = panel.selected, panel.db()
         text = panel.pending_text()
         if not entry or not db:
             self.apply_impact(None)
+            return
+        if has_background_scheduler(panel._page):
+            self.update_buttons()
+            self.request_impact()
             return
         self.apply_impact(compute_impact(db, entry, text, bool(panel.sync_row.value)))
 
@@ -235,6 +242,7 @@ class ReviewScopeController:
             panel.confirm_btn.disabled = True
 
     def confirm(self, _e=None) -> None:
+        """依目前輸入的審核範圍（背景讀取預覽）開啟確認視窗；預覽被拒絕時顯示原因。"""
         panel = self.panel
         entry, db = panel.selected, panel.db()
         if (
@@ -249,22 +257,51 @@ class ReviewScopeController:
                 C.GOLD,
             )
             return
-        try:
-            preview = db.preview_manual_review(
-                entry.id,
-                expected_zh_tw=entry.zh_tw,
-                expected_source=entry.source,
-                expected_review_status=entry.review_status,
-                expected_checker=entry.checker,
-                propagate=panel.sync_row.value,
-            )
-        except ValueError as exc:
-            self._reject(entry, exc)
-            return
-        self._show_scope(entry, db, preview, bool(panel.sync_row.value))
+        propagate = bool(panel.sync_row.value)
+        self._confirm_ticket += 1
+        ticket = self._confirm_ticket
+
+        def apply(preview, error) -> None:
+            selected = panel.selected
+            if (
+                ticket != self._confirm_ticket
+                or selected is None
+                or selected.id != entry.id
+            ):
+                return  # 又按了一次，或已換成別筆條目
+            if error is None:
+                self._show_scope(entry, db, preview, propagate)
+            elif isinstance(error, ValueError | sqlite3.Error):
+                self._reject(entry, error, database=isinstance(error, sqlite3.Error))
+            else:
+                raise error
+
+        launched = run_read(
+            panel._page,
+            lambda: self._preview_review(entry, db, propagate),
+            apply,
+            name="Mod 資料庫審核範圍預覽",
+            owner="moddb-review-scope-preview",
+        )
+        if not launched:
+            show_snack(panel._page, "審核預覽無法啟動，或應用程式正在關閉。", C.GOLD)
+
+    @staticmethod
+    def _preview_review(
+        entry: EntryRow, db: TranslationDB, propagate: bool
+    ) -> list[ReviewPreviewItem]:
+        """以條目目前的生效譯文為預期值，查詢審核會涵蓋的版本（只讀資料庫）。"""
+        return db.preview_manual_review(
+            entry.id,
+            expected_zh_tw=entry.zh_tw,
+            expected_source=entry.source,
+            expected_review_status=entry.review_status,
+            expected_checker=entry.checker,
+            propagate=propagate,
+        )
 
     def clear_review(self, _e=None) -> None:
-        """解除目前生效譯文的人工審核標記，不改譯文與來源。"""
+        """解除目前生效譯文的人工審核標記（背景寫入），不改譯文與來源。"""
         panel = self.panel
         entry, db = panel.selected, panel.db()
         if (
@@ -273,6 +310,7 @@ class ReviewScopeController:
             or not entry.zh_tw
             or panel.pending_text() != entry.zh_tw
             or entry.review_status not in ("reviewed", "legacy_unknown")
+            or self._executing
         ):
             show_snack(
                 panel._page,
@@ -280,8 +318,11 @@ class ReviewScopeController:
                 C.GOLD,
             )
             return
+        self._executing = True
+        panel.clear_review_btn.disabled = True
+        update_regions(panel.clear_review_btn)
 
-        def work():
+        def work() -> None:
             db.clear_manual_review(
                 entry.id,
                 expected_zh_tw=entry.zh_tw,
@@ -291,42 +332,44 @@ class ReviewScopeController:
                 actor="使用者",
             )
 
-        def apply(_value, error) -> None:
-            if error is not None:
-                self._apply_clear_error(entry, error)
-                return
-            message = "已解除人工審核，譯文與來源未變更"
-            log_info(
-                f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
-            )
-            show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
-            entry_writes.after_data_change(panel, message)
+        def apply(_done, error) -> None:
+            self._executing = False
+            if error is None:
+                message = "已解除人工審核，譯文與來源未變更"
+                log_info(
+                    f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
+                )
+                show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
+                entry_writes.after_data_change(panel, message)
+            elif isinstance(error, ValueError):
+                self._reject_clear(entry, error)
+            elif isinstance(error, sqlite3.Error):
+                log_exception(
+                    f"Mod 資料庫解除人工審核失敗：{entry.mc_version} "
+                    f"{entry.mod_id} {entry.key}"
+                )
+                show_snack(
+                    panel._page,
+                    f"解除人工審核失敗（資料庫錯誤：{error}）；詳情見後台 log",
+                    C.RED,
+                )
+                panel._review_controller.update_buttons()
+                update_regions(panel.clear_review_btn)
+            else:
+                raise error
 
-        if not entry_writes.run_write(
+        launched = entry_writes.run_write(
             panel._page,
             work,
             apply,
             name="Mod 資料庫解除人工審核",
-            owner="moddb-clear-review",
-            label="Mod 資料庫解除人工審核結果",
-        ):
+            owner="moddb-review-clear",
+            label="Mod 資料庫解除審核結果",
+            on_failure=lambda: setattr(self, "_executing", False),
+        )
+        if not launched:
+            self._executing = False
             show_snack(panel._page, "解除審核無法啟動，或應用程式正在關閉。", C.GOLD)
-
-    def _apply_clear_error(self, entry: EntryRow, error: BaseException) -> None:
-        if isinstance(error, ValueError):
-            self._reject_clear(entry, error)
-        elif isinstance(error, sqlite3.Error):
-            log_exception(
-                f"Mod 資料庫解除人工審核失敗：{entry.mc_version} "
-                f"{entry.mod_id} {entry.key}"
-            )
-            show_snack(
-                self.panel._page,
-                f"解除人工審核失敗（資料庫錯誤：{error}）；詳情見後台 log",
-                C.RED,
-            )
-        else:
-            raise error
 
     def _reject_clear(self, entry: EntryRow, exc: Exception) -> None:
         panel = self.panel
@@ -375,23 +418,34 @@ class ReviewScopeController:
             )
             dialog.actions = self._build_scope_actions(entry, db, items, included, sync)
 
+        sync_ticket = [0]
+
         def on_sync_change(_e=None) -> None:
             sync = bool(sync_switch.value)
-            try:
-                items = db.preview_manual_review(
-                    entry.id,
-                    expected_zh_tw=entry.zh_tw,
-                    expected_source=entry.source,
-                    expected_review_status=entry.review_status,
-                    expected_checker=entry.checker,
-                    propagate=sync,
-                )
-            except ValueError as exc:
-                panel._page.pop_dialog()
-                self._reject(entry, exc)
-                return
-            fill(items, sync)
-            panel._page.update()
+            sync_ticket[0] += 1
+            ticket = sync_ticket[0]
+
+            def apply(items, error) -> None:
+                if ticket != sync_ticket[0]:
+                    return  # 又切換了一次：只套用最後一次的結果
+                if error is None:
+                    fill(items, sync)
+                    update_regions(dialog)
+                elif isinstance(error, ValueError | sqlite3.Error):
+                    panel._page.pop_dialog()
+                    self._reject(
+                        entry, error, database=isinstance(error, sqlite3.Error)
+                    )
+                else:
+                    raise error
+
+            run_read(
+                panel._page,
+                lambda: self._preview_review(entry, db, sync),
+                apply,
+                name="Mod 資料庫審核範圍預覽",
+                owner="moddb-review-scope-sync",
+            )
 
         sync_switch.on_change = on_sync_change
         fill(preview, propagate)

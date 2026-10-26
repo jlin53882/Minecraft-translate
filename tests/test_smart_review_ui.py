@@ -502,21 +502,29 @@ def test_run_panel_rejects_batch_size_over_safe_limit(db, monkeypatch):
         panel._request()
 
 
-def test_run_panel_does_not_refresh_page_when_progress_and_log_unchanged(db):
-    """驗證 Smart Review 輪詢沒有可見變更時不會重送整頁 UI。"""
+def test_run_panel_does_not_refresh_dialog_when_progress_and_log_unchanged(
+    db, monkeypatch
+):
+    """驗證 Smart Review 輪詢沒有可見變更時不會重送視窗；有變更時也只更新視窗、不更新整頁。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
 
     page = _sync_page()
     dialog = SmartReviewDialog(page, lambda: db, "1.21.1", None)
     panel = dialog.run_panel
+    updated_regions = []
+    monkeypatch.setattr(
+        "app.views.moddb.smart_review_context.update_regions",
+        lambda *controls: updated_regions.append(controls) or True,
+    )
 
-    before = page.updated
+    page_updates = page.updated
     panel.sync()
-    first = page.updated
+    first = len(updated_regions)
     panel.sync()
 
-    assert first == before + 1
-    assert page.updated == first
+    assert first == 1
+    assert updated_regions == [(dialog.dialog,)] * first
+    assert page.updated == page_updates  # 沒有整頁更新
 
 
 def test_run_panel_renders_preparation_stage_in_progress_and_status(db):

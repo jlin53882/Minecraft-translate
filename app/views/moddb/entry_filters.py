@@ -39,8 +39,12 @@ def build_filter_controls(panel) -> None:
     _build_filter_card(panel)
 
 
-def apply_filter_options(panel, snapshot: dict) -> None:
-    """套用背景載入的篩選選項，並保持目前選取值有效。"""
+def apply_filter_options(panel, snapshot: dict) -> bool:
+    """套用背景載入的篩選選項，並保持目前選取值有效；回傳篩選列是否有任何顯示內容改變。
+
+    選項與選值都沒變時（例如存檔後重新載入同一頁）篩選列不必重畫；
+    它的下拉選單有上千個模組選項，重畫一次要上百毫秒。
+    """
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
     if "identity" in snapshot:
@@ -51,7 +55,13 @@ def apply_filter_options(panel, snapshot: dict) -> None:
             reset_editor_for_database_change(panel)
             panel.source_filter.reset()
             panel._db_identity = identity
-    panel.source_filter.refresh(
+    values_before = (
+        panel.version_dd.value,
+        panel.mod_dd.value,
+        panel.kind_dd.value,
+        panel.source_filter.dropdown.value,
+    )
+    changed = panel.source_filter.refresh(
         snapshot.get("effective_source_codes", ()),
         catalog=snapshot.get("source_catalog"),
         available_only=bool(snapshot.get("filter_options_are_filtered")),
@@ -66,22 +76,29 @@ def apply_filter_options(panel, snapshot: dict) -> None:
             source_value if source_value in available_values else ALL_SOURCES
         )
     versions = snapshot.get("versions", [])
-    kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
+    changed |= kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
     panel.version = snapshot.get("version")
     panel.version_dd.value = panel.version
     mods = snapshot.get("mods", [])
-    kit.set_dropdown_options(
+    changed |= kit.set_dropdown_options(
         panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
     )
     panel.mod_id = snapshot.get("mod_id")
     panel.mod_dd.value = panel.mod_id or ALL_MODS
     kinds = snapshot.get("kinds", [])
-    kit.set_dropdown_options(
+    changed |= kit.set_dropdown_options(
         panel.kind_dd,
         [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
     )
     panel.kind = snapshot.get("kind")
     panel.kind_dd.value = panel.kind or ALL_KINDS
+    values_after = (
+        panel.version_dd.value,
+        panel.mod_dd.value,
+        panel.kind_dd.value,
+        panel.source_filter.dropdown.value,
+    )
+    return changed or values_before != values_after
 
 
 def refresh_after_database_change(panel) -> None:

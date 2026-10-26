@@ -416,6 +416,30 @@ def source_codes(conn: sqlite3.Connection, version: str | None = None) -> list[i
     return sorted(int(row[0]) for row in rows)
 
 
+def mods(conn: sqlite3.Connection, version: str) -> list[str]:
+    """某版本至少有一筆條目的模組，由小到大（成本隨摘要列數而不是條目數成長）。"""
+    return sorted(
+        row[0]
+        for row in conn.execute(
+            "SELECT mod_id FROM stat_src WHERE mc_version = ? "
+            "GROUP BY mod_id HAVING SUM(cnt) > 0",
+            (version,),
+        )
+    )
+
+
+def kinds(conn: sqlite3.Connection, version: str) -> list[str]:
+    """某版本至少有一筆條目的類型，由小到大。"""
+    return sorted(
+        row[0]
+        for row in conn.execute(
+            "SELECT kind FROM stat_src WHERE mc_version = ? "
+            "GROUP BY kind HAVING SUM(cnt) > 0",
+            (version,),
+        )
+    )
+
+
 def counters(conn: sqlite3.Connection) -> dict[str, int]:
     return {
         name: int(v) for name, v in conn.execute("SELECT name, v FROM stat_counter")

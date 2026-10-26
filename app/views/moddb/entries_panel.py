@@ -31,7 +31,7 @@ from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.page_post import has_background_scheduler
-from app.ui.update_scope import isolate, update_regions
+from app.ui.update_scope import isolate, suppress_auto_update, update_regions
 from app.views.moddb import editor_drafts, entry_selection, entry_writes
 from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.editor_save_state import shadowed_versions, shadowing_source
@@ -449,8 +449,8 @@ class EntriesPanel(ft.Column):
         self.editor_card.disabled = False
         self.list_shell.opacity = 1.0
         filter_only = snapshot.get("filter_only", False)
-        if not filter_only or snapshot.get("filter_options_ready"):
-            apply_filter_options(self, snapshot)
+        options_ready = not filter_only or snapshot.get("filter_options_ready")
+        if options_ready and apply_filter_options(self, snapshot):
             self._options_dirty = True
 
         self._editor_drafts.remember(self.selected, self.tw_field.value)
@@ -823,6 +823,7 @@ class EntriesPanel(ft.Column):
 
     def _on_search_input(self, e) -> None:
         """輸入時即時搜尋：停止輸入一小段時間後才查詢，避免每個字都打資料庫。"""
+        suppress_auto_update()  # 輸入中沒有畫面變更；停筆後的搜尋才更新
         if (e.control.value or "").strip() == self.query:
             self._search_debounce.cancel()
             return
@@ -1107,7 +1108,7 @@ class EntriesPanel(ft.Column):
     def show_loading(self) -> None:
         """背景載入中：提示文字已設好，清單變暗表示目前內容即將被取代。"""
         self.list_shell.opacity = LOADING_OPACITY
-        update_regions(self.refresh_indicator, self.list_shell, self.filter_card)
+        update_regions(self.refresh_indicator, self.list_shell)
 
     def clear_loading(self) -> None:
         self.list_shell.opacity = 1.0

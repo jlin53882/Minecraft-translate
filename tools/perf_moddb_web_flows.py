@@ -86,8 +86,8 @@ def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
     for _ in range(3):
         clicked = False
         for label in labels:
-            if ctx.find_all(label, "button", "exact", [240, 20, 1250, 1100]):
-                x, y, *_ = ctx.find(label, "button", "exact", [240, 20, 1250, 1100])
+            if ctx.find_all(label, "button", "exact", [240, 20, 1440, 1100]):
+                x, y, *_ = ctx.find(label, "button", "exact", [240, 20, 1440, 1100])
                 ctx.click_at(x, y)
                 clicked = True
                 break
@@ -96,14 +96,14 @@ def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
             ctx.pg.keyboard.press("Escape")
             ctx.pg.wait_for_timeout(500)
         if not any(
-            ctx.find_all(label, "button", "exact", [240, 20, 1250, 1100])
+            ctx.find_all(label, "button", "exact", [240, 20, 1440, 1100])
             for label in labels
         ):
             return
 
 
 def _dialog_textboxes(ctx: Ctx):
-    return ctx.find_all(None, "textbox", region=[240, 20, 1250, 700])
+    return ctx.find_all(None, "textbox", region=[240, 20, 1440, 700])
 
 
 def _open_dialog_op(ctx: Ctx, name: str, button: str, close_labels, hot=3) -> None:
@@ -263,7 +263,7 @@ def s_review(ctx: Ctx) -> None:
     )
     ctx.op(
         "review_confirm",
-        lambda i: _click_dialog_button(ctx, "確認審核目前版本", "contain"),
+        lambda i: _click_dialog_button(ctx, "確認審核", "start"),
         before=lambda i: (before(i + 4), action(i), ctx.settle(700)),
         hot=min(ctx.hot, 2),
     )
@@ -391,7 +391,7 @@ def s_smart_review(ctx: Ctx) -> None:
 
         ctx.op(f"smart_review_tab_{label}", tab_action, hot=2)
         ctx.settle(800)
-    boxes = ctx.find_all(None, "textbox", region=[240, 20, 1250, 900])
+    boxes = ctx.find_all(None, "textbox", region=[240, 20, 1440, 900])
     if boxes:
 
         def est_before(i):
@@ -509,10 +509,67 @@ def s_translate_scope(ctx: Ctx) -> None:
     ctx.settle(800)
 
 
+def s_version(ctx: Ctx) -> None:
+    """切換版本下拉選單（資料庫有多個版本時，每次都是真正的切換）。"""
+    _to_entries(ctx)
+
+    def before(i):
+        ctx._target = ctx.pick_option(ctx.dropdowns()[0], (i + 1) % 2)
+
+    ctx.op(
+        "version_switch",
+        lambda i: ctx.click_at(*ctx._target),
+        before=before,
+        hot=min(ctx.hot, 4),
+    )
+    ctx.settle(800)
+
+
+def s_review_clear(ctx: Ctx) -> None:
+    """人工審核後再「解除人工審核」；量測的是解除按鈕。"""
+    _to_entries(ctx)
+
+    def confirm_review(i):
+        rows = [
+            r for r in _list_rows(ctx) if "未翻譯" not in r[4] and "人工" not in r[4]
+        ]
+        if not rows:
+            raise ScenarioError("找不到未審核條目")
+        row = rows[i % len(rows)]
+        ctx.click_at(row[0], row[1])
+        ctx.settle(500)
+        it = _scroll_find(
+            ctx,
+            "審核（確認目前譯文）",
+            region=EDITOR_REGION,
+            wheel_at=(840, 700),
+            mode="start",
+        )
+        ctx.click_at(it[0], it[1])
+        ctx.settle(700)
+        _click_dialog_button(ctx, "確認審核", "start")
+        ctx.settle(900)
+
+    def action(i):
+        it = _scroll_find(
+            ctx,
+            "解除人工審核",
+            region=EDITOR_REGION,
+            wheel_at=(840, 700),
+            mode="start",
+        )
+        ctx.click_at(it[0], it[1])
+
+    ctx.op("review_clear", action, before=confirm_review, hot=min(ctx.hot, 3))
+    ctx.settle(800)
+
+
 FLOWS = {
     "advanced": s_advanced,
     "edit": s_edit_save,
     "review": s_review,
+    "version": s_version,
+    "review_clear": s_review_clear,
     "chars": s_chars,
     "batch_replace": s_batch_replace,
     "bulk_review": s_bulk_review,

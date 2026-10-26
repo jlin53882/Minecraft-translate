@@ -31,8 +31,23 @@ Flet 的 `update()` 成本與被走訪的控制項數成正比：`page.update()`
 UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同一把鎖。
 
 模組分工：`entry_row_tile.py`（固定列數的 `EntryTilePool`）、`entry_selection.py`（選取與詳情載入）、
-`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`review_scope_dialog.py`
-（`compute_impact` 與審核確認）。
+`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`background_read.py`（`run_read`：
+審核範圍預覽這類背景唯讀工作）、`review_scope_dialog.py`（`compute_impact`、審核確認與解除審核）。
+
+更新範圍的補充規則：
+
+- 對話框（`BulkReviewDialog`、`CleanupDialog`、`SpeciesCandidateDialog`、`SmartReviewDialog`、
+  `RepairReviewer`）開啟前以 `isolate` 標成更新邊界，內容只由 `update_regions(self.dialog)`（智慧校對
+  是 `SmartReviewContext.update`，其 `dialog` 由 `SmartReviewDialog` 設定）更新；對話框內不得呼叫
+  `page.update()`，否則整頁走訪一次要數十到上百毫秒。`app/ui/dialogs.py` 的縮放處理也逐一更新視窗。
+- 條目寫入完成由 `entry_writes.after_data_change` 收尾：背景模式只觸發上層快照（`_refresh_active_panel`
+  以 `show_loading` 顯示輕量提示），整個面板由快照套用後的 `flush` 重畫一次，回傳值表示編輯區是否
+  由快照重畫。`ModDbView._request_panel_refresh` 先把讀取交給 worker，再重畫載入中提示。
+- `apply_filter_options` 回傳選項或選值是否改變，只有改變才重畫 `filter_card`。
+- 沒有畫面變更的事件處理函式（全域按鍵 `KeyboardShortcutHandler.handle_keyboard`、
+  `EntriesPanel._on_search_input`）呼叫 `suppress_auto_update`，避免 Flet 在事件後補一次自動更新。
+- 畫面執行緒連線上的 `TranslationDB._persist_stat_cache` 以 `busy_timeout = 0` 寫入：其他連線持有
+  寫入鎖時直接放棄這次快取寫入，不凍結畫面。
 
 ## 學名候選流程
 
@@ -83,7 +98,7 @@ EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftSto
 
 頁籤背景快照（`panel_refresh.py` 的 `load_panel_snapshot`、`load_entries_filter_snapshot`）透過 service 的 `moddb_read_snapshot` 取得 worker 專用唯讀連線與單一讀取交易，離開時一律 rollback 並關閉；資料世代由 `database_data_generation` 讀取，內容包含 `data_gen` 與外部 SQLite 寫入序號，view 不碰連線內部，也不可直接呼叫 `_data_gen()`。因此另一個連線完成寫入時，篩選結果與清單快照會被判定為過期並重新載入。批次取代對話框、規則頁與圖示預覽頁各自維護的分頁（前後頁、跳頁輸入）與 `kit.Pager` 的頁碼按鈕語意不同，維持各自實作並由行為測試固定。
 
-一般使用者操作的 `EntriesPanel` 換頁與篩選不會呼叫 `load_entries_filter_snapshot`；它保留給快照失效／相容路徑與背景頁籤刷新使用。這個界線避免同步導覽與背景結果同時改寫同一份清單，造成頁碼或選取項目短暫跳動。
+`EntriesPanel` 的換頁與篩選透過 `ModDbView._on_entries_filter_changed` 發出背景快照：只換頁時 `page_only` 為真，worker 走 `load_entries_filter_snapshot` 且不重算下拉選項；篩選條件改變時才重算選項（`filter_options_ready`）。`apply_filter_options` 回傳選項或選值是否改變，沒有改變就不標記 `_options_dirty`，篩選列因此不會因存檔、還原或翻頁而重畫。
 
 `SmartReviewDialog` 切換到「審查」時只在目前批次尚未載入時啟動 `SmartReviewReviewer.load_run` 或 `SmartReviewBatchReviewer.load_run`；兩者的資料庫讀取都透過 `SmartReviewContext.run_background`，分頁本身先立即顯示載入狀態。`SmartReviewHistory.refresh` 的批次清單與「載入更多」也透過 `run_background`，以 request sequence、資料庫身分與視窗世代丟棄晚到結果；因此切換分頁不會被歷史 JSON／SQLite 讀取卡住，也不會用舊清單覆蓋新請求。
 

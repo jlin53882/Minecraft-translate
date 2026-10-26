@@ -37,8 +37,15 @@ def _responsive_dialog(page):
     return dialog, field
 
 
-def test_open_dialog_resizes_body_and_responsive_fields_and_restores_handler():
+def test_open_dialog_resizes_body_and_responsive_fields_and_restores_handler(
+    monkeypatch,
+):
     page = _ResizablePage()
+    updated_dialogs = []
+    monkeypatch.setattr(
+        "app.ui.dialogs.update_regions",
+        lambda *controls: updated_dialogs.append(controls) or True,
+    )
     original_resize = page.on_resize
     dialog, field = _responsive_dialog(page)
     initial_size = dialog_dimensions(page)
@@ -56,7 +63,9 @@ def test_open_dialog_resizes_body_and_responsive_fields_and_restores_handler():
     assert (dialog.content.width, dialog.content.height) != initial_size
     assert field.width == max(216, dialog.content.width - 340)
     assert field.width != initial_field_width
-    assert page.updates == 1
+    # 視窗可能是更新邊界：只更新視窗自己，不走整頁
+    assert updated_dialogs == [(dialog,)]
+    assert page.updates == 0
 
     assert close_page_dialog(page, dialog)
     assert page.on_resize is original_resize

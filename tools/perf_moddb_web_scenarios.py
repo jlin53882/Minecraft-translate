@@ -122,9 +122,9 @@ class Ctx:
             self.pg.keyboard.press("Escape")
             self.pg.wait_for_timeout(400)
             for label in ("取消", "關閉"):
-                if self.find_all(label, "button", "exact", [240, 20, 1250, 1100]):
+                if self.find_all(label, "button", "exact", [240, 20, 1440, 1100]):
                     x, y, *_ = self.find(
-                        label, "button", "exact", [240, 20, 1250, 1100]
+                        label, "button", "exact", [240, 20, 1440, 1100]
                     )
                     self.click_at(x, y)
                     self.pg.wait_for_timeout(400)
@@ -495,17 +495,22 @@ def summarize(samples: list[dict]) -> dict:
 
 def print_table(output: dict) -> None:
     print()
-    header = f"{'操作':34} {'冷srv':>7} {'冷e2e':>7} | {'熱srv med':>9} {'p95':>7} | {'熱e2e med':>9} {'p95':>7} | {'blk':>6} {'patchKB':>7}"
+    header = f"{'操作':34} {'冷srv':>7} {'冷e2e':>7} | {'熱srv med':>9} {'p95':>7} {'首patch':>7} | {'熱e2e med':>9} {'p95':>7} | {'blk':>6} {'patchKB':>7}"
     print(header)
     print("-" * len(header))
     for name, s in output["summary"].items():
         cold = s["cold"]
         print(
             f"{name:34} {cold.get('server_ms') or 0:7.0f} {cold.get('e2e_ms') or 0:7.0f} | "
-            f"{s.get('hot_server_ms_median', 0):9.0f} {s.get('hot_server_ms_p95', 0):7.0f} | "
+            f"{s.get('hot_server_ms_median', 0):9.0f} {s.get('hot_server_ms_p95', 0):7.0f} "
+            f"{s.get('hot_first_patch_ms_median', 0):7.0f} | "
             f"{s.get('hot_e2e_ms_median', 0):9.0f} {s.get('hot_e2e_ms_p95', 0):7.0f} | "
             f"{s.get('hot_loop_block_ms_median', 0):6.0f} {cold.get('patch_kb') or 0:7.1f}"
         )
+    for name, s in output["summary"].items():
+        if s.get("db_last_hot"):
+            calls = ", ".join(f"{k}={v:.0f}" for k, v in s["db_last_hot"].items())
+            print(f"  db[{name}]: {calls}")
     for name, stalls in output["stalls"].items():
         print(
             f"  stall[{name}]: "

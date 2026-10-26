@@ -379,7 +379,14 @@ class ModDbView(ft.Column):
             elif key == "translate":
                 self.translate.resume()
 
-    def _activate_panel(self, key: str, *, background: bool, update: bool) -> None:
+    def _activate_panel(
+        self,
+        key: str,
+        *,
+        background: bool,
+        update: bool,
+        message: str | None = None,
+    ) -> None:
         pending = self._pending_panel_results.pop(key, None)
         if pending is not None:
             generation, signature, request, data_revision, snapshot = pending
@@ -399,7 +406,7 @@ class ModDbView(ft.Column):
             return
         if background:
             if update:
-                self._request_panel_refresh(key)
+                self._request_panel_refresh(key, message=message)
             return
         if key == "entries":
             keep_scroll = self.entries._refresh_keep_scroll
@@ -451,12 +458,8 @@ class ModDbView(ft.Column):
         panel.refresh_indicator.visible = True
         if key == "entries":
             self.entries.set_data_loading(True)
-        if self.tab == key:
-            if message is not None and key == "entries":
-                panel.show_loading()
-            else:
-                self._safe_update()
 
+        # 先把讀取交給 worker，再重畫「載入中」：資料庫讀取不佔 GIL，可與畫面差異計算重疊。
         try:
             launched = self._launch_panel_refresh(
                 key, panel, request, settings, signature, data_revision, generation
@@ -476,6 +479,11 @@ class ModDbView(ft.Column):
             if key == "entries":
                 self.entries.set_data_loading(False)
             if self.tab == key:
+                self._safe_update()
+        elif self.tab == key:
+            if message is not None and key == "entries":
+                panel.show_loading()
+            else:
                 self._safe_update()
 
     def _launch_panel_refresh(
@@ -796,10 +804,14 @@ class ModDbView(ft.Column):
         if self.tab == "overview":
             self._request_overview_refresh()
         else:
+            # 目前頁籤已顯示：條目頁只需要輕量的「載入中」提示，不必重畫整個頁籤
             self._activate_panel(
                 self.tab,
                 background=self._has_background_scheduler(),
                 update=True,
+                message=PANEL_REFRESH_MESSAGES["entries"]
+                if self.tab == "entries"
+                else None,
             )
 
     # ------------------------------------------------------------------ 生命週期

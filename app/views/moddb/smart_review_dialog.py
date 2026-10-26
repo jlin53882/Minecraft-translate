@@ -19,6 +19,7 @@ from app.ui.dialogs import (
     present_page_dialog,
 )
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.smart_review_batch_reviewer import SmartReviewBatchReviewer
 from app.views.moddb.smart_review_candidate_loader import SmartReviewCandidateLoader
 from app.views.moddb.smart_review_context import SmartReviewContext
@@ -163,6 +164,7 @@ class SmartReviewDialog:
             actions=[self.close_btn],
             on_dismiss=self._on_dismiss,
         )
+        self.ctx.dialog = self.dialog
 
     def _on_tab(self, key: str) -> None:
         """立即切換分頁，並把該分頁需要的資料讀取交給背景工作。"""
@@ -463,7 +465,7 @@ class SmartReviewDialog:
         if error:
             self._resume_error_text.value = error
             self._resume_error_text.color = C.RED
-            self.page.update()
+            update_regions(self._resume_dialog)
             return
         started = self.run_panel.resume_run(
             run_id,
@@ -491,6 +493,7 @@ class SmartReviewDialog:
     def open(self) -> None:
         """開啟視窗，接續背景任務狀態並載入批次清單。"""
         try:
+            isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
             present_page_dialog(self.page, self.dialog)
         except (AttributeError, RuntimeError):
             show_snack(self.page, "目前畫面無法開啟智慧校對視窗。", C.GOLD)

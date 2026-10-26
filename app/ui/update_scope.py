@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import flet as ft
+
 from translation_tool.utils.log_unit import log_debug
 
 
@@ -41,3 +43,16 @@ def update_regions(*controls: Any) -> bool:
             log_debug(f"區域更新略過：{exc!r}")
             ok = False
     return ok
+
+
+def suppress_auto_update() -> None:
+    """事件處理函式沒有任何畫面變更時呼叫，讓 Flet 略過事後的自動更新。
+
+    Flet 在事件處理完、沒有人呼叫過 ``update()`` 時，會對最近的更新邊界（通常是整個 Page）
+    補一次更新。全域按鍵事件與逐字輸入每個字元都觸發，整頁走訪一次要數十毫秒。
+    處理函式確定沒有改動控制項（或已自行更新需要的區塊）時呼叫這個函式。
+    """
+    try:
+        ft.context.mark_update_called()
+    except Exception as exc:  # noqa: BLE001 - 不在 Flet 事件脈絡內（單元測試）時沒有影響
+        log_debug(f"略過自動更新抑制：{exc!r}")

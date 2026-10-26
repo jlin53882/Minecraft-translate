@@ -273,3 +273,218 @@ def test_translate_scope_change_counts_in_the_background(view, monkeypatch):
     _settle(view._page)
     assert threads and MAIN not in threads
     assert "未翻譯" in translate.count_text.value
+
+
+# ------------------------------------------------------------------ 載入中提示與寫入後重畫
+def test_loading_state_does_not_redraw_the_filter_card(view, monkeypatch):
+    regions: list[tuple] = []
+    monkeypatch.setattr(
+        entries_panel, "update_regions", lambda *controls: regions.append(controls)
+    )
+
+    view.entries.show_loading()
+
+    assert regions == [(view.entries.refresh_indicator, view.entries.list_shell)]
+
+
+def test_panel_refresh_is_handed_to_the_worker_before_the_loading_redraw(
+    view, monkeypatch
+):
+    order: list[str] = []
+    original_launch = view._launch_panel_refresh
+    original_loading = view.entries.show_loading
+
+    def launch(*args, **kwargs):
+        order.append("launch")
+        return original_launch(*args, **kwargs)
+
+    def loading():
+        order.append("loading")
+        original_loading()
+
+    monkeypatch.setattr(view, "_launch_panel_refresh", launch)
+    monkeypatch.setattr(view.entries, "show_loading", loading)
+
+    view.entries.pager.goto(2)
+
+    assert order == ["launch", "loading"]  # 讀取先開跑，畫面差異計算與它重疊
+    _settle(view._page)
+
+
+def test_save_redraws_the_entries_panel_once_after_the_worker_snapshot(
+    view, monkeypatch
+):
+    entries = view.entries
+    entries._edit_debounce = SimpleNamespace(
+        call=lambda fn, *args: fn(*args), cancel=lambda: None
+    )
+    flushes: list[str] = []
+    for name in ("flush", "flush_all"):
+        original = getattr(entries, name)
+
+        def counted(*args, _name=name, _original=original, **kwargs):
+            flushes.append(_name)
+            return _original(*args, **kwargs)
+
+        monkeypatch.setattr(entries, name, counted)
+    entries.tw_field.value = "新的譯文"
+    entries._on_text_change()
+    _settle(view._page)
+    flushes.clear()
+
+    entries._save()
+    _settle(view._page)
+
+    # 寫入完成只顯示輕量的載入中提示，整個條目面板在新快照套用後才重畫一次
+    assert flushes == ["flush"]
+    assert entries.selected.zh_tw == "新的譯文"
+    assert entries.saved_text.value
+
+
+def test_save_failure_still_recomputes_the_impact_in_the_background(view, monkeypatch):
+    threads = _record_threads(monkeypatch, "preview_manual")
+    entries = view.entries
+    entries._edit_debounce = SimpleNamespace(
+        call=lambda fn, *args: fn(*args), cancel=lambda: None
+    )
+    entries.tw_field.value = "會失敗的譯文"
+    entries._on_text_change()
+    _settle(view._page)
+    threads.clear()
+
+    entries._update_impact()
+
+    assert MAIN not in threads  # 畫面執行緒不查資料庫
+    _settle(view._page)
+    assert threads and MAIN not in threads
+
+
+# ------------------------------------------------------------------ 人工審核
+def _select_first_reviewable(view):
+    entries = view.entries
+    entries._edit_debounce = SimpleNamespace(
+        call=lambda fn, *args: fn(*args), cancel=lambda: None
+    )
+    row = next(r for r in entries.rows if r.zh_tw)
+    entries.select(row.id)
+    _settle(view._page)
+    entries.tw_field.value = entries.selected.zh_tw
+    entries._on_text_change()
+    _settle(view._page)
+    return entries
+
+
+def test_review_scope_preview_is_read_in_a_worker(view, monkeypatch):
+    threads = _record_threads(monkeypatch, "preview_manual_review")
+    entries = _select_first_reviewable(view)
+    threads.clear()
+    page = view._page
+
+    entries._confirm()
+
+    assert MAIN not in threads  # 按下審核當下不查資料庫
+    assert not any(getattr(c, "title", None) for c in page.overlay)
+    _settle(page)
+    assert threads and MAIN not in threads
+    assert page.overlay[-1].title.value == "確認條目審核"
+
+
+def test_review_scope_switch_recomputes_in_a_worker_and_updates_only_the_dialog(
+    view, monkeypatch
+):
+    entries = _select_first_reviewable(view)
+    page = view._page
+    entries._confirm()
+    _settle(page)
+    dialog = page.overlay[-1]
+    switch = next(
+        c for c in _walk_controls(dialog.content) if type(c).__name__ == "Switch"
+    )
+    threads = _record_threads(monkeypatch, "preview_manual_review")
+    page_wide: list[tuple] = []
+    original = page.update
+    page.update = lambda *controls: (
+        page_wide.append(controls) if not controls else None,
+        original(*controls),
+    )[1]
+
+    switch.value = False
+    switch.on_change(None)
+
+    assert MAIN not in threads
+    _settle(page)
+    assert threads and MAIN not in threads
+    assert page_wide == []  # 只更新確認視窗
+
+
+def _walk_controls(control):
+    yield control
+    for child in getattr(control, "controls", None) or []:
+        yield from _walk_controls(child)
+    inner = getattr(control, "content", None)
+    if inner is not None:
+        yield from _walk_controls(inner)
+
+
+def test_clear_review_writes_in_a_worker_and_reloads_in_place(view, monkeypatch):
+    entries = _select_first_reviewable(view)
+    page = view._page
+    entries._confirm()
+    _settle(page)
+    page.overlay[-1].actions[-1].on_click(None)  # 確認審核
+    _settle(page)
+    assert entries.selected.review_status == "reviewed"
+    assert entries.clear_review_btn.visible is True
+    threads = _record_threads(monkeypatch, "clear_manual_review")
+
+    entries.clear_review_btn.on_click(None)
+
+    assert MAIN not in threads  # 畫面執行緒不寫資料庫
+    _settle(page)
+    assert threads and MAIN not in threads
+    assert entries.selected.review_status == "unreviewed"
+    assert entries.clear_review_btn.visible is False
+    assert entries.confirm_btn.visible is True
+
+
+def test_typing_in_the_search_box_suppresses_the_automatic_update(view, monkeypatch):
+    suppressed: list[int] = []
+    monkeypatch.setattr(
+        entries_panel, "suppress_auto_update", lambda: suppressed.append(1)
+    )
+    entries = view.entries
+
+    entries._on_search_input(SimpleNamespace(control=SimpleNamespace(value="ab")))
+
+    assert suppressed == [1]  # 逐字輸入不對篩選列補一次自動更新
+
+
+def _record_regions(monkeypatch) -> list:
+    regions: list = []
+    original = entries_panel.update_regions
+
+    def recorder(*controls):
+        regions.extend(controls)
+        return original(*controls)
+
+    monkeypatch.setattr(entries_panel, "update_regions", recorder)
+    return regions
+
+
+def test_reloading_unchanged_options_does_not_redraw_the_filter_card(view, monkeypatch):
+    regions = _record_regions(monkeypatch)
+
+    view._request_panel_refresh("entries")  # 完整快照，選項與選值都沒變
+    _settle(view._page)
+
+    assert view.entries.filter_card not in regions
+    assert view.entries.list_view in regions
+
+
+def test_changed_options_redraw_the_filter_card(view, monkeypatch):
+    regions = _record_regions(monkeypatch)
+
+    view.entries._on_state("none")  # 沒有未翻譯條目：模組選項縮減
+    _settle(view._page)
+
+    assert view.entries.filter_card in regions

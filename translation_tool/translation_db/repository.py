@@ -487,6 +487,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         with self._lock:
             if self._conn.in_transaction:
                 return
+            # 快取寫不進去就算了：不等其他連線（掃描、批次寫入）持有的寫入鎖。
+            # 預設的等待時間是數秒，這個函式常在畫面執行緒的連線上被呼叫，等鎖會凍結整個畫面。
+            wait_ms = self._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            self._conn.execute("PRAGMA busy_timeout = 0")
             try:
                 if self._cache_generation() != gen:
                     return  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
@@ -502,6 +506,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 # 不回復會一直持有寫鎖，擋住之後所有寫入。
                 if self._conn.in_transaction:
                     self._conn.rollback()
+            finally:
+                self._conn.execute(f"PRAGMA busy_timeout = {int(wait_ms)}")
 
     def warm_stats(self) -> None:
         """預先算好總覽統計並存入快取（大量寫入後在背景呼叫，之後切到總覽頁就是即時的）。"""
@@ -807,6 +813,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return self._cached(f"kinds:{version}", lambda: self._kinds_uncached(version))
 
     def _kinds_uncached(self, version: str) -> list[str]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return stat_summary.kinds(self._conn, version)
         return [
             r[0]
             for r in self._q(
@@ -821,6 +830,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         ]
 
     def _mods_uncached(self, version: str) -> list[str]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return stat_summary.mods(self._conn, version)
         # 沿 idx_entry_list_order (mc_version, mod_id, …) 逐個跳到下一個模組：
         # 成本隨模組數而不是條目數成長，也不必暫存排序。
         rows = self._q(

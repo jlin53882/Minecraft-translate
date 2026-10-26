@@ -4,12 +4,12 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **356** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **359** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 319 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| 已記錄／回報 | 321 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
@@ -66,6 +66,7 @@
 | `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/sync_text_field.py:_clean_path_input` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/ui/update_scope.py:update_regions` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
+| `app/ui/update_scope.py:suppress_auto_update` | BLE001 | 已記錄／回報 | 不在 Flet 事件脈絡內（單元測試）時沒有影響 |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:_execute_cache_work` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -138,6 +139,8 @@
 | `app/views/merge_view.py:MergeView._run_merge_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界：失敗要寫進 session，否則輪詢永遠等不到結束 |
 | `app/views/merge_view.py:MergeView._sync_ui_once` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/merge_view.py:MergeView._close_dialog_overlay` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/views/moddb/background_read.py:run_read.call` | BLE001 | UI／畫面保護 | worker 邊界：交給 apply 顯示 |
+| `app/views/moddb/background_read.py:run_read` | BLE001 | 已記錄／回報 | 無法啟動：讓呼叫端恢復畫面 |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._start_scope_options_load.work` | BLE001 | 已記錄／回報 | worker boundary |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._confirm.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |

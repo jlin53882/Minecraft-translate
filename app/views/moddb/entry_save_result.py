@@ -114,7 +114,8 @@ def _show_success_snack(panel, message, shadow, held_back) -> None:
 
 def _apply_current_panel_result(
     panel, entry, text: str, message: str, shadow, flagged_batch: int
-) -> None:
+) -> bool:
+    """回傳是否已交給父層的背景快照重畫（呼叫端不必再更新編輯區）。"""
     if (
         not shadow
         and not analyze_format_diagnostics(
@@ -129,8 +130,8 @@ def _apply_current_panel_result(
         panel._editor_drafts.remember(panel.selected, panel.tw_field.value)
     if same_entry and (panel.tw_field.value or "") == text:
         panel._editor_drafts.discard(entry.id)
-        entry_writes.after_data_change(panel, message)
-        return
+        return entry_writes.after_data_change(panel, message)
     if same_entry:
         panel.saved_text.value = f"{message}；目前輸入的變更尚未儲存。"
     panel._notify_changed(keep_scroll=True)
+    return False

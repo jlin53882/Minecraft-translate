@@ -42,3 +42,38 @@ def test_ctrl_f_prefers_visible_field_and_ignores_pages_without_search():
     handler.set_current_view_getter(lambda: SimpleNamespace(content=SimpleNamespace()))
     handler.handle_keyboard(_event("f"))
     assert len(page.tasks) == 1
+
+
+def test_plain_keys_suppress_flets_automatic_page_update(monkeypatch):
+    """一般按鍵與沒有對應的組合鍵沒有畫面變更：不讓 Flet 對整個 Page 補一次更新。"""
+    suppressed = []
+    monkeypatch.setattr(
+        "app.ui.keyboard_shortcuts.suppress_auto_update",
+        lambda: suppressed.append(1),
+    )
+    handler = KeyboardShortcutHandler(_Page(), [], lambda idx: None)
+
+    handler.handle_keyboard(
+        SimpleNamespace(key="a", ctrl=False, meta=False, shift=False, alt=False)
+    )
+    handler.handle_keyboard(_event("c"))  # Ctrl+C：瀏覽器自己處理
+
+    assert suppressed == [1, 1]
+
+
+def test_handled_shortcuts_keep_flets_automatic_update(monkeypatch):
+    suppressed = []
+    monkeypatch.setattr(
+        "app.ui.keyboard_shortcuts.suppress_auto_update",
+        lambda: suppressed.append(1),
+    )
+    saved = []
+    handler = KeyboardShortcutHandler(_Page(), [], lambda idx: None)
+    handler.set_save_callback(lambda: saved.append(1)) if hasattr(
+        handler, "set_save_callback"
+    ) else setattr(handler, "_save_callback", lambda: saved.append(1))
+
+    handler.handle_keyboard(_event("s"))
+
+    assert saved == [1]
+    assert suppressed == []

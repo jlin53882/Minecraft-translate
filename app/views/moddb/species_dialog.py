@@ -36,6 +36,7 @@ from app.ui.dialogs import (
 )
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb import species_bulk_lookup as bulk
 from app.views.moddb.formatting import kind_label
 from translation_tool.utils.log_unit import log_exception
@@ -383,6 +384,7 @@ class SpeciesCandidateDialog:
         if self.job.running:
             self._attach_running_job()
         try:
+            isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
             present_page_dialog(self.page, self.dialog)
             self._opened = True
         except (AttributeError, RuntimeError):
@@ -842,15 +844,12 @@ class SpeciesCandidateDialog:
         self._flush(force=True)
 
     def _flush(self, *, force: bool = False) -> None:
-        """重繪畫面；批次查詢時節流，避免每完成一筆就整頁更新。"""
+        """重繪畫面；批次查詢時節流，避免每完成一筆就重畫視窗。"""
         now = time.monotonic()
         if not force and now - self._last_flush < UI_FLUSH_INTERVAL_SECONDS:
             return
         self._last_flush = now
-        try:
-            self.page.update()
-        except RuntimeError:
-            pass
+        update_regions(self.dialog)
 
 
 __all__ = ["SpeciesCandidateDialog"]

@@ -141,6 +141,32 @@ def _install_hooks(probe: ServerProbe) -> None:
 
     Session.dispatch_event = dispatch_event
 
+    original_patch_control = Session.patch_control
+
+    def patch_control(self, control, *args, **kwargs):
+        """記錄每次 ``update()`` 的控制項型別與呼叫位置（找出多餘或重複的更新）。"""
+        frame = sys._getframe(1)
+        callers: list[str] = []
+        while frame is not None and len(callers) < 3:
+            path = frame.f_code.co_filename
+            if str(ROOT / "app") in path:
+                callers.append(
+                    f"{Path(path).name}:{frame.f_lineno}:{frame.f_code.co_name}"
+                )
+            frame = frame.f_back
+        started = time.perf_counter()
+        try:
+            return original_patch_control(self, control, *args, **kwargs)
+        finally:
+            probe.add(
+                "patch",
+                control=type(control).__name__,
+                ms=round((time.perf_counter() - started) * 1000, 1),
+                callers=callers,
+            )
+
+    Session.patch_control = patch_control
+
     original_send = fapp.FletApp.send_message
     original_packb = fapp.msgpack.packb
     size_box = {"n": 0}
@@ -159,6 +185,38 @@ def _install_hooks(probe: ServerProbe) -> None:
         )
 
     fapp.FletApp.send_message = send_message
+    _install_db_hooks(probe)
+
+
+def _install_db_hooks(probe: ServerProbe) -> None:
+    """記錄 ``TranslationDB`` 公開方法的耗時與執行緒（區分畫面執行緒與 worker）。"""
+    import functools
+    import inspect
+
+    from translation_tool.translation_db import TranslationDB
+
+    def wrap(name, func):
+        @functools.wraps(func)
+        def timed(self, *args, **kwargs):
+            started = time.perf_counter()
+            try:
+                return func(self, *args, **kwargs)
+            finally:
+                ms = (time.perf_counter() - started) * 1000
+                if ms >= 3:
+                    probe.add(
+                        "db",
+                        name=name,
+                        ms=round(ms, 1),
+                        ui=threading.get_ident() == probe.main_thread_id,
+                    )
+
+        return timed
+
+    for name, func in list(vars(TranslationDB).items()):
+        if name.startswith("_") or not inspect.isfunction(func):
+            continue
+        setattr(TranslationDB, name, wrap(name, func))
 
 
 class LoopProfiler:
@@ -284,11 +342,13 @@ def summarize(samples: list[dict]) -> dict:
         return {}
     hot = samples[1:]
     result: dict = {"cold": samples[0]}
-    for field in ("server_ms", "e2e_ms", "loop_block_ms"):
+    for field in ("server_ms", "first_patch_ms", "e2e_ms", "loop_block_ms"):
         values = [s[field] for s in hot if s.get(field) is not None]
         if values:
             result[f"hot_{field}_median"] = round(statistics.median(values), 1)
             result[f"hot_{field}_p95"] = round(percentile(values, 95), 1)
+    if hot and hot[-1].get("db_ms"):
+        result["db_last_hot"] = hot[-1]["db_ms"]
     return result
 
 
@@ -402,18 +462,50 @@ class Driver:
         recvs = [e for e in events if e["kind"] == "recv"]
         sends = [e for e in events if e["kind"] == "send"]
         server_ms = None
+        first_ms = None
         if recvs and sends:
             first_recv = recvs[0]["t"]
-            last_send = max(s["t"] for s in sends)
+            # 外殼每隔幾秒的 API Key 輪詢也會 patch；它與這次操作無關，不計入
+            patches = [
+                e
+                for e in events
+                if e["kind"] == "patch"
+                and not any("_poll_keys" in c for c in e["callers"])
+            ]
+            last_send = max([e["t"] for e in patches] or [s["t"] for s in sends])
             server_ms = round((last_send - first_recv) * 1000, 1)
+            first_ms = round((min(s["t"] for s in sends) - first_recv) * 1000, 1)
+        db_calls = [e for e in events if e["kind"] == "db"]
+        db_summary: dict[str, float] = {}
+        for call in db_calls:
+            key = call["name"] + ("@ui" if call["ui"] else "")
+            db_summary[key] = round(db_summary.get(key, 0.0) + call["ms"], 1)
+        db_top = dict(sorted(db_summary.items(), key=lambda kv: -kv[1])[:6])
         sem = self.page.evaluate(
             "() => window.__perf ? [window.__perf.t0, window.__perf.last] : [0, 0]"
         )
         e2e_ms = round(sem[1] - sem[0], 1) if sem[0] and sem[1] >= sem[0] else None
         stalls = [e for e in events if e["kind"] == "stall"]
+        origin = recvs[0]["t"] if recvs else t0
+        timeline = [
+            [
+                e["kind"],
+                round((e["t"] - origin) * 1000),
+                e.get("name") or e.get("action") or e.get("control") or "",
+                e.get("ms") or e.get("bytes") or 0,
+                " < ".join(e.get("callers", []))
+                if e["kind"] == "patch"
+                else ("ui" if e.get("ui") else ""),
+            ]
+            for e in events
+            if e["kind"] in ("recv", "send", "db", "patch")
+        ][:120]
         sample = {
             "label": label,
+            "timeline": timeline,
             "server_ms": server_ms,
+            "first_patch_ms": first_ms,
+            "db_ms": db_top,
             "e2e_ms": e2e_ms,
             "action_ms": round((t_action_done - t0) * 1000, 1),
             "events": [f"{e['control']}.{e['name']}" for e in recvs][:4],

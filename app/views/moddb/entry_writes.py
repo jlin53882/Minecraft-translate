@@ -75,17 +75,20 @@ def run_write(
     return launched is not False
 
 
-def after_data_change(panel, message: str | None = None) -> None:
+def after_data_change(panel, message: str | None = None) -> bool:
     """寫入完成後重整畫面：維持頁碼、捲動位置與選取位置，並通知上層使其他快照失效。
 
-    有上層（``on_changed``）時，清單只由上層的快照重載一次：有背景排程時交給背景快照，
-    ``message`` 會在新快照套用後顯示在編輯區；沒有背景排程時上層同步刷新，
-    目前條目若已不在清單中就改選同位置的下一筆。沒有上層的面板自己重載目前頁。
+    有上層（``on_changed``）時，清單只由上層的快照重載一次：有背景排程時交給背景快照
+    （``on_changed`` 會觸發並顯示載入中提示），``message`` 會在新快照套用後顯示在編輯區；
+    沒有背景排程時上層同步刷新，目前條目若已不在清單中就改選同位置的下一筆。
+    沒有上層的面板自己重載目前頁。
+    回傳是否已交給背景快照（True 時編輯區會由快照重畫，呼叫端不必再更新）。
     """
+    background = has_background_scheduler(panel._page) and panel._on_changed is not None
     if panel._on_changed is None:
         panel.reload_page_in_place()
         _show_message(panel, message)
-    elif has_background_scheduler(panel._page):
+    elif background:
         panel.prepare_reload_after_change(message)
         panel._on_changed()
     else:
@@ -94,7 +97,9 @@ def after_data_change(panel, message: str | None = None) -> None:
         panel._notify_changed(keep_scroll=True)
         _select_next_if_gone(panel, entry_id, selected_index)
         _show_message(panel, message)
-    panel._safe_update()
+    if not background:
+        panel._safe_update()
+    return background
 
 
 def _show_message(panel, message: str | None) -> None:

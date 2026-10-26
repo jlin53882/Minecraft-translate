@@ -18,6 +18,7 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
+from app.ui.update_scope import update_regions
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class SmartReviewContext:
         self.on_complete = on_complete
         self.generation = 0
         self.closed = False
+        self.dialog: ft.AlertDialog | None = None  # 視窗外殼：``update()`` 只更新它
         self._request_sequences: dict[str, int] = {}
 
     def close(self) -> None:
@@ -156,6 +158,9 @@ class SmartReviewContext:
 
     def update(self) -> None:
         """在 UI 仍然有效時安全更新頁面。"""
+        if self.dialog is not None:
+            update_regions(self.dialog)  # 只重畫智慧校對視窗，不走訪整個頁面
+            return
         try:
             self.page.update()
         except RuntimeError:

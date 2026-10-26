@@ -9,6 +9,8 @@
 
 import flet as ft
 
+from app.ui.update_scope import suppress_auto_update
+
 
 def shortcut_index(view_registry, key: str) -> int | None:
     """Ctrl+<數字> 對應到 registry 的位置（快捷鍵定義在 ``ViewSpec.shortcut``）；沒有對應回傳 None。"""
@@ -94,6 +96,8 @@ class KeyboardShortcutHandler:
                 return
 
         if not is_ctrl:
+            # 一般按鍵沒有任何畫面變更：不要讓 Flet 對整個 Page 補一次自動更新
+            suppress_auto_update()
             return
 
         key = e.key.lower()
@@ -132,6 +136,9 @@ class KeyboardShortcutHandler:
             if hasattr(self, "_search_callback") and self._search_callback:
                 self._search_callback(None)
             return
+
+        # 其他組合鍵（複製、貼上、全選…）由瀏覽器處理，沒有畫面變更
+        suppress_auto_update()
 
     def _show_toast(self, message: str):
         """顯示簡短提示"""
