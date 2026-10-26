@@ -403,10 +403,10 @@ def test_icon_preview_view_detect_source_mode():
     assert callable(view._detect_source_mode)
 
 
-def test_icon_preview_view_load_entries_from_jar_directory():
+def test_icon_preview_view_scan_entries():
     view = IconPreviewView(mock_page())
-    assert hasattr(view, "_load_entries_from_jar_directory")
-    assert callable(view._load_entries_from_jar_directory)
+    assert hasattr(view, "_scan_entries")
+    assert callable(view._scan_entries)
 
 
 def test_icon_preview_view_on_value_changed():

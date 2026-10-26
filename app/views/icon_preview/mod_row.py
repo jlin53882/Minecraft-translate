@@ -76,8 +76,11 @@ class ModRow(ft.Container):
             ),
         )
 
-    def bind(self, modid: str, total_count: int, untranslated: int) -> None:
-        """顯示指定模組的筆數與完成度。"""
+    def bind(self, modid: str, total_count: int, untranslated: int | None) -> None:
+        """顯示指定模組的筆數與完成度；``untranslated`` 為 None 表示掃描中、尚無譯文統計。"""
+        if untranslated is None:
+            self._bind_scanning(modid, total_count)
+            return
         done = untranslated == 0
         palette = tone("em" if done else "gold")
         self.modid = modid
@@ -88,6 +91,17 @@ class ModRow(ft.Container):
         )
         self._progress.color = palette.fg
         self._chip_text.value = "完成" if done else f"未翻譯 {untranslated}"
+        self._chip_text.color = palette.fg
+        self._chip.bgcolor = palette.bg
+        self._chip.border = ft.Border.all(1, palette.line)
+
+    def _bind_scanning(self, modid: str, total_count: int) -> None:
+        palette = tone("neutral")
+        self.modid = modid
+        self._name.value = modid
+        self._counts.value = f"總數 {total_count} ｜ 掃描中…"
+        self._progress.value = 0.0
+        self._chip_text.value = "掃描中"
         self._chip_text.color = palette.fg
         self._chip.bgcolor = palette.bg
         self._chip.border = ft.Border.all(1, palette.line)

@@ -20,10 +20,13 @@
 | `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 JAR 索引失敗不中止整體，但要留下堆疊 |
 | `app/icon_index.py:build_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_index.py:load_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/icon_jar_scan.py:scan_jar` | BLE001 | 已記錄／回報 | 單一 JAR 失敗不中止整批，但要留下是哪個 JAR |
 | `app/icon_preview_image.py:render_icon_uri` | BLE001 | 已記錄／回報 | 單張壞圖不應中斷整頁，改顯示佔位圖 |
 | `app/icon_reader.py:_ZipCache.get` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/icon_reader.py:_ZipCache.close_all` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/icon_reader.py:read_icon_bytes` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |
+| `app/icon_scan_pool.py:icon_scan_executor` | BLE001 | 已記錄／回報 | 行程池無法啟動（打包、權限等）時退回執行緒 |
+| `app/icon_scan_pool.py:_stream_once` | BLE001 | 已記錄／回報 | worker 回報異常：該 JAR 視為失敗，其他照常 |
 | `app/services.py:run_untranslated_check_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_variant_compare_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_english_residue_check_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
@@ -116,14 +119,12 @@
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._open_mod_detail` | BLE001 | 已記錄／回報 | 排程失敗時需結束 owner 並回報 UI |
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._write_zh_file` | BLE001 | 已記錄／回報 | 錯誤由呼叫端顯示在 UI |
 | `app/views/icon_preview/detail_mixin.py:IconPreviewDetailMixin._load_entries` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/icon_preview/icon_cache.py:_run_jar_workers` | BLE001 | 已記錄／回報 | 單一 JAR 圖示解析失敗不中止整批，但要留下是哪個 JAR |
-| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons` | BLE001 | 已記錄／回報 | 預建索引載入失敗時改為逐 JAR 解析，但要留下紀錄 |
-| `app/views/icon_preview/icon_cache.py:_batch_extract_jar_icons._process_jar` | BLE001 | 已記錄／回報 | 單一 JAR 解析失敗保留已解析的部分，但要留下是哪個 JAR |
 | `app/views/icon_preview/load_operation.py:observe_async_owner.on_done` | BLE001 | 已記錄／回報 | Future cancellation must release reservation |
 | `app/views/icon_preview/load_operation.py:_run_blocking` | BLE001 | UI／畫面保護 | drain even when blocking work fails |
 | `app/views/icon_preview/load_operation.py:load_icon_preview` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/icon_preview/render_operation.py:render_current_page.prepare_icons` | BLE001 | 已記錄／回報 | event loop displays failure |
 | `app/views/icon_preview/render_operation.py:render_current_page` | BLE001 | 已記錄／回報 | scheduling failure must be reported |
+| `app/views/icon_preview/scan_operation.py:_load_prebuilt_index` | BLE001 | 已記錄／回報 | 預建索引載入失敗時改為逐 JAR 解析，但要留下紀錄 |
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._on_load_clicked` | BLE001 | 已記錄／回報 | 排程失敗時需結束 owner 並回報 UI |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |

@@ -32,6 +32,12 @@ CONTENT_ICON_PREFIXES = frozenset(
     ]
 )
 
+
+def key_needs_icon(key: str) -> bool:
+    """lang key 是否為需要圖示的遊戲內容（item／block／entity 等）；``_comment``、``jei.*`` 等不需要。"""
+    return "." in key and key.split(".", 1)[0] in CONTENT_ICON_PREFIXES
+
+
 _MAX_CHAIN_DEPTH = 32
 
 # 原版方塊 parent 模板 -> 三個可見面（up / east / north）使用的 texture 變數

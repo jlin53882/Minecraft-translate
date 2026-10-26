@@ -47,6 +47,47 @@ class MemorySource:
         return self._by_mod.get(modid, [])
 
 
+class ScannedSource:
+    """JAR 掃描結果的來源：依 JAR 分塊累積，項目在第一次被載入時才轉成 dict。
+
+    ``add`` 只在掃描執行緒呼叫；給畫面用的是 ``snapshot()``（淺複製，之後的 ``add`` 不影響它）。
+    同一模組的項目依 JAR 名稱排序，與完成順序無關。
+    """
+
+    def __init__(self, identity: dict | None = None):
+        self.identity = identity
+        self._chunks: dict[str, list[tuple[str, list]]] = {}
+        self.modids: list[str] = []
+        self.entry_count = 0
+
+    def add(self, scan, icon_index: Mapping[str, str] | None = None) -> None:
+        """加入一個 JAR 的掃描結果（``JarScan``）；``icon_index`` 提供時以它覆蓋圖示。"""
+        for modid, rows in scan.mods.items():
+            if icon_index is not None:
+                rows = [(k, en, icon_index.get(k)) for k, en, _icon in rows]
+            self._chunks.setdefault(modid, []).append((scan.jar_name, rows))
+            self.entry_count += len(rows)
+
+    def snapshot(self) -> "ScannedSource":
+        copy = ScannedSource(self.identity)
+        copy._chunks = {modid: list(chunks) for modid, chunks in self._chunks.items()}
+        copy.modids = sorted(copy._chunks)
+        copy.entry_count = self.entry_count
+        return copy
+
+    def load(self, modid: str) -> list[dict]:
+        entries = []
+        for jar_name, rows in sorted(
+            self._chunks.get(modid, ()), key=lambda chunk: chunk[0].casefold()
+        ):
+            for key, en, icon in rows:
+                row = {"modid": modid, "key": key, "en": en, "source_jar": jar_name}
+                if icon:
+                    row["icon_path"] = icon
+                entries.append(row)
+        return entries
+
+
 class ModEntryStore(Mapping):
     """``modid -> [SimpleNamespace]`` 的唯讀 Mapping；譯文來自 ``zh_lookup``（key → 譯文）。"""
 

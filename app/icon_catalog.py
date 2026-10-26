@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import os
+import struct
 import threading
 import zipfile
 from collections import OrderedDict, defaultdict
@@ -102,6 +104,67 @@ def parse_model(raw: bytes) -> ModelInfo:
     )
 
 
+_RESOURCE_KINDS = frozenset({"models", "blockstates", "textures"})
+_EOCD_SIG = b"PK\x05\x06"
+_CEN_SIG = b"PK\x01\x02"
+_CEN_HEADER = 46
+_EOCD_TAIL_BYTES = 22 + 0xFFFF  # EOCD 固定 22 位元組，註解最長 64KB
+
+
+def _central_directory_names(path: Path) -> list[str] | None:
+    """直接解析 ZIP 中央目錄取得成員名稱；遇到 ZIP64 或任何不尋常的結構回傳 None。
+
+    索引整包 modpack 只需要名稱，``zipfile.ZipFile`` 為每個成員建立完整的 ``ZipInfo``
+    （解碼 extra、檢查檔名、時間戳記），是索引時間的大宗；這裡只切出名稱。
+    """
+    with open(path, "rb") as f:
+        f.seek(0, os.SEEK_END)
+        size = f.tell()
+        read = min(size, _EOCD_TAIL_BYTES)
+        f.seek(size - read)
+        tail = f.read(read)
+        pos = tail.rfind(_EOCD_SIG)
+        if pos < 0 or len(tail) - pos < 22:
+            return None
+        total, cd_size, cd_offset = struct.unpack_from("<10xHII", tail, pos)
+        if total == 0xFFFF or cd_size == 0xFFFFFFFF or cd_offset == 0xFFFFFFFF:
+            return None  # ZIP64
+        # 前面若有附加資料（自解壓檔），中央目錄實際位置要平移；這裡不處理，交給 zipfile
+        if cd_offset + cd_size != size - read + pos:
+            return None
+        f.seek(cd_offset)
+        cd = f.read(cd_size)
+    names: list[str] = []
+    offset = 0
+    unpack = struct.unpack_from
+    while offset < len(cd):
+        if cd[offset : offset + 4] != _CEN_SIG:
+            return None
+        flags = unpack("<H", cd, offset + 8)[0]
+        name_len, extra_len, comment_len = unpack("<HHH", cd, offset + 28)
+        start = offset + _CEN_HEADER
+        raw = cd[start : start + name_len]
+        names.append(raw.decode("utf-8" if flags & 0x800 else "cp437", "replace"))
+        offset = start + name_len + extra_len + comment_len
+    if len(names) != total:
+        return None
+    if os.sep != "/":
+        names = [name.replace(os.sep, "/") for name in names]
+    return names
+
+
+def _archive_names(archive: Path) -> list[str]:
+    """成員名稱清單；ZIP 結構不尋常時退回 ``zipfile``。壞檔拋出 ``OSError``／``BadZipFile``。"""
+    try:
+        names = _central_directory_names(archive)
+    except (OSError, struct.error, ValueError):
+        names = None
+    if names is not None:
+        return names
+    with zipfile.ZipFile(archive) as zf:
+        return zf.namelist()
+
+
 class ModpackAssetCatalog:
     """唯讀索引 modpack 內的 model/blockstate/texture 資源位置。"""
 
@@ -119,7 +182,6 @@ class ModpackAssetCatalog:
         self.client_archive = (
             Path(client_archive).resolve() if client_archive is not None else None
         )
-        self.members: dict[Path, set[str]] = {}
         self.resources: dict[str, list[Path]] = defaultdict(list)
         self.texture_names: dict[str, list[str]] = defaultdict(list)
         self._handles: OrderedDict[Path, zipfile.ZipFile] = OrderedDict()
@@ -148,21 +210,18 @@ class ModpackAssetCatalog:
 
     def _index_archive(self, archive: Path) -> None:
         try:
-            with zipfile.ZipFile(archive) as zf:
-                names = set(zf.namelist())
+            names = _archive_names(archive)
         except (OSError, zipfile.BadZipFile):
             return
-        self.members[archive] = names
-        for name in names:
-            raise_if_cancelled()
-            parts = name.split("/")
-            if (
-                len(parts) >= 4
-                and parts[0] == "assets"
-                and parts[2] in {"models", "blockstates", "textures"}
-            ):
+        for number, name in enumerate(dict.fromkeys(names)):
+            if number % 4096 == 0:
+                raise_if_cancelled()
+            if not name.startswith("assets/"):
+                continue
+            parts = name.split("/", 3)
+            if len(parts) == 4 and parts[2] in _RESOURCE_KINDS:
                 self.resources[name].append(archive)
-                if "/textures/" in name:
+                if parts[2] == "textures":
                     self.texture_names[name.rsplit("/", 1)[-1].casefold()].append(name)
 
     @classmethod

@@ -104,11 +104,14 @@ class IconPreviewListMixin:
         pool = self._mod_row_pool
         while len(pool) < len(modids):
             pool.append(ModRow(self._open_mod_detail))
+        scanning = getattr(self, "_scan_partial", False)
         for row, modid in zip(pool, modids, strict=False):
             entries = self.mods[modid]
-            row.bind(
-                modid, len(entries), sum(1 for e in entries if not e.zh_tw.strip())
+            # 掃描中的部分結果還沒有譯文對照：只顯示筆數，不顯示未翻譯數
+            untranslated = (
+                None if scanning else sum(1 for e in entries if not e.zh_tw.strip())
             )
+            row.bind(modid, len(entries), untranslated)
         self.mod_list_view.controls = pool[: len(modids)]
         self._update_page_bar_for_mods()
         self._update_list_area(self.mod_list_view)

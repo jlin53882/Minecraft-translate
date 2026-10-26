@@ -213,6 +213,20 @@ def _save_entries_cache_l2(
     source_root: Path, entries: list, identity: dict | None = None
 ):
     """寫入 L2 磁碟快取（先寫暫存目錄再整個換上）。"""
+    # Translation data is intentionally omitted: it belongs to review_root.
+    by_mod: dict[str, list[dict]] = {}
+    for entry in entries:
+        row = _source_entry_data(entry)
+        by_mod.setdefault(str(row.get("modid", "")), []).append(row)
+    _write_l2(source_root, identity, sorted(by_mod), by_mod.__getitem__)
+
+
+def save_source_cache_l2(source_root: Path, source) -> None:
+    """把一份 ``EntrySource`` 寫成 L2 磁碟快取（一次只轉換一個模組，不必先展開全部項目）。"""
+    _write_l2(source_root, source.identity, sorted(source.modids), source.load)
+
+
+def _write_l2(source_root: Path, identity: dict | None, modids, load_rows) -> None:
     if identity is None:
         identity = _compute_source_identity(source_root, "jar_directory")
     cache_root = _get_cache_dir()
@@ -223,22 +237,15 @@ def _save_entries_cache_l2(
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir()
 
-    # Translation data is intentionally omitted: it belongs to review_root.
-    by_mod: dict[str, list[dict]] = {}
-    for entry in entries:
-        row = _source_entry_data(entry)
-        by_mod.setdefault(str(row.get("modid", "")), []).append(row)
-
     mods = []
-    for number, modid in enumerate(sorted(by_mod)):
+    for number, modid in enumerate(modids):
+        rows = load_rows(modid)
         name = f"{number}.json"
         (tmp / name).write_text(
-            json.dumps(
-                _encode_shard(by_mod[modid]), ensure_ascii=False, separators=(",", ":")
-            ),
+            json.dumps(_encode_shard(rows), ensure_ascii=False, separators=(",", ":")),
             encoding="utf-8",
         )
-        mods.append([modid, len(by_mod[modid]), name])
+        mods.append([modid, len(rows), name])
     index = {
         "version": _CACHE_VERSION,
         "source_identity": identity,

@@ -35,7 +35,7 @@ from app.views.icon_preview.load_operation import (
     observe_async_owner,
 )
 from app.views.icon_preview.mod_store import EntrySource, MemorySource, ModEntryStore
-from app.views.icon_preview.progress import _make_progress_callback
+from app.views.icon_preview.scan_operation import scan_jar_directory
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.path_text import normalize_path_text
@@ -125,6 +125,10 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         # 詳情頁渲染的世代：連續渲染只套用最後一次；卸載時遞增以丟棄進行中的結果
         self._render_generation = 0
         self._last_progress_refresh = 0.0
+        # 冷載入途中的部分結果：掃描執行緒產生快照，event loop 套用
+        self._partial_source = None
+        self._partial_pending = False
+        self._scan_partial = False  # mods 目前是否為掃描中的部分結果
 
         # =========================
         # 使用者選擇的資料夾
@@ -785,76 +789,55 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
 
         run_task(_update)
 
-    def _scan_entries(
-        self, mode: str, total_steps: int, generation: int | None = None
-    ) -> list:
-        """讀取翻譯與圖示（不直接刷新畫面，可在背景執行緒執行）。"""
-        if mode == "jar_directory":
-            entries = self._load_entries_from_jar_directory(
-                processed_callback=_make_progress_callback(
-                    self,
-                    "讀取翻譯內容",
-                    total_steps,
-                    generation=generation,
-                ),
-                generation=generation,
-            )
-        elif mode == "extracted_folder":
-            entries = self._load_entries()
-        else:
-            return []
-        return self._hydrate_entries(entries)
+    def _scan_entries(self, mode: str, total_steps: int, generation: int | None = None):
+        """讀取翻譯與圖示（不直接刷新畫面，可在背景執行緒執行）。
 
-    def _finish_load(self, entries: list, mode: str):
-        """（event loop 上）套用掃描結果並渲染模組清單。"""
+        JAR 目錄回傳 ``ModEntryStore``（同時已寫入 L2 快取）；解包資料夾回傳項目清單。
+        """
+        if mode == "jar_directory":
+            return scan_jar_directory(self, generation)
+        if mode == "extracted_folder":
+            return self._hydrate_entries(self._load_entries())
+        return []
+
+    def _finish_load(self, entries, mode: str):
+        """（event loop 上）套用掃描結果並渲染模組清單。
+
+        ``entries`` 是 ``ModEntryStore``（JAR 目錄冷載入，已在背景完成）或項目清單（解包資料夾）。
+        """
         self._pending_progress = (
             None  # 掃描結束後不再套用延遲的進度（避免重新顯示進度條）
         )
+        was_partial, self._scan_partial = self._scan_partial, False
+        self._partial_source = None
         if mode not in ("jar_directory", "extracted_folder"):
             log_warning("[IconPreview] 無法識別資料夾模式，或資料夾為空")
-            show_snack(
-                self.page,
-                "❌ 無法識別模式，請確認資料夾內容",
-                color=C.RED,
-                clear_existing=True,
-                duration=3000,
-            )
-            self.progress_bar.visible = False
-            self.update()
+            self._show_load_error("❌ 無法識別模式，請確認資料夾內容", was_partial)
             return
 
-        if not entries:
+        store = entries if isinstance(entries, ModEntryStore) else None
+        if (store.total_entries == 0) if store is not None else not entries:
             log_warning("[IconPreview] 掃描結果為空，確認 en_us.json 是否存在")
-            show_snack(
-                self.page,
-                "❌ 掃描結果為空，請確認 en_us.json 是否存在",
-                color=C.RED,
-                clear_existing=True,
-                duration=3000,
+            self._show_load_error(
+                "❌ 掃描結果為空，請確認 en_us.json 是否存在", was_partial
             )
-            self.progress_bar.visible = False
-            self.update()
             return
 
+        if store is not None:
+            source, mods = store.source, store
+        else:
+            source, mods = self._source_and_mods_from_entries(entries, mode)
         # L1 stores source-side scan data only; the review translation is
         # hydrated afresh on every load from the currently selected root.
-        identity = _compute_source_identity(self.source_root, mode)
-        self._source_cache = MemorySource.from_entries(
-            [_source_entry_data(entry) for entry in entries], identity
-        )
-        self._cache_meta = {"source_identity": identity}
-
-        mods = defaultdict(list)
-        for entry in entries:
-            mods[entry.modid].append(entry)
-
-        self.mods = dict(mods)
+        self._source_cache = source
+        self._cache_meta = {"source_identity": source.identity}
+        self.mods = mods
         log_info(
-            f"[IconPreview] 載入完成，共 {len(self.mods)} 個模組，{len(entries)} 筆翻譯"
+            f"[IconPreview] 載入完成，共 {len(mods)} 個模組，{source.entry_count} 筆翻譯"
         )
         show_snack(
             self.page,
-            f"✅ 載入完成（共 {len(self.mods)} 個模組）",
+            f"✅ 載入完成（共 {len(mods)} 個模組）",
             color=C.EM,
             clear_existing=True,
             duration=3000,
@@ -865,14 +848,31 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         self.progress_text.value = "準備就緒"
         self.update()
 
-        self._render_mod_list()
+        if self.current_modid is not None:
+            return  # 掃描期間使用者已開啟詳情：不拉回清單，返回時才用完整結果
+        if self._mod_search_text.strip():
+            self._do_mod_search()  # 掃描期間輸入的搜尋：用完整結果重跑
+        else:
+            self._render_mod_list()
 
-    def _update_progress(self, current: int, total: int):
-        """更新進度條"""
-        if total > 0:
-            self.progress_bar.value = current / total
-            self.progress_text.value = f"正在掃描：{current} / {total}"
-            self.update()
+    def _source_and_mods_from_entries(self, entries, mode: str):
+        """解包資料夾模式：項目清單 → (L1 來源, ``modid -> 項目`` 對照)。"""
+        identity = _compute_source_identity(self.source_root, mode)
+        source = MemorySource.from_entries(
+            [_source_entry_data(entry) for entry in entries], identity
+        )
+        mods = defaultdict(list)
+        for entry in entries:
+            mods[entry.modid].append(entry)
+        return source, dict(mods)
+
+    def _show_load_error(self, message: str, discard_partial: bool) -> None:
+        show_snack(self.page, message, color=C.RED, clear_existing=True, duration=3000)
+        self.progress_bar.visible = False
+        if discard_partial:
+            self.mods = {}  # 掃描中途顯示的部分結果不再有意義
+            self._render_mod_list()
+        self.update()
 
     @property
     def page(self):

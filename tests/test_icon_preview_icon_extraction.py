@@ -2,14 +2,13 @@
 
 測試 icon_preview_view 的 icon 提取相關功能。
 
-覆蓋：
-- _batch_extract_jar_icons()：批次 ZIP 處理（每 JAR 只開一次、progress callback、icon_path 回寫）
+覆蓋：圖示解析（catalog／model／blockstate 挑選規則）與 ``to_halfwidth``。
+逐 JAR 掃描（每 JAR 只開一次、icon_path 回寫）見 ``tests/test_icon_jar_scan.py``。
 """
 
 import json
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
 
 # ==================================================
 # 測試資料工廠
@@ -35,116 +34,12 @@ def png_1x1() -> bytes:
 
 
 # ==================================================
-# _batch_extract_jar_icons 測試
+# 圖示解析測試
 # ==================================================
 
 
-class MockEntry:
-    """模擬翻譯 entry（含 modid / key / icon_path）。"""
-
-    def __init__(self, modid: str, key: str, icon_path: str | None = None):
-        self.modid = modid
-        self.key = key
-        self.icon_path = icon_path
-
-
-class TestBatchExtractJarIcons:
-    """_batch_extract_jar_icons 的各種情境測試。"""
-
-    def test_single_jar_opened_once(self, tmp_path):
-        """同一個 JAR 的多個 entry 只開一次 ZIP"""
-        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
-
-        jar = tmp_path / "mods" / "test_mod-1.0.jar"
-        jar.parent.mkdir(parents=True)
-        create_test_jar(
-            jar,
-            {
-                "assets/test_mod/icon.png": png_1x1(),
-                "assets/test_mod/lang/en_us.json": b"{}",
-            },
-        )
-
-        entries = [
-            MockEntry("test_mod", "item.test_mod.one"),
-            MockEntry("test_mod", "item.test_mod.two"),
-            MockEntry("test_mod", "item.test_mod.three"),
-        ]
-        jar_to_entries = {"test_mod-1.0.jar": entries}
-        cache_root = tmp_path / "icon_cache"
-
-        zip_open_count = 0
-        original_zipfile = zipfile.ZipFile
-
-        def counting_zipfile(*args, **kwargs):
-            nonlocal zip_open_count
-            zip_open_count += 1
-            return original_zipfile(*args, **kwargs)
-
-        with patch("zipfile.ZipFile", side_effect=counting_zipfile):
-            processed = _batch_extract_jar_icons(
-                jar_to_entries, cache_root, tmp_path / "mods"
-            )
-
-        assert processed == 1
-        # Catalog indexing and the per-JAR worker each open the archive once.
-        assert zip_open_count == 2, f"ZIP 應索引與解析各開一次，實際：{zip_open_count}"
-
-    def test_icon_path_written_back_to_entries(self, tmp_path):
-        """找到 icon 時，icon_path 正確寫回 entry"""
-        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
-
-        jar = tmp_path / "mods" / "test_mod-1.0.jar"
-        jar.parent.mkdir(parents=True)
-        create_test_jar(
-            jar,
-            {
-                "assets/test_mod/icon.png": png_1x1(),
-            },
-        )
-
-        entry1 = MockEntry("test_mod", "item.test_mod.one")
-        entry2 = MockEntry("test_mod", "item.test_mod.two")
-        jar_to_entries = {"test_mod-1.0.jar": [entry1, entry2]}
-        cache_root = tmp_path / "icon_cache"
-
-        with patch(
-            "app.views.icon_preview.icon_cache._resolve_icon_from_catalog",
-            return_value=(
-                "test_mod:item/one",
-                "assets/test_mod/textures/item/one.png",
-                jar.resolve(),
-            ),
-        ):
-            _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
-
-        assert entry1.icon_path is not None
-        assert entry2.icon_path is not None
-        assert entry1.icon_path.startswith("jar://")
-        assert "assets/test_mod" in entry1.icon_path
-
-    def test_entity_key_uses_exact_named_item_model_fallback(self, tmp_path):
-        """Entity 翻譯找不到 entity model 時可用同名 item model 顯示圖示。"""
-        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
-
-        jar = tmp_path / "mods" / "actuallyadditions.jar"
-        create_test_jar(
-            jar,
-            {
-                "assets/actuallyadditions/models/item/worm.json": json.dumps(
-                    {"textures": {"layer0": "actuallyadditions:item/worm"}}
-                ).encode(),
-                "assets/actuallyadditions/textures/item/worm.png": png_1x1(),
-            },
-        )
-        entry = MockEntry("actuallyadditions", "entity.actuallyadditions.worm")
-
-        _batch_extract_jar_icons(
-            {jar.name: [entry]}, tmp_path / "icon_cache", jar.parent
-        )
-
-        assert entry.icon_path.startswith("jar://")
-        assert "textures/item/worm.png" in entry.icon_path
+class TestCatalogIconResolution:
+    """catalog 圖示解析的各種情境測試。"""
 
     def test_catalog_uses_item_model_for_block_key(self, tmp_path):
         from app.views.icon_preview.icon_cache import (
@@ -451,87 +346,6 @@ class TestBatchExtractJarIcons:
             catalog.close()
 
         assert result is None
-
-    def test_missing_jar_skipped(self, tmp_path):
-        """JAR 檔案不存在時跳過，不拋例外"""
-        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
-
-        entry = MockEntry("missing_mod", "item.missing_mod.hello")
-        jar_to_entries = {"missing_mod-1.0.jar": [entry]}
-        cache_root = tmp_path / "icon_cache"
-        progress_calls = []
-
-        def progress(processed, total):
-            progress_calls.append((processed, total))
-
-        processed = _batch_extract_jar_icons(
-            jar_to_entries, cache_root, tmp_path / "mods", progress_cb=progress
-        )
-
-        assert processed == 1
-        assert entry.icon_path is None  # 沒有寫入
-
-    def test_progress_callback_invoked(self, tmp_path):
-        """progress callback 每個 JAR 都會被呼叫"""
-        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
-
-        jar = tmp_path / "mods" / "mod_a-1.0.jar"
-        jar.parent.mkdir(parents=True)
-        create_test_jar(jar, {"assets/mod_a/lang/en_us.json": b"{}"})
-
-        jar2 = tmp_path / "mods" / "mod_b-1.0.jar"
-        create_test_jar(jar2, {"assets/mod_b/lang/en_us.json": b"{}"})
-
-        entries = [MockEntry("mod_a", "item.mod_a.hello")]
-        entries2 = [MockEntry("mod_b", "item.mod_b.hello")]
-        jar_to_entries = {"mod_a-1.0.jar": entries, "mod_b-1.0.jar": entries2}
-        cache_root = tmp_path / "icon_cache"
-        progress_calls = []
-
-        def progress(processed, total):
-            progress_calls.append((processed, total))
-
-        _batch_extract_jar_icons(
-            jar_to_entries, cache_root, tmp_path / "mods", progress_cb=progress
-        )
-
-        # 2 個 JAR 少於 50 → 只有最後一次 callback
-        assert len(progress_calls) >= 1
-        assert progress_calls[-1] == (2, 2)  # 最後一次是 complete
-
-    def test_multiple_modids_same_jar(self, tmp_path):
-        """同一個 JAR 含多個 modid，每個都嘗試提取"""
-        from app.views.icon_preview.icon_cache import _batch_extract_jar_icons
-
-        jar = tmp_path / "mods" / "multi_mod-1.0.jar"
-        jar.parent.mkdir(parents=True)
-        create_test_jar(
-            jar,
-            {
-                "assets/mod_a/icon.png": png_1x1(),
-                "assets/mod_b/icon.png": png_1x1(),
-            },
-        )
-
-        entries = [
-            MockEntry("mod_a", "item.mod_a.hello"),
-            MockEntry("mod_b", "item.mod_b.hello"),
-        ]
-        jar_to_entries = {"multi_mod-1.0.jar": entries}
-        cache_root = tmp_path / "icon_cache"
-
-        with patch(
-            "app.views.icon_preview.icon_cache._resolve_icon_from_catalog",
-            side_effect=lambda _jar, modid, _key, *_args, **_kwargs: (
-                f"{modid}:item/hello",
-                f"assets/{modid}/textures/item/hello.png",
-                jar.resolve(),
-            ),
-        ):
-            _batch_extract_jar_icons(jar_to_entries, cache_root, tmp_path / "mods")
-
-        assert entries[0].icon_path is not None
-        assert entries[1].icon_path is not None
 
 
 # ==================================================

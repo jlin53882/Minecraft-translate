@@ -6,9 +6,9 @@
 
 - 讓使用者指定模組資料夾（`mods` 或已解包的資料夾）與資源包／`lang_output` 路徑，載入所有模組的語言條目與對應的繁中譯文。
 - 以兩層介面呈現：第一層為模組清單（可分頁、可搜尋），第二層為單一模組的翻譯校對列（含 mod icon 預覽、可分頁、可搜尋）。
-- 掃描與讀取由 `app/views/icon_preview/load_operation.py` 協調，核心讀取位於 `translation_tool/utils/jar_browser.py`（`scan_jars`）與 `translation_tool/core/icon_resolver.py`（`resolve_icon_with_reason`）。
+- 載入由 `app/views/icon_preview/load_operation.py` 協調；JAR 目錄的冷載入由 `app/views/icon_preview/scan_operation.py` 驅動 `app/icon_scan_pool.py`（行程池）與 `app/icon_jar_scan.py`（單一 JAR：讀 lang 並解析圖示）；解包資料夾與詳情頁的圖示備援用 `translation_tool/core/icon_resolver.py`（`resolve_icon_with_reason`）。
 - 儲存時把使用者編輯的譯文寫回 `{modid}/lang/zh_tw.json`。
-- 圖示解析由 `app/icon_resolve.py`、渲染由 `app/icon_render.py`／`app/icon_preview_image.py` 負責；批次提取與磁碟快取由 `app/views/icon_preview/icon_cache.py` 與 `entries_cache.py` 管理。
+- 圖示解析由 `app/icon_resolve.py`、渲染由 `app/icon_render.py`／`app/icon_preview_image.py` 負責；磁碟快取由 `app/views/icon_preview/entries_cache.py` 管理。
 - 圖示在背景執行緒渲染為 128×128 的像素銳利 PNG（動畫取首格、整數倍最近鄰放大、方塊為等角預覽）；懸停可看貼圖／模型／來源 JAR；內容類 key 找不到圖示時顯示共用佔位圖。
 
 ## 主要流程
@@ -29,9 +29,13 @@ flowchart TD
   H -- 是 --> I["_apply_cached_entries 直接渲染"]
   H -- 否 --> J["_count_scan_steps 計算步數"]
   J --> K["_show_scan_started 顯示進度列"]
-  K --> L["_scan_entries 讀取來源與圖示"]
-  L --> M["_hydrate_entries 補上繁中譯文"]
-  M --> N["_finish_load 寫入 L1 快取並渲染清單"]
+  K --> L{"模式"}
+  L -- jar_directory --> M["_scan_entries → scan_jar_directory：行程池逐 JAR 讀 lang 並解析圖示"]
+  M --> M1["每 0.5 秒 publish_partial：模組清單先出現（顯示筆數、掃描中）"]
+  M --> M2["完成後建立譯文對照並寫入 L2 快取"]
+  L -- extracted_folder --> M3["_scan_entries → _load_entries、_hydrate_entries 補上繁中譯文"]
+  M2 --> N["_finish_load 寫入 L1 快取並渲染清單"]
+  M3 --> N
 ```
 
 ### 開啟模組詳情、渲染與儲存
@@ -57,6 +61,8 @@ flowchart TD
   - 載入：owner `icon-preview-load`，`CancellationPolicy.BOUNDARY_ONLY`，`CommitPolicy.EPHEMERAL`，`ShutdownPolicy.CANCEL_AND_DRAIN`。
   - 詳情與圖示準備：owner `icon-preview-detail` 與 `icon-preview-cache`，同樣為 `BOUNDARY_ONLY`。
   - 儲存：owner `icon-preview-save`，`CancellationPolicy.NON_CANCELLABLE`，`CommitPolicy.PARTIAL_ALLOWED`，`DurabilityPolicy.USER_ACTION`，`ShutdownPolicy.DRAIN_ONLY`。
+- JAR 目錄冷載入（`scan_operation.scan_jar_directory`，背景執行緒）每個 JAR 只開一次：`app/icon_jar_scan.py` 的 `scan_jar` 在同一個 ZIP 內讀出 `assets/<modid>/lang/en_us.json` 並以 `ModpackAssetCatalog` 解析每個內容類 key 的圖示。解析是純 Python（受 GIL 限制），所以 JAR 數達 `PROCESS_MIN_JARS` 且 worker 數大於 1 時由 `icon_scan_pool` 啟動 `spawn` 行程池（worker 數取 config `translator.parallel_execution_workers` 的 `icon_cache` 用途，不超過 CPU 核心數）；每個 worker 行程第一次工作時各自建立一份 catalog。行程池無法啟動、或掃描中途整個壞掉時，其餘 JAR 改用執行緒完成；JAR 少於門檻時直接用執行緒。取消時監看執行緒設定共用的 `Event`，worker 在下一個讀取區塊中止；worker 內的日誌隨結果送回，由呼叫端重新送出。
+- 逐步顯示：掃描執行緒最多每 `PARTIAL_INTERVAL_SEC`（0.5 秒）把目前累積的 `ScannedSource` 快照經 `publish_partial` 交給 event loop，`apply_partial` 以 `ModEntryStore` 顯示模組清單（`_scan_partial` 為真時，`ModRow` 只顯示筆數與「掃描中」，不顯示未翻譯數）。使用者已開啟詳情或正在搜尋模組時不套用；載入結束時 `_finish_load` 以完整結果取代，使用者仍在詳情頁就不拉回清單。掃描途中沒有任何解析或檔案 I/O 發生在 event loop。
 - 阻塞步驟以 `_run_blocking`（`load_operation.py`）包成 `asyncio.to_thread`。取消時 `_run_blocking` 會等待執行緒結束後才重新拋出，確保 owner 不提早釋放。
 - 世代檢查：
   - `_load_generation` 與 `_render_generation` 在 `will_unmount` 時遞增。每個 `await` 之後，協程檢查世代是否仍相同，不相同就丟棄結果，不再碰已卸載的控制項。
@@ -72,18 +78,19 @@ flowchart TD
 
 - 路徑狀態：`source_root`（模組資料夾）、`review_root`（資源包路徑）。路徑欄位失焦時會正規化（`normalize_path_text`），並視需要呼叫 `_migrate_old_icon_cache`。
 - 資料狀態：
-  - `mods`：`modid → [entry]`。掃描完成時由 `_finish_load` 建成 dict；快取命中時為 `ModEntryStore`（`mod_store.py`），第一次存取某模組才讀該模組分片並補上譯文，模組清單因此只讀當頁模組。
+  - `mods`：`modid → [entry]`。JAR 目錄冷載入與快取命中時都是 `ModEntryStore`（`mod_store.py`，冷載入的來源為 `ScannedSource`）；解包資料夾由 `_finish_load` 建成 dict，第一次存取某模組才讀該模組分片並補上譯文，模組清單因此只讀當頁模組。
   - `current_modid`、`_zh_data`（目前模組的譯文字典，儲存時整份寫出）、`_current_zh_file`。
   - 分頁：模組清單 `mod_page_size`（預設 50，可選 25、50、100），詳情 `page_size`（預設 50）。
-- L1 快取：`_source_cache`（`MemorySource` 或 `ShardSource`）與 `_cache_meta["source_identity"]`，僅保存來源資料（modid、key、en、source_jar、icon_path），不含譯文。命中時依目前的 `review_root` 建立譯文對照（`_build_zh_tw_lookup`），由 `ModEntryStore` 逐模組補上。
-- L2 快取：`get_data_root()/.icon_cache/<key>/`（`entries_cache._get_cache_dir`），只在 `jar_directory` 模式下讀寫：`index.json`（身分、模組與筆數）加每個模組一個欄位式分片。寫入於掃描完成後（`_save_entries_cache_l2`），讀取（`open_entries_cache_l2`）命中時只讀 index。快取版本為 `_CACHE_VERSION`，身分由 `_compute_source_identity` 計算。
+- L1 快取：`_source_cache`（`MemorySource`、`ScannedSource` 或 `ShardSource`）與 `_cache_meta["source_identity"]`，僅保存來源資料（modid、key、en、source_jar、icon_path），不含譯文。命中時依目前的 `review_root` 建立譯文對照（`_build_zh_tw_lookup`），由 `ModEntryStore` 逐模組補上。
+- L2 快取：`get_data_root()/.icon_cache/<key>/`（`entries_cache._get_cache_dir`），只在 `jar_directory` 模式下讀寫：`index.json`（身分、模組與筆數）加每個模組一個欄位式分片。寫入於掃描完成後、仍在背景執行緒（`save_source_cache_l2`），讀取（`open_entries_cache_l2`）命中時只讀 index。快取版本為 `_CACHE_VERSION`，身分由 `_compute_source_identity` 計算。
 - 圖示快取：`get_data_root()/.icon_cache/jar_icons/`（`_get_icon_cache_dir`）。
 - 寫出檔案：`{review_root}/{modid}/lang/zh_tw.json`，UTF-8、`indent=2`、`ensure_ascii=False`。若找不到既有檔案，`_find_zh_file` 回傳 `None`，儲存會被拒絕。
 
 ## 錯誤處理
 
 - 路徑檢查失敗（空白、不存在、不是資料夾）：`_validate_input_paths` 以 snackbar 提示並中止載入。
-- 載入例外：`load_icon_preview` 記錄 `log_error`，顯示「掃描失敗」snackbar，然後以空清單進入 `_finish_load`，後者再提示「掃描結果為空」或「無法識別模式」。
+- 載入例外：`load_icon_preview` 記錄 `log_error`，顯示「掃描失敗」snackbar，然後以空清單進入 `_finish_load`，後者再提示「掃描結果為空」或「無法識別模式」，並丟棄掃描途中顯示的部分清單。
+- 單一 JAR 無法讀取（壞 ZIP、累計讀取超過安全上限）：該 JAR 視為沒有項目並寫 `[IconPreview]` 警告，其他 JAR 照常；圖示解析累計讀取超限時保留該 JAR 的 lang 項目，其餘 key 不再解析。
 - 取消：`TaskCancelled` 或 owner 被取消時，`load_icon_preview` 不顯示錯誤。若世代已變（已卸載），結果一律丟棄。
 - 詳情載入失敗：`_open_mod_detail` 的 `find_file` 把例外放入 `result["error"]`，協程以 `log_error` 與「載入詳情失敗」snackbar 呈現。
 - 圖示準備失敗：`render_current_page` 的 `prepare_icons` 把例外放入結果，協程只記錄 `log_error`，不重繪該頁。
