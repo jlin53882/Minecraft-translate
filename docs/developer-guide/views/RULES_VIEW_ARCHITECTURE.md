@@ -17,7 +17,7 @@ RulesView（維護替換規則）→ ConfigView（翻譯參數）→ Translation
 - `app/views/rules/rules_actions.py` — 重新載入執行緒、放棄變更確認對話框（`confirm_discard_changes`）、驗證與儲存 worker（`launch_validate_and_save`、`to_saved_rules`）與分頁計算
 - `app/views/rules/rules_filter.py` — 搜尋比對（`parse_query`、`rule_matches`、`filter_rules`，純邏輯）
 - `app/views/rules/rules_validation.py` — 逐條驗證（`check_rule`、`validate_rule`、`build_from_index`、`translate_regex_error`）與非阻擋提醒（`rule_hint`）
-- `translation_tool/utils/replace_rules_diagnostics.py` — 規則診斷（`diagnose_rules`：交叉引用、自我引用、重複、前後空白、s2twp 轉換），非 UI，可重用
+- `translation_tool/utils/replace_rules_diagnostics.py` — 規則診斷（`diagnose_rules`：交叉引用、自我引用、重複、前後空白、原詞不會出現在 s2twp 轉換後的文字），非 UI，可重用
 - `app/views/rules/rules_state.py` — `RulesTableState` dataclass（**page_size=50**、current_page、total_pages、rid_seq）
 - `app/views/rules/rules_table.py` — `create_rule_row(view, from_text, to_text, rid, display_no)` 建立 DataRow（`RulesView.create_rule_row` 轉呼叫它）
 - `app/services_impl/config_service.py` — `load_replace_rules()` / `save_replace_rules()`（委派給 `translation_tool/utils/text_processor.py` 的同名函式，路徑 `REPLACE_RULES_PATH = str(PROJECT_ROOT / "replace_rules.json")`）

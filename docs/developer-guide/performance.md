@@ -98,9 +98,9 @@ path. A list total is taken from a cached facet when it exists and is otherwise 
 service query never scans the whole version.
 
 Text search (`LIKE '%text%'` on key, source text and effective translation) cannot use an index and is a CPU-bound
-row-by-row comparison (about 190 ms for 280,000 entries on one connection). It is not backed by derived data: a
-trigram posting table was estimated from a sample at about 64 distinct trigrams per entry, i.e. roughly 55 million rows
-and 700 MB for 850,000 entries, plus 64 extra index rows per written entry, which does not pay off. Instead
+row-by-row comparison whose cost grows with the size of one version. It is not backed by derived data: a trigram
+posting table needs dozens of distinct trigrams per entry (hundreds of millions of rows for a large database) plus as
+many index rows per written entry, which does not pay off (see `docs/adr/0006-moddb-option-facets.md`). Instead
 `translation_tool/translation_db/parallel_scan.py` splits `entry.id` into contiguous ranges and scans them on separate
 read-only connections at once (SQLite releases the GIL while stepping); the ranged facet SQL groups by module per range
 and `option_facets.merge_rows` adds the ranges together. These connections must not use `temp_store = MEMORY` (several
@@ -211,21 +211,21 @@ Per-sample timelines (`patch` entries with the calling `app/` frames, DB calls w
 `--profile` (cProfile of the event-loop thread) show where a number comes from. Compare runs on the same copy of the
 database, and expect other processes on the machine to move a single sample by tens of milliseconds; use medians.
 
-What the numbers are made of (700k entries, one version = 284k):
+What the interaction times are made of:
 
 - Most of a write's (save, revert, review, clear) interactive time is Flet: a patch costs time proportional to the
   number of controls it has to diff, not to what changed. The page therefore updates only what changed:
   `EntryTilePool.set_rows` reports the rows whose content changed and the panel updates those rows instead of the
   50-row `ListView` (more than `MAX_ROW_UPDATES` changed rows update the whole list, because one patch per row has a
-  fixed cost); `FilterFlush` updates only the dropdowns whose options or value changed. Large dropdowns (1,400 module
-  options) cost about 25 ms to diff when their options change.
+  fixed cost); `FilterFlush` updates only the dropdowns whose options or value changed. A dropdown with a very large option list is
+  expensive to diff when its options change, so it is only updated when they did.
 - The write path requests the background reload before it shows the snack bar, and does not recompute the impact
   preview or redraw the editor that the reload redraws anyway.
 - A quality or search filter that is new for the current data generation scans one version's flags in the worker
-  (about 60-250 ms for 284k entries, depending on the status). The result is cached per data generation, so selecting
+  (cost grows with the version's size and depends on the status). The result is cached per data generation, so selecting
   it again is a cache hit. State filters (`none` / `all`) are answered by `stat_src` and never scan.
-- The first batch-translation preview of a process used to stop the event loop for several hundred milliseconds:
-  loading the `tiktoken` vocabulary holds the GIL. `app/startup_tasks.py` loads it in the startup worker
+- Loading the `tiktoken` vocabulary holds the GIL and would stop the event loop at the first batch-translation
+  preview of a process. `app/startup_tasks.py` loads it in the startup worker
   (`warm_token_encoder`). The preview itself is worker-side work (one sorted read of the version's untranslated
   entries plus batch planning); it is reported as an interaction time but is not event-loop time.
 

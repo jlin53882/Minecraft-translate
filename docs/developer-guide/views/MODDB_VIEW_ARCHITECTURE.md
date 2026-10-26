@@ -46,7 +46,7 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
   載入期間 `EntriesPanel.set_data_loading(True)` 停用批次取代、批量審核與 Smart Review 等依賴
   範圍資料的入口，快照套用後才恢復。
 - `apply_filter_options` 回傳選項或選值是否改變，並把有變的下拉選單登記到 `FilterFlush`；
-  `EntriesPanel.flush_filter_options` 只更新這幾個下拉選單（大模組選單的選項 diff 約 25 毫秒，
+  `EntriesPanel.flush_filter_options` 只更新這幾個下拉選單（選項很多的模組選單 diff 成本高，
   整張 `filter_card` 更貴），進階條件摘要、錯誤文字與四個資料操作按鈕（載入中停用）的狀態與上次送出的不同時
   只更新 `filter_actions_row`／錯誤文字；只有 `flush_all`（來源不明的變更）才重畫整張 `filter_card`。
   `flush` 在清單、編輯區與記錄之後才呼叫 `flush_filter_options`。

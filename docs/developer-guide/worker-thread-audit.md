@@ -132,6 +132,8 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 | 快取分片頁的分片 JSON 解析（`_load_shard_rows`、`_load_shard_keys`；不得每次渲染都解析所有分片） | `shard_reader`（`app/views/cache_manager/shard_reader.py`）以檔案簽名記憶；背景（`_fetch_overview`、`run_cache_action`）預熱 |
 | 快取歷史 `history_load_recent`（掃描整個 jsonl）、`history_append_event`（每次讀寫整個 ≤10000 筆的 json 陣列） | 索引記憶 + 就地更新；json 鏡像由單一背景執行緒寫入 |
 | Mod DB 舊 AI 重翻預覽的候選查詢、樣本分組與批次估算（不得在 UI handler 同步執行） | Registry-owned `moddb-retranslate-preview` 背景操作；worker 依 path/priority 建立獨立唯讀 DB connection，結果經 `page.run_task` 套用，generation 與 DB identity 不符即丟棄。單次 SQLite 查詢仍不可即時中斷，shutdown 採 drain-only，最大查詢時間尚未證明 |
+| Mod DB 條目頁的資料庫讀取（翻頁、選取、影響預覽、審核範圍預覽、篩選選項）與寫入（儲存、還原、批次取代、審核） | 讀取經 `app/views/moddb/background_read.py` 的 `run_read`、`entry_selection.py` 與 `filter_options_loader.py`，寫入經 `entry_writes.py`，都是 `launch_page_operation`；結果經 `post_to_ui` 排回 UI，ticket／世代不符即丟棄。查詢帶 `QueryInterrupt`（`translation_tool/translation_db/query_interrupt.py`），被新請求取代時由 SQLite progress handler 中斷；全版本逐列比對由 `parallel_scan.py` 在多條唯讀連線上同時掃（`ContextThreadPoolExecutor`，寫入交易中不平行） |
+| Mod DB 掃描匯入的 JAR 解析（純 Python，受 GIL 限制） | `translation_db/scan_pool.py`：JAR 數達 `PROCESS_MIN_JARS` 時用 `spawn` 行程池，否則單一讀取執行緒；取消經共用 `Event`，worker 日誌隨結果送回由呼叫端重送；寫入端累積一批後以單一交易提交 |
 | `merge_view` 輪詢（不得用 `time.sleep`） | event loop 輪詢；`app/` 不得有 `time.sleep`（護欄測試） |
 
 ## D. 仍保留的同步 I/O（皆在「有界」界線內或為非 UI 路徑）

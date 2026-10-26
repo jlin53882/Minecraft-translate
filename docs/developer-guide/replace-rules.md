@@ -39,7 +39,7 @@ python tools/audit_replace_rules.py --per-rule --mod-db <db> # 逐條規則好�
 
 輸出包含：只做 s2twp 與套用規則後的完全一致率（全部 key、名稱類 key）與平均相似度；結構檢查
 （`edge_whitespace`、`inner_space_in_to`、`unreachable_from`、`output_differs_from_to`、`duplicate_from`、`conflicts`）。
-結構中的重複、前後空白與交叉引用由 `translation_tool/utils/replace_rules_diagnostics.py` 的 `diagnose_rules` 偵測，
+結構中的重複、前後空白、交叉引用與原詞不可達（`unreachable_from`）由 `translation_tool/utils/replace_rules_diagnostics.py` 的 `diagnose_rules` 偵測，
 規則頁也用同一份診斷。
 
 加入新規則的驗證方式：同時在官方與模組語料回測，官方不得有任何 key 變差；模組變差的 key 要逐一確認是不是
