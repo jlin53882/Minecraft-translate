@@ -58,6 +58,29 @@ def test_get_cache_dict_ref_lazily_initializes_existing_disk_cache(
     assert state.initialized is True
 
 
+def test_advancement_cache_persists_across_runtime_reset(tmp_path, monkeypatch):
+    """Advancement 快取必須在程序重置後仍能載入並命中。"""
+    _prepare_disk_cache(tmp_path, monkeypatch)
+    key = "story/start.json#display.title.text|Start Here"
+
+    try:
+        assert (
+            cache_manager.add_to_cache("advancement", key, "Start Here", "從這裡開始")
+            is True
+        )
+        assert (
+            cache_manager.save_translation_cache("advancement", write_new_shard=False)
+            is True
+        )
+        assert list((tmp_path / "cache" / "advancement").glob("*.json"))
+
+        cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+
+        assert cache_manager.get_from_cache("advancement", key) == "從這裡開始"
+    finally:
+        cache_store.reset_runtime_state(cache_manager.CACHE_TYPES)
+
+
 def test_get_from_cache_lazily_initializes_existing_cache(tmp_path, monkeypatch):
     """第一次讀取值時，不可誤判為快取未命中。"""
     state = _prepare_disk_cache(tmp_path, monkeypatch)

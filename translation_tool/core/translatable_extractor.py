@@ -14,21 +14,21 @@ from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_ind
 from translation_tool.core.lm_config_rules import (
     is_value_translatable,
 )
+from translation_tool.core.patchouli_semantics import (
+    PatchouliContext,
+    patchouli_translatable_items,
+)
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
-    book_field,
-    classify_book_string,
+    advancement_texts,
+    is_advancement_document,
     lang_non_text_reason,
     looks_like_book_json,
     value_shape_reason,
 )
 from translation_tool.utils.config_manager import load_config
 
-# Patchouli 結構性欄位：整個子樹只描述版面或方塊圖樣，沒有顯示文字。
-# 例如 ``multiblock.pattern`` 的列 ``" 0 "``，翻譯或削掉空白都會讓每列長度不一致，
-# 整本書載入失敗。
 _MAX_SNIFF_BYTES = 2 * 1024 * 1024
-NON_TEXT_PATCHOULI_KEYS = frozenset({"multiblock"})
 
 
 def find_patchouli_json(root: Path, dir_names=None):
@@ -104,17 +104,58 @@ def find_lang_json(root: Path):
     return list(root.rglob("assets/*/lang/*.json"))
 
 
+def is_advancement_file(file_path: Path) -> bool:
+    """判斷是否為 ``data/<mod>/advancement(s)/*.json`` 檔案。"""
+    parts = Path(file_path).parts
+    # 輸入路徑可能帶有外層 ``data``／``assets`` 資料夾名稱；由內向外找，
+    # 才會以實際資源根目錄判斷，而不是被父目錄同名片段誤判。
+    for index in range(len(parts) - 3, -1, -1):
+        part = parts[index]
+        if part.lower() in {"assets", "data"} and parts[index + 2].lower() in {
+            "advancement",
+            "advancements",
+        }:
+            return parts[-1].lower().endswith(".json")
+    return False
+
+
+def find_advancement_json(root: Path) -> list[Path]:
+    """找出 Minecraft Advancement JSON，供一般目錄翻譯流程使用。"""
+    return [
+        path
+        for path in root.rglob("*.json")
+        if is_advancement_file(path.relative_to(root))
+    ]
+
+
 def is_lang_file(file_path: Path) -> bool:
     """
-    判斷是否為語言檔（lang 類型）。
+    判斷是否為標準資源結構中的語言檔（lang 類型）。
 
     參數：
         file_path: 檔案路徑
 
     回傳：
-        True 是 lang 檔，False 是 Patchouli 檔
+        True 是 ``assets/<模組>/lang/<語系>.json``／``.lang`` 或
+        ``data/<模組>/lang/<語系>.json``／``.lang``，False 是其他檔案。
+
+    Advancement 優先於路徑片段判斷：即使進度檔的子路徑碰巧叫做
+    ``lang``，也不能被當成語言檔而繞過 Advancement 專用 writer。
     """
-    return "lang" in file_path.parts
+    path = Path(file_path)
+    if is_advancement_file(path):
+        return False
+    parts = path.parts
+    for index, part in enumerate(parts[:-3]):
+        if (
+            part.lower() in {"assets", "data"}
+            and parts[index + 2].lower() == "lang"
+            and index + 3 == len(parts) - 1
+        ):
+            # 現代資源包使用 JSON；scanner 仍支援舊版 Minecraft 的 .lang，
+            # 兩者都必須在 canonical lang 路徑內才算語言檔。
+            return parts[-1].lower().endswith((".json", ".lang"))
+    return False
 
 
 def _lang_nested_translatable(value: str) -> bool:
@@ -125,13 +166,36 @@ def _lang_nested_translatable(value: str) -> bool:
 
 
 def _list_text_translatable(value: str, is_lang: bool, path: str) -> bool:
-    """陣列裡的字串是否要翻譯：lang 檔用既有規則，手冊檔依上層欄位與值的形狀。"""
-    if is_lang:
-        return _lang_nested_translatable(value)
-    return classify_book_string(value, book_field(path)) == "text"
+    """語言檔陣列裡的字串是否要翻譯。"""
+    return _lang_nested_translatable(value) if is_lang else False
 
 
-def extract_translatables(json_data, file_path):
+def _extract_advancement_translatables(json_data, file_path) -> list[dict[str, str]]:
+    """依完整 Advancement 文件契約抽取 literal，拒絕 generic JSON fallback。"""
+    if not is_advancement_document(json_data):
+        return []
+    return [
+        {
+            "file": str(file_path),
+            "path": path,
+            "text": text,
+            "source_text": text,
+        }
+        for path, text in advancement_texts(json_data).items()
+    ]
+
+
+def _is_advancement_content_file(file_path) -> bool:
+    """確認檔案應走 Advancement 專用抽取，而不是語言檔 walker。"""
+    return is_advancement_file(Path(file_path))
+
+
+def extract_translatables(
+    json_data,
+    file_path,
+    *,
+    patchouli_context: PatchouliContext | None = None,
+):
     """
     從 JSON 資料中抽取可翻譯的項目。
 
@@ -147,14 +211,28 @@ def extract_translatables(json_data, file_path):
         可翻譯項目列表，每項包含 file、path、text、source_text
     """
     items = []
-    is_lang = is_lang_file(Path(file_path))
+    # 先辨識 Advancement，再判斷 Lang；不能讓父目錄或子路徑中的 ``lang``
+    # 片段把合法 Advancement 導向通用 JSON walker。
+    is_advancement = is_advancement_file(Path(file_path))
+    is_lang = not is_advancement and is_lang_file(Path(file_path))
+
+    if _is_advancement_content_file(file_path):
+        # Advancement 必須在抽取、DB scanner 與 writer 共用同一個完整文件契約；
+        # 不完整文件安全略過，不退回通用 JSON 抽取器，避免稍後才由 writer 拒絕。
+        return _extract_advancement_translatables(json_data, file_path)
+
+    if not is_lang:
+        # Patchouli 必須由同一個語意分類器決定 literal/reference/structure。
+        # scanner 讀 ZIP 時會傳入 archive context；一般目錄翻譯則由
+        # patchouli_semantics 依 book.json/template 建立有界快取。
+        return patchouli_translatable_items(
+            json_data, file_path, context=patchouli_context
+        )
 
     def walk(obj, base_path=""):
         """遞迴遍歷物件提取可翻譯文字。"""
         if isinstance(obj, dict):
             for k, v in obj.items():
-                if not is_lang and k in NON_TEXT_PATCHOULI_KEYS:
-                    continue
                 new_path = f"{base_path}.{k}" if base_path else k
 
                 if is_lang and isinstance(v, str):
@@ -185,20 +263,6 @@ def extract_translatables(json_data, file_path):
                         )
                     continue
 
-                elif (
-                    not is_lang
-                    and isinstance(k, str)
-                    and isinstance(v, str)
-                    and classify_book_string(v, k) == "text"
-                ):
-                    items.append(
-                        {
-                            "file": str(file_path),
-                            "path": new_path,
-                            "text": v,
-                            "source_text": v,
-                        }
-                    )
                 else:
                     walk(v, new_path)
 

@@ -61,6 +61,11 @@ from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
 )
+from translation_tool.core.text_sniffer import set_advancement_text
+from translation_tool.core.translatable_extractor import (
+    is_advancement_file,
+    is_lang_file,
+)
 from translation_tool.core.translation_path_writer import (
     map_lang_output_path,
     set_by_path,
@@ -290,7 +295,21 @@ def _directory_cache_rules() -> dict[str, CacheRule]:
         # Guide .md/.txt items use the Patchouli prompt but the md cache bucket.
         "md": CacheRule("path|source_text"),
         "patchouli": CacheRule("path|source_text"),
+        "advancement": CacheRule("path|source_text"),
     }
+
+
+def _set_directory_item_text(
+    file_cache: dict[str, dict], item: dict[str, Any], text: str
+) -> None:
+    """依 cache type 寫回 JSON；Advancement 必須通過結構白名單 writer。"""
+    file_name = item.get("file")
+    if file_name not in file_cache:
+        return
+    if item.get("cache_type") == "advancement":
+        set_advancement_text(file_cache[file_name], item["path"], text)
+    else:
+        set_by_path(file_cache[file_name], item["path"], text)
 
 
 def _split_directory_items(
@@ -342,7 +361,7 @@ def _write_directory_outputs(
             dst.write_text(render_guide(file_cache[file_name]), encoding="utf-8")
             continue
         rel = map_lang_output_path(src.relative_to(root))
-        if export_lang and "lang" in src.parts:
+        if export_lang and is_lang_file(src):
             dst = (out_root / rel).with_suffix(".lang")
             dst.parent.mkdir(parents=True, exist_ok=True)
             dst.write_text(
@@ -457,7 +476,7 @@ def _apply_cached_directory_items(
         file_name = item.get("file")
         if file_name not in file_cache:
             continue
-        set_by_path(file_cache[file_name], item["path"], item["text"])
+        _set_directory_item_text(file_cache, item, item["text"])
         touched_files.add(file_name)
 
     _write_directory_outputs(file_cache, touched_files, root, out_root, export_lang)
@@ -546,7 +565,7 @@ def _run_directory_translation(
             return
         rejected = bool(item.get("_cache_rejected"))
         output_text = safe_output_text(item)
-        set_by_path(file_cache[file_name], item["path"], output_text)
+        _set_directory_item_text(file_cache, item, output_text)
         touched_files.add(file_name)
         if (
             db_ctx is not None
@@ -683,7 +702,10 @@ def _scan_directory_files(root: Path) -> list[Path]:
     except Exception as error:  # noqa: BLE001
         log_warning(f"⚠️ 掃描可翻譯檔案失敗，已跳過本次掃描：{error!r}")
         patchouli_files, lang_files, files = [], [], []
-    log_info(f"🔍 掃描完成：Patchouli={len(patchouli_files)}，Lang={len(lang_files)}")
+    advancement_count = sum(1 for path in patchouli_files if is_advancement_file(path))
+    log_info(
+        f"🔍 掃描完成：內容={len(patchouli_files)}（Advancement={advancement_count}），Lang={len(lang_files)}"
+    )
     return files
 
 

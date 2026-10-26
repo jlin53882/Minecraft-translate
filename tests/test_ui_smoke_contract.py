@@ -8,6 +8,7 @@ from pathlib import Path
 import flet as ft
 import pytest
 
+from app.view_registry import VIEW_SPECS
 from tools.ui_smoke import (
     DIALOG_CLICK_PROBE_EXTRA_CASES,
     DIALOG_CLICK_STAGES,
@@ -34,7 +35,7 @@ def test_view_scenario_covers_first_build_revisit_and_shared_dialogs() -> None:
     """每個 theme / viewport 都要有首次頁面、回訪與共用 Dialog 案例。"""
     keys = _expected_case_keys("views", ("dark",), ((1360, 900),))
 
-    assert len(VIEW_KEYS) == 13
+    assert VIEW_KEYS == tuple(spec.key for spec in VIEW_SPECS)
     assert len(keys) == 2 * len(VIEW_KEYS) + 3
     assert ("view_revisit", "dark", "1360x900", "dashboard") in keys
     assert ("dialog", "dark", "1360x900", "command_palette_reopen") in keys

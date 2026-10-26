@@ -80,6 +80,7 @@ class TestGetDefaultCacheRules:
 
         assert "lang" in rules
         assert "patchouli" in rules
+        assert "advancement" in rules
         assert "ftbquests" in rules
         assert "kubejs" in rules
         assert "md" in rules
@@ -125,6 +126,28 @@ class TestIsValidHit:
         entry = {"dst": "你好"}
 
         assert _is_valid_hit("你好", entry, item) is True
+
+    def test_is_valid_hit_advancement_requires_matching_source(self):
+        """Advancement 快取必須確認原文，避免同一路徑誤用舊翻譯。"""
+        from translation_tool.core.lm_translator_shared_cache import _is_valid_hit
+
+        item = {"cache_type": "advancement", "source_text": "Start Here"}
+        assert (
+            _is_valid_hit(
+                "從這裡開始",
+                {"dst": "從這裡開始", "src": "Start Here"},
+                item,
+            )
+            is True
+        )
+        assert (
+            _is_valid_hit(
+                "從這裡開始",
+                {"dst": "從這裡開始", "src": "Different"},
+                item,
+            )
+            is False
+        )
 
     def test_is_valid_hit_empty_source(self):
         """測試空 source 情況。"""
@@ -442,6 +465,7 @@ class TestStrictSrcTypes:
         from translation_tool.core.lm_translator_shared_cache import STRICT_SRC_TYPES
 
         assert "lang" in STRICT_SRC_TYPES
+        assert "advancement" in STRICT_SRC_TYPES
         assert "kubejs" in STRICT_SRC_TYPES
         assert "ftbquests" in STRICT_SRC_TYPES
         assert "md" in STRICT_SRC_TYPES

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from translation_tool.core.translatable_extractor import is_advancement_file
+
 
 def map_lang_output_path(src: Path) -> Path:
     """根據來源路徑自動判定翻譯輸出的目標路徑。
@@ -15,7 +17,10 @@ def map_lang_output_path(src: Path) -> Path:
     - ``…/lang/en_us.json`` → ``…/lang/zh_tw.json``
     - ``…/patchouli_books/<書>/en_us/…`` → ``…/patchouli_books/<書>/zh_tw/…``
     - 其他手冊資料夾 ``assets/<模組>/<資料夾>/…/en_us/…`` → 同路徑換成 ``zh_tw``
+    - Advancement 即使子路徑包含 ``en_us`` 或 ``lang``，仍保留完整來源路徑
     """
+    if is_advancement_file(src):
+        return src
     if src.name.lower() == "en_us.json" and "lang" in src.parts:
         return src.with_name("zh_tw.json")
     parts = list(src.parts)

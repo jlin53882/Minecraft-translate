@@ -214,10 +214,73 @@ _COLOR_VALUE = re.compile(r"#?[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?")
 _CONST_VALUE = re.compile(r"[A-Z0-9]+(?:_[A-Z0-9]+)+")
 _SNAKE_VALUE = re.compile(r"[a-z0-9]+(?:_[a-z0-9]+)+")
 _URL_VALUE = re.compile(r"https?://\S+")
+_LANG_DISPLAY_MARKERS = frozenset(
+    {
+        "button",
+        "buttons",
+        "description",
+        "label",
+        "message",
+        "messages",
+        "name",
+        "option",
+        "options",
+        "screen",
+        "subtitle",
+        "subtitles",
+        "text",
+        "title",
+        "tooltip",
+    }
+)
+_LANG_DISPLAY_ROOTS = frozenset(
+    {
+        "advancement",
+        "advancements",
+        "block",
+        "container",
+        "death",
+        "effect",
+        "effects",
+        "entity",
+        "gui",
+        "screen",
+        "subtitles",
+    }
+)
+_LANG_STRUCTURAL_VALUE = re.compile(
+    r"^(?:#?[a-z0-9_.-]+:[a-z0-9_./-]+|[\w.-]+(?:/[\w.-]+)+)$", re.IGNORECASE
+)
+_LANG_NUMBER_VALUE = re.compile(r"^[-+]?\d+(?:\.\d+)?[a-zA-Z]?$")
+
+
+def is_lang_display_key(key: str) -> bool:
+    """判斷語言鍵是否帶有可驗證的顯示語意。
+
+    這不是模組白名單，也不把所有 ``.tooltip`` 都視為文字。只有規格中常見的
+    顯示命名空間（例如 ``block``、``effect``、``subtitles``、``gui``）或
+    ``text.autoconfig.*.option`` 這類完整語意才會放寬值形狀判斷；資源 ID、網址、
+    色碼及格式資料仍由 ``lang_non_text_reason`` 優先排除。
+    """
+    parts = [part for part in re.split(r"[.\[\]]+", key.casefold()) if part]
+    if not parts:
+        return False
+    if parts[:2] == ["text", "autoconfig"]:
+        return any(part in _LANG_DISPLAY_MARKERS for part in parts[2:])
+    if parts[0] in {"effect", "effects", "subtitles", "subtitle"}:
+        return True
+    return parts[0] in _LANG_DISPLAY_ROOTS and any(
+        part in _LANG_DISPLAY_MARKERS for part in parts[1:]
+    )
 
 
 def lang_non_text_reason(key: str, value: str) -> str | None:
-    """語言檔條目不是顯示文字時回傳原因：翻譯者備註鍵、語言代碼、色碼、``SEED_OIL_BUCKET``、單獨網址。"""
+    """語言檔條目不是顯示文字時回傳原因。
+
+    常數形狀只是弱證據：在已知顯示語意的完整鍵上（例如 block tooltip、effect、
+    subtitles、text.autoconfig option）仍可能是玩家看得到的名稱，因此不能單獨
+    以大寫或 snake_case 刪除。結構值、網址與語言 metadata 則維持高信心排除。
+    """
     text = value.strip()
     if key.startswith("_") or key.lower() in _LANG_META_KEYS:
         return "meta_key"
@@ -225,9 +288,13 @@ def lang_non_text_reason(key: str, value: str) -> str | None:
         text
     ):
         return "code_value"
+    if _URL_VALUE.fullmatch(text) or _LANG_STRUCTURAL_VALUE.fullmatch(text):
+        return "code_value"
+    if _LANG_NUMBER_VALUE.fullmatch(text) or _TRANSLATION_KEY.fullmatch(text):
+        return "code_value"
     if any(
-        pattern.fullmatch(text) for pattern in (_CONST_VALUE, _SNAKE_VALUE, _URL_VALUE)
-    ):
+        pattern.fullmatch(text) for pattern in (_CONST_VALUE, _SNAKE_VALUE)
+    ) and not is_lang_display_key(key):
         return "code_value"
     return None
 
@@ -503,6 +570,29 @@ def classify_book_string(value: str, field: str = "") -> str:
     return "text" if _HAS_LETTER.search(plain) else "not"
 
 
+def raw_english_fallback_allowed(kind: str, path: str, value: str) -> bool:
+    """判斷翻譯 ZIP 是否可把同一路徑的 raw 英文補回條目。
+
+    這個判斷只服務「已從翻譯檔找到對位值」的回補路徑，不會擴大一般英文掃描。
+    語言檔沿用共用的 metadata／值形狀分類；Patchouli 則必須通過完整欄位語意，
+    因此 resource ID、URL、pattern、mapping、placeholder 等結構值不會因翻譯 ZIP
+    而重新出現。
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if kind == "lang":
+        if (
+            lang_non_text_reason(path, value) is not None
+            or value_shape_reason(value) is not None
+        ):
+            return False
+        # 格式碼本身不是英文原文；只有含有可見字母的值才能回補。
+        return _HAS_LETTER.search(_FORMAT_TOKEN.sub("", value)) is not None
+    if kind == "patchouli":
+        return classify_book_string(value, book_field(path)) == "text"
+    return False
+
+
 # ---------------------------------------------------------------------------
 # 手冊檔案本身的判斷（不需要設定資料夾名稱）
 # ---------------------------------------------------------------------------
@@ -549,32 +639,151 @@ def looks_like_book_json(data: object, parts: Sequence[str]) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def advancement_texts(data: object) -> dict[str, str]:
-    """進度 ``display.title``／``display.description`` 裡的**字面**文字：``{JSON 路徑: 文字}``。
+def is_advancement_document(data: object) -> bool:
+    """判斷 JSON 是否符合可安全寫回的 Minecraft Advancement 外形。"""
+    return (
+        isinstance(data, dict)
+        and isinstance(data.get("criteria"), dict)
+        and isinstance(data.get("display"), dict)
+    )
 
-    寫成 ``{"translate": "鍵"}`` 的是語言檔的鍵，由語言檔負責，這裡不收。
+
+def _walk_advancement_component(
+    value: object, path: str, found: dict[str, str]
+) -> None:
+    """只走 Advancement 文字元件允許的 literal 子樹。
+
+    ``translate``、selector、score、NBT、樣式與事件都是結構資料；只有根字串、
+    ``text``／``fallback``，以及 ``with``／``extra`` 裡的元件文字可以進入翻譯閉環。
     """
-    if not isinstance(data, dict) or not isinstance(data.get("display"), dict):
+    if isinstance(value, str):
+        found[path] = value
+        return
+    if isinstance(value, list):
+        for index, child in enumerate(value):
+            _walk_advancement_component(child, f"{path}[{index}]", found)
+        return
+    if not isinstance(value, dict):
+        return
+
+    for key in ("text", "fallback"):
+        child = value.get(key)
+        if isinstance(child, str):
+            found[f"{path}.{key}"] = child
+    for key in ("with", "extra"):
+        children = value.get(key)
+        if isinstance(children, list):
+            for index, child in enumerate(children):
+                _walk_advancement_component(child, f"{path}.{key}[{index}]", found)
+
+
+def advancement_literal_paths(data: object) -> dict[str, str]:
+    """回傳 Advancement 顯示文字中可安全寫回的 literal 路徑。"""
+    if not is_advancement_document(data):
         return {}
+    display = data["display"]
     found: dict[str, str] = {}
     for field in ("title", "description"):
-        value = data["display"].get(field)
-        path = f"display.{field}"
-        if isinstance(value, dict) and isinstance(value.get("text"), str):
-            value, path = value["text"], f"{path}.text"
-        if (
-            isinstance(value, str)
-            and classify_book_string(value, book_field(path)) == "text"
-            and not is_field_name_text(path, value)
-        ):
+        if field in display:
+            _walk_advancement_component(display[field], f"display.{field}", found)
+    return found
+
+
+def _is_advancement_structural_value(text: str) -> bool:
+    """判斷是否為 Advancement 不應送入 AI 的結構值。"""
+    if _LANGKEY.fullmatch(text.lstrip("# ")):
+        return True
+    return any(
+        pattern.match(text) if prefix else pattern.fullmatch(text)
+        for pattern, prefix in (
+            (_URL, True),
+            (_JAVA_CLASS, False),
+            (_STACK, True),
+            (_BOOK_NUMBER, False),
+            (_BOOL, False),
+            (_TEMPLATE_VAR, False),
+            (_ANY_RESLOC, False),
+            (_PATHLIKE, False),
+        )
+    )
+
+
+def _is_advancement_technical_identifier(text: str, core: str, field: str) -> bool:
+    """判斷未知 component 欄位中的 snake_case／路徑識別字。"""
+    return (
+        not _WHITESPACE.search(text)
+        and _LOWER_IDENT.fullmatch(core) is not None
+        and any(separator in core for separator in "_./-")
+        and field not in BOOK_DISPLAY_FIELDS
+    )
+
+
+def is_advancement_literal_text(value: str, *, field: str = "") -> bool:
+    """判斷 Advancement component literal 是否是安全的顯示文字。
+
+    Advancement 的 ``fallback``、``with`` 和 ``extra`` 不是 Patchouli 欄位，
+    不能直接套用 ``classify_book_string`` 的未知欄位保守規則；合法的單字或短字
+    仍可能是玩家看得到的文字。這裡只排除已知的 resource ID、路徑、網址、格式碼
+    以外的純控制值、placeholder 與沒有字母的內容，並保留與其他文字流程一致的
+    結構值防護。
+    """
+    if not isinstance(value, str):
+        return False
+    text = value.strip()
+    if not text or _CJK.search(text):
+        return False
+    core = _BOOK_MARKUP.sub("", text).strip()
+    if not _ASCII_LETTER.search(core) or value_shape_reason(text) is not None:
+        return False
+    if _is_advancement_structural_value(text):
+        return False
+    # 裸單字（例如 ``welcome``、``player``）可能是可見文字；帶有
+    # snake_case、路徑或版本分隔符的值則保守視為技術識別字。若值位於
+    # advancement 的明確顯示欄位，保留既有 Patchouli 類似欄位的語意，
+    # 讓像 ``pollen_sifter`` 的合法顯示名稱不因改用共用 walker 而退化。
+    if _is_advancement_technical_identifier(text, core, field):
+        return False
+    if not _WHITESPACE.search(text):
+        return True
+    tokens = _BOOK_MARKUP.sub("", text).split()
+    if tokens and all(_STRICT_RESLOC.fullmatch(token) for token in tokens):
+        return False
+    plain = _BOOK_MARKUP.sub("", _PLACEHOLDER.sub("", text))
+    return _HAS_LETTER.search(plain) is not None
+
+
+def advancement_texts(data: object) -> dict[str, str]:
+    """進度顯示元件中的可翻譯 literal：``{JSON 路徑: 文字}``。
+
+    ``translate`` 是語言檔鍵，永遠不送給 AI，也不會由 Advancement writer 覆寫。
+    ``fallback``、``with``、``extra`` 僅在它們確實是 literal 文字時納入。
+    """
+    found: dict[str, str] = {}
+    for path, value in advancement_literal_paths(data).items():
+        if is_advancement_literal_text(
+            value, field=book_field(path)
+        ) and not is_field_name_text(path, value):
             found[path] = value
     return found
 
 
+def set_advancement_text(data: object, path: str, value: str) -> None:
+    """以結構白名單寫回 Advancement literal，拒絕任意 JSON 路徑。
+
+    writer 與 extractor 共用 ``advancement_literal_paths``，因此翻譯後再次寫入時仍能
+    找到原本的路徑；樣式、事件與 ``translate`` key 不會被 generic writer 意外改動。
+    """
+    if not is_advancement_document(data):
+        raise ValueError("不是可寫回的 Advancement JSON")
+    if not isinstance(value, str):
+        raise TypeError("Advancement literal 翻譯必須是字串")
+    if path not in advancement_literal_paths(data):
+        raise KeyError(f"不是允許寫回的 Advancement literal 路徑：{path}")
+    from translation_tool.core.translation_path_writer import set_by_path
+
+    set_by_path(data, path, value)
+
+
 def looks_like_advancement(data: object) -> bool:
-    """有 ``criteria`` 且 ``display`` 帶字面文字的 JSON。"""
-    return (
-        isinstance(data, dict)
-        and isinstance(data.get("criteria"), dict)
-        and bool(advancement_texts(data))
-    )
+    """有 ``criteria``、``display`` 且帶可翻譯字面文字的 JSON。"""
+    return is_advancement_document(data) and bool(advancement_texts(data))

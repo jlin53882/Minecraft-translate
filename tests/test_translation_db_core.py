@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from translation_tool.translation_db import (
+    KIND_ADVANCEMENT,
     KIND_LANG,
     KIND_PATCHOULI,
     ScanItem,
@@ -128,6 +129,45 @@ def test_history_retention_preserves_pending_smart_review_marker(db):
     ) == (0,)
 
 
+def test_pending_smart_review_marker_survives_five_later_writes_and_reopen(tmp_path):
+    """JSON 回寫失敗後重開資料庫，仍能找回 SQLite 的套用證據。"""
+    path = tmp_path / "pending-marker.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note, projection_state) "
+            "VALUES (?, ?, 'smart_review_apply', '', ?, ?, 'pending')",
+            (entry_id, "smart-run", "AI 譯文", "run=run-1; ordinal=1"),
+        )
+    for number in range(5):
+        with db._tx() as conn:
+            conn.execute(
+                "INSERT INTO history "
+                "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+                "VALUES (?, ?, 'manual', '', ?, ?)",
+                (entry_id, f"manual-{number}", f"人工-{number}", str(number)),
+            )
+    db.close()
+
+    reopened = TranslationDB(path)
+    try:
+        marker = reopened._one(
+            "SELECT action, projection_state, note FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        )
+        assert marker == (
+            "smart_review_apply",
+            "pending",
+            "run=run-1; ordinal=1",
+        )
+    finally:
+        reopened.close()
+
+
 def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
     tmp_path,
 ):
@@ -169,6 +209,55 @@ def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
         reopened.close()
 
 
+def test_history_retention_migration_preserves_legacy_smart_review_marker(
+    tmp_path,
+):
+    """v8 migration 無法判定舊 marker 是否已對帳時，先保留以便後續恢復。"""
+    path = tmp_path / "history-v8-pending.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [item()])
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    db.close()
+
+    conn = sqlite3.connect(path)
+    conn.execute("ALTER TABLE history DROP COLUMN projection_state")
+    conn.execute("UPDATE meta SET value='8' WHERE key='schema_version'")
+    conn.execute(
+        "INSERT INTO history "
+        "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+        "VALUES (?, 'legacy-smart-run', 'smart_review_apply', '', ?, ?)",
+        (entry_id, "AI 譯文", "run=legacy-run; ordinal=1"),
+    )
+    for number in range(7):
+        conn.execute(
+            "INSERT INTO history "
+            "(entry_id, batch, action, old_zh_tw, new_zh_tw, note) "
+            "VALUES (?, ?, 'manual', '', ?, ?)",
+            (entry_id, f"legacy-manual-{number}", f"人工-{number}", str(number)),
+        )
+    conn.commit()
+    conn.close()
+
+    reopened = TranslationDB(path)
+    try:
+        marker = reopened._one(
+            "SELECT action, projection_state, note FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        )
+        assert marker == (
+            "smart_review_apply",
+            "pending",
+            "run=legacy-run; ordinal=1",
+        )
+        assert reopened._one(
+            "SELECT COUNT(*) FROM history WHERE entry_id=? AND action='manual'",
+            (entry_id,),
+        ) == (5,)
+    finally:
+        reopened.close()
+
+
 # ---------------------------------------------------------------- 身分
 def test_classify_lang_and_patchouli_members():
     lang = classify_member("assets/foo/lang/en_us.json")
@@ -188,6 +277,16 @@ def test_classify_lang_and_patchouli_members():
     other = classify_member("data/foo/patchouli_books/guide/zh_tw/entries/a/b.json")
     assert other.file_key == book.file_key and other.lang == "zh_tw"
     assert classify_member("assets/foo/patchouli_books/guide/entries/a.json") is None
+
+    advancement = classify_member("data/foo/advancements/story/start.json")
+    assert (advancement.kind, advancement.file_key, advancement.lang) == (
+        KIND_ADVANCEMENT,
+        "story/start.json",
+        "en_us",
+    )
+    assert advancement.item_key("display.title.fallback") == (
+        "story/start.json#display.title.fallback"
+    )
 
 
 def test_classify_file_relative_to_root(tmp_path):
@@ -1951,6 +2050,28 @@ def test_write_back_buffer_flushes_translated_items(db, tmp_path):
     assert stats.written == 1 and buf.flush().written == 0
 
 
+def test_write_back_buffer_resolves_advancement_identity_and_lookup(db, tmp_path):
+    f = tmp_path / "data" / "foo" / "advancement" / "story" / "start.json"
+    item_data = {
+        "file": str(f),
+        "path": "display.title.fallback",
+        "source_text": "Start Here",
+        "text": "從這裡開始",
+        "cache_type": "advancement",
+    }
+    buf = WriteBackBuffer(db, "1.21.1", tmp_path)
+    buf.add(item_data)
+    assert buf.flush().written == 1
+
+    hits, rest = split_items_by_db(
+        TranslationResolver(db, "1.21.1"),
+        [{**item_data, "text": "Start Here"}],
+        tmp_path,
+    )
+    assert [item["text"] for item in hits] == ["從這裡開始"]
+    assert rest == []
+
+
 # ---------------------------------------------------------- jar 掃描
 def make_jar(
     path: Path, files: dict[str, object], nested: dict[str, bytes] | None = None
@@ -2304,7 +2425,7 @@ def test_clean_english_switch_controls_filtering_of_english_values(tmp_path):
         for i in scan_jar(jar, ScanOptions("1.21.1", clean_english=False), ()).items
     }
     assert on == {"a.real"}  # 與機器翻譯相同的判斷：略過過短字串與技術 ID
-    assert off == {"a.real", "a.short", "a.id"}  # 關閉：全部逐字匯入
+    assert off == {"a.real", "a.short"}  # 關閉：放寬文字篩選，仍排除技術 ID
 
 
 def test_translated_patchouli_uses_field_names_not_content(db, tmp_path):

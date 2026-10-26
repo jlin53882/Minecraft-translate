@@ -185,13 +185,15 @@ def test_rescan_delete_revert_sequence_stays_consistent(db, tmp_path):
     db.ingest(V2, items)
     _assert_derived_consistent(db)
 
-    # 重新掃描讓同一條目回來時，還原不覆蓋新資料：批次保持待還原，被刪的人工譯文仍在快照裡
+    # 重新掃描讓同一條目回來時，還原不覆蓋新資料：批次保持待還原，被刪的人工譯文仍在快照裡。
+    # 舊資料沒有 Patchouli 原始 context 時，placeholder 只能是 unknown，
+    # 因此不應進入可刪除／還原批次。
     assert not result.complete and result.conflicts
     batch = db._one(
         "SELECT payload, reverted_at FROM cleanup_batch WHERE id = ?", (plan1.batch_id,)
     )
     assert batch[1] is None
-    assert "[待補照片]" in batch[0]
+    assert "[待補照片]" not in batch[0]
     assert original  # 起始資料確實存在
     manual = {
         r[0]

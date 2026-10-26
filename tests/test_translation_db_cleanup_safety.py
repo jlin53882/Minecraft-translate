@@ -505,8 +505,37 @@ def test_advancement_cleanup_matches_what_the_scanner_collects():
     for value, expected in values.items():
         key = "a.json#display.title.text"
         assert entry_cleanup_category("advancement", key, value) == expected, value
-        found = advancement_texts({"display": {"title": {"text": value}}})
+        found = advancement_texts(
+            {
+                "criteria": {"x": {}},
+                "display": {"title": {"text": value}},
+            }
+        )
         assert (not found) == (expected is not None), value
+
+
+def test_advancement_cleanup_keeps_nested_component_literals():
+    from translation_tool.core.text_sniffer import advancement_texts
+    from translation_tool.translation_db.cleanup import entry_cleanup_category
+
+    document = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "fallback": "welcome",
+                "with": ["player"],
+                "extra": [{"text": "suffix"}],
+            }
+        },
+    }
+    found = advancement_texts(document)
+    assert found == {
+        "display.title.fallback": "welcome",
+        "display.title.with[0]": "player",
+        "display.title.extra[0].text": "suffix",
+    }
+    for path, value in found.items():
+        assert entry_cleanup_category("advancement", f"a.json#{path}", value) is None
 
 
 def test_src_change_added_after_the_preview_invalidates_the_plan(tmp_path):

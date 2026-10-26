@@ -31,9 +31,18 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.guide_blocks import NON_TEXT_REASONS, non_text_reason
+from translation_tool.core.patchouli_semantics import (
+    DISPLAY_NONTRANSLATABLE,
+    PATCHOULI_CLASSIFIER_VERSION,
+    STRUCTURAL,
+    TRANSLATION_REFERENCE,
+    UNKNOWN,
+    PatchouliSemantic,
+)
 from translation_tool.core.text_sniffer import (
     book_field,
     classify_book_string,
+    is_advancement_literal_text,
     is_field_name_text,
     is_placeholder_text,
     lang_non_text_reason,
@@ -78,7 +87,13 @@ _CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, KIND_LANG)
 
 
 def entry_cleanup_category(
-    kind: str, key: str, en_us: str, zh_text: str = ""
+    kind: str,
+    key: str,
+    en_us: str,
+    zh_text: str = "",
+    *,
+    semantic: PatchouliSemantic | None = None,
+    conservative: bool = False,
 ) -> str | None:
     """依目前規則判斷這個條目屬於哪一類「不該收」；正常條目回傳 None。
 
@@ -93,6 +108,10 @@ def entry_cleanup_category(
     if kind == KIND_GUIDE:
         return non_text_reason(en_us)
     if kind == KIND_PATCHOULI:
+        if semantic is not None:
+            return _patchouli_semantic_category(key, en_us, semantic)
+        if conservative:
+            return _patchouli_conservative_category(key, en_us)
         return _patchouli_category(key, en_us)
     if kind in (KIND_LANG, KIND_ADVANCEMENT):
         # 語言檔與進度只用不看內容語意的保守規則（小寫單字如 ``on``／``off`` 是正常譯文）
@@ -105,10 +124,74 @@ def entry_cleanup_category(
         if kind == KIND_ADVANCEMENT:
             if is_field_name_text(key, en_us):
                 return "field_name"
-            # 進度掃描用同一個分類（advancement_texts）：資源 ID、語言檔鍵值、網址不收
+            # Advancement 的 fallback／with／extra 不是 Patchouli 欄位，
+            # 必須和 advancement_texts 共用專用 literal 分類器；否則合法短字
+            # 會被舊的未知欄位保守規則誤列為清理候選。
+            if is_advancement_literal_text(en_us, field=book_field(key)):
+                return None
             verdict = classify_book_string(en_us, book_field(key))
             if verdict != "text":
                 return "lang_key" if verdict == "lang_key" else "not_text"
+    return None
+
+
+def _patchouli_semantic_category(
+    key: str, en_us: str, semantic: PatchouliSemantic
+) -> str | None:
+    """依共用分類器決定清理資格；模糊或玩家可見的值一律保留。"""
+
+    if semantic.kind in {
+        UNKNOWN,
+        TRANSLATION_REFERENCE,
+        DISPLAY_NONTRANSLATABLE,
+    }:
+        return None
+    if semantic.kind != STRUCTURAL or not semantic.cleanup_delete_allowed:
+        return None
+    if "multiblock.pattern" in key and not _LOWERCASE.search(en_us):
+        return "multiblock"
+    return "not_text"
+
+
+def _patchouli_conservative_category(key: str, en_us: str) -> str | None:
+    """沒有原始 JSON context 時，只接受資料庫鍵本身能證明的結構值。
+
+    舊資料庫只保存 ``file_key#JSON.path`` 與原文，無法安全還原 custom page、
+    book i18n 或 template processor 的用途。多方塊 pattern 與 mapping 是
+    Patchouli 固定的結構子樹，才保留既有清理類別；其他形狀推測（placeholder、
+    resource id、短字等）一律降級為 unknown，不列入自動清理。
+    """
+
+    normalized = key.lower()
+    if "multiblock.pattern" in normalized and not _LOWERCASE.search(en_us):
+        return "multiblock"
+    if "multiblock.mapping" in normalized and re.fullmatch(
+        r"#?[a-z0-9_.-]+:[a-z0-9_./-]+", en_us.strip(), re.IGNORECASE
+    ):
+        return "not_text"
+    return None
+
+
+def _patchouli_conservative_metadata(
+    key: str, en_us: str
+) -> tuple[str, str, tuple[str, ...], bool, str] | None:
+    category = _patchouli_conservative_category(key, en_us)
+    if category == "multiblock":
+        return (
+            STRUCTURAL,
+            "legacy_key_path_high_confidence",
+            ("key_path:multiblock.pattern",),
+            False,
+            PATCHOULI_CLASSIFIER_VERSION,
+        )
+    if category == "not_text":
+        return (
+            STRUCTURAL,
+            "legacy_key_path_high_confidence",
+            ("key_path:multiblock.mapping",),
+            False,
+            PATCHOULI_CLASSIFIER_VERSION,
+        )
     return None
 
 
@@ -162,6 +245,11 @@ class CleanupCandidate:
     key: str
     en_us: str
     category: str
+    semantic_kind: str = ""
+    semantic_reason: str = ""
+    semantic_evidence: tuple[str, ...] = ()
+    source_available: bool = False
+    classifier_version: str = ""
 
 
 @dataclass
@@ -284,7 +372,7 @@ def _write_report(path: str | Path, payload: dict[str, Any]) -> Path:
 
 def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
     en_us, truncated = _clip(candidate.en_us)
-    return {
+    item = {
         "id": candidate.entry_id,
         "delete": True,
         "category": candidate.category,
@@ -295,6 +383,17 @@ def _report_item(candidate: CleanupCandidate) -> dict[str, Any]:
         "en_us_truncated": truncated,
         "en_us_hash": _text_hash(candidate.en_us),
     }
+    if candidate.semantic_kind:
+        item.update(
+            {
+                "semantic_kind": candidate.semantic_kind,
+                "semantic_reason": candidate.semantic_reason,
+                "semantic_evidence": list(candidate.semantic_evidence),
+                "source_available": candidate.source_available,
+                "classifier_version": candidate.classifier_version,
+            }
+        )
+    return item
 
 
 def _item_problem(row: tuple | None, item: dict[str, Any], version: str) -> str | None:
@@ -310,7 +409,7 @@ def _item_problem(row: tuple | None, item: dict[str, Any], version: str) -> str 
         return "類型、模組或鍵值與檢查檔不符"
     if _text_hash(row[5]) != item.get("en_us_hash"):
         return "原文已變動"
-    category = entry_cleanup_category(row[1], row[4], row[5], row[6])
+    category = entry_cleanup_category(row[1], row[4], row[5], row[6], conservative=True)
     if category is None:
         return "目前規則判為正常內容"
     if category != item.get("category"):
@@ -454,10 +553,25 @@ class CleanupMixin:
             "ORDER BY e.kind, e.mod_id, e.key",
             (version, *_CLEANUP_KINDS),
         ):
-            category = entry_cleanup_category(kind, key, en_us, zh_text)
+            category = entry_cleanup_category(
+                kind, key, en_us, zh_text, conservative=True
+            )
             if category is not None:
+                metadata = (
+                    _patchouli_conservative_metadata(key, en_us)
+                    if kind == KIND_PATCHOULI
+                    else None
+                )
                 flagged.append(
-                    CleanupCandidate(entry_id, kind, mod_id, key, en_us, category)
+                    CleanupCandidate(
+                        entry_id,
+                        kind,
+                        mod_id,
+                        key,
+                        en_us,
+                        category,
+                        *(metadata or ("", "", (), False, "")),
+                    )
                 )
         return flagged
 
@@ -756,7 +870,9 @@ class CleanupMixin:
             plan.with_translation += entry_id in translated
             row = rows[entry_id]
             plan.by_category[
-                entry_cleanup_category(row[1], row[4], row[5], row[6])
+                entry_cleanup_category(
+                    row[1], row[4], row[5], row[6], conservative=True
+                )
             ] += 1
         plan.token = _digest(
             {

@@ -10,7 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.core.text_sniffer import advancement_texts, classify_book_string
+from translation_tool.core.text_sniffer import (
+    advancement_literal_paths,
+    advancement_texts,
+    classify_book_string,
+    set_advancement_text,
+)
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.cleanup import entry_cleanup_category
 
@@ -88,6 +93,25 @@ def test_tooltip_list_items_are_display_text():
     assert _book_paths(doc) == {"tooltip[0]", "tooltip[1]"}
 
 
+def test_patchouli_page_type_fields_keep_entity_ids_and_multiblock_structure_safe():
+    """頁型／entity id／多方塊結構不翻；可見 name 與未知自然語句仍可辨識。"""
+    doc = {
+        "type": "patchouli:entity",
+        "entity": "minecraft:zombie",
+        "name": "Zombie",
+        "multiblock": {
+            "pattern": [[" A "], [" B "]],
+            "mapping": {"A": "minecraft:stone", "B": "minecraft:dirt"},
+        },
+        "entity_data": {"custom": "This visible explanation is safe."},
+    }
+
+    assert _book_paths(doc) == {"name", "entity_data.custom"}
+    assert classify_book_string("minecraft:zombie", "entity") == "not"
+    assert classify_book_string(" A ", "pattern") == "not"
+    assert classify_book_string("minecraft:stone", "mapping") == "not"
+
+
 @pytest.mark.parametrize(
     "value", ["minecraft:stone", "https://example.com/x", "12", "#FFAA00", "#tier#"]
 )
@@ -131,6 +155,108 @@ def test_advancement_title_is_judged_as_a_display_field():
         "display.title.text": "MasterXort",
         "display.description": "pollen_sifter",
     }
+
+
+def test_lang_display_snake_case_is_extractable_but_identifier_is_not():
+    """顯示欄位的 snake_case 可保留；沒有語意的 tooltip 仍維持保守排除。"""
+    doc = {
+        "block.createaddition.barbed_wire.tooltip": "BARBED_WIRE",
+        "text.autoconfig.simpleplanes.option.FLY_TICKS_PER_COAL": (
+            "FLY_TICKS_PER_COAL"
+        ),
+        "subtitles.clogger_roaring": "clogger_roaring",
+        "effect.undead_revamp2.tankleak": "tank_leaks",
+        "item.m.oil.tooltip": "SEED_OIL_BUCKET",
+    }
+    assert {item["path"] for item in extract_translatables(doc, LANG_FILE)} == {
+        "block.createaddition.barbed_wire.tooltip",
+        "text.autoconfig.simpleplanes.option.FLY_TICKS_PER_COAL",
+        "subtitles.clogger_roaring",
+        "effect.undead_revamp2.tankleak",
+    }
+
+
+def test_advancement_text_components_round_trip_without_touching_structure():
+    """Advancement 巢狀文字可抽取、寫回，且結構元件保持不變。"""
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "translate": "advancements.story.mine_stone",
+                "fallback": "Mine Stone",
+                "with": [{"text": "literal"}, "raw literal"],
+                "extra": [{"text": "suffix", "bold": True}],
+                "clickEvent": {
+                    "action": "open_url",
+                    "value": "https://example.com",
+                },
+            },
+            "description": [
+                {"text": "Literal description", "italic": True},
+                {"text": "Second description"},
+            ],
+        },
+    }
+    paths = advancement_texts(adv)
+    assert paths == {
+        "display.title.fallback": "Mine Stone",
+        "display.title.with[0].text": "literal",
+        "display.title.with[1]": "raw literal",
+        "display.title.extra[0].text": "suffix",
+        "display.description[0].text": "Literal description",
+        "display.description[1].text": "Second description",
+    }
+    assert "display.title.translate" not in advancement_literal_paths(adv)
+
+    original_structure = {
+        "translate": adv["display"]["title"]["translate"],
+        "clickEvent": adv["display"]["title"]["clickEvent"],
+        "bold": adv["display"]["title"]["extra"][0]["bold"],
+        "criteria": adv["criteria"],
+    }
+    for index, path in enumerate(paths):
+        set_advancement_text(adv, path, f"翻譯 {index}")
+
+    assert adv["display"]["title"]["translate"] == original_structure["translate"]
+    assert adv["display"]["title"]["clickEvent"] == original_structure["clickEvent"]
+    assert adv["display"]["title"]["extra"][0]["bold"] == original_structure["bold"]
+    assert adv["criteria"] == original_structure["criteria"]
+    assert set(advancement_literal_paths(adv)) == set(paths)
+
+
+def test_advancement_writer_rejects_translate_and_event_paths():
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "translate": "advancements.story.mine_stone",
+                "text": "Mine Stone",
+                "clickEvent": {"action": "run_command", "value": "/say hi"},
+            }
+        },
+    }
+    with pytest.raises(KeyError):
+        set_advancement_text(adv, "display.title.translate", "不應改鍵")
+    with pytest.raises(KeyError):
+        set_advancement_text(adv, "display.title.clickEvent.value", "不應改事件")
+
+
+def test_advancement_directory_extraction_uses_the_same_literal_contract():
+    adv = {
+        "criteria": {"x": {}},
+        "display": {
+            "title": {
+                "translate": "advancements.story.mine_stone",
+                "fallback": "Mine Stone",
+                "with": [{"text": "literal"}],
+            }
+        },
+    }
+    items = extract_translatables(adv, Path("data/m/advancement/story/start.json"))
+    assert [(item["path"], item["source_text"]) for item in items] == [
+        ("display.title.fallback", "Mine Stone"),
+        ("display.title.with[0].text", "literal"),
+    ]
 
 
 @pytest.mark.parametrize("value", ["← →", "180°", "TODO"])

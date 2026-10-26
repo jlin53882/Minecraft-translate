@@ -140,6 +140,36 @@ Synthetic JARs, translation items, Dashboard cache shards and replace rules are
 generated in temporary directories. Dashboard task rendering is measured as
 Python-side control refresh; it is not browser frame or scroll performance.
 
+### ModDB 匯入與清理基準
+
+`tools/benchmark_moddb_import.py` 提供不接觸正式資料庫的可重現基準：合成
+語言檔寫在暫存目錄，SQLite ingest、清理報告、preview、apply 與 revert
+都使用暫存資料庫，程序結束後由暫存目錄一併移除。`--real-root` 僅逐一
+唯讀掃描實際的 JAR，不會建立 `TranslationDB` 或寫入資料庫。
+
+### Advancement component round-trip
+
+Advancement 的 `display.title`／`display.description` 使用共用 literal
+抽取器與專用 writer。效能成本是每個元件樹一次線性走訪；只走訪
+`text`、`fallback`、`with[]` 與 `extra[]`，不會為每個候選重新查詢資料庫或掃描
+整個 JSON。`translate`、樣式、事件與 selector／score／NBT 等結構不進入翻譯候選，
+writer 也會再次驗證路徑，因此安全檢查不依賴呼叫端自律。
+
+H3 的回歸測試涵蓋根字串、`text`、陣列、巢狀 literal、資料庫 identity／key、
+cache 命中寫回、JSON 重新解析，以及 translate key／樣式／事件保留。實際模組
+inventory 與 1,000／10,000／70,000／100,000／269,000 列的隔離基準仍分開記錄；
+不能把單一 Advancement JSON 的 parser 時間誤報成整體 UI 或外部模型 SLA。
+
+```bash
+uv run python -m tools.benchmark_moddb_import --sizes 1000 10000 70000
+uv run python -m tools.benchmark_moddb_import \
+  --real-root "<mods 資料夾>" --version 1.20.1 --sizes 1000
+```
+
+輸出保留每次取樣、median、p95、輸入列數、SQLite 版本、掃描錯誤與資料庫
+隔離聲明。合成基準用來比較程式碼前後的資料庫處理成本；實際 JAR 掃描
+則另外記錄 archive 數、條目數與總耗時，兩者不可合併成單一 UI SLA。
+
 ### Smart Review apply-record reconciliation
 
 `schema.py` installs `idx_history_smart_review_apply` on `history (note)` with

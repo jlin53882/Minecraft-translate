@@ -16,11 +16,12 @@ import json
 import re
 import sqlite3
 import zipfile
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from translation_tool.core.book_dirs import find_book_dir_index
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     has_translatable_text,
@@ -32,7 +33,17 @@ from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
 )
-from translation_tool.core.text_sniffer import advancement_texts
+from translation_tool.core.patchouli_semantics import (
+    PatchouliContext,
+    PatchouliSemantic,
+    context_from_archive_documents,
+    context_from_metadata,
+    iter_patchouli_semantics,
+)
+from translation_tool.core.text_sniffer import (
+    advancement_texts,
+    raw_english_fallback_allowed,
+)
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.cleanup import entry_cleanup_category
 from translation_tool.translation_db.identity import (
@@ -71,6 +82,8 @@ NESTED_DIRS = ("META-INF/jarjar/", "META-INF/jars/")
 # 書籍檔的「命名空間資源 ID」（如 patchouli:basics）是引用不是文字；直接匯入時只跳過這一種結構值
 _RESOURCE_ID = re.compile(r"^#?[a-z0-9_.-]+:[a-z0-9_./-]+$")
 MAX_NESTED_DEPTH = 3
+_PATCHOULI_LOCALES = frozenset({"en_us", "zh_tw", "zh_cn"})
+_MAX_PATCHOULI_CONTEXT_FILES = 256
 
 
 @dataclass(frozen=True)
@@ -85,7 +98,7 @@ class ScanOptions:
     dry_run: bool = False  # 只讀 jar 並統計，不寫入資料庫
     apply_rules: bool = True  # 與語系合併相同：對 jar 自帶譯文套用「替換規則」
     rules: Any = field(default=(), compare=False, repr=False)  # 載入後的替換規則
-    clean_english: bool = True  # 關閉＝放寬機器翻譯篩選，其餘字串逐字匯入
+    clean_english: bool = True  # 關閉＝放寬文字篩選，但仍排除結構值
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
 
@@ -297,6 +310,100 @@ def _read_json_member(
     return _load_json(raw)
 
 
+def _patchouli_member_info(
+    member: str, dir_names: Sequence[str]
+) -> tuple[str, str, str] | None:
+    """回傳 canonical book root、locale 與書本內相對路徑。
+
+    Patchouli 的實際資源可以把 ``book.json`` 放在 ``data/<namespace>``，把
+    entry/template 放在 ``assets/<namespace>``。``assets``／``data`` 是資源
+    類型，不是 book identity 的一部分；canonical root 只保留 namespace、
+    book directory 與 book name，讓兩邊共用 context。
+    """
+
+    parts = tuple(member.replace("\\", "/").split("/"))
+    index = find_book_dir_index(parts, dir_names)
+    if index is None or index == 0 or len(parts) <= index + 1:
+        return None
+    book_root = "/".join(parts[index - 1 : index + 2])
+    tail = list(parts[index + 2 :])
+    locale = "en_us"
+    if tail and tail[0].lower() in _PATCHOULI_LOCALES:
+        locale = tail.pop(0).lower()
+    if not tail:
+        return None
+    return book_root, locale, "/".join(tail)
+
+
+def _patchouli_contexts_for_archive(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    names: Sequence[str],
+    dir_names: Sequence[str],
+) -> dict[str, PatchouliContext]:
+    """一次讀取 archive 內的 book.json/template，供所有 entry 共用。
+
+    這裡只讀最多 256 個 template JSON，並沿用 archive 的 ZipReadBudget；不會
+    為每一筆候選重新打開或掃描同一本 book。讀不到 context 時不阻斷掃描，
+    分類器會把自訂欄位標成 unknown。
+    """
+
+    book_members: dict[str, str] = {}
+    template_members: dict[str, dict[str, str]] = {}
+    for name in names:
+        if name.endswith("/"):
+            continue
+        member_info = _patchouli_member_info(name, dir_names)
+        if member_info is None:
+            continue
+        root, _locale, relative = member_info
+        lower = relative.lower()
+        if lower == "book.json":
+            book_members.setdefault(root, name)
+            continue
+        if lower.startswith("templates/") and lower.endswith(".json"):
+            template_members.setdefault(root, {})[relative] = name
+
+    contexts: dict[str, PatchouliContext] = {}
+    roots = set(book_members) | set(template_members)
+    for root in roots:
+        book = None
+        book_member = book_members.get(root)
+        if book_member is not None:
+            book = _read_json_member(zf, budget, book_member)
+        templates: dict[str, dict] = {}
+        for relative, member in list(template_members.get(root, {}).items())[
+            :_MAX_PATCHOULI_CONTEXT_FILES
+        ]:
+            data = _read_json_member(zf, budget, member)
+            if data is not None:
+                templates[relative] = data
+        contexts[root] = context_from_archive_documents(
+            root,
+            book_json=book,
+            templates=templates,
+            resolution_error=(
+                "book.json_missing"
+                if book_member is None
+                else ("book.json_invalid" if book is None else "")
+            ),
+        )
+    return contexts
+
+
+def _patchouli_context_for_member(
+    member: str | None,
+    contexts: Mapping[str, PatchouliContext] | None,
+    dir_names: Sequence[str],
+) -> PatchouliContext | None:
+    if member is None or not contexts:
+        return None
+    info = _patchouli_member_info(member, dir_names)
+    if info is None:
+        return None
+    return contexts.get(info[0])
+
+
 def _load_legacy_lang(data: bytes) -> dict | None:
     """舊版 ``key=value`` 語言檔；與語系合併共用 ``parse_lang_text``（續行、註解、空白規則一致）。"""
     try:
@@ -435,32 +542,173 @@ def _advancement_items(
     ]
 
 
+def _patchouli_value_map(
+    document: dict,
+    member: str,
+    context: PatchouliContext,
+    *,
+    include_localized: bool = False,
+) -> tuple[dict[str, str], dict[str, PatchouliSemantic]]:
+    semantics = iter_patchouli_semantics(
+        document, PurePosixPath(member), context=context
+    )
+    values = {
+        item.path: item.value
+        for item in semantics
+        if item.writer_allowed
+        or (
+            include_localized
+            and item.kind == "display_nontranslatable"
+            and item.reason == "empty_or_already_localized"
+        )
+    }
+    return values, {item.path: item for item in semantics}
+
+
+def _english_value_map(
+    kind: str,
+    document: dict | None,
+    member: str | None,
+    options: ScanOptions,
+    context: PatchouliContext | None,
+) -> tuple[dict[str, str], dict[str, PatchouliSemantic]]:
+    if document is None or member is None:
+        return {}, {}
+    if kind == "patchouli":
+        if context is None:
+            return {}, {}
+        return _patchouli_value_map(document, member, context)
+    if options.clean_english:
+        return (
+            {
+                item["path"]: item["source_text"]
+                for item in extract_translatables(document, PurePosixPath(member))
+            },
+            {},
+        )
+    return extract_all_strings(document, is_lang=kind == "lang"), {}
+
+
+def _translated_value_map(
+    kind: str,
+    document: dict | None,
+    member: str | None,
+    context: PatchouliContext | None,
+) -> dict[str, str]:
+    if document is None or member is None:
+        return {}
+    if kind == "patchouli":
+        if context is None:
+            return {}
+        values, _ = _patchouli_value_map(
+            document, member, context, include_localized=True
+        )
+        return values
+    return extract_all_strings(document, is_lang=kind == "lang")
+
+
+def _build_scan_items(
+    *,
+    ident: FileIdentity,
+    paths: Sequence[str],
+    kind: str,
+    options: ScanOptions,
+    en_items: Mapping[str, str],
+    en_raw: Mapping[str, str],
+    semantic_by_path: Mapping[str, PatchouliSemantic],
+    tw_all: Mapping[str, str],
+    tw_obj: dict | None,
+    cn_obj: dict | None,
+) -> list[ScanItem]:
+    out: list[ScanItem] = []
+    for path in paths:
+        key = ident.item_key(path)
+        tw = cn = ""
+        source = None
+        if options.translated:
+            tw = tw_all.get(path, "")
+            source = options.translation_source
+        elif tw_obj is not None:
+            raw = get_by_path(tw_obj, path)
+            if isinstance(raw, str) and contains_cjk(raw):
+                tw = apply_replace_rules(raw, options.rules)
+        if cn_obj is not None:
+            raw_cn = get_by_path(cn_obj, path)
+            if isinstance(raw_cn, str) and contains_cjk(raw_cn):
+                cn = raw_cn
+        if (
+            entry_cleanup_category(
+                kind,
+                key,
+                en_items.get(path) or en_raw.get(path, ""),
+                tw or cn,
+                semantic=semantic_by_path.get(path),
+            )
+            is not None
+        ):
+            continue
+        source_text = en_items.get(path, "")
+        if not source_text:
+            raw_source = en_raw.get(path, "")
+            if kind == "patchouli":
+                semantic = semantic_by_path.get(path)
+                if semantic is not None and semantic.ai_allowed:
+                    source_text = raw_source
+                elif raw_source:
+                    continue
+            elif raw_english_fallback_allowed(kind, path, raw_source):
+                source_text = raw_source
+            elif raw_source:
+                continue
+        out.append(
+            ScanItem(
+                kind=kind,
+                mod_id=ident.mod_id,
+                key=key,
+                en_us=source_text,
+                zh_tw=tw,
+                zh_cn=cn,
+                source=source,
+            )
+        )
+    return out
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
     ident_key: tuple[str, str, str],
     members: dict[str, str],
     options: ScanOptions,
+    patchouli_contexts: Mapping[str, PatchouliContext] | None = None,
+    dir_names: Sequence[str] = (),
 ) -> list[ScanItem]:
     kind, mod_id, file_key = ident_key
     if kind == KIND_GUIDE:
         return _guide_items(zf, budget, ident_key, members, options)
     if kind == KIND_ADVANCEMENT:
         return _advancement_items(zf, budget, ident_key, members)
-    is_lang = kind == "lang"
     en_member = members.get("en_us")
     en = _read_json_member(zf, budget, en_member)
     if not options.translated and en is None:
         return []  # 掃描 jar 以原文為準；沒有 en_us 就沒有可匯入的條目
 
-    # 英文：預設與翻譯流程使用同一套抽取規則（之後查詢才會對得上）；關閉「清理」則全部字串逐字匯入
-    en_items: dict[str, str] = {}
-    if en is not None and en_member is not None:
-        if options.clean_english:
-            for it in extract_translatables(en, PurePosixPath(en_member)):
-                en_items[it["path"]] = it["source_text"]
-        else:
-            en_items = extract_all_strings(en, is_lang=is_lang)
+    patchouli_context = _patchouli_context_for_member(
+        en_member or members.get("zh_tw") or members.get("zh_cn"),
+        patchouli_contexts,
+        dir_names,
+    )
+    if kind == "patchouli" and patchouli_context is None:
+        patchouli_context = context_from_metadata(
+            en_member or members.get("zh_tw") or members.get("zh_cn") or file_key,
+            resolution_error="archive_context_missing",
+        )
+
+    # 英文與 Patchouli 語意判斷共用同一個 value map；關閉清理只放寬
+    # 文字形狀篩選，不能繞過結構性保護。
+    en_items, semantic_by_path = _english_value_map(
+        kind, en, en_member, options, patchouli_context
+    )
 
     tw_obj = cn_obj = None
     if options.read_jar_translations or options.translated:
@@ -476,60 +724,41 @@ def _items_for_group(
     tw_all: dict[str, str] = {}
     if options.translated and tw_obj is not None:
         # 已翻譯來源：zh_tw 的每個字串都匯入，連 en_us 沒有的鍵值也收（原文先留空）
-        tw_all = extract_all_strings(tw_obj, is_lang=is_lang)
+        tw_all = _translated_value_map(
+            kind, tw_obj, members.get("zh_tw"), patchouli_context
+        )
         paths += [p for p in tw_all if p not in en_items]
     if options.translated and tw_obj is None and cn_obj is not None:
         # 翻譯來源只有簡中：條目照樣建立（沒有 en_us 的鍵值也收），簡中交給匯入轉繁
-        cn_all = extract_all_strings(cn_obj, is_lang=is_lang)
+        cn_all = _translated_value_map(
+            kind, cn_obj, members.get("zh_cn"), patchouli_context
+        )
         paths += [p for p in cn_all if p not in en_items]
     if not paths:
         return []
 
     ident = FileIdentity(kind, mod_id, file_key, "en_us")
-    # 翻譯 ZIP 的譯文即使原文被抽取規則濾掉，仍要用原文判斷是不是垃圾條目
     en_raw = (
-        extract_all_strings(en, is_lang=is_lang)
-        if options.translated and en is not None
-        else {}
-    )
-    out: list[ScanItem] = []
-    for path in paths:
-        key = ident.item_key(path)
-        tw = cn = ""
-        source = None
-        if options.translated:
-            tw = tw_all.get(path, "")  # 不判讀、不套替換規則，逐字匯入
-            source = options.translation_source
-        elif tw_obj is not None:
-            raw = get_by_path(tw_obj, path)
-            # 與語系合併相同：只有含中文（CJK）的值才算譯文；繁中先套替換規則
-            if isinstance(raw, str) and contains_cjk(raw):
-                tw = apply_replace_rules(raw, options.rules)
-        if cn_obj is not None:
-            raw_cn = get_by_path(cn_obj, path)
-            if isinstance(raw_cn, str) and contains_cjk(raw_cn):
-                cn = raw_cn
-        # 不論來源或「清理英文」開關，清理規則判定不是文字的條目都不收（沒有原文時看鍵與譯文），
-        # 否則清理過的資料重新掃描、匯入翻譯 ZIP 後又會回來
-        if (
-            entry_cleanup_category(
-                kind, key, en_items.get(path) or en_raw.get(path, ""), tw or cn
-            )
-            is not None
-        ):
-            continue
-        out.append(
-            ScanItem(
-                kind=kind,
-                mod_id=mod_id,
-                key=key,
-                en_us=en_items.get(path, ""),
-                zh_tw=tw,
-                zh_cn=cn,
-                source=source,
-            )
+        {path: item.value for path, item in semantic_by_path.items()}
+        if options.translated and en is not None and kind == "patchouli"
+        else (
+            extract_all_strings(en, is_lang=kind == "lang")
+            if options.translated and en is not None
+            else {}
         )
-    return out
+    )
+    return _build_scan_items(
+        ident=ident,
+        paths=paths,
+        kind=kind,
+        options=options,
+        en_items=en_items,
+        en_raw=en_raw,
+        semantic_by_path=semantic_by_path,
+        tw_all=tw_all,
+        tw_obj=tw_obj,
+        cn_obj=cn_obj,
+    )
 
 
 def _reason(exc: BaseException) -> str:
@@ -559,10 +788,23 @@ def _scan_archive(
             zf, names, claimed, translated=options.translated
         ).items():
             groups.setdefault(key, members)
+    patchouli_contexts = (
+        _patchouli_contexts_for_archive(zf, budget, names, dir_names)
+        if any(kind == "patchouli" for kind, _mod, _file in groups)
+        else {}
+    )
     for ident_key, members in groups.items():
         try:
             result.items.extend(
-                _items_for_group(zf, budget, ident_key, members, options)
+                _items_for_group(
+                    zf,
+                    budget,
+                    ident_key,
+                    members,
+                    options,
+                    patchouli_contexts,
+                    dir_names,
+                )
             )
         except ZipSizeError as exc:
             result.error = str(exc)

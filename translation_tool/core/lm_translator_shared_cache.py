@@ -36,6 +36,7 @@ class CacheRule:
 
 STRICT_SRC_TYPES = {
     "lang",
+    "advancement",
     "kubejs",
     "ftbquests",
     "md",
@@ -112,6 +113,7 @@ def get_default_cache_rules() -> dict[str, CacheRule]:
     return {
         "lang": CacheRule("path"),
         "patchouli": CacheRule("path|source_text"),
+        "advancement": CacheRule("path|source_text"),
         "ftbquests": CacheRule("path|source_text"),
         "kubejs": CacheRule("path|source_text"),
         "md": CacheRule("path|source_text"),

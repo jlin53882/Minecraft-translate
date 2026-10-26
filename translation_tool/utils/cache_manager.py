@@ -29,7 +29,8 @@ from .config_manager import load_config, resolve_project_path
 
 log = logging.getLogger(__name__)
 
-CACHE_TYPES = ["lang", "patchouli", "ftbquests", "kubejs", "md"]
+# Advancement 也使用共用分片快取；列在註冊表中才能完成初始化、持久化與重載。
+CACHE_TYPES = ["lang", "patchouli", "advancement", "ftbquests", "kubejs", "md"]
 ROLLING_SHARD_SIZE = 2500
 ACTIVE_SHARD_FILE = ".active"
 # 初始化失敗後的重試冷卻秒數；避免持續故障時每次讀寫都重跑完整載入並洗版 log。
@@ -517,7 +518,7 @@ def add_to_cache_batch(
     """批次新增翻譯到快取（單次鎖獲取，減少鎖競爭）。
 
     Args:
-        cache_type: 快取類型 (lang, patchouli, ftbquests, kubejs, md)
+        cache_type: 快取類型 (lang, patchouli, advancement, ftbquests, kubejs, md)
         entries: List of (key, src, dst) tuples
         mods: Optional list of mod names (same length as entries)
         paths: Optional list of paths (same length as entries)

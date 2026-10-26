@@ -7,7 +7,7 @@ import zipfile
 
 import pytest
 
-from tools import performance_baseline, ui_smoke
+from tools import benchmark_moddb_import, performance_baseline, ui_smoke
 
 
 def test_parse_viewports_accepts_matrix_and_rejects_invalid_values():
@@ -79,3 +79,13 @@ def test_summarize_ui_report_groups_view_build_timings(tmp_path):
     assert summary["browser_ready"]["median_ms"] == 110.0
     assert summary["first_view_build"]["dashboard"]["median_ms"] == 3.0
     assert summary["warm_view_revisit"]["dashboard"]["median_ms"] == 2.0
+
+
+def test_moddb_import_benchmark_uses_disposable_database_and_roundtrips_cleanup():
+    report = benchmark_moddb_import.benchmark_synthetic(20)
+
+    assert report["scan_first"]["items"] == 20
+    assert report["cleanup_candidates"] == 1
+    assert report["apply"]["result"] == 1
+    assert report["revert"]["result"] == 1
+    assert report["database"] == "temporary; removed on exit"

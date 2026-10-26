@@ -49,6 +49,19 @@ class TestMapLangOutputPath:
         # 不在 lang 資料夾中，應該保持不變
         assert result == src
 
+    @pytest.mark.parametrize(
+        "src",
+        [
+            Path("data/demo/advancements/en_us/start.json"),
+            Path("data/demo/advancements/lang/start.json"),
+        ],
+    )
+    def test_advancement_subdirectories_are_not_locale_directories(self, src):
+        """Advancement 的 ID 子目錄不能被誤改成翻譯語系目錄。"""
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        assert map_lang_output_path(src) == src
+
 
 class TestSetByPath:
     """測試 set_by_path 函式"""

@@ -6,6 +6,12 @@ JSON 是候選狀態投影，兩者的協議見
 [`smart-review-status.md`](smart-review-status.md)。本文件說明 JSON 目錄的檔案格式、復原、
 維護工具與保留策略。
 
+SQLite `history` 一般每個條目只保留最新五筆；但 `projection_state=pending` 的
+`smart_review_apply` 不計入刪除候選，直到 JSON 回寫或讀取對帳成功。從 schema v8
+升級時，舊資料沒有投影狀態可供判斷，migration 會先把既有 `smart_review_apply`
+保守標為 `pending` 再執行保留清理，避免遺失 SQLite 已提交、JSON 尚未同步時所需的
+故障復原證據。下一次對帳成功後才會轉為 `projected`，並在後續交易中依一般政策清理。
+
 程式分工（`translation_tool/translation_db/`）：
 
 | 模組 | 負責 |

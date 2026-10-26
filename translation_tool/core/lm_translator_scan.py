@@ -19,8 +19,10 @@ from translation_tool.core.guide_translation import (
 )
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
+    find_advancement_json,
     find_lang_json,
     find_patchouli_json,
+    is_advancement_file,
     is_lang_file,
 )
 from translation_tool.utils.bounded_executor import bounded_as_completed
@@ -49,14 +51,18 @@ def is_plain_lang_json(data: dict) -> bool:
 def scan_translatable_files(root: Path) -> tuple[list[Path], list[Path], list[Path]]:
     """掃描 root 下可翻譯 JSON 檔案。
 
-    回傳：(patchouli_files, lang_files, files)
+    回傳：(content_files, lang_files, files)；content_files 包含 Patchouli、指南與 Advancement。
     若掃描過程中發生錯誤，只 log warning 並繼續，回傳空結果。
     """
     try:
-        patchouli_files = find_patchouli_json(root) + find_guide_files(root)
+        content_files = (
+            find_patchouli_json(root)
+            + find_guide_files(root)
+            + find_advancement_json(root)
+        )
         lang_files = find_lang_json(root)
-        files = patchouli_files + lang_files
-        return patchouli_files, lang_files, files
+        files = content_files + lang_files
+        return content_files, lang_files, files
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_warning(f"掃描 {root} 時失敗: {e!r}")
         return [], [], []
@@ -88,10 +94,14 @@ def extract_items_parallel(
             data = json.loads(f.read_bytes())
             raise_if_cancelled()
 
-            if is_lang_file(f):
+            # Advancement 必須優先於 Lang。路徑內即使出現名為 ``lang`` 的
+            # 子資料夾，也要保留專用抽取器與安全 writer 的完整閉環。
+            if is_advancement_file(f):
+                c_type = "advancement"
+            elif is_lang_file(f):
                 c_type = "lang"
 
-                # ⭐ 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
+                # 若要輸出 .lang，但內容不是純 key->str，就只能退回輸出 json
                 if export_lang and not is_plain_lang_json(data):
                     log_info(
                         f"⚠️ Lang 檔為複合格式（含 list/dict），無法輸出 .lang，將改用 .json：{f}"
