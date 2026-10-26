@@ -10,7 +10,6 @@ import os
 from collections.abc import Generator
 from typing import Any
 
-import pandas as pd
 from opencc import OpenCC
 
 
@@ -20,6 +19,9 @@ def compare_variants_tsv_generator(
     """
     (核心功能) 比較 TSV 檔案中 'zh_cn' 和 'zh_tw' 欄位的差異 (來自 compare_zh_variants.py)。
     """
+    # pandas 載入約 0.35 秒；只有真的比較 TSV 時才載入，避免開啟 QC 頁（匯入 app.services）就卡住畫面。
+    import pandas as pd
+
     yield {"progress": 0.0, "log": f"開始比較 TSV 檔案: {os.path.basename(file_path)}"}
 
     if not os.path.exists(file_path):
