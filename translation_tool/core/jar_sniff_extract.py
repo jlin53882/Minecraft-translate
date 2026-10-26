@@ -185,10 +185,12 @@ def _extract_sniffed_from_jar_detailed(
     langs: set[str],
     *,
     nested_output_name: str | None = None,
+    direct_asset_winners: dict[str, Path] | None = None,
 ) -> tuple[int, int, SniffTraversalStatus]:
     """供 pipeline 使用的補掃結果，保留寫入數與完整性狀態。"""
     written = skipped = 0
     jar_base = _normalize_jar_base_name(jar_path)
+    jar_identity = Path(jar_path).resolve()
 
     def write_member(
         zf: zipfile.ZipFile,
@@ -198,6 +200,20 @@ def _extract_sniffed_from_jar_detailed(
         budget: ZipReadBudget,
     ) -> None:
         nonlocal written, skipped
+        if (
+            direct_asset_winners is not None
+            and not archive_chain
+            and member.startswith("assets/")
+        ):
+            owner = direct_asset_winners.setdefault(member, jar_identity)
+            if owner != jar_identity:
+                log_warning(
+                    "[Sniff] direct assets 路徑衝突，保留先出現來源：%s（略過 %s）",
+                    member,
+                    jar_path,
+                )
+                skipped += 1
+                return
         try:
             target = _output_path(
                 output_root,
@@ -250,6 +266,7 @@ def extract_sniffed_book_files(
     """
     langs = _wanted_langs(lang_codes, skip_zh_cn)
     nested_output_names = build_nested_output_names(jar_paths, source_root)
+    direct_asset_winners: dict[str, Path] = {}
     total_written = 0
     for jar_path in jar_paths:
         raise_if_cancelled()
@@ -260,6 +277,7 @@ def extract_sniffed_book_files(
                 claimed,
                 langs,
                 nested_output_name=nested_output_names.get(Path(jar_path)),
+                direct_asset_winners=direct_asset_winners,
             )
         except (zipfile.BadZipFile, OSError, ArchiveBudgetError) as exc:
             log_error("[Sniff] 無法讀取 %s：%s", jar_path, exc)

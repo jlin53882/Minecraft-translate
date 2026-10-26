@@ -324,6 +324,45 @@ def test_nested_content_sniff_keeps_first_canonical_source(tmp_path: Path):
     assert "From A" in extracted.read_text(encoding="utf-8")
 
 
+def test_cross_outer_direct_sniff_collision_uses_input_order(tmp_path: Path):
+    """Book sniff 的 direct assets 也必須採用穩定的 first-wins 規則。"""
+    member = "assets/demo/books/chapters/foods.json"
+    first = _outer_jar(
+        tmp_path / "first.jar",
+        direct={
+            member: json.dumps(
+                {"title": "demo.book.title", "pages": [{"summary": "First"}]}
+            )
+        },
+    )
+    second = _outer_jar(
+        tmp_path / "second.jar",
+        direct={
+            member: json.dumps(
+                {"title": "demo.book.title", "pages": [{"summary": "Second"}]}
+            )
+        },
+    )
+
+    def extract_in_order(jars: list[Path], output: Path) -> str:
+        updates = list(
+            extract_sniffed_book_files(
+                [str(path) for path in jars],
+                str(output),
+                lambda _name: False,
+                lang_codes=["en_us"],
+                skip_zh_cn=False,
+            )
+        )
+        assert updates[-1]["log"].endswith("1 個手冊／指南檔")
+        return json.loads((output / member).read_text(encoding="utf-8"))["pages"][0][
+            "summary"
+        ]
+
+    assert extract_in_order([first, second], tmp_path / "first_output") == "First"
+    assert extract_in_order([second, first], tmp_path / "second_output") == "Second"
+
+
 def test_sniff_budget_exhaustion_is_reported_as_partial(monkeypatch, tmp_path: Path):
     from translation_tool.translation_db import sniff_groups
 
