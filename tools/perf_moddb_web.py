@@ -39,6 +39,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# 先顯示主要內容、之後才在背景補齊的 patch（呼叫者名稱）：不計入 ``server_ms``，
+# 但仍計入 ``settled_ms``，兩個數字都會輸出。
+DEFERRED_CALLERS = ("flush_filter_options", "_update_estimate_region")
+
 # ---------------------------------------------------------------------------
 # 伺服器端：包裝 Flet 的事件分派與訊息送出
 # ---------------------------------------------------------------------------
@@ -344,6 +348,8 @@ def summarize(samples: list[dict]) -> dict:
     result: dict = {"cold": samples[0]}
     for field in (
         "server_ms",
+        "wall_ms",
+        "settled_ms",
         "first_patch_ms",
         "list_patch_ms",
         "after_last_key_ms",
@@ -438,12 +444,24 @@ class Driver:
             return json.loads(resp.read())["text"]
 
     def measure(
-        self, name: str, action, *, label: str = "", quiet_ms: int | None = None
+        self,
+        name: str,
+        action,
+        *,
+        label: str = "",
+        quiet_ms: int | None = None,
+        after_last_key: bool = False,
+        debounce_ms: float = 0.0,
     ) -> dict:
         """執行 ``action()``（會觸發一次前端操作），回傳 server/e2e 延遲。
 
         ``quiet_ms`` 暫時覆寫「patch 靜默多久算完成」：背景工作很久才回報結果的操作
         （例如數十萬筆的預覽）要設得比工作時間長，否則會在結果到達前就判定結束。
+
+        ``after_last_key``：輸入類操作（一次打好幾個字）改從「最後一個字的事件」起算，
+        前面幾個字之間的間隔是瀏覽器送鍵盤事件的節奏，不是伺服器的回應時間。
+        ``debounce_ms``：程式刻意等待的停筆時間（例如編輯框 0.15 秒）從 ``server_ms`` 扣掉；
+        含等待的時間另存在 ``wall_ms``，兩個數字都會輸出。
         """
         quiet = quiet_ms if quiet_ms is not None else self.quiet_ms
         self.drain()
@@ -483,13 +501,15 @@ class Driver:
             recvs = [e for e in events if e["kind"] == "recv"]
         sends = [e for e in events if e["kind"] == "send"]
         server_ms = None
+        wall_ms = None
+        settled_ms = None
         first_ms = None
         list_ms = None
         after_key_ms = None
         if recvs and sends:
             first_recv = recvs[0]["t"]
             # 外殼每隔幾秒的 API Key 輪詢、寫入後 250ms 合併的外殼狀態刷新（整頁 patch）與這次操作的內容更新無關，不計入
-            patches = [
+            content = [
                 e
                 for e in events
                 if e["kind"] == "patch"
@@ -497,8 +517,25 @@ class Driver:
                     "_poll_keys" in c or "_coalesced_refresh" in c for c in e["callers"]
                 )
             ]
+            # 清單先顯示、之後才在背景補上的內容（篩選選項、預估筆數）另列為 settled_ms
+            patches = [
+                e
+                for e in content
+                if not any(m in c for c in e["callers"] for m in DEFERRED_CALLERS)
+            ]
+            origin_recv = first_recv
+            typed_events = [
+                e for e in recvs if e.get("name") in ("keyboard_event", "change")
+            ]
+            if after_last_key and typed_events:
+                origin_recv = typed_events[-1]["t"]
             last_send = max([e["t"] for e in patches] or [s["t"] for s in sends])
-            server_ms = round((last_send - first_recv) * 1000, 1)
+            server_ms = round(
+                max(0.0, (last_send - origin_recv) * 1000 - debounce_ms), 1
+            )
+            wall_ms = round((last_send - origin_recv) * 1000, 1)
+            last_any = max([e["t"] for e in content] or [last_send])
+            settled_ms = round((last_any - origin_recv) * 1000, 1)
             first_ms = round((min(s["t"] for s in sends) - first_recv) * 1000, 1)
             list_patches = [e for e in patches if e["control"] == "ListView"]
             if list_patches:
@@ -548,6 +585,8 @@ class Driver:
             "label": label,
             "timeline": timeline,
             "server_ms": server_ms,
+            "wall_ms": wall_ms,
+            "settled_ms": settled_ms,
             "first_patch_ms": first_ms,
             "list_patch_ms": list_ms,
             "after_last_key_ms": after_key_ms,

@@ -192,15 +192,25 @@ class Ctx:
         hot=None,
         label="",
         quiet_ms=None,
+        after_last_key=False,
+        debounce_ms=0.0,
     ):
-        """冷 1 次 + 熱 N 次。``before(i)`` 為不計時的準備；``action(i)`` 只做原始輸入。"""
+        """冷 1 次 + 熱 N 次。``before(i)`` 為不計時的準備；``action(i)`` 只做原始輸入。
+
+        ``after_last_key`` / ``debounce_ms`` 見 ``Driver.measure``（輸入類操作的起算點與刻意的停筆等待）。
+        """
         n = 1 + (self.hot if hot is None else hot)
         for i in range(n):
             if before:
                 before(i)
             self.settle()
             self.drv.measure(
-                name, lambda i=i: action(i), label=f"{label}#{i}", quiet_ms=quiet_ms
+                name,
+                lambda i=i: action(i),
+                label=f"{label}#{i}",
+                quiet_ms=quiet_ms,
+                after_last_key=after_last_key,
+                debounce_ms=debounce_ms,
             )
             if after:
                 after(i)
@@ -555,6 +565,32 @@ def print_table(output: dict) -> None:
             f"{s.get('hot_e2e_ms_median', 0):9.0f} {s.get('hot_e2e_ms_p95', 0):7.0f} | "
             f"{s.get('hot_loop_block_ms_median', 0):6.0f} {cold.get('patch_kb') or 0:7.1f}"
         )
+    late = {
+        n: s
+        for n, s in output["summary"].items()
+        if s.get("hot_settled_ms_median", 0) - s.get("hot_server_ms_median", 0) > 20
+    }
+    if late:
+        print("\n含背景補齊（篩選選項、預估筆數）或停筆等待的總時間（ms）：")
+        for name, s in late.items():
+            print(
+                f"  {name:32} 主要內容 med {s.get('hot_server_ms_median', 0):7.0f}"
+                f"  含背景補齊 med {s['hot_settled_ms_median']:7.0f}"
+                f"  p95 {s['hot_settled_ms_p95']:7.0f}"
+            )
+    waited = {
+        n: s
+        for n, s in output["summary"].items()
+        if s.get("hot_wall_ms_median", 0) - s.get("hot_server_ms_median", 0) > 20
+        and n not in late
+    }
+    if waited:
+        print("\n扣除刻意等待（停筆 debounce）前後（ms）：")
+        for name, s in waited.items():
+            print(
+                f"  {name:32} 扣除後 med {s.get('hot_server_ms_median', 0):7.0f}"
+                f"  含等待 med {s['hot_wall_ms_median']:7.0f}"
+            )
     listed = {
         n: s for n, s in output["summary"].items() if "hot_list_patch_ms_median" in s
     }

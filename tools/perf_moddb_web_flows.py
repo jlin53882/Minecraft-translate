@@ -8,6 +8,7 @@ from pathlib import Path
 
 from tools.perf_moddb_web_scenarios import Ctx, ScenarioError, _to_entries
 
+EDIT_DEBOUNCE_MS = 150.0  # app.views.moddb.entries_panel.EDIT_DEBOUNCE_SECONDS
 EDITOR_REGION = [598, 120, 1145, 5000]
 HISTORY_REGION = [1150, 120, 1440, 5000]
 ACTION_ROW = [500, 280, 1440, 360]
@@ -90,6 +91,18 @@ def _dialog_button(ctx: Ctx, text, mode="exact", timeout=8.0):
 def _click_dialog_button(ctx: Ctx, text, mode="exact") -> None:
     x, y, *_ = _dialog_button(ctx, text, mode)
     ctx.click_at(x, y)
+
+
+def _dialog_tab_button(ctx: Ctx, label: str, timeout=8.0):
+    """對話框內分頁按鈕：視窗內容分段載入，按鈕出現前先等；文字含圖示字元時改用「開頭」比對。"""
+    end = time.time() + timeout
+    while time.time() < end:
+        for mode in ("exact", "start"):
+            items = ctx.find_all(label, "button", mode)
+            if items:
+                return items[0]
+        time.sleep(0.1)
+    raise ScenarioError(f"對話框裡找不到分頁按鈕 {label!r}")
 
 
 def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
@@ -233,10 +246,15 @@ def s_edit_save(ctx: Ctx) -> None:
         ctx.pg.keyboard.press("Control+End")
         ctx.settle(300)
 
+    # 編輯框停筆 0.15 秒才重畫格式提示與影響預覽（EDIT_DEBOUNCE_SECONDS）：
+    # 按鍵本身的回應（儲存／審核按鈕）在 first_patch_ms，停筆後的工作量是 server_ms，
+    # 含等待的時間在 wall_ms。
     ctx.op(
         "edit_keystroke",
         lambda i: ctx.pg.keyboard.type("測", delay=0),
         before=key_before,
+        after_last_key=True,
+        debounce_ms=EDIT_DEBOUNCE_MS,
     )
     ctx.settle(800)
 
@@ -490,7 +508,7 @@ def s_smart_review(ctx: Ctx) -> None:
     for label in ("歷史批次", "審查", "執行"):
 
         def tab_action(i, label=label):
-            x, y, *_ = ctx.find(label, role="button")
+            x, y, *_ = _dialog_tab_button(ctx, label)
             ctx.click_at(x, y)
 
         ctx.op(f"smart_review_tab_{label}", tab_action, hot=2)
@@ -604,11 +622,13 @@ def s_translate_scope(ctx: Ctx) -> None:
             ctx.pg.keyboard.press("Backspace")
             ctx.settle(700)
 
+        # 一次打三個數字：從最後一個字的事件起算（字與字之間是瀏覽器送鍵盤事件的間隔）
         ctx.op(
             "translate_scope_limit",
             lambda i: ctx.pg.keyboard.type(str(100 * (i + 1)), delay=0),
             before=lim_before,
             hot=3,
+            after_last_key=True,
         )
         ctx.settle(700)
 
