@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
 import shutil
 import zipfile
@@ -16,6 +17,9 @@ from translation_tool.core.jar_processor import (
     build_lang_file_regex,
     extract_book_files_generator,
     extract_lang_files_generator,
+)
+from translation_tool.core.jar_processor_extract import (
+    build_collision_safe_output_names,
 )
 from translation_tool.core.jar_processor_preview import _scan_single_jar_for_preview
 from translation_tool.core.jar_sniff_extract import (
@@ -644,6 +648,19 @@ def test_cross_jar_data_paths_are_isolated_for_colliding_normalized_names(
     assert {
         json.loads(path.read_text(encoding="utf-8"))["value"] for path in extracted
     } == {"client", "server"}
+
+
+def test_collision_identity_uses_host_path_case_semantics(tmp_path: Path):
+    """Case-only source paths stay distinct only on case-sensitive filesystems."""
+    client = tmp_path / "CLIENT" / "example.jar"
+    server = tmp_path / "client" / "example.jar"
+
+    output_names = build_collision_safe_output_names([client, server], tmp_path)
+
+    if os.path.normcase("A") == os.path.normcase("a"):
+        assert output_names == {}
+    else:
+        assert output_names[client] != output_names[server]
 
 
 def test_direct_and_nested_data_paths_use_distinct_collision_safe_wrappers(

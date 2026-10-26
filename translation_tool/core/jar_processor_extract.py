@@ -154,7 +154,7 @@ def build_collision_safe_output_names(
             except (OSError, ValueError):
                 identity = path.resolve().as_posix()
             digest = hashlib.blake2s(
-                identity.casefold().encode("utf-8"), digest_size=4
+                os.path.normcase(identity).encode("utf-8"), digest_size=4
             ).hexdigest()
             output_names[path] = f"{path.stem}_{digest}_extracted"
     return output_names
