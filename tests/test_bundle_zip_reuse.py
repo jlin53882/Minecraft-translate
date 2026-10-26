@@ -164,13 +164,25 @@ def test_description_and_format_change_rebuild(src, zip_path):
 
 def test_extra_folders_change_rebuilds(src, zip_path, tmp_path):
     extra = tmp_path / "extra"
-    (extra / "sub").mkdir(parents=True)
-    (extra / "sub" / "a.txt").write_text("1")
+    lang_file = extra / "assets" / "extra_mod" / "lang" / "zh_tw.json"
+    lang_file.parent.mkdir(parents=True)
+    lang_file.write_text('{"key":"1"}')
     run(src, zip_path, extra_folders=[str(extra)])
     assert reused(run(src, zip_path, extra_folders=[str(extra)]))
-    (extra / "sub" / "a.txt").write_text("2")
+    lang_file.write_text('{"key":"2"}')
     assert not reused(run(src, zip_path, extra_folders=[str(extra)]))
     assert not reused(run(src, zip_path))  # 移除 extra 也要重建
+
+
+def test_non_resource_extra_changes_do_not_rebuild(src, zip_path, tmp_path):
+    extra = tmp_path / "extra"
+    ignored = extra / "sub" / "a.txt"
+    ignored.parent.mkdir(parents=True)
+    ignored.write_text("1")
+    run(src, zip_path, extra_folders=[str(extra)])
+    assert reused(run(src, zip_path, extra_folders=[str(extra)]))
+    ignored.write_text("2")
+    assert reused(run(src, zip_path, extra_folders=[str(extra)]))
 
 
 def test_pack_image_change_rebuilds(src, zip_path, tmp_path):
