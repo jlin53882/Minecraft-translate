@@ -76,11 +76,13 @@ class TestBundleOutputsGenerator:
         assert "不存在" in results[-1].get("log", "")
 
     def test_bundle_adds_all_files_from_root(self, tmp_path):
-        """測試直接打包 input_root_dir 下所有檔案"""
+        """只收集 assets/，不把散落根目錄檔案當成資源包內容。"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
-        (tmp_path / "lang").mkdir()
-        (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+        lang = tmp_path / "assets" / "demo" / "lang"
+        lang.mkdir(parents=True)
+        (lang / "zh_tw.json").write_text('{"test": "value"}')
+        (tmp_path / "translation_map.json").write_text("{}")
 
         output_zip = tmp_path / "output.zip"
         list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
@@ -88,14 +90,16 @@ class TestBundleOutputsGenerator:
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
-            assert any("lang/zh_tw.json" in n or n == "lang/zh_tw.json" for n in names)
+            assert "assets/demo/lang/zh_tw.json" in names
+            assert "translation_map.json" not in names
 
     def test_bundle_pack_mcmeta_from_folder_overrides_ui(self, tmp_path):
         """測試 input_root_dir 中有 pack.mcmeta 時優先使用，忽略 UI 設定"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
-        (tmp_path / "lang").mkdir()
-        (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+        lang = tmp_path / "assets" / "demo" / "lang"
+        lang.mkdir(parents=True)
+        (lang / "zh_tw.json").write_text('{"test": "value"}')
 
         (tmp_path / "pack.mcmeta").write_text(
             '{"pack":{"description":"FolderVersion","pack_format":15}}'
@@ -124,8 +128,9 @@ class TestBundleOutputsGenerator:
         """測試 input_root_dir 中有 pack.png 時優先使用，忽略 UI 設定"""
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
-        (tmp_path / "lang").mkdir()
-        (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+        lang = tmp_path / "assets" / "demo" / "lang"
+        lang.mkdir(parents=True)
+        (lang / "zh_tw.json").write_text('{"test": "value"}')
 
         (tmp_path / "pack.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
 
@@ -152,7 +157,7 @@ class TestBundleOutputsGenerator:
         assert output_zip.exists()
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
-            assert any("lang/zh_tw.json" in n or n == "lang/zh_tw.json" for n in names)
+            assert "assets/demo/lang/zh_tw.json" in names
 
 
 class TestWritePackMcmeta:
@@ -289,8 +294,9 @@ class TestBundleOutputsGeneratorNewParams:
         (zh_tw / "zh_tw.json").write_text('{"key": "中文"}')
 
         extra = tmp_path / "extra_folder"
-        extra.mkdir()
-        (extra / "extra.json").write_text('{"extra": true}')
+        extra_lang = extra / "assets" / "extra_mod" / "lang"
+        extra_lang.mkdir(parents=True)
+        (extra_lang / "zh_tw.json").write_text('{"extra": true}')
 
         class MockConfig:
             def get(self, key, default=None):
@@ -315,7 +321,7 @@ class TestBundleOutputsGeneratorNewParams:
         with zipfile.ZipFile(output_zip, "r") as zf:
             names = zf.namelist()
             assert any("zh_tw.json" in n for n in names)
-            assert "extra.json" in names
+            assert "assets/extra_mod/lang/zh_tw.json" in names
 
     def test_bundle_extra_folders_duplicate_handling(self, tmp_path, monkeypatch):
         """測試 extra_folders 與主資料夾有重複檔名時的處理"""
@@ -326,9 +332,9 @@ class TestBundleOutputsGeneratorNewParams:
         (zh_tw / "shared.txt").write_text("from main")
 
         extra = tmp_path / "extra_folder"
-        extra.mkdir()
-        (extra / "subdir").mkdir()
-        (extra / "subdir" / "shared.txt").write_text("from extra subdir")
+        extra_assets = extra / "assets" / "extra_mod"
+        extra_assets.mkdir(parents=True)
+        (extra_assets / "shared.txt").write_text("from extra subdir")
 
         class MockConfig:
             def get(self, key, default=None):
@@ -479,8 +485,8 @@ class TestOutputBundlerIntegration:
         zh_tw.mkdir(parents=True)
         (zh_tw / "zh_tw.json").write_text('{"mod1": "中文"}')
 
-        extra = tmp_path / "extras"
-        extra.mkdir()
+        extra = tmp_path / "extras" / "assets"
+        extra.mkdir(parents=True)
         (extra / "extra.json").write_text('{"extra": true}')
 
         pack_img = tmp_path / "pack.png"
@@ -506,12 +512,49 @@ class TestOutputBundlerIntegration:
 
             assert any("zh_tw.json" in n for n in names)
             assert "pack.png" in names
-            assert "extra.json" in names
+            assert "assets/extra.json" in names
             assert content["pack"]["description"] == "Full Test Pack"
             assert content["pack"]["pack_format"] == 34
             assert content["pack"]["supported_formats"]["min_inclusive"] == 34
 
         assert results[-1].get("progress") == 1.0
+
+    def test_resource_pack_contract_excludes_data_and_nested_pack_metadata(self, tmp_path):
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        lang = tmp_path / "root" / "assets" / "demo" / "lang"
+        lang.mkdir(parents=True)
+        (lang / "zh_tw.json").write_text('{"item.demo": "示範"}')
+        (tmp_path / "root" / "pack.mcmeta").write_text(
+            '{"pack": {"description": "root", "pack_format": 34}}'
+        )
+        (tmp_path / "assets" / "demo" / "pack.mcmeta").parent.mkdir(
+            parents=True, exist_ok=True
+        )
+        (tmp_path / "assets" / "demo" / "pack.mcmeta").write_text("{}")
+        (tmp_path / "pack_1.mcmeta").write_text("{}")
+        (tmp_path / "data" / "demo" / "advancements").mkdir(parents=True)
+        (tmp_path / "data" / "demo" / "advancements" / "start.json").write_text(
+            "{}"
+        )
+        (tmp_path / "other_output" / "assets").mkdir(parents=True)
+        (tmp_path / "other_output" / "assets" / "ignored.json").write_text("{}")
+
+        output_zip = tmp_path / "resource-pack.zip"
+        updates = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
+
+        with zipfile.ZipFile(output_zip) as zf:
+            names = zf.namelist()
+        assert names.count("pack.mcmeta") == 1
+        assert "assets/demo/lang/zh_tw.json" in names
+        assert all(
+            name in {"pack.mcmeta", "pack.png"} or name.startswith("assets/")
+            for name in names
+        )
+        assert not any(name.lower().endswith("pack_1.mcmeta") for name in names)
+        assert not any(name.lower().startswith("data/") for name in names)
+        assert not any(name.lower().startswith("other_output/") for name in names)
+        assert any("非 Resource Pack" in update.get("log", "") for update in updates)
 
 
 def test_bundle_result_matches_the_log_and_marks_reuse(tmp_path):
@@ -520,8 +563,9 @@ def test_bundle_result_matches_the_log_and_marks_reuse(tmp_path):
     from app.views.bundler_view import bundle_result_text
     from translation_tool.core.output_bundler import bundle_outputs_generator
 
-    (tmp_path / "lang").mkdir()
-    (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+    lang = tmp_path / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "zh_tw.json").write_text('{"test": "value"}')
     output_zip = tmp_path / "output.zip"
 
     updates = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))

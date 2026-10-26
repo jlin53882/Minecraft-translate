@@ -24,7 +24,7 @@ from translation_tool.utils.config_manager import (
     load_config,  # noqa: F401 - 測試以 monkeypatch 取代的 seam
 )
 from translation_tool.utils.file_replace import replace_with_retry
-from translation_tool.utils.log_unit import log_debug, log_error, log_info, log_warning
+from translation_tool.utils.log_unit import log_error, log_info, log_warning
 
 # ZIP 壓縮等級（zlib 1~9）。量測（150 個 mod、約 124 MB 的語言檔與貼圖）：
 # level 9 耗時 8.4 s、8.72 MB；level 6 耗時 3.7 s、8.70 MB——大小幾乎相同、快 2.3 倍。
@@ -58,6 +58,7 @@ _WINDOWS_RESERVED_NAMES = frozenset(
     | {f"COM{i}" for i in range(1, 10)}
     | {f"LPT{i}" for i in range(1, 10)}
 )
+_PACK_METADATA_VARIANT = re.compile(r"pack_\d+\.mcmeta$", re.IGNORECASE)
 
 
 def normalize_output_zip_name(value: object) -> str:
@@ -222,23 +223,137 @@ def _walk_files(
     return found
 
 
+def _is_invalid_pack_metadata_entry(archive_name: str) -> bool:
+    """判斷一般來源檔是否會製造非法的 pack metadata 路徑。"""
+    normalized = archive_name.replace("\\", "/").strip("/")
+    basename = normalized.rsplit("/", 1)[-1]
+    if basename.lower() == "pack.mcmeta":
+        return normalized.lower() != "pack.mcmeta"
+    return bool(_PACK_METADATA_VARIANT.fullmatch(basename))
+
+
+def _resource_pack_folders(
+    input_root_dir: str, extra_folders: list[str] | None
+) -> tuple[list[tuple[str, str, str]], list[str]]:
+    """選出可寫入 Resource Pack 的 assets 根目錄。
+
+    輸入可能來自 pipeline staging（直接有 ``assets/``），也可能帶有一層
+    legacy/extraction wrapper（例如 ``translated/assets/`` 或 ``root/assets/``）。
+    wrapper 只在這裡被剝掉；``data/``、``other_output/`` 與任意散落根目錄檔案
+    不會被當成資源包內容。
+    """
+    folders: list[tuple[str, str, str]] = []
+    ignored: list[str] = []
+    seen: set[str] = set()
+
+    def add(label: str, path: str) -> None:
+        if not os.path.isdir(path):
+            return
+        key = _norm(path)
+        if key in seen:
+            return
+        seen.add(key)
+        folders.append((label, path, "assets"))
+
+    def has_files(path: str) -> bool:
+        return any(_walk_files(path))
+
+    def inspect_container(container: str, label: str, *, include_children: bool) -> None:
+        if not os.path.isdir(container):
+            return
+        basename = os.path.basename(container.rstrip("/\\")).lower()
+        if basename == "assets":
+            add(label, container)
+            return
+        if basename == "root":
+            add(f"{label}/assets", os.path.join(container, "assets"))
+            return
+
+        add(f"{label}/assets", os.path.join(container, "assets"))
+        if not include_children:
+            return
+        try:
+            children = sorted(os.listdir(container))
+        except OSError:
+            return
+        for child in children:
+            child_path = os.path.join(container, child)
+            if not os.path.isdir(child_path):
+                continue
+            child_lower = child.lower()
+            if child_lower in {"assets", "root"}:
+                inspect_container(child_path, f"{label}/{child}", include_children=False)
+            elif child_lower in {"data", "other_output", "meta-inf", "nested"}:
+                if has_files(child_path):
+                    ignored.append(child_path)
+            elif os.path.isdir(os.path.join(child_path, "assets")):
+                add(f"{label}/{child}/assets", os.path.join(child_path, "assets"))
+            elif has_files(child_path):
+                ignored.append(child_path)
+
+    inspect_container(input_root_dir, "input", include_children=True)
+    for index, extra in enumerate(extra_folders or []):
+        label = f"extra[{index}]"
+        if os.path.isfile(extra):
+            if not _is_pack_file(extra) and not _is_artifact(extra, None):
+                ignored.append(extra)
+            continue
+        if os.path.isdir(extra):
+            inspect_container(extra, label, include_children=True)
+        elif os.path.exists(extra):
+            ignored.append(extra)
+        else:
+            ignored.append(extra)
+
+    return folders, ignored
+
+
 def _collect_sources(
     input_root_dir: str,
     extra_folders: list[str] | None,
     exclude: frozenset[str] | None = None,
 ) -> list[tuple[str, str, str]]:
-    """列出所有可能進入 ZIP 的來源檔：(來源標籤, 相對路徑, 絕對路徑)。"""
-    sources = [("in", rel, full) for rel, full in _walk_files(input_root_dir, exclude)]
-    for index, extra in enumerate(extra_folders or []):
-        label = f"x{index}"
-        if os.path.isfile(extra):
-            if not _is_artifact(extra, exclude):
-                sources.append((label, os.path.basename(extra), extra))
-        elif os.path.isdir(extra):
-            sources.extend(
-                (label, rel, full) for rel, full in _walk_files(extra, exclude)
-            )
+    """列出 Resource Pack 允許進入 ZIP 的來源檔。"""
+    folders, _ignored = _resource_pack_folders(input_root_dir, extra_folders)
+    sources: list[tuple[str, str, str]] = []
+    for label, folder, base in folders:
+        for rel, full in _walk_files(folder, exclude):
+            archive_name = os.path.join(base, rel).replace("\\", "/")
+            if _is_invalid_pack_metadata_entry(archive_name):
+                continue
+            sources.append((label, archive_name, full))
+
+    pack_mcmeta, pack_png = find_source_pack_files(input_root_dir, extra_folders)
+    for path in (pack_mcmeta, pack_png):
+        if path and not _is_artifact(path, exclude):
+            sources.append(("pack-metadata", os.path.basename(path).lower(), path))
     return sources
+
+
+def _validate_resource_pack_entries(names: list[str]) -> None:
+    """驗證最終 ZIP 不含 data 或抽取／打包 wrapper。"""
+    normalized = [name.replace("\\", "/").strip("/") for name in names]
+    if normalized.count("pack.mcmeta") != 1:
+        raise ValueError("Resource Pack ZIP 必須恰好包含一個根目錄 pack.mcmeta")
+
+    invalid: list[str] = []
+    for name in normalized:
+        lowered = name.lower()
+        top = lowered.split("/", 1)[0]
+        if (
+            _is_invalid_pack_metadata_entry(name)
+            or top in {"data", "other_output"}
+            or (
+                name not in {"pack.mcmeta", "pack.png"}
+                and top != "assets"
+            )
+        ):
+            invalid.append(name)
+    if invalid:
+        raise ValueError(
+            "Resource Pack ZIP 含不合法的非 assets 路徑: "
+            + ", ".join(sorted(set(invalid))[:5])
+        )
 
 
 def _compute_fingerprint(
@@ -399,6 +514,8 @@ def _iter_add_folder_to_zip(
             archive_name = os.path.join(base_path_in_zip, relative_path).replace(
                 "\\", "/"
             )
+            if _is_invalid_pack_metadata_entry(archive_name):
+                continue
             if "/" not in archive_name and _is_pack_file(archive_name):
                 continue  # 根目錄的 pack.mcmeta／pack.png 由專用步驟寫入
 
@@ -505,20 +622,13 @@ def bundle_outputs_generator(
         }
         return
 
-    subfolders = [
-        d
-        for d in os.listdir(input_root_dir)
-        if os.path.isdir(os.path.join(input_root_dir, d))
-    ]
-    log_info(f"輸入目錄: {input_root_dir}，找到子資料夾: {subfolders}")
-    if not subfolders:
-        yield {
-            "progress": 1.0,
-            "log": f"錯誤：輸入目錄中沒有子資料夾: {input_root_dir}",
-            "error": True,
-        }
-        log_error(f"輸入目錄中沒有子資料夾: {input_root_dir}")
-        return
+    resource_folders, ignored_sources = _resource_pack_folders(
+        input_root_dir, extra_folders
+    )
+    log_info(
+        f"輸入目錄: {input_root_dir}，找到 Resource Pack assets 來源: "
+        f"{[label for label, _path, _base in resource_folders]}"
+    )
 
     total_files_added = 0
     yield {"progress": 0.0, "log": f"開始建立 ZIP 檔案於: {output_zip_path}"}
@@ -548,6 +658,16 @@ def bundle_outputs_generator(
         # 重建期間不得留下舊的有效狀態：任何中途失敗／取消，下次都必須重建。
         _remove_quietly(_state_path(output_zip_path))
         tracker = _ProgressTracker(len(sources))
+
+        for ignored in ignored_sources:
+            if not os.path.exists(ignored):
+                message = f"額外項目不存在: '{ignored}'"
+            else:
+                message = (
+                    f"警告：略過非 Resource Pack 輸出來源 '{ignored}'（只收集 assets/）"
+                )
+            yield {"progress": tracker.progress, "log": message}
+            log_warning(message)
 
         # Pre-check for pack.png and pack.mcmeta in folders
         skipped_pack_mcmeta = None
@@ -640,15 +760,13 @@ def bundle_outputs_generator(
                 except Exception as ex:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
                     yield {"progress": 0.1, "log": f"複製 pack.png 失敗: {ex}"}
 
-            for folder_name in subfolders:
-                full_source_path = os.path.join(input_root_dir, folder_name)
+            for label, full_source_path, base in resource_folders:
                 yield {
                     "progress": tracker.progress,
-                    "log": f"正在掃描來源: '{folder_name}'...",
+                    "log": f"正在掃描 Resource Pack 來源: '{label}'...",
                 }
                 log_info(f"掃描資料夾: {full_source_path}")
 
-                base = "" if folder_name.lower() == "root" else folder_name
                 count, seen_files = yield from tracker.run(
                     _iter_add_folder_to_zip(
                         zf, full_source_path, base, seen_files, exclude
@@ -659,120 +777,18 @@ def bundle_outputs_generator(
                     total_files_added += count
                     yield {
                         "progress": tracker.progress,
-                        "log": f"成功從 '{folder_name}' 加入 {count} 個檔案。",
+                        "log": f"成功從 '{label}' 加入 {count} 個檔案。",
                     }
-                    log_info(f"從 '{folder_name}' 加入 {count} 個檔案")
+                    log_info(f"從 '{label}' 加入 {count} 個檔案")
                 else:
                     yield {
                         "progress": tracker.progress,
-                        "log": f"警告：'{folder_name}' 中沒有可打包的檔案。",
+                        "log": f"警告：'{label}' 中沒有可打包的檔案。",
                     }
-                    log_warning(f"'{folder_name}' 中沒有可打包的檔案")
-
-            for entry in os.listdir(input_root_dir):
-                full_path = os.path.join(input_root_dir, entry)
-                if (
-                    os.path.isfile(full_path)
-                    and not _is_pack_file(full_path)
-                    and not _is_artifact(full_path, exclude)
-                ):
-                    archive_name = entry
-                    if archive_name in seen_files:
-                        base, ext = os.path.splitext(archive_name)
-                        counter = 1
-                        while f"{base}_{counter}{ext}" in seen_files:
-                            counter += 1
-                        archive_name = f"{base}_{counter}{ext}"
-                    seen_files[archive_name] = 1
-                    zf.write(full_path, archive_name)
-                    total_files_added += 1
-                    tracker.advance()
-                    yield {
-                        "progress": tracker.progress,
-                        "log": f"額外檔案: +1 ({entry})",
-                    }
-                    log_debug(f"加入根目錄檔案: {entry}")
-
-            if extra_folders:
-                for extra_path in extra_folders:
-                    yield {
-                        "progress": tracker.progress,
-                        "log": f"正在處理額外項目: '{extra_path}'...",
-                    }
-                    log_debug(f"處理額外項目: {extra_path}")
-
-                    if not os.path.exists(extra_path):
-                        yield {
-                            "progress": tracker.progress,
-                            "log": f"額外項目不存在: '{extra_path}'",
-                        }
-                        log_warning(f"額外項目不存在: {extra_path}")
-                        continue
-
-                    if os.path.isfile(extra_path):
-                        if _is_pack_file(extra_path) or _is_artifact(
-                            extra_path, exclude
-                        ):
-                            continue
-                        file_name = os.path.basename(extra_path)
-                        archive_name = file_name
-                        if archive_name in seen_files:
-                            base, ext = os.path.splitext(archive_name)
-                            counter = 1
-                            while f"{base}_{counter}{ext}" in seen_files:
-                                counter += 1
-                            archive_name = f"{base}_{counter}{ext}"
-                        seen_files[archive_name] = 1
-                        zf.write(extra_path, archive_name)
-                        total_files_added += 1
-                        tracker.advance()
-                        yield {
-                            "progress": tracker.progress,
-                            "log": f"額外檔案: +1 ({file_name})",
-                        }
-                        log_info(f"加入額外檔案: {file_name}")
-                    elif os.path.isdir(extra_path):
-                        parent_name = os.path.basename(extra_path.rstrip("/\\"))
-                        for entry in os.listdir(extra_path):
-                            src = os.path.join(extra_path, entry)
-                            if os.path.isdir(src):
-                                count, seen_files = yield from tracker.run(
-                                    _iter_add_folder_to_zip(
-                                        zf, src, "", seen_files, exclude
-                                    )
-                                )
-                                total_files_added += count
-                                yield {
-                                    "progress": tracker.progress,
-                                    "log": f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案",
-                                }
-                                log_debug(
-                                    f"額外資料夾 '{parent_name}/{entry}': +{count} 個檔案"
-                                )
-                            elif (
-                                os.path.isfile(src)
-                                and not _is_pack_file(src)
-                                and not _is_artifact(src, exclude)
-                            ):
-                                archive_name = entry
-                                if archive_name in seen_files:
-                                    base, ext = os.path.splitext(archive_name)
-                                    counter = 1
-                                    while f"{base}_{counter}{ext}" in seen_files:
-                                        counter += 1
-                                    archive_name = f"{base}_{counter}{ext}"
-                                seen_files[archive_name] = 1
-                                zf.write(src, archive_name)
-                                total_files_added += 1
-                                tracker.advance()
-                                yield {
-                                    "progress": tracker.progress,
-                                    "log": f"額外檔案: +1 ({entry})",
-                                }
-                                log_debug(f"額外資料夾內檔案: {entry}")
+                    log_warning(f"'{label}' 中沒有可打包的檔案")
 
         with zipfile.ZipFile(tmp_zip_path) as check:
-            check.namelist()  # 中央目錄必須可讀，才允許替換正式 ZIP
+            _validate_resource_pack_entries(check.namelist())
         replace_with_retry(tmp_zip_path, output_zip_path)
         committed = True
         state_warning = None

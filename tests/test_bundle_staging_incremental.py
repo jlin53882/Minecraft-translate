@@ -156,6 +156,25 @@ class TestEquivalenceWithFullRebuild:
         assert (stats["copied"], stats["merged"]) == (0, 0)
         assert _snapshot(out) == {}
 
+    def test_excluded_outputs_are_reported_without_entering_resource_pack(self, tmp_path):
+        source = tmp_path / "source"
+        _lang(source, "demo", {"item.demo": "Demo"})
+        _put(
+            source / "data" / "demo" / "advancements" / "start.json",
+            '{"display": {"title": {"text": "Literal title"}}}',
+        )
+        _put(source / "other_output" / "assets" / "demo" / "ignored.json", "{}")
+
+        staging = tmp_path / "staging"
+        stats = build_bundle_staging([str(source)], str(staging))
+
+        assert stats["excluded"] == 2
+        assert any("Advancement" in warning for warning in stats["warnings"])
+        assert any("other_output" in warning for warning in stats["warnings"])
+        assert (staging / "assets/demo/lang/zh_tw.json").is_file()
+        assert not (staging / "data").exists()
+        assert not (staging / "other_output").exists()
+
 
 class TestIncrementalBehaviour:
     def test_second_run_with_same_sources_writes_nothing(

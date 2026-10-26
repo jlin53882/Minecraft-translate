@@ -10,8 +10,8 @@ from translation_tool.core.output_bundler import (
 
 def _make_source(tmp_path):
     src = tmp_path / "src"
-    (src / "mod_a" / "assets").mkdir(parents=True)
-    (src / "mod_a" / "assets" / "lang.json").write_text('{"a": "b"}', encoding="utf-8")
+    (src / "assets").mkdir(parents=True)
+    (src / "assets" / "lang.json").write_text('{"a": "b"}', encoding="utf-8")
     (src / "notes.txt").write_text("root file", encoding="utf-8")
     return src
 
@@ -44,7 +44,8 @@ def test_zip_inside_source_root_is_not_packed_into_itself(tmp_path):
     _run(src, zip_path, force_rebuild=True)
     names = _names(zip_path)
     _no_artifacts(names, zip_path.name)
-    assert "notes.txt" in names
+    assert "assets/lang.json" in names
+    assert "notes.txt" not in names
 
 
 def test_unchanged_source_reuses_zip_even_when_zip_lives_inside(tmp_path):
@@ -69,6 +70,7 @@ def test_stale_tmp_zip_from_failed_run_is_ignored(tmp_path):
 
 def test_zip_inside_a_source_subfolder_is_excluded(tmp_path):
     src = _make_source(tmp_path)
+    (src / "mod_a").mkdir()
     zip_path = src / "mod_a" / "out.zip"
     _run(src, zip_path)
     _run(src, zip_path, force_rebuild=True)
@@ -78,21 +80,22 @@ def test_zip_inside_a_source_subfolder_is_excluded(tmp_path):
 def test_zip_inside_an_extra_folder_is_excluded(tmp_path):
     src = _make_source(tmp_path)
     extra = tmp_path / "extra"
-    (extra / "pack_x").mkdir(parents=True)
-    (extra / "pack_x" / "f.txt").write_text("x", encoding="utf-8")
+    (extra / "assets").mkdir(parents=True)
+    (extra / "assets" / "f.txt").write_text("x", encoding="utf-8")
     zip_path = extra / "out.zip"
     _run(src, zip_path, extra_folders=[str(extra)])
     _run(src, zip_path, extra_folders=[str(extra)], force_rebuild=True)
     names = _names(zip_path)
     assert "out.zip" not in names
-    assert "f.txt" in names
+    assert "assets/f.txt" in names
 
 
 def test_stray_tmp_and_state_files_of_other_zips_are_ignored(tmp_path):
     """別的輸出檔名留下的 *.zip.tmp／狀態檔（Windows 實測 A5）也不得被打包。"""
     src = _make_source(tmp_path)
     (src / "other.zip.tmp").write_bytes(b"leftover")
-    (src / "mod_a" / "old.zip.tmp").write_bytes(b"leftover in subfolder")
+    (src / "assets" / "mod_a").mkdir()
+    (src / "assets" / "mod_a" / "old.zip.tmp").write_bytes(b"leftover in subfolder")
     (src / "other.zip.bundle-state.json").write_text("{}", encoding="utf-8")
     (src / "other.zip.bundle-state.json.tmp").write_text("{}", encoding="utf-8")
     zip_path = tmp_path / "out" / "result.zip"
@@ -104,4 +107,4 @@ def test_stray_tmp_and_state_files_of_other_zips_are_ignored(tmp_path):
     assert not any(
         n.endswith((".zip.tmp", ".bundle-state.json", ".json.tmp")) for n in names
     )
-    assert "notes.txt" in names and "mod_a/assets/lang.json" in names
+    assert "notes.txt" not in names and "assets/lang.json" in names

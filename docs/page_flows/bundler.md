@@ -4,13 +4,20 @@
 
 ## 職責
 
-資源包打包頁把翻譯專案根目錄下各子資料夾的產出，連同額外資料夾與 `pack.mcmeta`、`pack.png`，打包成一個可直接放入遊戲的 ZIP。頁面負責：
+資源包打包頁把合法的 Resource Pack 產出打包成一個可直接放入遊戲的 ZIP。最終 ZIP 遵守 Minecraft Java Edition 的根目錄契約：根目錄有且只有一個 `pack.mcmeta`，可選根目錄 `pack.png`，其餘翻譯資源從 `assets/` 開始；`data/`、`other_output/` 與抽取／包裝 wrapper 不會被盲目放入 ZIP。格式細節以 [Minecraft Wiki 的 Resource Pack 說明](https://minecraft.wiki/w/Resource_Pack) 為外部參考，版本欄位仍由專案既有 helper 產生。頁面負責：
 
 - 選擇翻譯專案根目錄、輸出 ZIP 路徑（留空時自動帶入 `根目錄\<output_zip_name>`）、封面圖。
 - 在單一輸入框填 Minecraft 版本（如 `1.20.4`）或 `pack_format` 整數，換算出寫入 `pack.mcmeta` 的 `pack_format`（18～64 另寫 `supported_formats`；65 以上改寫 `min_format`／`max_format`）；選填「最大使用版本」取代預設上限。
 - 新增、移除額外資料夾或檔案。
 - 即時預覽描述（含 § 顏色碼）、封面圖、版本格式與實際會寫進 ZIP 的 `pack.mcmeta` 內容，描述與封面圖同樣以來源資料夾的 `pack.mcmeta`／`pack.png` 優先；來源資料夾有 `pack.mcmeta` 時預覽顯示該檔（含修正）並提示會覆蓋 UI 設定。
 - 顯示打包日誌與進度。
+
+### Resource Pack 輸出契約
+
+- 標準語言檔輸出為 `assets/<namespace>/lang/zh_tw.json`；`data/<namespace>/lang` 只可作為掃描來源，不能直接成為資源包 ZIP 內容。
+- 標準 Patchouli 的 `assets/<namespace>/patchouli_books/<book>/en_us/...` 會輸出到 `zh_tw/`；沒有明確語系資料夾的自訂書本（例如 Herbs and Harvest 的 `assets/herbsandharvest/books/...`）保留原相對路徑。
+- Advancement 的 `data/<namespace>/advancement(s)/...` 不會進入 Resource Pack。使用 translate key 的文字應透過 `assets/<namespace>/lang/zh_tw.json` 生效；literal 文字會列為「目前資源包無法直接套用」，需要另建 Data Pack 才能套用。
+- `extra_folders` 只接受其中的 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。
 
 打包本身由 `translation_tool/core/output_bundler.py` 的 `bundle_outputs_generator` 完成。`BundlerView` 直接呼叫它（經由 `app/services_impl/pipelines/bundle_service.py` 的 re-export），沒有使用 `run_bundling_service`，因此這一頁不經過 `GLOBAL_LOG_LIMITER` 節流。
 
@@ -98,15 +105,15 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["輸入目錄存在且含子資料夾？"] -- 否 --> E1["yield error 並結束"]
-    A -- 是 --> B["_collect_sources：收集子資料夾與額外資料夾，排除輸出 ZIP 相關檔案"]
+    A["輸入目錄存在？"] -- 否 --> E1["yield error 並結束"]
+    A -- 是 --> B["_collect_sources：只收集 assets/，剝除一層合法 wrapper，排除 data/ 與輸出 ZIP 相關檔案"]
     B --> C["_compute_fingerprint：來源與 pack 參數的指紋"]
     C --> D{"指紋相同且 ZIP 未被改動（_load_reusable_state）且未強制重建？"}
     D -- 是 --> E2["yield「沿用上次的 ZIP」並結束"]
     D -- 否 --> F["移除舊狀態檔，寫入 output_zip.tmp"]
-    F --> G["寫入 pack.mcmeta（來源已有則跳過 UI 設定）與 pack.png"]
-    G --> H["逐資料夾 _iter_add_folder_to_zip，由 _ProgressTracker 計算進度"]
-    H --> I["驗證 tmp ZIP 中央目錄可讀，os.replace 覆蓋正式 ZIP"]
+    F --> G["寫入根目錄 pack.mcmeta（來源已有則跳過 UI 設定）與 pack.png"]
+    G --> H["逐一寫入 assets/，並記錄被排除的 data/／other_output/ 警告"]
+    H --> I["驗證根目錄 metadata 與只含 assets/，再 os.replace 覆蓋正式 ZIP"]
     I --> J["_commit_state 記錄新指紋，yield 完成訊息"]
 ```
 
@@ -121,18 +128,20 @@ flowchart TD
 ## 狀態與資料
 
 - **版本對照表**：`translation_tool/core/pack_format_table.json`，由 `pack_format_lookup.load_table()` 讀入並快取。檔案不存在或損毀時使用空表並記錄 `log_warning`，此時輸入版本會提示改填 `pack_format` 整數。
-- **`extra_folders`**：使用者新增的額外資料夾或檔案路徑清單，只存在記憶體中，打包時以副本傳入。
+- **`extra_folders`**：使用者新增的額外資料夾或檔案路徑清單，只存在記憶體中；打包時只收集其中的 `assets/` 與根目錄 metadata，其他輸出會列 warning，不會整包塞入 ZIP。
 - **版本輸入**：`version_field.value` 為版本或 `pack_format`；`max_format_field.value` 為選填的最大使用版本。
 - **輸出檔名**：`_config_output_zip_name` 來自設定 `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`（`OUTPUT_ZIP_NAME_PATH` 為訂閱的設定路徑）。
 - **打包狀態檔**：`_state_path(output_zip_path)` 記錄上次成功打包的指紋，供下次判斷是否可沿用既有 ZIP。
 - **暫存檔**：打包期間寫入 `<輸出路徑>.tmp`，成功後以 `os.replace` 替換正式檔案，未完成則在 `finally` 中刪除。
-- **pack.mcmeta**：內容來自 UI 的描述、`pack_format` 與選填的最大使用版本（整數；18～64 另有 `supported_formats`，最大使用版本 ≥ 65 時再加 `min_format`／`max_format`；`pack_format` 65 以上改用 `min_format`／`max_format`）；若來源（根目錄第一層、名為 `root` 的子資料夾、直接加入的額外檔案、額外資料夾第一層及其子資料夾第一層，即會落在 ZIP 根目錄的檔案）中已有 `pack.mcmeta`，會跳過 UI 設定並在日誌中說明，format 欄位寫成字串或無法使用時會修正（數字字串改成整數、無效欄位丟掉並用 UI 設定補上；上下限比較時整數的 `max_format` 涵蓋該主版本所有次版本（`min_format` 整數視為次版本 0），`max_format` 小於 `min_format` 或只剩其中一個時移除；新舊兩組欄位的範圍不一致時以 `min_format`／`max_format` 為準校正舊欄位；`overlays.entries` 的每個項目都必須有 `min_format`／`max_format`（缺少時由 `formats` 推得），只要有任何項目涵蓋 65 以下的版本，所有項目都必須有 `formats`，沒有項目涵蓋時則移除 `formats`；`overlays`／`entries` 結構不對、項目缺少 `directory`，或項目的版本欄位無法使用、範圍反向、完全沒有版本欄位時不猜測，整份來源改用 UI 設定產生並在日誌說明；最後依實際支援範圍讓新舊欄位搭配（只支援 65 以上則移除 `pack_format`／`supported_formats`，只支援 64 以下則保留來源已有的 `min_format`／`max_format`（不主動補上），跨越 64／65 則缺少的一組依範圍補上）；`supported_formats` 不含 `pack_format` 時依 `pack_format` 重設；其他自訂欄位保留）並在日誌列出；來源檔讀不出來或不是有效 JSON 時改用 UI 設定產生。`pack.png` 的處理方式相同。落在 ZIP 根目錄的 `pack.mcmeta`／`pack.png` 一律只由專用步驟寫入，一般檔案收集不會重複加入（不會出現 `pack_1.mcmeta`）。
+- **pack.mcmeta／pack.png**：內容與版本欄位仍完全使用 `pack_mcmeta.py`、`pack_format_lookup.py` 與 `pack_format_table.json`；來源 metadata 只會由專用步驟寫到 ZIP 根目錄，不能產生 `nested/pack.mcmeta`、`root/pack.mcmeta` 或 `pack_1.mcmeta`。來源檔讀不出來或不是有效 JSON 時改用既有 helper 依 UI 設定產生，不能在打包功能內另建一套 pack format 規則。
+- **最終 ZIP 驗證**：替換正式 ZIP 前會確認 `pack.mcmeta` 恰好一次，且每個非 metadata 成員都位於 `assets/`；驗證失敗時保留舊 ZIP、刪除狀態檔並回報錯誤。
 
 ## 錯誤處理
 
 - **輸入驗證**：根目錄為空時提示並不啟動；輸出路徑為空時自動帶入。
 - **重複執行**：`_bundling_running` 為真時，再次點擊只會提示「打包正在執行中」。
-- **輸入目錄錯誤**：不存在或沒有子資料夾時，核心 generator 以 `error` 更新回報，worker 將進度條改為錯誤色，狀態列顯示「打包失敗，請查看日誌」。
+- **輸入目錄錯誤**：不存在時核心 generator 以 `error` 更新回報；存在但沒有 `assets/` 時仍可產生只有 metadata 的合法 ZIP，並在有非資源包來源時列出略過警告。
+- **非 Resource Pack 輸出**：`data/`、`other_output/` 或散落根目錄檔案不進 staging／ZIP；流水線回報被排除的數量與原因，literal Advancement 會明確指出目前資源包無法直接套用。
 - **輸出路徑不是檔案**：輸出 ZIP 路徑空白、以 `/` 或 `\\` 結尾、或指到既有資料夾時，核心 generator 一開始就回報「錯誤：輸出 ZIP 路徑是資料夾而不是檔案…（請指定檔名）」並結束，不建立任何檔案。設定 `output_bundler.output_zip_name` 為空白、含路徑分隔字元時改用預設檔名，缺少 `.zip` 時補上。
 - **最終替換被暫時拒絕**：暫存檔換成正式 ZIP 時遇到 `PermissionError`（OneDrive 或防毒掃描剛寫完的檔案）會短暫退避重試，仍失敗才視為打包失敗。
 - **打包中途失敗**：核心 generator 保留既有的有效 ZIP（尚未替換），移除狀態檔使下次必定重建，並刪除暫存檔。worker 另外捕捉未預期例外，寫入「[錯誤]」行。

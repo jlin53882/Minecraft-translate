@@ -136,6 +136,66 @@ def _collect_bundle_sources(
     return plan, canon
 
 
+def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
+    """盤點不屬於 Resource Pack staging 的輸出，並產生可顯示的原因。"""
+    grouped: dict[tuple[str, str], int] = {}
+    excluded = 0
+    for source in sources:
+        if not os.path.isdir(source):
+            continue
+        for root, dirs, files in os.walk(source):
+            rel_root = os.path.relpath(root, source)
+            if rel_root == ".":
+                top = "<root>"
+            else:
+                top = rel_root.split(os.sep, 1)[0]
+            top_lower = top.lower()
+            if top_lower == _STAGING_CONTENT_ROOT:
+                dirs[:] = []
+                continue
+            for name in files:
+                excluded += 1
+                rel = os.path.join(rel_root, name)
+                if top_lower == "data":
+                    parts = rel.split(os.sep)
+                    category = (
+                        "data/advancement"
+                        if any(
+                            part.lower() in {"advancement", "advancements"}
+                            for part in parts
+                        )
+                        else "data"
+                    )
+                elif top_lower == "other_output":
+                    category = "other_output"
+                else:
+                    category = f"非 assets/{top}"
+                grouped[(source, category)] = grouped.get((source, category), 0) + 1
+
+    warnings: list[str] = []
+    for (source, category), count in grouped.items():
+        if category == "data/advancement":
+            warnings.append(
+                f"略過 {count} 個 {source}/data/**/advancement(s) 檔案；"
+                "Advancement 不屬於 Resource Pack，literal 文字無法透過目前資源包直接套用，"
+                "如需生效必須另建 Data Pack。"
+            )
+        elif category == "data":
+            warnings.append(
+                f"略過 {count} 個 {source}/data/ 檔案；Resource Pack staging 不收 data/，"
+                "需要 Data Pack 輸出契約才能套用。"
+            )
+        elif category == "other_output":
+            warnings.append(
+                f"略過 {count} 個 {source}/other_output/ 檔案；不會將 other_output/ 整包塞入 ZIP。"
+            )
+        else:
+            warnings.append(
+                f"略過 {count} 個 {source}/{category} 輸出；Resource Pack staging 只收 assets/。"
+            )
+    return excluded, warnings
+
+
 def _normalize_staging_case(staging_dir: str, canon: dict[str, str]) -> None:
     """把 staging 內「只有大小寫不同」的既有資料夾與檔案改成標準拼法。
 
@@ -191,14 +251,17 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
         staging_dir: 暫存目錄；不存在會建立，內容會被更新成與來源一致。
 
     Returns:
-        {"copied": int, "merged": int, "written": int, "unchanged": int, "removed": int}
+        {"copied": int, "merged": int, "written": int, "unchanged": int, "removed": int,
+        "excluded": int, "warnings": list[str]}
         ``copied`` / ``merged`` 是處理的來源檔案數（與是否需要寫入無關，呼叫端用來判斷
         是否有可打包內容）；``written`` / ``unchanged`` 是實際寫入與沿用的輸出檔數；
-        ``removed`` 是刪除的殘留檔案數。
+        ``removed`` 是刪除的殘留檔案數；``excluded`` / ``warnings`` 說明未進入 Resource
+        Pack staging 的其他輸出，特別是不能由資源包直接套用的 Advancement。
     """
     os.makedirs(staging_dir, exist_ok=True)
 
     plan, canon = _collect_bundle_sources(sources)
+    excluded, warnings = _collect_excluded_outputs(sources)
     _normalize_staging_case(staging_dir, canon)
 
     copied = merged = written = unchanged = 0
@@ -252,6 +315,8 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
         "written": written,
         "unchanged": unchanged,
         "removed": removed,
+        "excluded": excluded,
+        "warnings": warnings,
     }
 
 

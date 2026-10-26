@@ -299,11 +299,14 @@ class PipelineActions:
                 cfg.bundle_sources, cfg.bundle_staging_dir
             )
             message = (
-                f"[系統] 打包暫存完成：複製 {stats['copied']} 個、合併 {stats['merged']} 個檔案"
+                f"[系統] 打包暫存完成：複製 {stats.get('copied', 0)} 個、"
+                f"合併 {stats.get('merged', 0)} 個檔案"
                 + _staging_reuse_note(stats)
             )
             session.add_log(message)
-            if not stats["copied"] and not stats["merged"]:
+            for warning in stats.get("warnings", []):
+                session.add_log(f"⚠️ {warning}", level="warning")
+            if not stats.get("copied", 0) and not stats.get("merged", 0):
                 message = "❌ 沒有可打包的翻譯檔案"
                 session.add_log(message, level="error")
                 session.set_error()
