@@ -803,6 +803,7 @@ def _scan_archive(
             result.nested_jars += 1
         names = current.namelist()
         groups = _group_members(names, options, dir_names)
+        patchouli_contexts: dict[str, PatchouliContext] = {}
         if options.include_patchouli:
             claimed = {n for members in groups.values() for n in members.values()}
             sniff_diagnostics: list[str] = []
@@ -818,10 +819,12 @@ def _scan_archive(
                 result.invalid_books.append(f"{current_label}:{member}")
                 result.notes.append(f"略過無法解析的書籍 JSON：{current_label}:{member}")
             patchouli_contexts = (
-            _patchouli_contexts_for_archive(current, current_budget, names, dir_names)
-            if any(kind == "patchouli" for kind, _mod, _file in groups)
-            else {}
-        )
+                _patchouli_contexts_for_archive(
+                    current, current_budget, names, dir_names
+                )
+                if any(kind == "patchouli" for kind, _mod, _file in groups)
+                else {}
+            )
         for ident_key, members in groups.items():
             try:
                 result.items.extend(
