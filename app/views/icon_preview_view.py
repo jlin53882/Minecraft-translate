@@ -708,7 +708,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         if callable(run_task):
             try:
                 run_task(_recover)
-            except Exception as schedule_error:  # noqa: BLE001
+            except Exception as schedule_error:  # noqa: BLE001 - 頁面關閉等排程失敗只記錄並重設旗標，下次載入會再重建
                 self._cache_recovery_scheduled = False
                 log_warning(f"[IconPreview] 無法排程分片快取重建：{schedule_error!r}")
         else:
