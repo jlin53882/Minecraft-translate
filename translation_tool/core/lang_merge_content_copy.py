@@ -15,6 +15,14 @@ from typing import Any
 from ..utils.cache_registry import register_cache
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from ..utils.zip_safety import UnsafePathError, safe_join
+from .book_formats import (
+    FORMAT_ETERNAL_STARLIGHT,
+    FORMAT_MODONOMICON,
+    FORMAT_NEUTRAL_PAGES,
+    FORMAT_ORACLE_INDEX,
+    map_neutral_pages_values,
+    resolve_book_format,
+)
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
 # ----------------------------------------------------------------------
@@ -364,6 +372,78 @@ def process_content_or_copy_file_impl(
             and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower)
         ):
             return {"success": True, "log": None}
+
+    custom_format = resolve_book_format(normalized_path)
+    custom_resource_path = normalized_path
+    custom_output_root = patchouli_output_dir or output_dir
+    pending_name = merger_cfg.get("pending_folder_name", "待翻譯")
+
+    if custom_format.name == FORMAT_NEUTRAL_PAGES:
+        # Neutral custom books have no en_us/zh_tw directory.  JSON source
+        # belongs in pending so the original English is not bundled; binary
+        # book assets belong in the normal patchouli output and are bundled.
+        if os.path.splitext(input_path)[1].lower() == ".json":
+            text = reader.read_text(input_path)
+            try:
+                source_data = json_module.loads(text)
+            except Exception as exc:  # noqa: BLE001 - invalid source is quarantined, never rewritten
+                quarantine_copy_fn(
+                    reader=reader,
+                    rel_path=input_path,
+                    output_dir=output_dir,
+                    reason="自訂書籍 JSON 解析失敗",
+                    extra_text=f"Exception: {type(exc).__name__}\nMessage: {exc!s}\nPath: {input_path}",
+                    errordata_dir=errordata_dir,
+                )
+                log_warning(f"略過無法解析的自訂書籍 JSON: {input_path}: {exc!s}")
+                return {"success": True}
+            transformed = map_neutral_pages_values(
+                source_data,
+                lambda value: recursive_translate_dict_fn(value, rules),
+            )
+            output_bytes = json_module.dumps(transformed, option=json_module.OPT_INDENT_2)
+            target = safe_join(custom_output_root, pending_name, custom_resource_path)
+        else:
+            output_bytes = reader.read_bytes(input_path)
+            target = safe_join(custom_output_root, custom_resource_path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        should_write = True
+        if os.path.isfile(target):
+            try:
+                with open(target, "rb") as existing:
+                    should_write = existing.read() != output_bytes
+            except OSError:
+                should_write = True
+        if should_write:
+            write_bytes_atomic_fn(target, output_bytes)
+        return {"success": True, "log": f"[自訂書籍] 保留格式並輸出: {target}"}
+
+    if custom_format.name in {
+        FORMAT_ETERNAL_STARLIGHT,
+        FORMAT_MODONOMICON,
+        FORMAT_ORACLE_INDEX,
+    }:
+        # These formats are deliberately not sent to the generic JSON walker.
+        # Keep the source in the non-bundled diagnostics/output area until a
+        # profile with a verified schema is implemented.
+        target = safe_join(other_output_dir or output_dir, custom_resource_path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        raw = reader.read_bytes(input_path)
+        should_write = True
+        if os.path.isfile(target):
+            try:
+                with open(target, "rb") as existing:
+                    should_write = existing.read() != raw
+            except OSError:
+                should_write = True
+        if should_write:
+            write_bytes_atomic_fn(target, raw)
+        log_warning(
+            "保留未支援的書籍格式，不套用通用 JSON 翻譯：%s（%s）",
+            input_path,
+            custom_format.name,
+        )
+        return {"success": True, "log": f"[未支援書籍] 保留原檔: {target}"}
 
     def get_patchouli_book_root(path: str):
         # 保留原始大小寫（因為 zf.namelist() 可能用原始大小寫）

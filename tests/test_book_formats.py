@@ -6,6 +6,7 @@ import json
 import zipfile
 from pathlib import Path
 
+from translation_tool.core import lang_merge_content, lang_merger
 from translation_tool.core.book_formats import (
     FORMAT_ETERNAL_STARLIGHT,
     FORMAT_MODONOMICON,
@@ -116,3 +117,92 @@ def test_invalid_custom_book_is_skipped_and_reported(tmp_path: Path):
     assert result.error == ""
     assert any(path.endswith("herbs.json") for path in result.invalid_books)
     assert any(item.key.endswith("foods.json#pages[0].summary") for item in result.items)
+
+
+def _merge_config() -> dict:
+    return {
+        "replace_rules_path": "replace_rules.json",
+        "translator": {"parallel_execution_workers": 1},
+        "lang_merger": {
+            "pending_folder_name": "待翻譯",
+            "pending_organized_folder_name": "待翻譯整理",
+            "filtered_pending_min_count": 1,
+            "quarantine_folder_name": "skipped_json",
+        },
+        "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}},
+    }
+
+
+def _mark_text(value, _rules):
+    if isinstance(value, str):
+        return f"TW:{value}"
+    if isinstance(value, list):
+        return [_mark_text(item, _rules) for item in value]
+    if isinstance(value, dict):
+        return {key: _mark_text(item, _rules) for key, item in value.items()}
+    return value
+
+
+def test_neutral_pages_merge_routes_pending_and_preserves_structure(tmp_path: Path, monkeypatch):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    source = input_dir / "assets" / "herbsandharvest" / "books" / "chapters" / "foods.json"
+    source.parent.mkdir(parents=True)
+    source.write_text(json.dumps(_neutral_document()), encoding="utf-8")
+
+    monkeypatch.setattr(lang_merger, "load_config", _merge_config)
+    monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
+    monkeypatch.setattr(lang_merge_content, "load_config", _merge_config)
+    monkeypatch.setattr(lang_merge_content, "recursive_translate_dict", _mark_text)
+
+    updates = list(
+        lang_merger.merge_zhcn_to_zhtw_from_folder(
+            str(input_dir), str(output_dir), only_process_lang=False
+        )
+    )
+    assert all(not update.get("error", False) for update in updates)
+
+    target = (
+        output_dir
+        / "patchouli_output"
+        / "待翻譯"
+        / "assets"
+        / "herbsandharvest"
+        / "books"
+        / "chapters"
+        / "foods.json"
+    )
+    assert target.exists()
+    merged = json.loads(target.read_text(encoding="utf-8"))
+    page = merged["pages"][0]
+    assert page["summary"].startswith("TW:")
+    assert page["elements"][0]["caption"].startswith("TW:")
+    assert page["elements"][1]["literal_text"].startswith("TW:")
+    assert page["elements"][0]["image_path"] == "herbsandharvest:textures/gui/book.png"
+    assert page["target_page"] == 2
+    assert not (
+        output_dir / "other_output" / "assets" / "herbsandharvest" / "books"
+    ).exists()
+
+
+def test_invalid_neutral_pages_merge_is_quarantined(tmp_path: Path, monkeypatch):
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    source = input_dir / "assets" / "herbsandharvest" / "books" / "chapters" / "herbs.json"
+    source.parent.mkdir(parents=True)
+    source.write_text('{"pages": []}\n{"extra": "document"}', encoding="utf-8")
+
+    monkeypatch.setattr(lang_merger, "load_config", _merge_config)
+    monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
+    monkeypatch.setattr(lang_merge_content, "load_config", _merge_config)
+
+    updates = list(
+        lang_merger.merge_zhcn_to_zhtw_from_folder(
+            str(input_dir), str(output_dir), only_process_lang=False
+        )
+    )
+    assert all(not update.get("error", False) for update in updates)
+    assert not (output_dir / "patchouli_output" / "待翻譯").exists() or not list(
+        (output_dir / "patchouli_output" / "待翻譯").rglob("herbs.json")
+    )
+    assert list((output_dir / "errordata_output").rglob("herbs.json"))
