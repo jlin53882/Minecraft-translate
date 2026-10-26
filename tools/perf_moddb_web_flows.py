@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import time
 from pathlib import Path
 
 from tools.perf_moddb_web_scenarios import Ctx, ScenarioError, _to_entries
@@ -55,7 +56,11 @@ def _select_row(ctx: Ctx, index: int) -> None:
 
 
 def _edit_box(ctx: Ctx):
+    end = time.time() + 8
     items = ctx.find_all(None, "textbox", region=EDITOR_REGION)
+    while not items and time.time() < end:
+        time.sleep(0.2)
+        items = ctx.find_all(None, "textbox", region=EDITOR_REGION)
     if not items:
         raise ScenarioError("找不到譯文輸入框（需要先切到「編輯譯文」）")
     return max(items, key=lambda r: r[2] * r[3])
@@ -77,11 +82,23 @@ def _click_dialog_button(ctx: Ctx, text, mode="exact") -> None:
 
 
 def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
-    for label in labels:
-        if ctx.find_all(label, "button", "exact"):
-            x, y, *_ = ctx.find(label, "button")
-            ctx.click_at(x, y)
-            ctx.settle(500)
+    """關閉最上層對話框；點不到按鈕或沒關掉時改按 Escape，最多等 5 秒。"""
+    for _ in range(3):
+        clicked = False
+        for label in labels:
+            if ctx.find_all(label, "button", "exact", [240, 20, 1250, 1100]):
+                x, y, *_ = ctx.find(label, "button", "exact", [240, 20, 1250, 1100])
+                ctx.click_at(x, y)
+                clicked = True
+                break
+        ctx.pg.wait_for_timeout(500)
+        if not clicked:
+            ctx.pg.keyboard.press("Escape")
+            ctx.pg.wait_for_timeout(500)
+        if not any(
+            ctx.find_all(label, "button", "exact", [240, 20, 1250, 1100])
+            for label in labels
+        ):
             return
 
 
