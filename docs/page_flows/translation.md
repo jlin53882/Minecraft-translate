@@ -78,6 +78,8 @@ flowchart TD
   L --> M
 ```
 
+KubeJS 注入使用步驟 1 快照出來的確切來源根目錄（`source_roots`），不再往下搜尋名為 `kubejs` 的資料夾；腳本與 `assets/kubejs/` 並存的標準配置因此也會注入腳本。
+
 KubeJS 的翻譯快照只有 `DONE` 才能提交為可注入版本；`PARTIAL`、`FAILED`、`CANCELLED` 不提交最終快照，也不執行注入，讓下一次續跑仍能從 checkpoint 接續。
 
 ### Markdown 流水線（`run_md_pipeline`）

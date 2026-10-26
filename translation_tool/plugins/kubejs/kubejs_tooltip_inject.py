@@ -462,7 +462,9 @@ def inject(
                     log_info(f"⏭️ 找不到來源對應，略過：{relative_path}")
                 done += 1
                 continue
-            script_root = Path(resolve_kubejs_root(source_root_value)).resolve()
+            # source_roots 已是流水線快照出來的確切 kubejs 根目錄；不能再往下搜尋名為 kubejs 的
+            # 資料夾，否則含 assets/kubejs/ 的快照會被誤判成 assets/kubejs 而找不到任何腳本。
+            script_root = Path(source_root_value).resolve()
         else:
             script_root = orig_root
         script_path = script_relative.with_suffix(".js")
