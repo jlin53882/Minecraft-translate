@@ -17,24 +17,25 @@ import os
 import sqlite3
 import threading
 from collections.abc import Sequence
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from pathlib import Path
 
 from translation_tool.utils.cancellation import is_cancelled
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 
 MAX_WORKERS = 4
 MIN_SPAN_PER_WORKER = 60_000  # 每個區間至少涵蓋的編號數（約 60 ms 以上的掃描量）
 _PROGRESS_STEP = 20_000  # 每執行這麼多 VM 指令檢查一次取消
 
 _pool_lock = threading.Lock()
-_pool: ThreadPoolExecutor | None = None
+_pool: ContextThreadPoolExecutor | None = None
 
 
-def _executor() -> ThreadPoolExecutor:
+def _executor() -> ContextThreadPoolExecutor:
     global _pool
     with _pool_lock:
         if _pool is None:
-            _pool = ThreadPoolExecutor(
+            _pool = ContextThreadPoolExecutor(
                 max_workers=MAX_WORKERS, thread_name_prefix="moddb-scan"
             )
         return _pool

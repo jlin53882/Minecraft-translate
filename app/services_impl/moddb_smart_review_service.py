@@ -870,6 +870,7 @@ __all__ = [
     "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_DEFAULT_SOURCE",
     "SMART_REVIEW_MANUAL_EDIT_STATUSES",
+    "QueryInterrupt",
     "SmartReviewBatchItemResult",
     "SmartReviewBatchResult",
     "SmartReviewCandidate",

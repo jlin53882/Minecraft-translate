@@ -11,6 +11,7 @@ from typing import Any
 import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
+    QueryInterrupt,
     preview_moddb_smart_review_plan_from_path,
 )
 from app.ui import kit
@@ -18,7 +19,6 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.update_scope import suppress_auto_update
 from app.views.moddb.smart_review_job import SmartReviewRequest
-from translation_tool.translation_db.query_interrupt import QueryInterrupt
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 

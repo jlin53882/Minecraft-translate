@@ -27,12 +27,13 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，7 個 AST 呼叫點）
+## A. 背景執行緒啟動點（`threading.Thread`，8 個 AST 呼叫點）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
 | `app/tasks/operation_registry.py`（2 個 raw Thread call） | registry wrapper 對 mounted App work；standalone fallback 仍以 page worker/daemon thread 執行 | reservation 先於 launcher；handle 結束前保留 active membership |
 | `app/startup_tasks.py` | 正式入口傳入 AppShell registry；無 App 的 legacy helper 保留 fallback Thread | `startup-index` non-cancellable / drain-only，關閉時等候完成 |
+| `app/icon_scan_pool.py`（圖示掃描取消監看） | 不碰 UI：只在 `should_cancel()` 為真時設定行程池共用的取消 `Event`；經 `run_in_context` 沿用呼叫端 context，記錄仍歸屬原任務 | 掃描結束時 `finally` 設定 `stop` Event，監看執行緒隨即結束（daemon，不阻擋關閉）；取消旗標由呼叫端提供 |
 | `app/shell/config_effects.py` | AppShell 注入 registry launcher；fallback 只供獨立測試/嵌入用 | `cache-root-reload` 註冊為 non-cancellable / drain-only |
 | `app/views/moddb/scan_panel.py` | mounted App 使用 `launch_page_operation`；module Thread 僅為沒有 registry 時的 standalone fallback | `moddb-scan` handle 由 Registry 擁有；View poller teardown 見 B |
 | `app/views/moddb/translate_panel.py`（批次翻譯、舊 AI 重翻） | 兩種工作均經 `launch_page_operation`；無直接 Thread 啟動 | `moddb-translate`、`moddb-retranslate` 由 Registry 擁有；重翻為 page-bound session、cancel-and-drain；逐筆提交見 B |

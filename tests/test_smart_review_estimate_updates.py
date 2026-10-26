@@ -80,7 +80,8 @@ def test_estimate_updates_redraw_only_the_estimate_texts(panel, monkeypatch):
 
     assert panel.counts and panel.plans
     assert regions and all(
-        set(controls) == {panel.estimate_text, panel.plan_preview_text}
+        set(controls)
+        == {panel.estimate_text, panel.plan_preview_text, panel.plan_progress_bar}
         for controls in regions
     )
     # 預估文字更新不再重畫整個視窗（它含數千個模組選項，差異計算要數十毫秒）
@@ -106,13 +107,13 @@ def test_typing_in_the_search_box_is_debounced_and_recounts_once(panel, monkeypa
 def test_limit_and_model_changes_only_refresh_the_plan(panel):
     """上限與模型不影響候選範圍：不重數候選，只重讀歷史規劃預估。"""
     panel.limit_field.value = "10"
-    panel._plan_inputs_changed()
+    panel._limit_changed()
     assert "本次上限 10" in panel.estimate_text.value  # 立刻用既有筆數更新文字
     assert panel._total == 28
     assert panel.counts == [] and panel.plans == []
 
     panel.model_dd.value = "other-model"
-    panel._plan_inputs_changed()
+    panel._model_changed()
     panel._plan_debounce.fire()
 
     assert panel.counts == []  # 候選筆數沒有重算
@@ -156,7 +157,7 @@ def test_plan_inputs_change_interrupts_the_running_plan(panel, monkeypatch):
     )
     panel._refresh_plan_preview()
     running = seen[-1]
-    panel._plan_inputs_changed()
+    panel._model_changed()
     assert running.cancelled is True
 
 

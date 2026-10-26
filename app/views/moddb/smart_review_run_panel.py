@@ -11,6 +11,7 @@ import flet as ft
 
 from app.services_impl.moddb_smart_review_service import (
     SMART_REVIEW_DEFAULT_SOURCE,
+    QueryInterrupt,
     count_moddb_smart_review_candidates_from_path,
     smart_review_model_options,
 )
@@ -39,7 +40,6 @@ from app.views.moddb.smart_review_run_status import (
     run_status_color,
     run_status_label,
 )
-from translation_tool.translation_db.query_interrupt import QueryInterrupt
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 _POLL_SECONDS = 0.4
