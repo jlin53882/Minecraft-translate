@@ -41,12 +41,21 @@ class IconIndex(dict[str, str]):
         values: Mapping[str, str] | None = None,
         *,
         by_jar: Mapping[str, Mapping[str, str]] | None = None,
+        complete_by_jar: Mapping[str, bool] | None = None,
     ) -> None:
         super().__init__(values or {})
         self.by_jar = (
             {jar_name: dict(jar_index) for jar_name, jar_index in by_jar.items()}
             if by_jar is not None
             else None
+        )
+        self.complete_by_jar = (
+            {
+                jar_name: bool(is_complete)
+                for jar_name, is_complete in complete_by_jar.items()
+            }
+            if complete_by_jar is not None
+            else ({jar_name: True for jar_name in self.by_jar} if self.by_jar else None)
         )
 
     def for_jar(self, jar_name: str) -> Mapping[str, str]:
@@ -142,18 +151,20 @@ def _strip_json_extras(text: str) -> str:
         else:
             out.append(ch)
         i += 1
-    # 只能在 JSON 字串之外檢查結尾逗號；直接對整份文字套 regex 會改掉
-    # ``"Use ,} symbol"`` 這類合法語言值。
-    cleaned = "".join(out)
+    return _strip_json_trailing_commas("".join(out))
+
+
+def _strip_json_trailing_commas(text: str) -> str:
+    """移除字串以外、緊接 JSON 容器結尾的逗號。"""
     result: list[str] = []
-    i, n = 0, len(cleaned)
+    i, n = 0, len(text)
     in_string = False
     while i < n:
-        ch = cleaned[i]
+        ch = text[i]
         if in_string:
             result.append(ch)
             if ch == "\\" and i + 1 < n:
-                result.append(cleaned[i + 1])
+                result.append(text[i + 1])
                 i += 1
             elif ch == '"':
                 in_string = False
@@ -162,9 +173,9 @@ def _strip_json_extras(text: str) -> str:
             result.append(ch)
         elif ch == ",":
             next_index = i + 1
-            while next_index < n and cleaned[next_index].isspace():
+            while next_index < n and text[next_index].isspace():
                 next_index += 1
-            if next_index < n and cleaned[next_index] in "}]":
+            if next_index < n and text[next_index] in "}]":
                 i += 1
                 continue
             result.append(ch)
@@ -254,12 +265,23 @@ def _iter_entries_from_lang_files(
             break  # 每個 namespace 只取第一個有效的英文 lang 檔
 
 
-def _process_single_jar(jar_path: Path, asset_catalog) -> dict[str, str]:
+class JarIconIndex(dict[str, str]):
+    """A per-JAR icon mapping plus whether the complete JAR was parsed."""
+
+    def __init__(
+        self, values: Mapping[str, str] | None = None, *, complete: bool = True
+    ) -> None:
+        super().__init__(values or {})
+        self.complete = complete
+
+
+def _process_single_jar(jar_path: Path, asset_catalog) -> JarIconIndex:
     """Worker: 處理單一 JAR，建立該 JAR 所有 entry 的 icon 索引。
 
     回傳：{key: icon_uri} — 該 JAR 內所有有 icon 的 key mapping
     """
     results: dict[str, str] = {}
+    complete = True
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             raise_if_cancelled()
@@ -285,13 +307,15 @@ def _process_single_jar(jar_path: Path, asset_catalog) -> dict[str, str]:
                     results[key] = hit_to_uri(result)
     except ArchiveBudgetError:
         # 累計讀取超過安全上限（budget 已記錄警告）：保留已建立的部分索引，不中止整個索引建置
+        complete = False
         log_warning(f"[IconIndex] {jar_path.name} 累計讀取超限，僅保留已解析的部分索引")
     except Exception as exc:  # noqa: BLE001 - 單一 JAR 索引失敗不中止整體，但要留下堆疊
+        complete = False
         log_warning(
             f"[IconIndex] {jar_path.name} 索引建立失敗，僅保留已解析的部分索引：{exc!r}",
             exc_info=True,
         )
-    return results
+    return JarIconIndex(results, complete=complete)
 
 
 # ==================================================
@@ -318,6 +342,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> IconIndex:
 
     index: dict[str, str] = {}
     index_by_jar: dict[str, dict[str, str]] = {}
+    complete_by_jar: dict[str, bool] = {}
     owners: dict[str, str] = {}
     done = 0
 
@@ -346,6 +371,9 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> IconIndex:
                 try:
                     jar_results = future.result()
                     index_by_jar[jar.name] = dict(jar_results)
+                    complete_by_jar[jar.name] = bool(
+                        getattr(jar_results, "complete", True)
+                    )
                     jar_order = jar.name.casefold()
                     for key, uri in jar_results.items():
                         raise_if_cancelled()
@@ -367,7 +395,11 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> IconIndex:
         asset_catalog.close()
 
     log_info(f"[IconIndex] 索引建立完成：{len(index)} 個 icon 進入索引")
-    return IconIndex(index, by_jar=index_by_jar)
+    return IconIndex(
+        index,
+        by_jar=index_by_jar,
+        complete_by_jar=complete_by_jar,
+    )
 
 
 def build_and_save_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
@@ -394,7 +426,13 @@ def _save_icon_index_for_manifest(
     manifest: list[dict[str, int | str]],
 ) -> Path:
     source_aware_index = index if isinstance(index, IconIndex) else IconIndex(index)
-    version = 6 if source_aware_index.by_jar is not None else 5
+    version = (
+        7
+        if source_aware_index.complete_by_jar is not None
+        else 6
+        if source_aware_index.by_jar is not None
+        else 5
+    )
     idx_path = _index_path_for_manifest(mods_dir, manifest)
     data = {
         "version": version,
@@ -404,7 +442,16 @@ def _save_icon_index_for_manifest(
         "index": dict(source_aware_index),
     }
     if source_aware_index.by_jar is not None:
-        data["index_by_jar"] = source_aware_index.by_jar
+        if version == 7:
+            data["index_by_jar"] = {
+                jar_name: {
+                    "complete": source_aware_index.complete_by_jar.get(jar_name, False),
+                    "index": jar_index,
+                }
+                for jar_name, jar_index in source_aware_index.by_jar.items()
+            }
+        else:
+            data["index_by_jar"] = source_aware_index.by_jar
     temp_path = idx_path.with_name(f"{idx_path.stem}.{uuid.uuid4().hex}.tmp")
     try:
         temp_path.write_text(
@@ -417,6 +464,57 @@ def _save_icon_index_for_manifest(
     return idx_path
 
 
+def _is_string_mapping(value) -> bool:
+    return isinstance(value, dict) and all(
+        isinstance(key, str) and isinstance(icon_uri, str)
+        for key, icon_uri in value.items()
+    )
+
+
+def _load_v6_index(
+    raw_index: dict, data: dict, expected_jars: set[str]
+) -> IconIndex | None:
+    """Validate the legacy per-JAR shape without trusting it for fast scans."""
+    raw_by_jar = data["index_by_jar"]
+    if not isinstance(raw_by_jar, dict) or set(raw_by_jar) != expected_jars:
+        return None
+    if not all(
+        isinstance(jar_name, str) and _is_string_mapping(jar_index)
+        for jar_name, jar_index in raw_by_jar.items()
+    ):
+        return None
+    # Version 6 has no completeness bit, so it cannot suppress a direct scan.
+    return IconIndex(raw_index)
+
+
+def _load_v7_index(
+    raw_index: dict, data: dict, expected_jars: set[str]
+) -> IconIndex | None:
+    """Load source-aware mappings only when every JAR was fully parsed."""
+    raw_by_jar = data["index_by_jar"]
+    if not isinstance(raw_by_jar, dict) or set(raw_by_jar) != expected_jars:
+        return None
+    complete_by_jar: dict[str, bool] = {}
+    by_jar: dict[str, dict[str, str]] = {}
+    for jar_name, jar_payload in raw_by_jar.items():
+        if not isinstance(jar_name, str) or not isinstance(jar_payload, dict):
+            return None
+        is_complete = jar_payload.get("complete")
+        jar_index = jar_payload.get("index")
+        if not isinstance(is_complete, bool) or not _is_string_mapping(jar_index):
+            return None
+        complete_by_jar[jar_name] = is_complete
+        by_jar[jar_name] = jar_index
+    if not all(complete_by_jar.values()):
+        log_warning("[IconIndex] 預建索引含未完整解析的 JAR，改為逐 JAR 解析")
+        return None
+    return IconIndex(
+        raw_index,
+        by_jar=by_jar,
+        complete_by_jar=complete_by_jar,
+    )
+
+
 def load_icon_index(mods_dir: Path) -> IconIndex | None:
     """快速載入已建立的 icon 索引。找不到或格式不符回 None。"""
     manifest = _jar_manifest(mods_dir)
@@ -426,7 +524,7 @@ def load_icon_index(mods_dir: Path) -> IconIndex | None:
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
         version = data.get("version")
-        if version not in {5, 6} or data.get("jars") != manifest:
+        if version not in {5, 6, 7} or data.get("jars") != manifest:
             return None
         if data.get("modpack") != str(mods_dir.resolve()):
             # modpack 路徑改了
@@ -439,22 +537,20 @@ def load_icon_index(mods_dir: Path) -> IconIndex | None:
             return None
         if version == 5:
             loaded = IconIndex(raw_index)
+        elif version == 6:
+            loaded = _load_v6_index(
+                raw_index,
+                data,
+                {path.name for path in mods_dir.glob("*.jar")},
+            )
         else:
-            raw_by_jar = data["index_by_jar"]
-            expected_jars = {path.name for path in mods_dir.glob("*.jar")}
-            if not isinstance(raw_by_jar, dict) or set(raw_by_jar) != expected_jars:
-                return None
-            if not all(
-                isinstance(jar_name, str)
-                and isinstance(jar_index, dict)
-                and all(
-                    isinstance(key, str) and isinstance(value, str)
-                    for key, value in jar_index.items()
-                )
-                for jar_name, jar_index in raw_by_jar.items()
-            ):
-                return None
-            loaded = IconIndex(raw_index, by_jar=raw_by_jar)
+            loaded = _load_v7_index(
+                raw_index,
+                data,
+                {path.name for path in mods_dir.glob("*.jar")},
+            )
+        if loaded is None:
+            return None
         log_info(
             f"[IconIndex] 已載入索引：{data.get('count')} 個 icon（來源：{idx_path.name}）"
         )

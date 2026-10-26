@@ -470,6 +470,7 @@ def test_process_single_jar_keeps_partial_index_when_budget_exceeded(
     result = _process_single_jar(jar, mod_catalog(jar))
 
     assert list(result) == ["item.m.a"]
+    assert result.complete is False
 
 
 # ---------------------------------------------------------------------------

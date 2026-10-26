@@ -418,3 +418,49 @@ def test_view_l2_lookup_warms_only_first_page_and_apply_does_not_read_disk(
     assert all(tid != threading.get_ident() for _, tid in opened)
     assert len(view.list_view.controls) == view.mod_page_size
     assert view._source_cache is store.source
+
+
+def test_deferred_l2_shard_failure_invalidates_and_queues_recovery(
+    tmp_path, monkeypatch
+):
+    """第二／三頁的分片損壞也要失效來源並回到完整重掃流程。"""
+    from app.views.icon_preview import entries_cache
+    from app.views.icon_preview.entries_cache import ShardLoadError
+    from app.views.icon_preview_view import IconPreviewView
+    from tests.conftest import mock_page
+
+    source_root = tmp_path / "mods"
+    source_root.mkdir()
+    (source_root / "mod.jar").write_bytes(b"jar")
+    monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: tmp_path / "cache")
+    rows = [
+        {
+            **_source_entry(),
+            "modid": f"mod{n:03d}",
+            "key": f"item.mod{n:03d}.a",
+        }
+        for n in range(120)
+    ]
+    _save_entries_cache_l2(source_root, rows)
+
+    cache_dir = next(path for path in (tmp_path / "cache").iterdir() if path.is_dir())
+    index = json.loads((cache_dir / "index.json").read_text(encoding="utf-8"))
+    third_page_shard = cache_dir / index["mods"][80][2]
+    third_page_shard.write_text("{", encoding="utf-8")
+
+    page = mock_page()
+    view = IconPreviewView(page)
+    view.source_root = source_root
+    view.review_root = None
+    kind, store = view._lookup_cached_entries("jar_directory")
+    assert kind == "L2"
+
+    reloads = []
+    view._on_load_clicked = lambda _event: reloads.append(True)
+    with pytest.raises(ShardLoadError):
+        store["mod080"]
+
+    assert not cache_dir.exists()
+    assert "mod080" not in store._hydrated
+    page._run_all_tasks()
+    assert reloads == [True]

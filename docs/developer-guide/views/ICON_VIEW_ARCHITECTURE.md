@@ -51,7 +51,7 @@ translation_tool/core/
 [載入] _on_load_clicked()（sync handler：驗證路徑、顯示掃描提示，之後以 page.run_task 排程 _load_async）
   └─ _load_async(generation, operation) → load_operation.load_icon_preview()：每個阻塞步驟經 _run_blocking 在執行緒執行，每步之後檢查世代（卸載就丟棄）
        ├─ _detect_source_mode()（glob / rglob）
-       ├─ _lookup_cached_entries(mode)：L1（_source_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，`open_entries_cache_l2` 只讀 index.json）→ 命中時以 `ModEntryStore`（modid → entries，第一次存取才讀該模組分片並補譯文）包裝，背景執行緒只預載第一頁模組 → _apply_cached_entries（把 store 設為 mods + _render_mod_list，在 event loop，不讀檔）
+        ├─ _lookup_cached_entries(mode)：L1（_source_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，`open_entries_cache_l2` 只讀 index.json）→ 命中時以 `ModEntryStore`（modid → entries，第一次存取才讀該模組分片並補譯文）包裝，背景執行緒只預載第一頁模組；任何後續分頁的 `ShardLoadError` 都會使來源失效並排程重新掃描 → _apply_cached_entries（把 store 設為 mods + _render_mod_list，在 event loop，不讀檔）
        ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
        └─ _scan_entries(mode, total_steps, generation) → _finish_load(entries 或 ModEntryStore, mode)
   無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
@@ -60,7 +60,7 @@ translation_tool/core/
     ├─ extracted_folder → _load_entries()
     │      └─ 掃 source_root 的 en_us.json（modid 取自路徑中 assets 的下一段），建立 entries（modid/key/en）
     └─ jar_directory → scan_operation.scan_jar_directory(view, generation)（背景執行緒）
-           ├─ 排序 JAR；有與目前 JAR 一致的預建索引（`load_icon_index`）就只讀 lang 並以索引覆蓋圖示，否則解析圖示
+           ├─ 排序 JAR；只有與目前 JAR 一致且每個來源 `complete_by_jar` 都為真的預建索引（`load_icon_index`）才只讀 lang 並以索引覆蓋圖示，否則逐 JAR 解析圖示
            ├─ icon_scan_pool.stream_jar_scans：每個 JAR 一個工作（icon_jar_scan.scan_jar），依完成順序回傳；累積到 `ScannedSource`，進度走 `_set_progress`
            ├─ 每 0.5 秒 publish_partial → event loop 上 apply_partial：以快照顯示模組清單（`_scan_partial`；詳情／搜尋中不套用）
            └─ 完成後 `_build_zh_tw_lookup`（直接路徑 review_root/<modid>/lang/zh_tw.json，再 rglob 補漏）、`save_source_cache_l2` 寫 L2，回傳 `ModEntryStore`
@@ -109,12 +109,12 @@ translation_tool/core/
 - 冷載入：`scan_jar(jar_path, catalog)` 對每個 JAR 只開一次 ZIP——先以 `assets/([^/]+)/lang/en_us\.json` 讀出 lang（各 JAR 一份 `ZipReadBudget`，累計超限則整個 JAR 視為沒有項目），再對 `key_needs_icon`（item／block／entity 等前綴）為真的 key 呼叫 `resolve_icon`（獨立的圖示讀取預算，超限後該 JAR 不再解析）。結果是 `JarScan.mods`（`modid → [(key, en, icon_uri)]`）。每個 (modid, key) 只依該 JAR 自己解析，不與其他 JAR 共用結果，因此與完成順序無關。
 - 並行：`icon_scan_pool.stream_jar_scans` 選擇執行器。JAR 數 ≥ `PROCESS_MIN_JARS`、worker 數 > 1 且有預建索引以外的圖示解析需求時用 `spawn` 行程池（worker 數取 `resolve_worker_count("icon_cache")`，不超過 CPU 核心數），每個 worker 第一次工作時建立自己的 `ModpackAssetCatalog`；否則用執行緒池共用一份 catalog。打包後需在入口呼叫 `multiprocessing.freeze_support()`（`main.py`）。行程池啟動失敗或中途整個壞掉時，其餘 JAR 改用執行緒。取消由 `cancel_scope` 的檢查函式經監看執行緒設定共用 `Event`，worker 內 `raise_if_cancelled` 中止。
 - `ModpackAssetCatalog` 只索引 `assets/*/{models,blockstates,textures}` 的名稱；名稱由 `_central_directory_names` 直接切自 ZIP 中央目錄（ZIP64、前置附加資料、結構不一致時退回 `zipfile.namelist()`）。
-- 有預建索引時（`load_icon_index`，見下）`scan_jar_directory` 只讀 lang（`with_icons=False`，不建立 catalog），以 `ScannedSource.add(scan, icon_index)` 依 key 覆蓋圖示。
+- 有完整預建索引時（`load_icon_index`，見下）`scan_jar_directory` 只讀 lang（`with_icons=False`，不建立 catalog），以 `ScannedSource.add(scan, icon_index)` 依來源 JAR 覆蓋圖示；任一 JAR 只有部分 mapping 時不接受整份索引，退回逐 JAR 解析。
 - 逐 key 解析規則：依 key 前綴（`CONTENT_ICON_PREFIXES`）、key namespace 與 lang namespace 查 item／block 的 model 與 blockstate，再追 parent model 取得 texture（`resolve_icon`；`icon_cache._resolve_icon_from_catalog` 是供 `app/icon_index.py` 與測試 patch 的穩定入口）。
   - 找不到 → 回 None，**不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
 - 預建索引檔位於 `.icon_cache/icon_index/`。以 JAR 檔名、檔案大小與 `mtime_ns` 建立快速 manifest（另含 NeoForge runtime assets）；modpack 路徑、任一 JAR 的新增／刪除／metadata 變更都會造成 cache miss。這不是內容雜湊：若內容變更但檔案大小與時間戳都被保留，無法偵測。
 - 預建 producer（`app/icon_index.py`）讀取 `assets/<modid>/lang/en_us.json`，並直接從路徑取得 namespace；同一 JAR 的多個 namespace 都會掃描。JSON 缺漏或格式錯誤時退回同 namespace 的 `en_us.lang`；其他語系不作為索引來源。
-- 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；入口為 `build_and_save_icon_index`：建置索引、比對建置前後 manifest，若 JAR 在建置期間變更則拋出錯誤且不儲存。冷載入會先以 `load_icon_index` 讀取索引；cache miss 則逐 JAR 解析。JAR 更新後重跑命令即可。
+- 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；入口為 `build_and_save_icon_index`：建置索引、比對建置前後 manifest，並在每個 JAR 寫入完整性標記；若 JAR 在建置期間變更則拋出錯誤且不儲存。冷載入會先以 `load_icon_index` 讀取完整的 version 7 索引；任一 JAR 解析不完整或 cache miss 都逐 JAR 解析。JAR 更新後重跑命令即可。
 - icon 只來自 model 解析（model-only icon contract）；JAR 內通用圖檔與模組 metadata 不作為 icon 來源。
 - `_migrate_old_icon_cache`：選擇模組資料夾時，把舊路徑 `<source_root>/_icon_preview/jar_icons/` 的 png 搬到 `.icon_cache/jar_icons/`
 
@@ -125,7 +125,7 @@ translation_tool/core/
 | `source_root` / `review_root` | 原文（en_us + textures）/ 校對（zh_tw）資料夾 |
 | `mods` | modid → entries 列表：JAR 目錄冷載入（含掃描中的部分結果）與快取命中時為 `ModEntryStore`（`mod_store.py`，唯讀 Mapping）；解包資料夾為 dict |
 | `_scan_partial` / `_partial_source` / `_partial_pending` | 冷載入途中 `mods` 是否為部分結果、待套用的快照、是否已排程套用 |
-| `_source_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>/`（`index.json` 列出模組與筆數，每個模組一個欄位式分片 `<n>.json`），只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要 |
+| `_source_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>/`（`index.json` 列出模組與筆數，每個模組一個欄位式分片 `<n>.json`），只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要；分片讀取失敗會刪除來源快取並重新掃描，不會把錯誤當成空模組 |
 | `_mod_search_*` / `_detail_search_*` | 兩層即時搜尋（`Debouncer`，150ms） |
 | `mod_page_size` / `page_size` | 模組清單每頁數（`page_size_selector` 可選 25/50/100）/ 詳情頁每頁筆數（50） |
 | `LangItemRow` | 單筆 key：TextField（繁中可編輯）+ lang key + 英文原文 + icon 預覽 |

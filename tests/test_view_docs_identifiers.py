@@ -64,6 +64,8 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
         "app/views/icon_preview/**/*.py",
         "app/views/icon_preview_row.py",
         "app/icon_index.py",
+        "app/icon_jar_scan.py",
+        "app/icon_scan_pool.py",
         "app/icon_reader.py",
         "app/icon_catalog.py",
         "app/icon_resolve.py",

@@ -31,7 +31,7 @@
   },
   "view_files": {
     "app/views/config_view.py": 1016,
-    "app/views/icon_preview_view.py": 879,
+    "app/views/icon_preview_view.py": 929,
     "app/views/moddb/batch_replace_dialog.py": 1012,
     "app/views/moddb/bulk_review_dialog.py": 800,
     "app/views/moddb/entries_panel.py": 1166,

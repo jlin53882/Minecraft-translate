@@ -208,6 +208,24 @@ def test_prebuilt_index_keeps_same_key_icons_separate_per_jar(tmp_path, monkeypa
         != prebuilt_icons[("b.jar", "item.shared.sword")]
     )
 
+    incomplete_index = icon_index.IconIndex(
+        {"item.shared.sword": "wrong"},
+        by_jar={
+            "a.jar": {"item.shared.sword": "wrong"},
+            "b.jar": {"item.shared.sword": "wrong"},
+        },
+        complete_by_jar={"a.jar": False, "b.jar": True},
+    )
+    monkeypatch.setattr(
+        scan_operation, "_load_prebuilt_index", lambda _root: incomplete_index
+    )
+    fallback_store = scan_jar_directory(make_view(mods), 0)
+    fallback_icons = {
+        (entry.source_jar, entry.key): entry.icon_path
+        for entry in entries_of(fallback_store)
+    }
+    assert fallback_icons == direct_icons
+
 
 # ---------------------------------------------------------------------------
 # 逐步顯示

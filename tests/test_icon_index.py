@@ -78,8 +78,42 @@ def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch)
         "broken-1.0.jar": {},
         "my-mod-1.0.jar": {"item.my_mod.apple": result["item.my_mod.apple"]},
     }
+    assert loaded.complete_by_jar == {
+        "broken-1.0.jar": True,
+        "my-mod-1.0.jar": True,
+    }
     saved = json.loads(icon_index.get_index_path(mods_dir).read_text(encoding="utf-8"))
-    assert saved["version"] == 6
+    assert saved["version"] == 7
+    assert all(payload["complete"] for payload in saved["index_by_jar"].values())
+
+
+def test_incomplete_prebuilt_index_is_not_loaded_as_source_aware(tmp_path, monkeypatch):
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    jar = mods_dir / "partial.jar"
+    with zipfile.ZipFile(jar, "w"):
+        pass
+    monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(
+        icon_index,
+        "load_config",
+        lambda: {"translator": {"parallel_execution_workers": 1}},
+    )
+    monkeypatch.setattr(
+        icon_index,
+        "_process_single_jar",
+        lambda _jar_path, _catalog: icon_index.JarIconIndex(
+            {"item.partial.icon": "icon://partial"}, complete=False
+        ),
+    )
+
+    built = icon_index.build_and_save_icon_index(mods_dir)
+
+    assert built.complete_by_jar == {"partial.jar": False}
+    saved = json.loads(icon_index.get_index_path(mods_dir).read_text(encoding="utf-8"))
+    assert saved["version"] == 7
+    assert saved["index_by_jar"]["partial.jar"]["complete"] is False
+    assert icon_index.load_icon_index(mods_dir) is None
 
 
 def test_build_and_save_indexes_every_namespace_in_one_jar(tmp_path, monkeypatch):

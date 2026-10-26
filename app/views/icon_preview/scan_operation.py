@@ -51,10 +51,14 @@ def scan_jar_directory(view, generation: int | None = None) -> ModEntryStore:
     jars = sorted(root.glob("*.jar"), key=lambda path: path.name.casefold())
     icon_index = _load_prebuilt_index(root)
     index_by_jar = getattr(icon_index, "by_jar", None)
+    complete_by_jar = getattr(icon_index, "complete_by_jar", None)
     use_prebuilt_index = (
         icon_index is not None
         and isinstance(index_by_jar, dict)
+        and isinstance(complete_by_jar, dict)
         and set(index_by_jar) == {jar.name for jar in jars}
+        and set(complete_by_jar) == set(index_by_jar)
+        and all(complete_by_jar.values())
         and callable(getattr(icon_index, "for_jar", None))
     )
     progress = _make_progress_callback(

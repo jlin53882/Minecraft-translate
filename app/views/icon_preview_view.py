@@ -4,6 +4,7 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
+import asyncio
 import time
 from collections import defaultdict
 from collections.abc import Mapping
@@ -148,6 +149,7 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         # 快取（防止重複掃描 JAR）
         self._source_cache: EntrySource | None = None  # 緩存的來源項目（不含譯文）
         self._cache_meta: dict = {}  # source_root, mode
+        self._cache_recovery_scheduled = False
 
         self._current_zh_file: Path | None = None
         self._zh_data: dict[str, str] = {}
@@ -675,7 +677,44 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
                 self._cache_meta = {}
             log_warning(f"[IconPreview] 分片快取已失效，將重新掃描來源：{exc!r}")
             return None
+        store.set_source_error_handler(
+            lambda exc: self._handle_cached_source_error(source, exc)
+        )
         return kind, store
+
+    def _handle_cached_source_error(self, source, exc: BaseException) -> None:
+        """Invalidate a deferred L2 failure and queue one source rebuild."""
+        invalidate = getattr(source, "invalidate", None)
+        if callable(invalidate):
+            invalidate()
+        if self._source_cache is source:
+            self._source_cache = None
+            self._cache_meta = {}
+        if self._cache_recovery_scheduled:
+            return
+        self._cache_recovery_scheduled = True
+        log_warning(f"[IconPreview] 延遲載入分片失效，將重新掃描來源：{exc!r}")
+
+        async def _recover() -> None:
+            try:
+                while self._loading and self._view_mounted:
+                    await asyncio.sleep(0)
+                if self._view_mounted:
+                    self._on_load_clicked(None)
+            finally:
+                self._cache_recovery_scheduled = False
+
+        run_task = getattr(self.page, "run_task", None)
+        if callable(run_task):
+            try:
+                run_task(_recover)
+            except Exception as schedule_error:  # noqa: BLE001
+                self._cache_recovery_scheduled = False
+                log_warning(f"[IconPreview] 無法排程分片快取重建：{schedule_error!r}")
+        else:
+            self._cache_recovery_scheduled = False
+            if self._view_mounted:
+                self._on_load_clicked(None)
 
     def _apply_cached_entries(self, kind: str, store, mode: str) -> None:
         """（event loop 上）顯示命中的快取並渲染模組清單。"""

@@ -7,7 +7,7 @@
 
 import threading
 from collections import OrderedDict
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from types import SimpleNamespace
 from typing import Protocol
 
@@ -102,10 +102,12 @@ class ModEntryStore(Mapping):
         zh_lookup: Mapping[str, object] | None = None,
         *,
         capacity: int = _HYDRATED_CAPACITY,
+        on_source_error: Callable[[BaseException], None] | None = None,
     ):
         self.source = source
         self._zh_lookup = zh_lookup or {}
         self._capacity = capacity
+        self._on_source_error = on_source_error
         self._hydrated: OrderedDict[str, list] = OrderedDict()
         self._lock = threading.Lock()
         self._known = frozenset(source.modids)
@@ -116,7 +118,18 @@ class ModEntryStore(Mapping):
 
     def with_translations(self, zh_lookup: Mapping[str, object]) -> "ModEntryStore":
         """同一份來源、換一份譯文（審查資料夾改變時）。"""
-        return ModEntryStore(self.source, zh_lookup, capacity=self._capacity)
+        return ModEntryStore(
+            self.source,
+            zh_lookup,
+            capacity=self._capacity,
+            on_source_error=self._on_source_error,
+        )
+
+    def set_source_error_handler(
+        self, handler: Callable[[BaseException], None] | None
+    ) -> None:
+        """Set the callback used when a deferred source load fails."""
+        self._on_source_error = handler
 
     def warm(self, modids) -> None:
         """預先載入指定模組（可在背景執行緒呼叫），讓第一次顯示不必讀檔。"""
@@ -141,7 +154,13 @@ class ModEntryStore(Mapping):
     def _hydrate(self, modid: str) -> list:
         lookup = self._zh_lookup
         entries = []
-        for row in self.source.load(modid):
+        try:
+            rows = self.source.load(modid)
+        except Exception as exc:
+            if self._on_source_error is not None:
+                self._on_source_error(exc)
+            raise
+        for row in rows:
             zh_tw = lookup.get(row.get("key"), "")
             if not isinstance(zh_tw, str):
                 zh_tw = ""

@@ -8,6 +8,7 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     reserve_page_operation,
 )
+from app.views.icon_preview.entries_cache import ShardLoadError
 from app.views.icon_preview.icon_cache import _get_icon_cache_dir
 from translation_tool.utils.log_unit import log_error
 
@@ -17,11 +18,14 @@ _POLL_SECONDS = 0.005
 
 def render_current_page(view) -> None:
     """Prepare blocking row icons under an owner, then render on the UI loop."""
-    entries = (
-        view._detail_filtered_entries
-        if view._detail_filtered_entries is not None
-        else view.mods.get(view.current_modid, [])
-    )
+    try:
+        entries = (
+            view._detail_filtered_entries
+            if view._detail_filtered_entries is not None
+            else view.mods.get(view.current_modid, [])
+        )
+    except ShardLoadError:
+        return
     view.total_pages = max(1, (len(entries) + view.page_size - 1) // view.page_size)
     start = view.current_page * view.page_size
     page_entries = list(entries[start : start + view.page_size])

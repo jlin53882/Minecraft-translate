@@ -6,6 +6,7 @@ import flet as ft
 
 from app.ui import kit
 from app.ui.design import C
+from app.views.icon_preview.entries_cache import ShardLoadError
 from app.views.icon_preview.mod_row import ModRow
 
 
@@ -95,7 +96,12 @@ class IconPreviewListMixin:
         if neighbors and run_task is not None:
 
             async def _warm():
-                await asyncio.to_thread(warm, neighbors)
+                try:
+                    await asyncio.to_thread(warm, neighbors)
+                except ShardLoadError:
+                    # ModEntryStore has already invalidated the source and
+                    # queued a single rebuild for the owning view.
+                    return
 
             run_task(_warm)
 
@@ -105,13 +111,16 @@ class IconPreviewListMixin:
         while len(pool) < len(modids):
             pool.append(ModRow(self._open_mod_detail))
         scanning = getattr(self, "_scan_partial", False)
-        for row, modid in zip(pool, modids, strict=False):
-            entries = self.mods[modid]
-            # 掃描中的部分結果還沒有譯文對照：只顯示筆數，不顯示未翻譯數
-            untranslated = (
-                None if scanning else sum(1 for e in entries if not e.zh_tw.strip())
-            )
-            row.bind(modid, len(entries), untranslated)
+        try:
+            for row, modid in zip(pool, modids, strict=False):
+                entries = self.mods[modid]
+                # 掃描中的部分結果還沒有譯文對照：只顯示筆數，不顯示未翻譯數
+                untranslated = (
+                    None if scanning else sum(1 for e in entries if not e.zh_tw.strip())
+                )
+                row.bind(modid, len(entries), untranslated)
+        except ShardLoadError:
+            return
         self.mod_list_view.controls = pool[: len(modids)]
         self._update_page_bar_for_mods()
         self._update_list_area(self.mod_list_view)
@@ -268,7 +277,10 @@ class IconPreviewListMixin:
     def _do_detail_search(self):
         """實際執行 detail 搜尋（在 debounce 延遲後執行）"""
         keyword = self._detail_search_text.strip().lower()
-        entries = self.mods.get(self.current_modid, [])
+        try:
+            entries = self.mods.get(self.current_modid, [])
+        except ShardLoadError:
+            return
         total = len(entries)
 
         if not keyword:
