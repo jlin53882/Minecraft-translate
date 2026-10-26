@@ -488,3 +488,220 @@ def test_changed_options_redraw_the_filter_card(view, monkeypatch):
     _settle(view._page)
 
     assert view.entries.filter_card in regions
+
+
+# ------------------------------------------------------------------ 搜尋：清單先、選項後
+def _two_mod_view(view, db_path):
+    """加入第二個模組，讓搜尋後的模組選項真的會縮小。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "bar", "item.bar.001", "Other text", "其他文字")],
+    )
+    db.close()
+    view._invalidate_database_snapshots()
+    view.entries.refresh()
+    view._request_panel_refresh("entries")
+    _settle(view._page)
+
+
+def test_search_shows_the_list_before_the_filter_options(view, db_path, monkeypatch):
+    _two_mod_view(view, db_path)
+    entries = view.entries
+    events: list[str] = []
+    for name, label in (
+        ("list_entries", "list-query"),
+        ("filter_option_values", "options-query"),
+    ):
+        original = getattr(TranslationDB, name)
+
+        def wrapper(self, *args, _o=original, _l=label, **kwargs):
+            events.append(_l)
+            return _o(self, *args, **kwargs)
+
+        monkeypatch.setattr(TranslationDB, name, wrapper)
+    for name, label in (
+        ("apply_refresh_snapshot", "list-applied"),
+        ("apply_options_snapshot", "options-applied"),
+    ):
+        original = getattr(entries, name)
+
+        def hook(*args, _o=original, _l=label, **kwargs):
+            events.append(_l)
+            return _o(*args, **kwargs)
+
+        monkeypatch.setattr(entries, name, hook)
+    events.clear()
+
+    entries.search.value = "Other"
+    entries._apply_search(entries.search)
+    _settle(view._page)
+
+    assert [r.key for r in entries.rows] == ["item.bar.001"]
+    assert events.index("list-applied") < events.index("options-query")
+    assert events.index("options-query") < events.index("options-applied")
+    assert [o.key for o in entries.mod_dd.options] == ["全部模組", "bar"]
+
+
+def test_filter_option_queries_run_in_a_worker(view, db_path, monkeypatch):
+    _two_mod_view(view, db_path)
+    threads = _record_threads(monkeypatch, "filter_option_values")
+    view.entries.search.value = "Other"
+    view.entries._apply_search(view.entries.search)
+    assert threads == []
+    _settle(view._page)
+    assert threads and MAIN not in threads
+
+
+def test_unchanged_filter_options_do_not_redraw_the_filter_card(
+    view, db_path, monkeypatch
+):
+    entries = view.entries
+    regions: list[tuple] = []
+    original = entries_panel.update_regions
+    monkeypatch.setattr(
+        entries_panel,
+        "update_regions",
+        lambda *controls: (regions.append(controls), original(*controls))[1],
+    )
+
+    entries.search.value = "Text 1"
+    entries._apply_search(entries.search)
+    _settle(view._page)
+    regions.clear()
+
+    entries.search.value = "Text 10"  # 模組與來源選項和上一次相同
+    entries._apply_search(entries.search)
+    _settle(view._page)
+
+    assert entries.total > 0
+    assert all(entries.filter_card not in controls for controls in regions)
+
+
+def test_filter_options_loader_keeps_only_the_latest_request():
+    from app.views.moddb.filter_options_loader import FilterOptionsLoader
+
+    page = _scheduled_page()
+    gate = threading.Event()
+    loaded: list[str] = []
+    applied: list[tuple[str, dict]] = []
+
+    def load(payload, interrupt):
+        loaded.append(payload)
+        gate.wait(5)
+        return {"payload": payload}
+
+    loader = FilterOptionsLoader(
+        page, load, lambda payload, snapshot: applied.append((payload, snapshot))
+    )
+    loader.request("a")
+    loader.request("b")  # a 還在跑：b、c 只保留最新的 c
+    loader.request("c")
+    gate.set()
+    _settle(page)
+
+    assert loaded == ["a", "c"]
+    assert applied == [("c", {"payload": "c"})]
+    assert loader.running is False
+
+
+def test_filter_options_loader_discards_results_after_cancel():
+    from app.views.moddb.filter_options_loader import FilterOptionsLoader
+
+    page = _scheduled_page()
+    gate = threading.Event()
+    applied: list[str] = []
+    loader = FilterOptionsLoader(
+        page,
+        lambda payload, interrupt: (gate.wait(5), {})[1],
+        lambda payload, snapshot: applied.append(payload),
+    )
+    loader.request("a")
+    loader.cancel()
+    gate.set()
+    _settle(page)
+    assert applied == []
+
+
+def test_stale_filter_options_are_not_applied_after_the_query_changed(
+    view, db_path, monkeypatch
+):
+    _two_mod_view(view, db_path)
+    entries = view.entries
+    applied: list[dict] = []
+    original = entries.apply_options_snapshot
+    monkeypatch.setattr(
+        entries,
+        "apply_options_snapshot",
+        lambda snapshot: (applied.append(snapshot), original(snapshot))[1],
+    )
+    entries.search.value = "Other"
+    entries._apply_search(entries.search)
+    assert view._page.operation_registry.wait_for_idle(timeout=5)
+    view._page._run_all_tasks()  # 第一階段的清單套用；選項的背景查詢隨後開始
+    entries.query = "Text"  # 選項結果回來之前，搜尋條件又變了
+    _settle(view._page)
+
+    assert applied == []
+    assert [o.key for o in entries.mod_dd.options] == ["全部模組", "bar", "foo"]
+
+
+def test_newer_filter_request_interrupts_the_running_query(view, monkeypatch):
+    """舊查詢被中斷，結果不顯示；最後顯示的是最新條件的清單。"""
+    from app.services_impl.moddb_service import QueryCancelled
+
+    entries = view.entries
+    original = moddb_view.load_entries_filter_snapshot
+    seen: list[str] = []
+    first_started = threading.Event()
+
+    def load(settings, request, interrupt=None):
+        query = request["criteria"].query
+        seen.append(query)
+        if query == "Text 1" and not first_started.is_set():
+            first_started.set()
+            # 模擬還在掃描：等較新的請求把它中斷
+            assert interrupt is not None
+            for _ in range(500):
+                if interrupt.cancelled:
+                    raise QueryCancelled
+                threading.Event().wait(0.01)
+        return original(settings, request, interrupt)
+
+    monkeypatch.setattr(moddb_view, "load_entries_filter_snapshot", load)
+    entries.search.value = "Text 1"
+    entries._apply_search(entries.search)
+    assert first_started.wait(5)
+    entries.search.value = "Text 2"
+    entries._apply_search(entries.search)
+    _settle(view._page)
+
+    assert seen == ["Text 1", "Text 2"]
+    assert entries.query == "Text 2"
+    assert entries.rows and all("2" in r.en_us for r in entries.rows)
+    assert entries.refresh_indicator.visible is False
+
+
+def test_search_typing_burst_queries_once_after_the_pause(view, monkeypatch):
+    entries = view.entries
+    scheduled: list = []
+    entries._search_debounce = SimpleNamespace(
+        call=lambda fn, *args: scheduled.append(lambda: fn(*args)),
+        cancel=lambda: scheduled.clear(),
+    )
+    threads = _record_threads(monkeypatch, "list_entries")
+    for text in ("T", "Te", "Tex", "Text 9"):
+        entries.search.value = text
+        entries._on_search_input(SimpleNamespace(control=entries.search))
+    _settle(view._page)
+    assert threads == []  # 停筆前沒有任何查詢
+
+    scheduled[-1]()  # 只有最後一次輸入的排程會真的執行
+    _settle(view._page)
+    assert len(threads) == 1 and MAIN not in threads
+    assert entries.query == "Text 9"
+
+
+def test_search_debounce_is_short_enough_to_feel_immediate():
+    # 舊查詢會被新條件中斷（QueryInterrupt），縮短等待不會造成每個字元都查詢的堆積
+    assert entries_panel.SEARCH_DEBOUNCE_SECONDS <= 0.25

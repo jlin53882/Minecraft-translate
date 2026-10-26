@@ -5,8 +5,11 @@ UI 不直接碰 SQL；資料庫存取都經過 ``translation_tool.translation_db
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
+import sqlite3
+import threading
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -188,21 +191,76 @@ def open_database(
     return open_db(settings or current_settings(), create=create, readonly=readonly)
 
 
+class QueryCancelled(Exception):
+    """背景讀取在開始前或執行中被較新的請求取代。"""
+
+
+class QueryInterrupt:
+    """讓其他執行緒中斷 worker 唯讀連線上正在跑的查詢。
+
+    搜尋時每個字都可能換條件；舊查詢要掃過整個版本（數十萬筆時數百毫秒），
+    讓它跑完只會擋住新的查詢。``cancel()`` 可在任何執行緒呼叫：連線還沒開就讓
+    ``raise_if_cancelled()`` 擋下，已經在查就用 SQLite 的 ``interrupt``。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._conn: sqlite3.Connection | None = None
+        self.cancelled = False
+
+    def attach(self, conn: sqlite3.Connection) -> None:
+        """登記要被中斷的連線（讀取快照開啟後呼叫）。"""
+        with self._lock:
+            self._conn = conn
+
+    def detach(self) -> None:
+        """連線即將關閉：之後的 ``cancel()`` 只會設旗標。"""
+        with self._lock:
+            self._conn = None
+
+    def cancel(self) -> None:
+        """標記取消，並中斷連線上進行中的查詢。"""
+        with self._lock:
+            self.cancelled = True
+            conn = self._conn
+            if conn is not None:
+                with contextlib.suppress(sqlite3.Error):
+                    conn.interrupt()
+
+    def raise_if_cancelled(self) -> None:
+        """已被取消就丟 ``QueryCancelled``。"""
+        if self.cancelled:
+            raise QueryCancelled
+
+
 @contextmanager
 def moddb_read_snapshot(
     settings: DbSettings | None = None,
+    *,
+    interrupt: QueryInterrupt | None = None,
 ) -> Iterator[TranslationDB | None]:
     """開啟 worker 專用的唯讀連線，並在一個讀取交易內提供一致的快照。
 
     資料庫不存在時 yield ``None``。離開時一律 rollback 並關閉連線；交易歸這個
-    context manager 所有，呼叫端不碰 ``_conn``。
+    context manager 所有，呼叫端不碰 ``_conn``。``interrupt`` 讓其他執行緒可以中斷
+    這條連線上的查詢；查詢被中斷時 ``sqlite3.OperationalError`` 會轉成 ``QueryCancelled``。
     """
     db = open_database(create=False, settings=settings, readonly=True)
     try:
         if db is not None:
+            if interrupt is not None:
+                interrupt.raise_if_cancelled()
+                interrupt.attach(db._conn)
             db._conn.execute("BEGIN")
-        yield db
+        try:
+            yield db
+        except sqlite3.OperationalError as exc:
+            if interrupt is not None and interrupt.cancelled:
+                raise QueryCancelled from exc
+            raise
     finally:
+        if interrupt is not None:
+            interrupt.detach()
         if db is not None:
             try:
                 if db._conn.in_transaction:

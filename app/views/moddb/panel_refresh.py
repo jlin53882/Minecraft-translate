@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from app.services_impl.moddb_service import (
+    QueryInterrupt,
     database_data_generation,
     moddb_read_snapshot,
     version_choices,
@@ -19,7 +20,9 @@ from app.views.moddb.entry_filters import database_identity
 ALL_MODS = "__all__"
 
 
-def load_panel_snapshot(key: str, request: dict, settings) -> dict:
+def load_panel_snapshot(
+    key: str, request: dict, settings, interrupt: QueryInterrupt | None = None
+) -> dict:
     """Read tab data from a worker-owned, read-only connection."""
     snapshot = {
         "key": key,
@@ -30,7 +33,7 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
         ),
     }
     snapshot["effective_source_codes"] = ()
-    with moddb_read_snapshot(settings) as db:
+    with moddb_read_snapshot(settings, interrupt=interrupt) as db:
         snapshot["identity"] = _database_identity(db)
         snapshot["source_catalog"] = source_catalog_for(db)
         snapshot["db_generation"] = database_data_generation(db)
@@ -116,14 +119,21 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
     return snapshot
 
 
-def load_entries_filter_snapshot(settings, request: dict) -> dict:
-    """Query a filtered page on a worker-owned read-only SQLite snapshot."""
-    with moddb_read_snapshot(settings) as db:
+def load_entries_filter_snapshot(
+    settings, request: dict, interrupt: QueryInterrupt | None = None
+) -> dict:
+    """Query a filtered page on a worker-owned read-only SQLite snapshot.
+
+    ``interrupt`` 讓較新的請求取代這次查詢（拋出 ``QueryCancelled``）。
+    """
+    with moddb_read_snapshot(settings, interrupt=interrupt) as db:
         return _entries_filter_snapshot(db, settings, request)
 
 
 def _entries_filter_snapshot(db, settings, request: dict) -> dict:
-    page_only = bool(request.get("page_only"))
+    # 只換頁、或只有篩選條件變了（選項稍後由 ``load_entries_options_snapshot`` 補上）：
+    # 版本／模組／類型沒換，清單直接用請求裡的條件查詢，不重算選項。
+    page_only = bool(request.get("page_only")) or bool(request.get("defer_options"))
     snapshot = {
         "key": "entries",
         "identity": _database_identity(db),
@@ -131,6 +141,8 @@ def _entries_filter_snapshot(db, settings, request: dict) -> dict:
         "db_generation": None,
         "filter_only": True,
         "filter_options_ready": not page_only,
+        "options_deferred": bool(request.get("defer_options"))
+        and not request.get("page_only"),
         "keep_scroll": bool(request.get("keep_scroll")),
         "versions": [],
         "version": request.get("version"),
@@ -167,6 +179,44 @@ def _entries_filter_snapshot(db, settings, request: dict) -> dict:
         filter_options_are_filtered=scope["options_are_filtered"],
         mod_id=scope["mod_id"],
         kind=scope["kind"],
+    )
+    return snapshot
+
+
+def load_entries_options_snapshot(
+    settings, request: dict, interrupt: QueryInterrupt | None = None
+) -> dict:
+    """第二階段：目前篩選條件下的模組／來源選項（在 worker 的唯讀連線讀取）。
+
+    清單已先顯示；這裡才做搜尋等條件需要的整個版本掃描。``scope_changed`` 表示版本、模組、
+    類型或來源在解析後和請求不同（例如來源選項已不存在），呼叫端要改走完整重載。
+    """
+    snapshot = {"key": "entries", "options_only": True, "error": None}
+    with moddb_read_snapshot(settings, interrupt=interrupt) as db:
+        if db is None:
+            return snapshot
+        snapshot["identity"] = _database_identity(db)
+        snapshot["source_catalog"] = source_catalog_for(db)
+        scope = _resolve_entries_scope(db, request, settings)
+    requested = request["criteria"]
+    resolved = scope["criteria"]
+    snapshot.update(
+        versions=scope["versions"],
+        version=scope["version"],
+        mods=scope["mods"],
+        kinds=scope["kinds"],
+        effective_source_codes=scope["source_codes"],
+        source=scope["source"],
+        filter_options_are_filtered=scope["options_are_filtered"],
+        mod_id=scope["mod_id"],
+        kind=scope["kind"],
+        scope_changed=(
+            resolved.version,
+            resolved.mod_id,
+            resolved.kind,
+            resolved.source,
+        )
+        != (requested.version, requested.mod_id, requested.kind, requested.source),
     )
     return snapshot
 

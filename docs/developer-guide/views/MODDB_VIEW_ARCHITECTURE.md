@@ -100,6 +100,10 @@ EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftSto
 
 `EntriesPanel` 的換頁與篩選透過 `ModDbView._on_entries_filter_changed` 發出背景快照：只換頁時 `page_only` 為真，worker 走 `load_entries_filter_snapshot` 且不重算下拉選項；篩選條件改變時才重算選項（`filter_options_ready`）。`apply_filter_options` 回傳選項或選值是否改變，沒有改變就不標記 `_options_dirty`，篩選列因此不會因存檔、還原或翻頁而重畫。
 
+只有篩選條件改變（搜尋、狀態、來源、審核狀態、智慧校對狀態、進階條件）時，`refresh_entry_filter(defer_options=True)` 讓 worker 只讀清單與總筆數（第一段，`options_deferred`）；`ModDbView._continue_filter_options` 在清單套用後把第二段交給 `FilterOptionsLoader`（`app/views/moddb/filter_options_loader.py`），它在 worker 呼叫 `panel_refresh.load_entries_options_snapshot`，結果回到畫面執行緒後由 `ModDbView._apply_entries_options` 檢查資料世代與目前條件，才經 `EntriesPanel.apply_options_snapshot` 套用並以 `flush_filter_options` 只重畫篩選列。解析後的版本／模組／類型／來源和請求不同（`scope_changed`）時改走完整重載。載入器同一時間只跑一個查詢、只保留最新 payload。
+
+條目查詢的 worker 連線由 `moddb_read_snapshot(interrupt=QueryInterrupt())` 開啟：較新的請求到來時 `_request_panel_refresh` 對進行中的查詢呼叫 `cancel()`（SQLite `interrupt` 加上 `cancel_scope` 讓平行掃描的各區間停下），worker 回報 `cancelled`，`_reload_after_cancel` 以目前條件重新載入；被中斷的結果從不顯示。
+
 `SmartReviewDialog` 切換到「審查」時只在目前批次尚未載入時啟動 `SmartReviewReviewer.load_run` 或 `SmartReviewBatchReviewer.load_run`；兩者的資料庫讀取都透過 `SmartReviewContext.run_background`，分頁本身先立即顯示載入狀態。`SmartReviewHistory.refresh` 的批次清單與「載入更多」也透過 `run_background`，以 request sequence、資料庫身分與視窗世代丟棄晚到結果；因此切換分頁不會被歷史 JSON／SQLite 讀取卡住，也不會用舊清單覆蓋新請求。
 
 智慧校對有四個語意不同的狀態層，標籤各自維護、不互相硬併：（1）候選層級 `SmartReviewStatus`，條目列標記 `MARK_STYLES` 與審查頁 `FILTERS` 各自顯示文字，`tests/test_smart_review_status_contract.py` 要求兩者加上明確的「不標記／不可篩選」清單後涵蓋全部成員；（2）執行批次層級 `SmartReviewRunStatus`（`smart_review_run_status.py`），`run_status_label` 與 `run_status_color` 是執行頁、歷史頁與背景任務提示共用的單一來源，已取消與部分完成同為 gold；（3）批量審查單筆結果 `BatchOutcome`（`smart_review_batch_outcome.py`），`summarize_outcomes` 把每筆結果恰好歸入套用、保留、略過、失敗其中一組，未知字面值計入略過，所以「完成 N / M」恆等於分類加總；（4）條目生效審核狀態 `REVIEW_STATUS_LABELS`（未審核、人工已審核；歷史狀態 `legacy_unknown` 與人工已審核同標籤），與前三層無關。

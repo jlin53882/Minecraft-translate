@@ -331,10 +331,13 @@ def refresh_entry_filter(
     background: bool = True,
     page_only: bool = False,
     keep_scroll: bool = False,
+    defer_options: bool = False,
 ) -> None:
     """重新載入指定結果頁，必要時把篩選變更交給上層處理。
 
     ``page_only`` 表示只有頁碼變了（篩選條件與選項都沒變），``keep_scroll`` 表示維持清單的捲動位置。
+    ``defer_options`` 表示只有篩選條件變了（版本、模組、類型都沒換）：先顯示清單，
+    模組／來源選項（需要另一次掃描）稍後在背景補上。
     """
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
@@ -345,6 +348,7 @@ def refresh_entry_filter(
             background=background,
             page_only=page_only,
             keep_scroll=keep_scroll,
+            defer_options=defer_options,
         )
         return
     panel._load_list(page=page, keep_selection=keep_selection, keep_scroll=keep_scroll)
@@ -352,7 +356,7 @@ def refresh_entry_filter(
 
 
 def on_advanced_change(panel) -> None:
-    refresh_entry_filter(panel)
+    refresh_entry_filter(panel, defer_options=True)
 
 
 def open_batch_replace(panel, _e=None) -> None:

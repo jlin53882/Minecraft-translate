@@ -9,6 +9,8 @@ from __future__ import annotations
 import flet as ft
 
 from app.services_impl.moddb_service import (
+    QueryCancelled,
+    QueryInterrupt,
     TranslationDB,
     current_settings,
     database_data_generation,
@@ -25,9 +27,11 @@ from app.ui import kit
 from app.ui.page_post import has_background_scheduler
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.entries_panel import EntriesPanel
+from app.views.moddb.filter_options_loader import FilterOptionsLoader
 from app.views.moddb.overview_panel import OverviewPanel
 from app.views.moddb.panel_refresh import (
     load_entries_filter_snapshot,
+    load_entries_options_snapshot,
     load_panel_snapshot,
 )
 from app.views.moddb.scan_panel import ScanPanel
@@ -108,6 +112,11 @@ class ModDbView(ft.Column):
             key: True for key, _label in TABS if key != "overview"
         }
         self._pending_panel_results = {}
+        self._entries_settings = None  # 最近一次條目載入用的設定（第二階段選項沿用）
+        self._entries_interrupt: QueryInterrupt | None = None  # 進行中的條目查詢
+        self._options_loader = FilterOptionsLoader(
+            page, self._load_entries_options, self._apply_entries_options
+        )
         self.tab = "overview"
 
         self.overview = OverviewPanel(
@@ -435,6 +444,9 @@ class ModDbView(ft.Column):
         """Load the selected tab's database data off the UI thread."""
         if key in self._panel_refresh_loading:
             self._panel_refresh_needed[key] = True
+            if key == "entries" and self._entries_interrupt is not None:
+                # 條件又變了：舊查詢的結果不會顯示，不必等它掃完整個版本
+                self._entries_interrupt.cancel()
             if self.tab == key and message is None:
                 self._safe_update()
             return
@@ -449,6 +461,8 @@ class ModDbView(ft.Column):
                 self._safe_update()
             return
         settings = current_settings()
+        if key == "entries":
+            self._entries_settings = settings
         signature = (str(settings.resolved_path()), settings.priority)
         data_revision = self._data_revision
         self._panel_refresh_generation[key] += 1
@@ -491,14 +505,22 @@ class ModDbView(ft.Column):
     ):
         """Run database reads in a worker, then apply their snapshot on the UI loop."""
 
+        interrupt = QueryInterrupt() if key == "entries" else None
+        if interrupt is not None:
+            self._entries_interrupt = interrupt
+
         def load() -> None:
             try:
                 if key == "entries" and request.get("filter_only"):
-                    snapshot = load_entries_filter_snapshot(settings, request)
+                    snapshot = load_entries_filter_snapshot(
+                        settings, request, interrupt
+                    )
                 else:
-                    snapshot = load_panel_snapshot(key, request, settings)
+                    snapshot = load_panel_snapshot(key, request, settings, interrupt)
                 if key == "entries":
                     self._mark_snapshot_generation(snapshot)
+            except QueryCancelled:
+                snapshot = {"key": key, "cancelled": True}
             except Exception as exc:  # noqa: BLE001 - 顯示載入錯誤並恢復頁籤
                 log_debug(f"Mod DB {key} 頁籤資料載入失敗：{exc!r}")
                 snapshot = {
@@ -511,6 +533,9 @@ class ModDbView(ft.Column):
                 }
 
             async def apply_on_ui() -> None:
+                if snapshot.get("cancelled"):
+                    self._reload_after_cancel(key, generation, panel)
+                    return
                 self._apply_panel_refresh(
                     key,
                     generation,
@@ -615,6 +640,54 @@ class ModDbView(ft.Column):
         self._panel_refresh_needed[key] = bool(snapshot.get("error"))
         if self.tab == key:
             self._update_panel(key)
+        self._continue_filter_options(key, snapshot, request, data_revision)
+
+    def _continue_filter_options(
+        self, key: str, snapshot: dict, request: dict, data_revision: int
+    ) -> None:
+        """清單快照套用後：條件變更的第二階段（篩選選項）排進背景；完整快照已帶選項就取消等待中的。"""
+        if key != "entries":
+            return
+        if snapshot.get("options_deferred"):
+            self._options_loader.request((request, data_revision))
+        else:
+            self._options_loader.cancel()
+
+    def _reload_after_cancel(self, key: str, generation: int, panel) -> None:
+        """查詢被較新的請求中斷：舊結果不顯示，以目前的條件重新載入。"""
+        if generation != self._panel_refresh_generation[key]:
+            return
+        self._panel_refresh_loading.discard(key)
+        self._panel_refresh_needed[key] = True
+        self._hide_indicator(panel)
+        if self.tab == key:
+            self._request_panel_refresh(key)
+
+    def _load_entries_options(self, payload, interrupt: QueryInterrupt) -> dict:
+        """第二階段（worker）：目前條件下的模組／來源選項。"""
+        request, _data_revision = payload
+        return load_entries_options_snapshot(self._entries_settings, request, interrupt)
+
+    def _apply_entries_options(self, payload, snapshot: dict) -> None:
+        """第二階段結果回到畫面執行緒：條件沒變才套用，選項沒變就不重畫篩選列。"""
+        request, data_revision = payload
+        if snapshot.get("error") or data_revision != self._data_revision:
+            return
+        if self.tab != "entries":
+            self._panel_refresh_needed["entries"] = True  # 回到這頁時重新載入
+            return
+        try:
+            current = self._panel_refresh_request("entries")
+        except ValueError:
+            return
+        if current["criteria"] != request["criteria"]:
+            return  # 條件又變了：新請求的清單與選項各自會再載入
+        if snapshot.get("scope_changed"):
+            self._invalidate_panel("entries")
+            self._request_panel_refresh("entries")
+            return
+        if self.entries.apply_options_snapshot(snapshot):
+            self.entries.flush_filter_options()
 
     def _validate_entries_snapshot(self, request: dict, snapshot: dict, panel) -> bool:
         """拒絕資料庫身分或資料代次過期的 Entries 快照。"""
@@ -631,6 +704,7 @@ class ModDbView(ft.Column):
         if identity_stale:
             self._panel_refresh_needed["entries"] = True
             self.entries._filter_only_refresh = False
+            self.entries._defer_options_refresh = False
             self.entries._sync_database_identity(None)
             self.reload_db()
             self._hide_indicator(panel)
@@ -683,6 +757,7 @@ class ModDbView(ft.Column):
                 "page": self.entries.pager.current_page,
                 "filter_only": self.entries._filter_only_refresh,
                 "page_only": self.entries._page_only_refresh,
+                "defer_options": self.entries._defer_options_refresh,
                 "keep_scroll": self.entries._refresh_keep_scroll,
                 "fallback_index": self.entries._refresh_fallback_index,
                 "identity": self.entries._db_identity,
@@ -755,10 +830,12 @@ class ModDbView(ft.Column):
         background: bool = True,
         page_only: bool = False,
         keep_scroll: bool = False,
+        defer_options: bool = False,
     ) -> None:
         """在 worker 重新載入條目結果頁；沒有背景排程的頁面（測試）同步載入。
 
         ``page_only``：只換頁，篩選條件與下拉選項都沒變，worker 不必重算選項。
+        ``defer_options``：只有篩選條件變了；清單先顯示，模組／來源選項隨後在背景補上。
         ``keep_scroll``：儲存／還原後留在原本的捲動位置。
         """
         self._invalidate_panel("entries")
@@ -766,6 +843,9 @@ class ModDbView(ft.Column):
         entries._refresh_keep_selection = keep_selection
         entries._filter_only_refresh = background and not full_refresh
         entries._page_only_refresh = page_only and entries._filter_only_refresh
+        entries._defer_options_refresh = (
+            defer_options and entries._filter_only_refresh and not page_only
+        )
         entries._refresh_keep_scroll = keep_scroll
         if self.tab != "entries":
             return
@@ -788,6 +868,8 @@ class ModDbView(ft.Column):
         self._overview_needs_refresh = True
         self.entries._filter_only_refresh = False
         self.entries._page_only_refresh = False
+        self.entries._defer_options_refresh = False
+        self._options_loader.cancel()
         for key in self._panel_refresh_needed:
             self._panel_refresh_needed[key] = True
         self._pending_panel_results.clear()
@@ -798,6 +880,7 @@ class ModDbView(ft.Column):
         if key == "entries":
             self.entries._filter_only_refresh = False
             self.entries._page_only_refresh = False
+            self.entries._defer_options_refresh = False
 
     def _refresh_active_panel(self) -> None:
         """資料庫更新後刷新目前頁籤（有背景排程時在 worker 讀取，結果以 ticket 丟棄過期者）。"""
@@ -822,6 +905,7 @@ class ModDbView(ft.Column):
             self._panel_refresh_generation[key] += 1
         self._panel_refresh_loading.clear()
         self._pending_panel_results.clear()
+        self._options_loader.cancel()
         self.scan.will_unmount()
         self.translate.will_unmount()
 

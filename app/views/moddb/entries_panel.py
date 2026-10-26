@@ -83,7 +83,9 @@ from translation_tool.utils.log_unit import (
 
 PAGE_SIZE = 50
 LOADING_OPACITY = 0.55  # 背景載入中清單的亮度
-SEARCH_DEBOUNCE_SECONDS = 0.35  # 停止輸入多久後自動搜尋
+SEARCH_DEBOUNCE_SECONDS = (
+    0.22  # 停止輸入多久後自動搜尋（舊查詢會被新條件中斷，不會堆積）
+)
 EDIT_DEBOUNCE_SECONDS = 0.15  # 停止輸入多久後重畫格式提示與影響預覽
 __all__ = ["EntriesPanel", "SourceFilter"]
 ALL_REVIEW_STATES = "__all__"
@@ -112,6 +114,7 @@ class EntriesPanel(ft.Column):
         self._refresh_keep_selection = True
         self._filter_only_refresh = False
         self._page_only_refresh = False
+        self._defer_options_refresh = False
         self._refresh_keep_scroll = False
         self._refresh_fallback_index: int | None = None
         self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
@@ -801,17 +804,17 @@ class EntriesPanel(ft.Column):
         refresh_entry_filter(self)
 
     def _on_source(self) -> None:
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_smart_review_filter(self) -> None:
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_review_status(self) -> None:
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_state(self, key: str) -> None:
         self.state = key
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_search_field(self, e) -> None:
         """切換搜尋內容欄位，讓目前搜尋文字只比對指定欄位。"""
@@ -819,7 +822,7 @@ class EntriesPanel(ft.Column):
         if value == self.query_field:
             return
         self.query_field = value
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_search_input(self, e) -> None:
         """輸入時即時搜尋：停止輸入一小段時間後才查詢，避免每個字都打資料庫。"""
@@ -833,13 +836,13 @@ class EntriesPanel(ft.Column):
         query = (control.value or "").strip()
         if query != self.query:
             self.query = query
-            refresh_entry_filter(self)
+            refresh_entry_filter(self, defer_options=True)
 
     def _on_search(self, e) -> None:
         """按 Enter：立即以目前輸入搜尋（取消尚在等待的即時搜尋）。"""
         self._search_debounce.cancel()
         self.query = (e.control.value or "").strip()
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_page(self, page: int) -> None:
         refresh_entry_filter(self, page=page, keep_selection=False, page_only=True)
@@ -1092,6 +1095,19 @@ class EntriesPanel(ft.Column):
                 f"只顯示本次機翻「特殊字元與原文不一致」的 {len(self.entry_ids):,} 筆"
                 "（AI 譯文尚未寫入，已預填在譯文框；修正後儲存即可，或按「清除篩選」）"
             )
+
+    def apply_options_snapshot(self, snapshot: dict) -> bool:
+        """套用第二階段載入的篩選選項；回傳篩選列是否有顯示內容改變（沒變就不必重畫）。"""
+        if apply_filter_options(self, snapshot):
+            self._options_dirty = True
+            return True
+        return False
+
+    def flush_filter_options(self) -> None:
+        """只重畫篩選列（第二階段選項套用後）。"""
+        if self._options_dirty:
+            self._options_dirty = False
+            update_regions(self.filter_card)
 
     def flush(self) -> None:
         """把整個頁籤的變更送到畫面。

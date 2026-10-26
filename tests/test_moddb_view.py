@@ -302,9 +302,9 @@ def test_database_tab_refreshes_and_entry_filters_run_in_worker(db_path, monkeyp
     filter_connections = []
     original_filter_snapshot = moddb_view.load_entries_filter_snapshot
 
-    def record_filter_snapshot(settings, request):
+    def record_filter_snapshot(settings, request, interrupt=None):
         filter_connections.append((settings, threading.current_thread().name))
-        return original_filter_snapshot(settings, request)
+        return original_filter_snapshot(settings, request, interrupt)
 
     monkeypatch.setattr(
         moddb_view, "load_entries_filter_snapshot", record_filter_snapshot
@@ -342,6 +342,15 @@ def test_database_tab_refreshes_and_entry_filters_run_in_worker(db_path, monkeyp
         page._run_all_tasks()
         page._tasks.clear()
         assert [row.key for row in view.entries.rows] == ["item.foo.b"]
+        # 清單先顯示；模組選項（需要另一次掃描）稍後才在背景縮小
+        assert [option.key for option in view.entries.mod_dd.options] == [
+            "全部模組",
+            "bar",
+            "foo",
+        ]
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
         assert [option.key for option in view.entries.mod_dd.options] == [
             "全部模組",
             "foo",
