@@ -84,6 +84,16 @@ class TestFindLangJson:
 
         assert len(results) == 2
 
+    def test_find_lang_json_includes_data_language_sources(self, tmp_path):
+        """data 語言來源也要進入一般目錄掃描，輸出位置另由 writer 正規化。"""
+        from translation_tool.core.translatable_extractor import find_lang_json
+
+        path = tmp_path / "data" / "demo" / "lang" / "en_us.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{}", encoding="utf-8")
+
+        assert find_lang_json(tmp_path) == [path]
+
 
 class TestFindPatchouliJson:
     """測試 find_patchouli_json 函式"""

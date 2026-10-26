@@ -112,7 +112,15 @@ def find_lang_json(root: Path):
     回傳：
         Path 物件列表
     """
-    return list(root.rglob("assets/*/lang/*.json"))
+    # ``data/<namespace>/lang`` 也是掃描器接受的來源格式；輸出階段會
+    # 將標準語言檔正規化到資源包的 ``assets/<namespace>/lang``。不要在
+    # 這裡把 data 語言檔漏掉，否則一般目錄翻譯入口與 JAR/DB 掃描入口
+    # 會看到不同的候選集合。
+    paths = [
+        *root.rglob("assets/*/lang/*.json"),
+        *root.rglob("data/*/lang/*.json"),
+    ]
+    return sorted(set(paths), key=lambda path: path.as_posix().lower())
 
 
 def is_advancement_file(file_path: Path) -> bool:

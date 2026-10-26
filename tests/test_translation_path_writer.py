@@ -29,6 +29,19 @@ class TestMapLangOutputPath:
 
         assert result == src
 
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [("en_us.json", "zh_tw.json"), ("zh_tw.json", "zh_tw.json")],
+    )
+    def test_data_language_files_are_written_under_resource_pack_assets(
+        self, filename, expected
+    ):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path(f"data/demo/lang/{filename}")
+
+        assert map_lang_output_path(src) == Path(f"assets/demo/lang/{expected}")
+
     def test_map_different_case(self):
         """測試不同大小寫的 en_us"""
         from translation_tool.core.translation_path_writer import map_lang_output_path
