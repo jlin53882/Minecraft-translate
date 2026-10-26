@@ -346,6 +346,7 @@ def summarize(samples: list[dict]) -> dict:
         "server_ms",
         "first_patch_ms",
         "list_patch_ms",
+        "after_last_key_ms",
         "e2e_ms",
         "loop_block_ms",
     ):
@@ -477,6 +478,7 @@ class Driver:
         server_ms = None
         first_ms = None
         list_ms = None
+        after_key_ms = None
         if recvs and sends:
             first_recv = recvs[0]["t"]
             # 外殼每隔幾秒的 API Key 輪詢、寫入後 250ms 合併的外殼狀態刷新（整頁 patch）與這次操作的內容更新無關，不計入
@@ -494,6 +496,13 @@ class Driver:
             list_patches = [e for e in patches if e["control"] == "ListView"]
             if list_patches:
                 list_ms = round((list_patches[-1]["t"] - first_recv) * 1000, 1)
+                typed = [
+                    e for e in recvs if e.get("name") in ("keyboard_event", "change")
+                ]
+                if typed and list_patches[-1]["t"] >= typed[-1]["t"]:
+                    after_key_ms = round(
+                        (list_patches[-1]["t"] - typed[-1]["t"]) * 1000, 1
+                    )
         db_calls = [e for e in events if e["kind"] == "db"]
         db_summary: dict[str, float] = {}
         for call in db_calls:
@@ -534,6 +543,7 @@ class Driver:
             "server_ms": server_ms,
             "first_patch_ms": first_ms,
             "list_patch_ms": list_ms,
+            "after_last_key_ms": after_key_ms,
             "db_ms": db_top,
             "e2e_ms": e2e_ms,
             "action_ms": round((t_action_done - t0) * 1000, 1),

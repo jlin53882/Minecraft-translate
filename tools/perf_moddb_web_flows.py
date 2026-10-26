@@ -96,13 +96,12 @@ def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
     """關閉最上層對話框。
 
     語意樹在對話框開啟／關閉的瞬間會暫時是空的，或同時留著舊頁面的節點，所以不能只看頁面
-    外殼在不在：先等到看得到關閉按鈕再點，點完等「按鈕消失且外殼回來」，連續兩次確認才算關閉。
-    開啟後 2 秒內都沒出現按鈕、外殼也在，視為沒有對話框；8 秒內關不掉才改按 Escape。
+    外殼在不在：先等到看得到關閉按鈕再點，點完等「按鈕消失且外殼回來」才算關閉。
+    開啟後 2 秒內都沒出現按鈕、外殼也在，視為沒有對話框；15 秒內關不掉才改按 Escape。
     """
     region = [240, 20, 1440, 1100]
     started = time.time()
-    escape_at = started + 8
-    stable = 0
+    escape_at = started + 15
 
     def button():
         for label in labels:
@@ -115,24 +114,21 @@ def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
         return bool(ctx.find_all("Mod 資料庫", "button", "exact", [0, 0, 240, 1100]))
 
     clicked = False
-    while time.time() < started + 14:
+    # 語意節點很多的對話框（批量審核預覽）一次查詢要好幾秒，所以時限寬鬆，
+    # 點過之後只要看到「按鈕消失、外殼回來」一次就算關閉
+    while time.time() < started + 40:
         item = button()
         if item is not None:
-            stable = 0
             if time.time() - started > 0.4:
                 ctx.click_at(item[0], item[1])
                 clicked = True
                 ctx.pg.wait_for_timeout(500)
         elif shell() and (clicked or time.time() - started > 2.0):
-            stable += 1
-            if stable >= 2:
-                ctx.pg.wait_for_timeout(200)
-                return
-        else:
-            stable = 0
+            ctx.pg.wait_for_timeout(300)
+            return
         if time.time() > escape_at:
             ctx.pg.keyboard.press("Escape")
-            escape_at = time.time() + 2
+            escape_at = time.time() + 4
         time.sleep(0.15)
     raise ScenarioError("對話框關不掉")
 

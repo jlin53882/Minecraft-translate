@@ -49,7 +49,7 @@ FIND_JS = """
     else if (mode === 'exact') ok = t === text || first === text;
     else if (mode === 'start') ok = t.startsWith(text);
     else ok = t.includes(text);
-    if (ok) out.push([r.left + r.width / 2, r.top + r.height / 2, r.width, r.height, t.slice(0, 60)]);
+    if (ok) out.push([r.left + r.width / 2, r.top + r.height / 2, r.width, r.height, t.slice(0, 200)]);
   }
   out.sort((a, b) => (a[1] - b[1]) || (a[0] - b[0]));
   return out;
@@ -416,16 +416,6 @@ def s_search_incremental(ctx: Ctx) -> None:
         ctx.pg.keyboard.type(words[i % len(words)], delay=gap_ms)
 
     ctx.op("search_typing_slow", action, before=before, hot=min(ctx.hot, 4))
-    samples = ctx.drv.results.get("search_typing_slow", [])
-    adjusted = []
-    for sample, word in zip(samples, words, strict=False):
-        base = dict(sample)
-        typed_ms = (len(word) - 1) * gap_ms
-        for field in ("server_ms", "list_patch_ms"):
-            if base.get(field) is not None:
-                base[field] = round(max(0.0, base[field] - typed_ms), 1)
-        adjusted.append(base)
-    ctx.drv.results["search_typing_slow_after_last_key"] = adjusted
     ctx.set_search("")
     ctx.settle(900)
 
@@ -557,10 +547,18 @@ def print_table(output: dict) -> None:
         n: s for n, s in output["summary"].items() if "hot_list_patch_ms_median" in s
     }
     if listed:
-        print("\n清單內容最後一次 patch（收到事件 → ListView，ms）：")
+        print(
+            "\n清單內容最後一次 patch（收到事件 → ListView，ms；輸入類另列「最後一個字之後」）："
+        )
         for name, s in listed.items():
+            extra = ""
+            if "hot_after_last_key_ms_median" in s:
+                extra = (
+                    f"   最後一個字之後 med {s['hot_after_last_key_ms_median']:7.0f}"
+                    f"  p95 {s['hot_after_last_key_ms_p95']:7.0f}"
+                )
             print(
-                f"  {name:32} 熱 med {s['hot_list_patch_ms_median']:7.0f}  p95 {s['hot_list_patch_ms_p95']:7.0f}"
+                f"  {name:32} 熱 med {s['hot_list_patch_ms_median']:7.0f}  p95 {s['hot_list_patch_ms_p95']:7.0f}{extra}"
             )
     for name, s in output["summary"].items():
         if s.get("db_last_hot"):
