@@ -727,6 +727,42 @@ def test_reextract_replaces_wrapper_when_source_path_changes(tmp_path: Path):
     assert json.loads(extracted.read_text(encoding="utf-8"))["value"] == "new"
 
 
+def test_invalid_manifest_wrapper_cannot_escape_output_directory(tmp_path: Path):
+    """Corrupt metadata must not make wrapper cleanup delete outside output."""
+    mods = tmp_path / "mods"
+    jar = _outer_jar(
+        mods / "guide.jar",
+        direct={"data/shared/lang/en_us.json": '{"value":"current"}'},
+    )
+    output = tmp_path / "out"
+    outside = tmp_path / "escape_extracted"
+    outside.mkdir()
+    marker = outside / "do-not-delete.txt"
+    marker.write_text("keep", encoding="utf-8")
+    manifest = output.parent / ".out.extraction_manifest"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sources": [
+                    {
+                        "path": str(jar.resolve()),
+                        "wrapper": f"../{outside.name}",
+                        "size": jar.stat().st_size,
+                        "mtime_ns": jar.stat().st_mtime_ns,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    assert marker.read_text(encoding="utf-8") == "keep"
+    assert (output / "guide_extracted/data/shared/lang/en_us.json").exists()
+
+
 def test_nested_walker_honors_cancellation_before_reading(tmp_path: Path):
     from translation_tool.utils.nested_archive import walk_nested_archives
     from translation_tool.utils.zip_safety import ZipReadBudget

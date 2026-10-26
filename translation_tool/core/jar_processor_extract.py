@@ -60,6 +60,23 @@ _EXTRACTED_WRAPPER_RE = re.compile(r"^.+_extracted(?:_\w+)?$", re.IGNORECASE)
 _EXTRACTION_MANIFEST_NAME = "extraction_manifest"
 
 
+def _is_safe_extracted_wrapper_name(wrapper: str) -> bool:
+    """Return whether ``wrapper`` is a single generated directory name.
+
+    The ownership manifest is generated locally, but it is still persisted
+    metadata and may be truncated or edited independently of the extraction
+    output.  Never let a manifest value turn the cleanup target into an
+    absolute path or a path containing traversal components.
+    """
+    return (
+        bool(_EXTRACTED_WRAPPER_RE.fullmatch(wrapper))
+        and wrapper not in {".", ".."}
+        and not any(separator in wrapper for separator in ("/", "\\", ":"))
+        and Path(wrapper).name == wrapper
+        and not Path(wrapper).is_absolute()
+    )
+
+
 def get_file_hash(data: bytes) -> str:
     """計算資料的 SHA-256 雜湊值（16進位字串）。
 
@@ -198,7 +215,7 @@ def _load_extraction_manifest(
         if (
             not isinstance(source_path, str)
             or not isinstance(wrapper, str)
-            or not _EXTRACTED_WRAPPER_RE.fullmatch(wrapper)
+            or not _is_safe_extracted_wrapper_name(wrapper)
             or (size is not None and not isinstance(size, int))
             or (mtime_ns is not None and not isinstance(mtime_ns, int))
         ):
