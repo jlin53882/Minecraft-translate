@@ -77,6 +77,7 @@ def _walk_sniffed_members(
     """
     jar_name = os.path.basename(jar_path)
     budget = ZipReadBudget(label=jar_name)
+    seen_members: set[str] = set()
 
     def visit_archive(
         current: zipfile.ZipFile,
@@ -95,12 +96,13 @@ def _walk_sniffed_members(
             if kind not in _BOOK_KINDS:
                 continue
             for lang, member in members.items():
-                if lang in langs:
+                if lang in langs and member not in seen_members:
+                    seen_members.add(member)
                     on_member(current, member, kind, archive_chain, current_budget)
         return True
 
     def on_nested_error(label: str, name: str, exc: BaseException) -> None:
-        log_warning("[Sniff] 略過內嵌 jar %s：%s", f"{label}!{name}", exc)
+        log_warning("[Sniff] 略過內嵌 jar %s：%s", label, exc)
 
     with zipfile.ZipFile(jar_path) as zf:
         walk_nested_archives(

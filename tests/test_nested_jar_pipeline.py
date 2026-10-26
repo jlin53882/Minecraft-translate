@@ -66,7 +66,7 @@ def _sodium_like_inner(value: str = "General") -> bytes:
     )
 
 
-def _custom_book_inner() -> bytes:
+def _custom_book_inner(summary: str = "A nested book that needs translation.") -> bytes:
     return _zip_bytes(
         {
             "assets/demo/books/chapters/foods.json": json.dumps(
@@ -75,7 +75,7 @@ def _custom_book_inner() -> bytes:
                     "pages": [
                         {
                             "type": "standard",
-                            "summary": "A nested book that needs translation.",
+                            "summary": summary,
                         }
                     ],
                 }
@@ -150,6 +150,31 @@ def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path
         )
     )
     assert (pipeline_output / "nested-sniff_extracted" / member).is_file()
+
+
+def test_nested_content_sniff_keeps_first_canonical_source(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "nested-sniff-collision.jar",
+        nested={
+            "META-INF/jarjar/a-books.jar": _custom_book_inner("From A"),
+            "META-INF/jarjar/b-books.jar": _custom_book_inner("From B"),
+        },
+    )
+    book_regex = build_book_path_regex(codes=["en_us"])
+    member = "assets/demo/books/chapters/foods.json"
+
+    preview = _scan_single_jar_for_preview(
+        str(jar), "book", book_regex, book_path_regex=None, lang_regex=None
+    )
+    assert preview["matched_files"] == [member]
+
+    output = tmp_path / "book_output"
+    written, skipped = extract_sniffed_from_jar(
+        str(jar), str(output), lambda name: bool(book_regex.search(name)), {"en_us"}
+    )
+    assert (written, skipped) == (1, 0)
+    extracted = output / "nested-sniff-collision_extracted" / member
+    assert "From A" in extracted.read_text(encoding="utf-8")
 
 
 def test_nested_translation_result_reaches_stage2_staging_and_zip(tmp_path: Path):
