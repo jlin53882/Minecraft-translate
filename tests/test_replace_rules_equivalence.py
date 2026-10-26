@@ -137,7 +137,7 @@ def test_project_literal_rules_are_idempotent():
         and not any(char in rule["from"] for char in ".?*[]()\\")
         and exact_source(rule["from"]) is None
     ]
-    assert len(literal_rules) == 1578
+    assert len(literal_rules) == 1571
 
     expected_canonical = {
         "噴濺型力量藥水": "飛濺力量藥水",
