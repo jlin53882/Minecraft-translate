@@ -360,3 +360,26 @@ def test_bulk_review_scope_options_match_candidates_and_are_cached(db):
     statements = _selects(db)
     db.bulk_review_scope_options(VERSION)
     assert not [s for s in statements if "GROUP BY e.mod_id" in s]
+
+
+@pytest.mark.parametrize(
+    "quality",
+    [
+        QualityFilter(status="missing_translation"),
+        QualityFilter(status="consistent"),
+        QualityFilter(status="mismatch", direction="missing"),
+    ],
+)
+def test_quality_filter_options_are_cached_per_data_generation(db, quality):
+    criteria = EntryFilter(version=VERSION, quality=quality)
+    first = db.filter_option_values(criteria)
+    statements = _selects(db)
+    assert db.filter_option_values(replace(criteria, mod_id="alpha")) == (
+        db.filter_option_values(replace(criteria, mod_id="alpha"))
+    )
+    assert db.filter_option_values(criteria) == first
+    assert not [s for s in statements if "FROM entry e" in s]
+    db.write_back(VERSION, [WriteBackItem(KIND_LANG, "alpha", "a.new", "New", "新")])
+    statements.clear()
+    db.filter_option_values(criteria)
+    assert [s for s in statements if "FROM entry e" in s]

@@ -1491,14 +1491,14 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                     option_criteria.quality, flags_ready
                 )
                 condition += f" AND ({prefilter})"
-                source = self._candidate_source(f"{condition} f.source")
-                rows = self._q(
-                    f"SELECT DISTINCT e.mod_id, f.source {source} WHERE {condition}",
+                pair_rows = self._scope_pairs(
+                    option_criteria.version,
+                    self._candidate_source(f"{condition} f.source"),
+                    condition,
                     params,
                 )
-                pair_rows = rows
             else:
-                pair_rows = self._quality_option_pairs(option_criteria)
+                pair_rows = self._cached_quality_option_pairs(option_criteria)
         else:
             condition, params = self._filter_sql(option_criteria)
             source = self._candidate_source(f"{condition} f.source")
@@ -1607,6 +1607,21 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         if facets is None:
             return None
         return option_facets.total(facets, criteria.mod_id, criteria.source)
+
+    def _cached_quality_option_pairs(
+        self, criteria: EntryFilter
+    ) -> set[tuple[str, int | None]]:
+        """:meth:`_quality_option_pairs` 的結果依資料世代快取（逐列判斷品質的掃描很貴）。"""
+        condition, params = self._filter_sql(criteria)
+        key = self._facet_key(
+            "quality-option-pairs", condition, params, criteria.quality
+        )
+        pairs = self._cached(
+            key,
+            lambda: [list(pair) for pair in self._quality_option_pairs(criteria)],
+            persist=False,
+        )
+        return {(str(mod_id), source) for mod_id, source in pairs}
 
     def _quality_option_pairs(
         self, criteria: EntryFilter
