@@ -1021,14 +1021,14 @@ def scan_folder_generator(
 
     done = 0
     buffer = _IngestBuffer(db, options.version, convert)
-    # 預覽用與實際寫入相同的分類規則，只是不寫入（見 scan_ingest）
+    # 預覽用與實際寫入相同的分類規則，只是不寫入（見 scan_ingest）；沒有資料庫時一定是預覽
     preview = (
         (
             db.scan_preview_target(options.version)
             if db is not None
             else PreviewIngestTarget(None, options.version)
         )
-        if options.dry_run or db is None
+        if options.dry_run
         else None
     )
 

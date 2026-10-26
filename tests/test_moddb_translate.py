@@ -1547,6 +1547,8 @@ def test_service_logs_batches_eta_and_reports_totals(db_path, monkeypatch):
     assert any("第 2 / 約 2 批" in t and "已處理 2 / 2 筆（100%）" in t for t in texts)
     summary = session.snapshot()["summary"]
     assert summary["batches"] == 2 and summary["elapsed_sec"] >= 0
+    # 完成的執行在結束時重算整個範圍的未翻譯數（與預覽的「此範圍仍未翻譯」同一個查詢）
+    assert isinstance(summary["scope_remaining"], int)
     assert any("共送出 2 批" in t for t in texts)
 
 
@@ -1741,6 +1743,8 @@ def test_aborted_run_ends_session_as_error(db_path, monkeypatch):
     )
     snap = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
     assert snap["status"] == "ERROR" and snap["summary"]["status"] == "ABORTED"
+    # 中止的執行不再做整個範圍的未翻譯計數（使用者在等它停下）
+    assert snap["summary"]["scope_remaining"] is None
 
 
 def test_db_flush_failure_retries_and_keeps_buffer(db_path, monkeypatch):
@@ -3179,12 +3183,38 @@ def test_scope_text_uses_the_preview_batch_plan_until_the_scope_changes(db_path)
     panel._refresh_counts()
     assert "粗估" in panel.count_text.value
 
+    missing, reusable = panel._last_counts[:2]
     panel._run_scope = panel._scope_key()
     panel._apply_translation_summary(
-        {"dry_run": True, "candidates": 3, "planned_batches": 4, "remaining": 3}
+        {
+            "dry_run": True,
+            "candidates": 3,
+            "planned_batches": 4,
+            "remaining": missing,
+            "scope_remaining": missing,
+            "reused": reusable,
+        }
     )
     assert "預覽規劃 4 批" in panel.count_text.value
     assert "粗估" not in panel.count_text.value
+
+    # 其他操作改了資料（例如掃描匯入新條目）：筆數不同，預覽批數不再適用
+    panel._set_count_text(missing + 100, reusable)
+    assert "粗估" in panel.count_text.value and "預覽規劃" not in panel.count_text.value
+    assert panel._preview_plan is None
+
+    panel._refresh_counts()  # 資料回到預覽時的筆數後再預覽一次
+    panel._apply_translation_summary(
+        {
+            "dry_run": True,
+            "candidates": 3,
+            "planned_batches": 4,
+            "remaining": missing,
+            "scope_remaining": missing,
+            "reused": reusable,
+        }
+    )
+    assert "預覽規劃 4 批" in panel.count_text.value
 
     panel.limit_field.value = "1"  # 範圍變了：預覽的批數不再適用
     panel._refresh_counts()

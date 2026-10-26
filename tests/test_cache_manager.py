@@ -505,7 +505,7 @@ def test_force_rotate_shard_waits_for_shard_lock(mock_save_path):
 
 
 def test_successful_shard_save_is_reported_as_last_save_time(monkeypatch, tmp_path):
-    """快取頁「最近儲存」來自實際寫入分片成功的時間，而不是永遠空白。"""
+    """快取頁「最近儲存」來自實際寫入分片的時間；沒有內容的儲存不算。"""
     from translation_tool.utils import cache_manager, cache_shards
 
     state = cache_manager._state()
@@ -513,10 +513,12 @@ def test_successful_shard_save_is_reported_as_last_save_time(monkeypatch, tmp_pa
     monkeypatch.setattr(
         cache_shards, "_save_entries_to_active_shards", lambda **_kwargs: True
     )
-    monkeypatch.setattr(cache_manager, "_last_save_at", None)
+    monkeypatch.setattr(state, "last_save_at", None)
+    cache_manager._save_entries_to_active_shards("lang", {})
+    assert state.last_save_at is None
     cache_manager._save_entries_to_active_shards("lang", {"k": {"dst": "v"}})
-    assert cache_manager._last_save_at is not None
+    assert state.last_save_at is not None
 
     monkeypatch.setattr(cache_manager, "initialize_translation_cache", lambda: None)
     overview = cache_manager.get_cache_overview()
-    assert overview["last_save_at"] == cache_manager._last_save_at
+    assert overview["last_save_at"] == state.last_save_at

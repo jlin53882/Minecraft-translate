@@ -62,6 +62,7 @@ STATUS_STYLE = {
 class TaskRow:
     """清單的一列（純資料）。"""
 
+    task_id: int
     name: str
     view_key: str | None
     page_label: str
@@ -128,6 +129,7 @@ def build_task_rows(
             text = f"進行中 {task.percent}%" if task.progress > 0 else "準備中"
         rows.append(
             TaskRow(
+                task_id=task.id,
                 name=task.name,
                 view_key=task.view_key,
                 page_label=_page_label(task.view_key),
@@ -158,6 +160,10 @@ class TaskListDialog:
         self._on_navigate = on_navigate
         self._filter = FILTER_ALL
         self._dialog: ft.AlertDialog | None = None
+        # 目前清單的 (任務, 狀態) 序列；沒變時只更新進行中各列的文字，不重建清單
+        self._row_key: tuple | None = None
+        # 與目前清單逐列對應（任務 id 取自 session 物件位址，可能被重複使用，不能當鍵）
+        self._row_controls: list[ft.Container] = []
         self.summary = ft.Text("", size=12.5, color=C.MUTED)
         self.filter_bar = kit.Segmented(
             [(key, label) for key, label in FILTER_LABELS.items()],
@@ -213,14 +219,23 @@ class TaskListDialog:
             for key in (FILTER_RUNNING, FILTER_DONE, FILTER_FAILED, FILTER_CANCELLED)
         )
         rows = build_task_rows(active, history, self._filter)
-        self.list_view.controls = [self._row(row) for row in rows] or [
-            kit.empty_state(
-                "沒有符合的任務",
-                "切換上方的狀態篩選，或到左側選一個流程開始",
-                icon=ft.Icons.HISTORY,
-            )
-        ]
-        hidden = counts[FILTER_ALL] - len(active) - len(history)
+        row_key = (self._filter, tuple((row.task_id, row.status) for row in rows))
+        if row_key == self._row_key:
+            # 只有進度與耗時在變：就地更新進行中的列，清單與捲動位置不動
+            for control, row in zip(self._row_controls, rows, strict=True):
+                if row.status == STATUS_RUNNING:
+                    self._fill_row(control, row)
+        else:
+            self._row_key = row_key
+            self._row_controls = [self._row(row) for row in rows]
+            self.list_view.controls = list(self._row_controls) or [
+                kit.empty_state(
+                    "沒有符合的任務",
+                    "切換上方的狀態篩選，或到左側選一個流程開始",
+                    icon=ft.Icons.HISTORY,
+                )
+            ]
+        hidden = self._tasks.evicted_count()
         self.footnote.value = f"清單只保留最近 {HISTORY_LIMIT} 筆已結束的任務；更早的 {hidden:,} 筆只計入上方統計"
         self.footnote.visible = hidden > 0
         if update and self.is_open:
@@ -229,14 +244,8 @@ class TaskListDialog:
             except (AssertionError, RuntimeError):
                 pass
 
-    def _row(self, row: TaskRow) -> ft.Control:
-        tone = get_tone(row.tone)
-        meta = "・".join(
-            part
-            for part in (row.page_label, f"開始 {row.started}", row.duration)
-            if part
-        )
-        return ft.Container(
+    def _row(self, row: TaskRow) -> ft.Container:
+        container = ft.Container(
             padding=ft.Padding.symmetric(horizontal=10, vertical=8),
             border_radius=design.RADIUS_CONTROL,
             ink=bool(row.view_key),
@@ -244,35 +253,42 @@ class TaskListDialog:
             if row.view_key
             else None,
             tooltip=f"前往 {row.page_label}" if row.view_key else None,
-            content=ft.Row(
-                [
-                    ft.Container(
-                        width=9,
-                        height=9,
-                        border_radius=5,
-                        border=ft.Border.all(2, tone.fg),
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text(
-                                row.name,
-                                size=13.5,
-                                weight=ft.FontWeight.W_600,
-                                color=C.TEXT,
-                            ),
-                            ft.Text(meta, size=11.5, color=C.DIM),
-                        ],
-                        spacing=1,
-                        tight=True,
-                        expand=True,
-                    ),
-                    kit.chip(
-                        row.status_text, row.tone, dot=row.status == STATUS_RUNNING
-                    ),
-                ],
-                spacing=12,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
+        )
+        self._fill_row(container, row)
+        return container
+
+    @staticmethod
+    def _fill_row(container: ft.Container, row: TaskRow) -> None:
+        """填入一列的內容（進行中的列每次更新只換這裡）。"""
+        tone = get_tone(row.tone)
+        meta = "・".join(
+            part
+            for part in (row.page_label, f"開始 {row.started}", row.duration)
+            if part
+        )
+        container.content = ft.Row(
+            [
+                ft.Container(
+                    width=9, height=9, border_radius=5, border=ft.Border.all(2, tone.fg)
+                ),
+                ft.Column(
+                    [
+                        ft.Text(
+                            row.name,
+                            size=13.5,
+                            weight=ft.FontWeight.W_600,
+                            color=C.TEXT,
+                        ),
+                        ft.Text(meta, size=11.5, color=C.DIM),
+                    ],
+                    spacing=1,
+                    tight=True,
+                    expand=True,
+                ),
+                kit.chip(row.status_text, row.tone, dot=row.status == STATUS_RUNNING),
+            ],
+            spacing=12,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
 
     def _navigate(self, view_key: str) -> None:

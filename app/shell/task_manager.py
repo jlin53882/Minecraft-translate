@@ -105,6 +105,8 @@ class TaskInfo:
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     operation_id: str | None = None
+    # 只分析不寫入的執行（例如機器翻譯 Dry-run）：工作台不算成該步驟「本次完成」
+    preview: bool = False
 
     @property
     def running(self) -> bool:
@@ -222,6 +224,7 @@ class TaskManager:
                     operation_id=(
                         handle.id if isinstance(handle, OperationHandle) else None
                     ),
+                    preview=bool(getattr(session, "preview", False)),
                 )
                 self._active[sid] = info
                 self._sessions[sid] = weakref.ref(session)
@@ -397,6 +400,11 @@ class TaskManager:
         """本次執行保留的所有已結束任務（新的在前，最多 ``HISTORY_LIMIT`` 筆）。"""
         with self._lock:
             return list(self._recent)
+
+    def evicted_count(self) -> int:
+        """超出 ``HISTORY_LIMIT`` 而不在 ``history()`` 裡、只計入統計的已結束任務數。"""
+        with self._lock:
+            return sum(self._evicted_counts.values())
 
     def finished_counts(self) -> dict[str, int]:
         """本次執行已結束任務依終態的筆數（含已擠出清單的舊紀錄）。"""

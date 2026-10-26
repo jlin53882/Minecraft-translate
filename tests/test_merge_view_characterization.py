@@ -522,7 +522,25 @@ def test_error_status_still_shows_the_failure_summary(monkeypatch):
     monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
     view = merge_view.MergeView(mock_page(), mock_filepicker())
     shown = []
-    monkeypatch.setattr(view, "_show_merge_summary", lambda s: shown.append(s))
+    monkeypatch.setattr(
+        view, "_show_merge_summary", lambda s, **kw: shown.append((s, kw))
+    )
     view._sync_ui_once()
-    assert shown and shown[0]["failed_zips"] == 2
+    assert shown and shown[0][0]["failed_zips"] == 2
+    assert shown[0][1] == {"failed": True}
     assert view.status_chip.label.value == "任務發生錯誤"
+
+
+def test_fatal_error_summary_is_titled_as_a_failure(monkeypatch):
+    """致命錯誤時失敗計數可能是 0：標題仍要寫失敗，不能寫「合併完成」。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_widgets, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+    view._show_merge_summary(
+        {"success_zips": 0, "failed_zips": 0, "errored_files": 0}, failed=True
+    )
+    texts = _dialog_texts(page.overlay[-1])
+    assert "合併失敗" in texts and "合併完成" not in texts

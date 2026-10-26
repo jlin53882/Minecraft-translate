@@ -182,13 +182,15 @@ def build_step_statuses(
     """依目前執行中的任務決定五個流程步驟的狀態。
 
     單步驟任務結束後就回到待執行，可以再跑一次；``runs_done`` 記錄本次執行中這一步
-    完成過幾次（``recent`` 要傳本次執行的全部紀錄）。「一鍵流水線」與「任務翻譯」不屬於
+    完成過幾次（``recent`` 要傳本次執行的全部紀錄；``preview`` 的 Dry-run 不算）。「一鍵流水線」與「任務翻譯」不屬於
     單一步驟，不影響這裡。
     """
     steps = []
     for key, title, desc in PIPELINE_STEPS:
         runs_done = sum(
-            1 for t in recent if t.view_key == key and t.status == STATUS_DONE
+            1
+            for t in recent
+            if t.view_key == key and t.status == STATUS_DONE and not t.preview
         )
         running = next((t for t in active if t.view_key == key), None)
         if running is not None:

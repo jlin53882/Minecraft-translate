@@ -647,7 +647,7 @@ class AppShell:
     def refresh_tasks(self) -> None:
         """依 TaskManager 更新任務膠囊、側欄徽章、狀態列與通知。"""
         active = self.tasks.active()
-        current = active[-1] if active else None
+        current = self.tasks.current()
         self.topbar.set_task(current, others=max(0, len(active) - 1))
         running_views = {t.view_key for t in active if t.view_key}
         for key in self.sidebar.items:

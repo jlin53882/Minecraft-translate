@@ -44,6 +44,7 @@ from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
 from app.views.moddb.operation_summaries import (
+    scope_batches_text,
     translation_kpi_titles,
     translation_scope_text,
 )
@@ -89,8 +90,9 @@ class TranslatePanel(ft.Column):
         self.view_flagged_btn = self.result_inspector.button
         self._run_version = ""
         self._run_scope: tuple = ()
-        # 最近一次預覽的 (範圍, 精確批數)；範圍說明在同一範圍時顯示它
-        self._preview_plan: tuple[tuple, int] | None = None
+        # 最近一次預覽的 (精確批數, 範圍, 未翻譯數, 可沿用數)；範圍與資料（兩個筆數）
+        # 都沒變時，範圍說明顯示預覽的批數
+        self._preview_plan: tuple[int, tuple, int, int] | None = None
         self._last_counts: tuple | None = None
         self._repair_preview = None
         self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
@@ -560,23 +562,18 @@ class TranslatePanel(ft.Column):
             else (min(to_ai, limit) if limit else to_ai)
         )
         self._last_counts = (missing, reusable, planned_batches, planned_items)
-        preview = self._preview_plan
-        if planned_batches is None and preview and preview[0] == self._scope_key():
-            # 同一範圍剛預覽過：用預覽依類型與分組精確規劃的批數，不再顯示粗估
-            batches_text = f"預覽規劃 {preview[1]:,} 批"
-        elif planned_batches is None:
-            batches_text = (
-                f"預估約 {estimate_batch_count(will):,} 批，粗估；"
-                "按「先預覽」取得精確批數"
-            )
-        else:
-            batches_text = f"預估約 {planned_batches:,} 批"
+        plan = self._preview_plan
+        if plan and plan[1:] != (self._scope_key(), missing, reusable):
+            # 範圍改了，或其他操作（掃描匯入、批次取代…）改了資料：預覽的批數不再適用
+            self._preview_plan = plan = None
         self.count_text.value = translation_scope_text(
             missing,
             reusable,
             limit,
             will,
-            batches_text,
+            scope_batches_text(
+                planned_batches, plan[0] if plan else None, estimate_batch_count(will)
+            ),
             warn_large=not limit and will > LARGE_RUN_WARNING,
         )
 
@@ -1062,7 +1059,12 @@ class TranslatePanel(ft.Column):
                 delta=f"本次將翻譯 {candidates:,} 筆",
             )
             # 範圍說明改用預覽精確規劃的批數，畫面上不同時出現兩個批數
-            self._preview_plan = (self._run_scope, s.get("planned_batches", 0) or 0)
+            self._preview_plan = (
+                s.get("planned_batches", 0) or 0,
+                self._run_scope,
+                s.get("scope_remaining", s.get("remaining", 0)) or 0,
+                s.get("reused", 0) or 0,
+            )
             if self._last_counts is not None:
                 self._set_count_text(*self._last_counts)
             return

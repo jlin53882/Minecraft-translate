@@ -405,6 +405,8 @@ class LMView(ft.Column):
         output_dir = self.output_path.value or get_lm_translate_folder_name()
         dry_run = self.dry_run_switch.value
         self._run_dry_run = bool(dry_run)
+        # 任務管理據此不把 Dry-run 算成工作台「機器翻譯」步驟的本次完成
+        self.session.preview = bool(dry_run)
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
         db_snapshot = self._db_snapshot_for_run()

@@ -74,7 +74,7 @@ flowchart TD
 ## 背景任務與 UI 更新
 
 - 開始時以 `launch_page_operation(..., owner="lm")` 登錄任務，使用預設的 `CancellationPolicy.COOPERATIVE` 與 `ShutdownPolicy.CANCEL_AND_DRAIN`（定義於 `app/tasks/operation_registry.py`）。
-- 背景執行緒只寫入 `TaskSession`（`add_log`、`set_progress`）。UI 不會從執行緒直接更新，而是由 `_poll_session` 在 Flet event loop 上以 `PollerHandle` 每 0.2 秒呼叫 `_sync_from_session`，同步進度條、`LogView.sync_entries` 日誌與統計卡。結束時狀態晶片為「任務完成」；這次是 Dry-run（開始時記在 `_run_dry_run`）則顯示「Dry-run 完成（未翻譯）」，和正式翻譯分得出來。
+- 背景執行緒只寫入 `TaskSession`（`add_log`、`set_progress`）。UI 不會從執行緒直接更新，而是由 `_poll_session` 在 Flet event loop 上以 `PollerHandle` 每 0.2 秒呼叫 `_sync_from_session`，同步進度條、`LogView.sync_entries` 日誌與統計卡。結束時狀態晶片為「任務完成」；這次是 Dry-run（開始時記在 `_run_dry_run`）則顯示「Dry-run 完成（未翻譯）」，和正式翻譯分得出來；session 同時標上 `preview`，工作台不把它算成「機器翻譯」步驟的本次完成。
 - 任務結束（狀態 `DONE` 或 `ERROR`）時，輪詢停止、按鈕復位；`DONE` 且已請求取消時顯示「已取消」。
 - 取消：`cancel_clicked` 呼叫 `session.request_cancel()`，狀態改為「取消中…」。取消在三個位置檢查：`cancel_scope`（等待 API 限流時可打斷）、`translate_batch` 的 `should_cancel`、以及共用迴圈在批次邊界的 `is_cancelled()`。已完成的批次照常保留。
 - 換頁卸載：`will_unmount` 只停止輪詢，任務繼續執行；`did_mount` 若任務仍在追蹤中，重新啟動輪詢。

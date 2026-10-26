@@ -513,7 +513,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
                 # 全部失敗時服務仍會寫入摘要：顯示失敗清單，不只留一個狀態晶片
                 if snap.get("summary"):
                     self._merge_stats = snap["summary"]
-                    self._show_merge_summary(self._merge_stats)
+                    self._show_merge_summary(self._merge_stats, failed=True)
                 self._ui_stop.set()
 
             self.progress_bar.value = progress
@@ -535,8 +535,13 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         set_chip_status(self.status_chip, text, tone)
         self.page.update()
 
-    def _show_merge_summary(self, summary: dict[str, Any]) -> None:
-        """顯示合併結果摘要（使用 overlay 確保穩定顯示）。"""
+    def _show_merge_summary(
+        self, summary: dict[str, Any], *, failed: bool = False
+    ) -> None:
+        """顯示合併結果摘要（使用 overlay 確保穩定顯示）。
+
+        ``failed``：任務以 ERROR 結束（例如輸出資料夾無法寫入的致命錯誤），失敗計數可能是 0。
+        """
         cfg = load_config()
         lang_merger_cfg = cfg.get("lang_merger", {})
         pending_name = lang_merger_cfg.get("pending_folder_name", "待翻譯")
@@ -571,7 +576,11 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         dialog = ft.AlertDialog(
             modal=True,
             title=ft.Text(
-                "合併完成（有失敗項目）" if f_zips or errored else "合併完成"
+                "合併失敗"
+                if failed
+                else "合併完成（有失敗項目）"
+                if f_zips or errored
+                else "合併完成"
             ),
             content=ft.Container(content=content, width=520),
             actions=[

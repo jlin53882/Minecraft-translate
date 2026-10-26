@@ -501,7 +501,6 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
     )
     if options.dry_run:
         report.scope_remaining = report.remaining
-    if options.dry_run:
         if preview_reuse:
             report.reused = db.count_reusable(options.version, mods)
             _log(
@@ -940,7 +939,9 @@ def _translate_rows(
         )
     flush()
     _settle_report(session, report, options, result, failures, buffer, tracker)
-    report.scope_remaining = _count_scope_remaining(db, options)
+    if report.status in ("DONE", "DONE_WITH_WARNINGS"):
+        # 取消、中止或資料庫錯誤時不再做整個範圍的計數（使用者在等它停下來）
+        report.scope_remaining = _count_scope_remaining(db, options)
     _log_final_summary(session, report)
     _record_backend_summary(report)
     if result.last_error:

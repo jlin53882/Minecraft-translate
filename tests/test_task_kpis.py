@@ -259,3 +259,41 @@ def test_cache_stat_never_reports_zero_for_an_unloaded_cache():
     assert cache_stat(failed, loaded=True) == ("—", "快取未載入，詳見後台記錄", "red")
     ready = DashboardData(total_entries=1234)
     assert cache_stat(ready, loaded=True) == ("1,234", "翻譯快取總筆數", "em")
+
+
+def test_dry_run_tasks_do_not_count_as_completed_steps(manager):
+    """機器翻譯 Dry-run 只分析不翻譯：完成後不算工作台「機器翻譯」步驟的本次完成。"""
+    from app.views.dashboard.dashboard_data import build_step_statuses
+
+    dry = TaskSession(name="機器翻譯", view_key="lm")
+    dry.preview = True
+    dry.start()
+    dry.finish()
+    steps = {s.key: s for s in build_step_statuses([], manager.history())}
+    assert manager.history()[0].preview is True
+    assert steps["lm"].runs_done == 0
+
+    _run("機器翻譯", "lm")
+    steps = {s.key: s for s in build_step_statuses([], manager.history())}
+    assert steps["lm"].runs_done == 1
+
+
+def test_task_list_only_updates_running_rows_when_just_progress_changes(manager):
+    from app.shell.task_list_dialog import TaskListDialog
+
+    for i in range(3):
+        _run(f"完成 {i}", "extractor")
+    running = TaskSession(name="翻譯中", view_key="lm")
+    running.start()
+    dialog = TaskListDialog(_DialogPage(), manager)
+    dialog.open()
+    before = list(dialog.list_view.controls)
+    running.set_progress(0.4)
+    dialog.refresh(update=False)
+    # 清單沒有重建（捲動位置不動），只換進行中那一列的內容
+    assert dialog.list_view.controls == before
+    assert all(a is b for a, b in zip(dialog.list_view.controls, before, strict=True))
+    assert dialog.footnote.visible is False  # 沒有任務被擠出清單
+    running.finish()
+    dialog.refresh(update=False)
+    assert dialog.list_view.controls[0] is not before[0]  # 狀態變了才重建

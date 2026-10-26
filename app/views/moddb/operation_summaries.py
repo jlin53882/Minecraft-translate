@@ -191,3 +191,14 @@ def translation_scope_text(
     if warn_large:
         text += "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
     return text
+
+
+def scope_batches_text(
+    planned_batches: int | None, preview_batches: int | None, rough_batches: int
+) -> str:
+    """範圍說明的批數：背景規劃的批數、同範圍預覽規劃的批數，或依每批筆數的粗估。"""
+    if planned_batches is not None:
+        return f"預估約 {planned_batches:,} 批"
+    if preview_batches is not None:
+        return f"預覽規劃 {preview_batches:,} 批"
+    return f"預估約 {rough_batches:,} 批，粗估；按「先預覽」取得精確批數"
