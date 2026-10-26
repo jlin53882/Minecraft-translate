@@ -20,6 +20,7 @@
 | `app/icon_index.py:_process_single_jar` | BLE001 | 已記錄／回報 | 單一 JAR 索引失敗不中止整體，但要留下堆疊 |
 | `app/icon_index.py:build_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/icon_index.py:load_icon_index` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/icon_preview_image.py:render_icon_uri` | BLE001 | 已記錄／回報 | 單張壞圖不應中斷整頁，改顯示佔位圖 |
 | `app/icon_reader.py:_ZipCache.get` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/icon_reader.py:_ZipCache.close_all` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/icon_reader.py:read_icon_bytes` | BLE001 | UI／畫面保護 | （未寫原因；見分類） |

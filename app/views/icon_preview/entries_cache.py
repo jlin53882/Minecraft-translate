@@ -15,8 +15,8 @@ def _get_cache_dir() -> Path:
 
 
 _SOURCE_ENTRY_FIELDS = ("modid", "key", "en", "source_jar", "icon_path")
-# Version 4 refreshes cached icon paths after runtime-library model resolution.
-_CACHE_VERSION = 4
+# Version 5：圖示 URI 帶有預覽提示（等角方塊、染色），且解析規則已更新，舊快取內的 icon_path 一律失效。
+_CACHE_VERSION = 5
 
 
 def _source_entry_data(entry) -> dict:

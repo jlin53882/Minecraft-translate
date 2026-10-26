@@ -4,6 +4,7 @@
 維護注意：本模組為 ZIP icon 讀取的單一責任入口。
 """
 
+import json
 import threading
 import zipfile
 from collections import OrderedDict
@@ -12,26 +13,55 @@ from pathlib import Path
 
 from translation_tool.utils.zip_safety import MAX_ICON_BYTES, read_limited
 
+_META_MARK = "#mct="
+
+
+def encode_meta(meta: dict | None) -> str | None:
+    """把預覽提示（等角三面、染色等）編成 URI 片段（精簡 JSON）；空值回傳 None。"""
+    if not meta:
+        return None
+    return json.dumps(meta, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
+def decode_meta(fragment: str | None) -> dict | None:
+    """解碼 ``encode_meta`` 的輸出；格式錯誤時回傳 None（降級為一般圖示）。"""
+    if not fragment:
+        return None
+    try:
+        data = json.loads(fragment)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
 
 @dataclass(frozen=True)
 class IconRef:
     """JAR 內 icon 的 URI 參照（frozen dataclass）。
 
-    URI 格式：jar://<jar_rel_path>:<png_path>
+    URI 格式：jar://<jar_rel_path>:<png_path>[#mct=<meta JSON>]
     - jar_rel_path：相對於 source_root 的 JAR 路徑
     - png_path：ZIP 內部的 PNG 資源路徑
+    - meta：預覽提示（精簡 JSON，見 ``encode_meta``），例如等角方塊的三面貼圖
 
     向後相容：舊磁碟路徑 parse 回傳 None。
     """
 
     jar_path: Path  # JAR 的相對路徑（相對於 source_root）
     png_path: str  # ZIP 內部路徑
+    meta_fragment: str | None = None  # 編碼後的預覽提示
+
+    @property
+    def meta(self) -> dict | None:
+        return decode_meta(self.meta_fragment)
 
     @staticmethod
     def parse(uri: str) -> "IconRef | None":
         """從 URI 字串解析。舊磁碟路徑視為無 icon，回傳 None。"""
         if not uri.startswith("jar://"):
             return None
+        fragment = None
+        if _META_MARK in uri:
+            uri, _, fragment = uri.rpartition(_META_MARK)
         # 標準化：把路徑中的反斜線轉成正斜線（避免 Path 轉換後的 backslash 破壞解析）
         normalized = uri.replace("\\", "/")
         _, rest = normalized.split("jar://", 1)
@@ -42,11 +72,12 @@ class IconRef:
         jar, png = rest.rsplit(":", 1)
         # 剝離 query string（如果有）
         png = png.split("?")[0]
-        return IconRef(Path(jar), png)
+        return IconRef(Path(jar), png, fragment or None)
 
     def to_uri(self) -> str:
         """序列化為 URI 字串（永遠輸出 forward-slash 路徑）。"""
-        return f"jar://{self.jar_path.as_posix()}:{self.png_path}"
+        uri = f"jar://{self.jar_path.as_posix()}:{self.png_path}"
+        return f"{uri}{_META_MARK}{self.meta_fragment}" if self.meta_fragment else uri
 
 
 class _ZipCache:

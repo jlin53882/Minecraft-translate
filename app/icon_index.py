@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import uuid
 import zipfile
 from collections.abc import Iterator
@@ -91,6 +92,45 @@ def get_index_path(mods_dir: Path) -> Path:
 # ==================================================
 
 
+def _strip_json_extras(text: str) -> str:
+    """移除 JSON 字串以外的 ``//``、``/* */`` 註解與結尾逗號（遊戲的 GSON 讀取器容許這些）。"""
+    out: list[str] = []
+    i, n = 0, len(text)
+    in_string = False
+    while i < n:
+        ch = text[i]
+        if in_string:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            out.append(ch)
+        elif text.startswith("//", i):
+            while i < n and text[i] != "\n":
+                i += 1
+            continue
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            i = n if end < 0 else end + 2
+            continue
+        else:
+            out.append(ch)
+        i += 1
+    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+
+
+def _loads_lang_json(content: str):
+    """解析 en_us.json：容許原始控制字元、註解與結尾逗號，行為與遊戲讀取器一致。"""
+    try:
+        return json.loads(content, strict=False)
+    except json.JSONDecodeError:
+        return json.loads(_strip_json_extras(content), strict=False)
+
+
 def _iter_entries_from_lang_files(
     zf: zipfile.ZipFile, budget: ZipReadBudget | None = None
 ) -> Iterator[tuple[str, str, str]]:
@@ -118,7 +158,7 @@ def _iter_entries_from_lang_files(
         for name in candidates:
             try:
                 content = read_limited(zf, name, budget=budget).decode(
-                    "utf-8", errors="ignore"
+                    "utf-8-sig", errors="ignore"
                 )
             except ArchiveBudgetError as exc:
                 if budget is not None:
@@ -131,7 +171,7 @@ def _iter_entries_from_lang_files(
 
             if name.endswith(".json"):
                 try:
-                    entries = json.loads(content)
+                    entries = _loads_lang_json(content)
                 except json.JSONDecodeError as exc:
                     log_warning(
                         f"[IconIndex] 略過格式錯誤的 JSON lang 檔 {name}: {exc!r}"
@@ -175,6 +215,7 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
             raise_if_cancelled()
             budget = ZipReadBudget.for_icon_scan(jar_path.name)
             from app.icon_reader import IconRef
+            from app.icon_resolve import CONTENT_ICON_PREFIXES, hit_to_uri
             from app.views.icon_preview.icon_cache import (
                 _resolve_icon_from_catalog,
                 _try_extract_mod_icon_from_model,
@@ -183,18 +224,7 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
             for modid, key, _value in _iter_entries_from_lang_files(zf, budget=budget):
                 raise_if_cancelled()
                 # 只處理有意義的 content key
-                if key.split(".", 1)[0] not in {
-                    "item",
-                    "block",
-                    "entity",
-                    "enchantment",
-                    "effect",
-                    "potion",
-                    "biome",
-                    "attribute",
-                    "tile",
-                    "-effect",
-                }:
+                if key.split(".", 1)[0] not in CONTENT_ICON_PREFIXES:
                     continue
 
                 if asset_catalog is not None:
@@ -207,8 +237,7 @@ def _process_single_jar(jar_path: Path, asset_catalog=None) -> dict[str, str]:
                         budget=budget,
                     )
                     if result:
-                        _tex_val, png_path, texture_archive = result
-                        results[key] = IconRef(texture_archive, png_path).to_uri()
+                        results[key] = hit_to_uri(result)
                 else:
                     result = _try_extract_mod_icon_from_model(
                         jar_path, modid, zf, names, key=key, budget=budget
@@ -250,6 +279,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     log_info(f"[IconIndex] 開始建立索引：{total} 個 JAR，使用 8 threads")
 
     index: dict[str, str] = {}
+    owners: dict[str, str] = {}
     done = 0
 
     from app.views.icon_preview.icon_cache import ModpackAssetCatalog
@@ -276,9 +306,14 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
                 done += 1
                 try:
                     jar_results = future.result()
+                    jar_order = jar.name.casefold()
                     for key, uri in jar_results.items():
                         raise_if_cancelled()
-                        index[key] = uri
+                        # 同一 key 出現在多個 JAR：以 JAR 名稱排序最前者為準，
+                        # 結果不再取決於執行緒完成順序。
+                        if key not in index or jar_order < owners[key]:
+                            index[key] = uri
+                            owners[key] = jar_order
                     if progress_cb:
                         progress_cb(done, total)
                 except Exception as ex:  # noqa: BLE001
@@ -320,7 +355,7 @@ def _save_icon_index_for_manifest(
 ) -> Path:
     idx_path = _index_path_for_manifest(mods_dir, manifest)
     data = {
-        "version": 4,
+        "version": 5,
         "modpack": str(mods_dir.resolve()),
         "jars": manifest,
         "count": len(index),
@@ -346,7 +381,7 @@ def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
         return None
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
-        if data.get("version") != 4 or data.get("jars") != manifest:
+        if data.get("version") != 5 or data.get("jars") != manifest:
             return None
         if data.get("modpack") != str(mods_dir.resolve()):
             # modpack 路徑改了

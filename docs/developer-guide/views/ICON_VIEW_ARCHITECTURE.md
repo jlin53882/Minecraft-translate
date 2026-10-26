@@ -16,13 +16,17 @@ IconPreviewView（`app/views/icon_preview_view.py`）是**翻譯校對頁**：�
 ```
 app/views/icon_preview_view.py        ← 主視圖（生命週期、載入編排、進度、雙層 UI 狀態）；列表與詳情邏輯見 icon_preview/
 app/icon_index.py                     ← 預建 icon 索引：build_and_save_icon_index() 建置、load_icon_index() 供載入流程讀取
+app/icon_catalog.py                   ← ModpackAssetCatalog：唯讀索引 JAR 內 model／blockstate／texture 位置，並快取解析後的 model（`ModelInfo`），同一資源只解壓一次
+app/icon_resolve.py                   ← resolve_icon()：lang key → 貼圖的挑選規則（parent 鏈、方塊面、mob_effect、同名貼圖、刷怪蛋）；`hit_to_uri()` 產生含預覽提示的 icon URI
+app/icon_render.py                    ← 影像處理（PIL）：動畫首格、整數倍最近鄰放大、灰階染色、等角方塊、程式繪製的刷怪蛋與佔位圖
+app/icon_preview_image.py             ← render_icon_uri()：URI → 128×128 預覽 PNG（記憶體 LRU）；describe_icon_uri()：懸停提示文字
 app/icon_reader.py                    ← IconRef 解析 + 從 ZIP 讀 icon bytes（read_icon_bytes）
 app/icon_runtime.py                   ← get_runtime_asset_paths()：NeoForge runtime assets（納入 source identity 與索引 manifest）
 app/views/icon_preview_row.py         ← LangItemRow：單筆 key 列（icon 解析 + 翻譯輸入框）
 translation_tool/core/
   ├─ icon_resolver.py                 ← resolve_icon_with_reason() / resolve_icon_for_lang_key()
   ├─ icon_reason.py                   ← IconRisk / IconResult 資料結構
-  ├─ icon_preview_cache.py            ← generate_icon_preview()（64×64 快取）
+  ├─ icon_preview_cache.py            ← generate_icon_preview()（舊式磁碟路徑的預覽快取）
   └─ icon_classifier.py               ← classify_no_icon_reason()，由 icon_resolver.resolve_icon_with_reason 呼叫
 ```
 
@@ -79,8 +83,8 @@ translation_tool/core/
 
 1. `icon_path` 已提供（JAR 模式預先解析，可為 `jar://` URI）→ 直接包成 `IconResult`，跳過 resolve
 2. 否則 `resolve_icon_with_reason(lang_key, assets_root)`（`assets_root` = `source_root / "assets"`）
-3. `_resolve_preview_path`：`_HAS_ICON_READER` 且 `IconRef.parse()` 成功 → `read_icon_bytes()` 從 ZIP 讀 bytes 寫入 preview_root 快取；否則 `generate_icon_preview()`（64×64 PNG）
-4. `_build_icon_widget`：`_ensure_icon_size` 將小於 64 的圖以 nearest neighbor 放大，顯示為 128×128 的 `ft.Image`
+3. `_resolve_preview_path`：只處理舊式磁碟路徑（`generate_icon_preview`）；`jar://` 與 `mct-icon://` URI 由 `prepare_row_icon` 直接呼叫 `render_icon_uri()`（讀 JAR bytes、套用 `app/icon_render.py` 規則、結果進記憶體 LRU）
+4. `_build_icon_widget`：以 128×128、`filter_quality=NONE` 的 `ft.Image` 1:1 顯示（`_ensure_icon_size` 只用於舊式磁碟預覽）；懸停提示由 `describe_icon_uri` 產生（貼圖、模型、來源 JAR、等角／染色／UV 展開圖註記）；內容類 key（item／block 等）找不到圖示時顯示共用佔位圖與原因，非內容類 key 不佔版面
 5. 無預覽圖：有 reason 時顯示灰底警示圖示 + 依 `IconRisk` 上色的原因文字；沒有 reason 則不顯示 icon（不中斷 UI）
 
 ## icon_resolver.py 決策鏈（extracted_folder 模式）
@@ -123,7 +127,7 @@ translation_tool/core/
 
 ## 維護注意
 
-1. 新增 icon 解析策略時，JAR 模式改 `app/views/icon_preview/icon_cache.py`（與 `app/icon_index.py` 共用），資料夾模式改 `translation_tool/core/icon_resolver.py`，不要塞進 view。
+1. 新增 icon 解析策略時，JAR 模式改 `app/icon_resolve.py`（挑選規則）與 `app/icon_render.py`（影像處理）；`app/views/icon_preview/icon_cache.py` 保留批次提取與穩定的 patch 入口（與 `app/icon_index.py` 共用），資料夾模式改 `translation_tool/core/icon_resolver.py`，不要塞進 view。
 2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
 3. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
 4. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
@@ -144,7 +148,7 @@ app/views/icon_preview_view.py            ← IconPreviewView 主體：生命週
 app/views/icon_preview/
   ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋
   ├─ detail_mixin.py     IconPreviewDetailMixin  單一模組詳情、載入 entries、翻譯儲存
-  ├─ icon_cache.py       圖示提取與快取輔助函式（ModpackAssetCatalog、model JSON 解析、批次提取、model index 快取）
+  ├─ icon_cache.py       圖示批次提取與快取輔助函式（批次提取、舊式 model index 快取；ModpackAssetCatalog 在 `app/icon_catalog.py`）
   ├─ entries_cache.py    掃描結果（entries）的 L2 磁碟快取
   ├─ load_operation.py   載入編排（模式偵測、快取查詢、掃描），於 page operation 內執行
   ├─ render_operation.py 詳情頁列渲染（分頁、圖示準備），以世代號只套用最後一次結果
@@ -153,3 +157,13 @@ app/views/icon_preview_row.py             ← 單列（圖示 + 翻譯欄位）
 ```
 
 測試要 monkeypatch 圖示輔助函式（`_get_cache_dir`、`_get_jar_hash`、`_try_extract_mod_icon_from_model` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）；L2 entries 快取目錄 `_get_cache_dir` 在 `entries_cache`。`app/icon_index.py` 也從 `icon_cache` 匯入 `_try_extract_mod_icon_from_model`。
+
+
+## 圖示解析與渲染規則
+
+- 索引與 L2 entries 快取內的 `icon_path` 是 URI：`jar://<archive>:<png>`，可帶 `#mct=<JSON>` 預覽提示（`k`=`iso` 等角方塊、`f` 與主貼圖不同的面、`t` 染色、`m` 模型、`u` UV 展開圖）；沒有貼圖的刷怪蛋為 `mct-icon://spawn_egg`。
+- 挑選順序：model（item／block／blockstate）→ 同名貼圖（item／block／mob_effect）。texture 優先序 `layer0, front, all, side, top, end, …`，`particle` 最後。
+- 完整方塊（原版 `cube_all`／`cube_column`／`orientable` 等模板或單一 16×16×16 element）使用頂／東／北三面合成等角預覽；其他模型為平面貼圖。
+- 缺少原版 client JAR 時，非原版命名空間的貼圖只在整包恰有一個同名檔案時採用；原版貼圖不猜測（顯示佔位圖）。
+- 索引建置：同一 key 出現在多個 JAR 時取 JAR 名稱排序最前者；lang JSON 容許註解、結尾逗號與原始控制字元。
+- 版本：`entries_cache._CACHE_VERSION` 與索引檔 `version` 變更會使舊快取內的 icon 失效。

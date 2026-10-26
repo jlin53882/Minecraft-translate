@@ -8,7 +8,8 @@
 - 以兩層介面呈現：第一層為模組清單（可分頁、可搜尋），第二層為單一模組的翻譯校對列（含 mod icon 預覽、可分頁、可搜尋）。
 - 掃描與讀取由 `app/views/icon_preview/load_operation.py` 協調，核心讀取位於 `translation_tool/utils/jar_browser.py`（`scan_jars`）與 `translation_tool/core/icon_resolver.py`（`resolve_icon_with_reason`）。
 - 儲存時把使用者編輯的譯文寫回 `{modid}/lang/zh_tw.json`。
-- 圖示快取與磁碟快取由 `app/views/icon_preview/icon_cache.py` 與 `entries_cache.py` 管理。
+- 圖示解析由 `app/icon_resolve.py`、渲染由 `app/icon_render.py`／`app/icon_preview_image.py` 負責；批次提取與磁碟快取由 `app/views/icon_preview/icon_cache.py` 與 `entries_cache.py` 管理。
+- 圖示在背景執行緒渲染為 128×128 的像素銳利 PNG（動畫取首格、整數倍最近鄰放大、方塊為等角預覽）；懸停可看貼圖／模型／來源 JAR；內容類 key 找不到圖示時顯示共用佔位圖。
 
 ## 主要流程
 

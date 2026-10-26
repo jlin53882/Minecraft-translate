@@ -9,11 +9,10 @@ import shutil
 import threading
 import unicodedata
 import zipfile
-from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-from app.icon_reader import IconRef
-from app.icon_runtime import get_runtime_asset_paths
+from app.icon_catalog import ModpackAssetCatalog
+from app.icon_resolve import CONTENT_ICON_PREFIXES, IconHit, hit_to_uri, resolve_icon
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cache_registry import register_cache
@@ -30,20 +29,7 @@ from translation_tool.utils.zip_safety import (
 
 # 只有這些內容 key 需要進行 model icon lookup。
 # 不在清單裡的 key（如 _comment、advancements.*、recipe_type、jei.* 等）不該有 icon。
-_CONTENT_ICON_PREFIXES = frozenset(
-    [
-        "item",
-        "block",
-        "entity",
-        "enchantment",
-        "effect",
-        "potion",
-        "biome",
-        "attribute",
-        "tile",
-        "-effect",
-    ]
-)
+_CONTENT_ICON_PREFIXES = CONTENT_ICON_PREFIXES
 
 
 def _key_needs_icon(key: str) -> bool:
@@ -138,305 +124,6 @@ def clear_model_index_memo() -> None:
 register_cache("icon_preview.model_index_memo", clear_model_index_memo)
 
 
-class ModpackAssetCatalog:
-    """唯讀索引 modpack 內的 model/blockstate/texture 資源位置。"""
-
-    def __init__(
-        self,
-        archives: list[Path],
-        *,
-        current_archive: Path | None = None,
-        client_archive: Path | None = None,
-    ):
-        self.archives = [Path(p).resolve() for p in archives]
-        self.current_archive = (
-            Path(current_archive).resolve() if current_archive is not None else None
-        )
-        self.client_archive = (
-            Path(client_archive).resolve() if client_archive is not None else None
-        )
-        self.members: dict[Path, set[str]] = {}
-        self.resources: dict[str, list[Path]] = defaultdict(list)
-        self.texture_names: dict[str, list[str]] = defaultdict(list)
-        self._handles: OrderedDict[Path, zipfile.ZipFile] = OrderedDict()
-        self._budgets: dict[Path, ZipReadBudget] = {}
-        self._lock = threading.Lock()
-        for archive in self.archives:
-            raise_if_cancelled()
-            try:
-                with zipfile.ZipFile(archive) as zf:
-                    names = set(zf.namelist())
-            except (OSError, zipfile.BadZipFile):
-                continue
-            self.members[archive] = names
-            for name in names:
-                raise_if_cancelled()
-                parts = name.split("/")
-                if (
-                    len(parts) >= 4
-                    and parts[0] == "assets"
-                    and parts[2] in {"models", "blockstates", "textures"}
-                ):
-                    self.resources[name].append(archive)
-                    if "/textures/" in name:
-                        self.texture_names[name.rsplit("/", 1)[-1].casefold()].append(
-                            name
-                        )
-        for paths in self.resources.values():
-            raise_if_cancelled()
-            paths.sort(key=lambda p: str(p).casefold())
-
-    @classmethod
-    def from_mods_directory(cls, source_root: Path) -> "ModpackAssetCatalog":
-        source_root = Path(source_root).resolve()
-        archives = []
-        for archive in source_root.glob("*.jar"):
-            raise_if_cancelled()
-            archives.append(archive)
-        archives.sort(key=lambda p: p.name.casefold())
-        runtime_assets = get_runtime_asset_paths(source_root)
-        # A normal Minecraft installation keeps the client JAR beside the mods folder.
-        client_jar = source_root.parent / f"{source_root.parent.name}.jar"
-        if client_jar.is_file():
-            archives.insert(0, client_jar)
-        else:
-            client_jar = None
-        loader_archives = [
-            path for path in runtime_assets if path.name.endswith("-universal.jar")
-        ]
-        archives = loader_archives + archives
-        return cls(archives, client_archive=client_jar)
-
-    def has(self, resource_path: str) -> bool:
-        return bool(self.resources.get(resource_path))
-
-    def unique_texture_with_name(self, filename: str) -> str | None:
-        """Return a texture path only when its basename is unambiguous in the pack."""
-        matches = self.texture_names.get(filename.casefold(), [])
-        return matches[0] if len(matches) == 1 else None
-
-    def archive_for(
-        self, resource_path: str, *, current_archive: Path | None = None
-    ) -> Path | None:
-        candidates = self.resources.get(resource_path, [])
-        current = Path(current_archive).resolve() if current_archive else None
-        namespace = (
-            resource_path.split("/", 2)[1]
-            if resource_path.startswith("assets/")
-            else ""
-        )
-        if current in candidates:
-            return current
-        if namespace == "minecraft" and self.client_archive in candidates:
-            return self.client_archive
-        return candidates[0] if candidates else None
-
-    def read(
-        self,
-        resource_path: str,
-        *,
-        current_archive: Path | None = None,
-        current_zf: zipfile.ZipFile | None = None,
-        budget: ZipReadBudget | None = None,
-    ) -> bytes | None:
-        candidates = self.resources.get(resource_path, [])
-        current = Path(current_archive).resolve() if current_archive else None
-        preferred = self.archive_for(resource_path, current_archive=current)
-        ordered = ([preferred] if preferred is not None else []) + [
-            path for path in candidates if path != preferred
-        ]
-        for archive in ordered:
-            if archive == current and current_zf is not None:
-                try:
-                    return read_limited(current_zf, resource_path, budget=budget)
-                except (KeyError, OSError, zipfile.BadZipFile):
-                    continue
-            zf = self._get_handle(archive)
-            if zf is None:
-                continue
-            try:
-                archive_budget = self._budgets.setdefault(
-                    archive, ZipReadBudget.for_icon_scan(archive.name)
-                )
-                return read_limited(zf, resource_path, budget=archive_budget)
-            except (KeyError, OSError, zipfile.BadZipFile):
-                continue
-        return None
-
-    def _get_handle(self, archive: Path) -> zipfile.ZipFile | None:
-        with self._lock:
-            if archive in self._handles:
-                self._handles.move_to_end(archive)
-                return self._handles[archive]
-            while len(self._handles) >= 16:
-                _, old = self._handles.popitem(last=False)
-                old.close()
-            try:
-                handle = zipfile.ZipFile(archive)
-            except (OSError, zipfile.BadZipFile):
-                return None
-            self._handles[archive] = handle
-            return handle
-
-    def close(self) -> None:
-        with self._lock:
-            while self._handles:
-                _, handle = self._handles.popitem(last=False)
-                handle.close()
-
-
-def _resource_location(value: str, default_namespace: str) -> tuple[str, str] | None:
-    if not isinstance(value, str) or not value:
-        return None
-    if ":" in value:
-        namespace, path = value.split(":", 1)
-    else:
-        namespace, path = default_namespace, value
-    if not namespace or not path or path.startswith("/") or ".." in path.split("/"):
-        return None
-    return namespace, path
-
-
-def _model_resource_path(namespace: str, path: str) -> str:
-    return f"assets/{namespace}/models/{path.removesuffix('.json')}.json"
-
-
-def _model_texture_values(
-    namespace: str,
-    model_path: str,
-    catalog: ModpackAssetCatalog,
-    *,
-    current_archive: Path | None,
-    current_zf: zipfile.ZipFile | None,
-    budget: ZipReadBudget | None,
-    visited: set[tuple[str, str]] | None = None,
-) -> dict[str, str]:
-    """收集子模型優先、父模型補齊的 texture map。"""
-    visited = visited or set()
-    location = (namespace, model_path.removesuffix(".json"))
-    if location in visited or len(visited) >= 32:
-        return {}
-    visited.add(location)
-    data_path = _model_resource_path(*location)
-    raw = catalog.read(
-        data_path,
-        current_archive=current_archive,
-        current_zf=current_zf,
-        budget=budget,
-    )
-    if raw is None:
-        return {}
-    try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    textures = data.get("textures")
-    result = (
-        {str(key): value for key, value in textures.items() if isinstance(value, str)}
-        if isinstance(textures, dict)
-        else {}
-    )
-    parent = data.get("parent")
-    parent_location = _resource_location(parent, location[0]) if parent else None
-    if parent_location:
-        parent_textures = _model_texture_values(
-            *parent_location,
-            catalog,
-            current_archive=current_archive,
-            current_zf=current_zf,
-            budget=budget,
-            visited=visited,
-        )
-        for key, value in parent_textures.items():
-            result.setdefault(key, value)
-    return result
-
-
-def _resolve_texture_alias(textures: dict[str, str], key: str) -> str | None:
-    seen: set[str] = set()
-    value = textures.get(key)
-    while isinstance(value, str) and value.startswith("#"):
-        alias = value[1:]
-        if alias in seen:
-            return None
-        seen.add(alias)
-        value = textures.get(alias)
-    return value if isinstance(value, str) and value else None
-
-
-def _texture_candidates(textures: dict[str, str]) -> list[str]:
-    keys = ["layer0", "front", "particle", "all", "side", "end", "top", "bottom"]
-    ordered = [key for key in keys if key in textures]
-    ordered.extend(key for key in textures if key not in ordered)
-    results: list[str] = []
-    for key in ordered:
-        value = _resolve_texture_alias(textures, key)
-        if value and value not in results:
-            results.append(value)
-    return results
-
-
-def _png_resource_path(value: str) -> str | None:
-    location = _resource_location(value, "minecraft")
-    if location is None:
-        return None
-    namespace, path = location
-    return f"assets/{namespace}/textures/{path.removesuffix('.png')}.png"
-
-
-def _blockstate_models(
-    namespace: str,
-    block_name: str,
-    catalog: ModpackAssetCatalog,
-    *,
-    current_archive: Path | None,
-    current_zf: zipfile.ZipFile | None,
-    budget: ZipReadBudget | None,
-) -> list[tuple[str, str]]:
-    path = f"assets/{namespace}/blockstates/{block_name}.json"
-    raw = catalog.read(
-        path,
-        current_archive=current_archive,
-        current_zf=current_zf,
-        budget=budget,
-    )
-    if raw is None:
-        return []
-    try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return []
-    refs: list[str] = []
-
-    def collect(value):
-        if isinstance(value, dict):
-            if isinstance(value.get("model"), str):
-                refs.append(value["model"])
-            for child in value.values():
-                collect(child)
-        elif isinstance(value, list):
-            for child in value:
-                collect(child)
-
-    if isinstance(data, dict):
-        variants = data.get("variants")
-        if isinstance(variants, dict) and variants:
-            selected = variants.get("")
-            if selected is None:
-                selected = variants[min(variants)]
-            collect(selected)
-        if "multipart" in data:
-            collect(data["multipart"])
-    result = []
-    for ref in refs:
-        location = _resource_location(ref, namespace)
-        if location and location not in result:
-            result.append(location)
-    return result
-
-
 def _resolve_icon_from_catalog(
     jar_path: Path,
     lang_namespace: str,
@@ -445,85 +132,19 @@ def _resolve_icon_from_catalog(
     *,
     current_zf: zipfile.ZipFile | None,
     budget: ZipReadBudget | None,
-) -> tuple[str, str, Path] | None:
-    parts = key.split(".")
-    if len(parts) < 3:
-        return None
-    prefix = parts[0]
-    if prefix not in _CONTENT_ICON_PREFIXES:
-        return None
+) -> IconHit | None:
+    """解析 lang key 對應的圖示（``(texture, png_path, archive)``，附 ``.meta`` 預覽提示）。
 
-    namespace_candidates: list[tuple[str, str]] = []
-    key_namespace = parts[1]
-    key_rest = ".".join(parts[2:])
-    if key_namespace and (
-        catalog.resources.get(f"assets/{key_namespace}/models/item/{key_rest}.json")
-        or catalog.resources.get(f"assets/{key_namespace}/blockstates/{key_rest}.json")
-        or catalog.resources.get(f"assets/{key_namespace}/models/block/{key_rest}.json")
-    ):
-        namespace_candidates.append((key_namespace, key_rest))
-    if key_namespace == lang_namespace:
-        namespace_candidates.append((lang_namespace, key_rest))
-    elif lang_namespace in parts[1:]:
-        mod_pos = parts.index(lang_namespace, 1)
-        namespace_candidates.append((lang_namespace, ".".join(parts[mod_pos + 1 :])))
-
-    model_subdirs = {
-        "item": ("item", "block"),
-        "block": ("block", "item"),
-        "entity": ("entity", "item"),
-        "enchantment": ("item", "block"),
-        "effect": ("item",),
-        "potion": ("item",),
-        "biome": ("item",),
-        "attribute": ("item",),
-        "tile": ("block", "item"),
-        "-effect": ("item",),
-    }.get(prefix, (prefix,))
-
-    for namespace, rest in dict.fromkeys(namespace_candidates):
-        if not rest:
-            continue
-        model_refs: list[tuple[str, str]] = []
-        for subdir in model_subdirs:
-            path = f"assets/{namespace}/models/{subdir}/{rest}.json"
-            if catalog.has(path):
-                model_refs.append((namespace, f"{subdir}/{rest}"))
-        if prefix == "block":
-            model_refs.extend(
-                _blockstate_models(
-                    namespace,
-                    rest,
-                    catalog,
-                    current_archive=jar_path,
-                    current_zf=current_zf,
-                    budget=budget,
-                )
-            )
-
-        for model_namespace, model_path in dict.fromkeys(model_refs):
-            textures = _model_texture_values(
-                model_namespace,
-                model_path,
-                catalog,
-                current_archive=jar_path,
-                current_zf=current_zf,
-                budget=budget,
-            )
-            for texture in _texture_candidates(textures):
-                png_path = _png_resource_path(texture)
-                if png_path and not catalog.has(png_path):
-                    # Some addon JARs ship models that retain a dependency namespace
-                    # after the source texture moved/was renamed. Only accept a
-                    # basename fallback when the whole pack has exactly one match.
-                    png_path = catalog.unique_texture_with_name(
-                        png_path.rsplit("/", 1)[-1]
-                    )
-                if png_path and catalog.has(png_path):
-                    archive = catalog.archive_for(png_path, current_archive=jar_path)
-                    if archive is not None:
-                        return texture, png_path, archive
-    return None
+    挑選規則在 ``app.icon_resolve``；本函式保留為呼叫端與測試 patch 的穩定入口。
+    """
+    return resolve_icon(
+        jar_path,
+        lang_namespace,
+        key,
+        catalog,
+        current_zf=current_zf,
+        budget=budget,
+    )
 
 
 def _load_model_index_from_cache(jar_path: Path, modid: str) -> dict | None:
@@ -917,8 +538,7 @@ def _batch_extract_jar_icons(
                         budget=budget,
                     )
                     if res:
-                        _tex_val, png_path, texture_archive = res
-                        uri = IconRef(texture_archive, png_path).to_uri()
+                        uri = hit_to_uri(res)
                         result_map[key] = uri
                         _result_cache[cache_key] = uri
                     else:
