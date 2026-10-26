@@ -244,6 +244,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         self.priority = tuple(priority)
         self.readonly = readonly
         self._lock = threading.RLock()
+        self._probe_lock = threading.Lock()
+        self._generation_probe: sqlite3.Connection | None = None
         self._write_transaction = False
         self._rank = rank_sql(self.priority, "t.source")
         existed = self.path.is_file()
@@ -320,6 +322,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
         """關閉連線。"""
+        with self._probe_lock:
+            if self._generation_probe is not None:
+                self._generation_probe.close()
+                self._generation_probe = None
         with self._lock:
             self._conn.close()
 
@@ -395,6 +401,32 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             "SELECT value FROM meta WHERE key = ?", (change_tracker.SEQ_KEY,)
         )
         return gen if row is None else f"{gen}.{row[0]}"
+
+    def cache_generation_nowait(self) -> str:
+        """與 :meth:`_cache_generation` 相同的世代值，但不等主連線的鎖，供畫面執行緒使用。
+
+        主連線正在寫入交易或跑長查詢時，``_cache_generation`` 要等鎖，畫面執行緒就會卡住；
+        這裡另用一條唯讀連線讀已提交的 ``data_gen`` 與外部寫入序號（WAL 讀者不被寫入擋住），
+        只在第一次呼叫時開啟，隨 :meth:`close` 關閉。
+        """
+        with self._probe_lock:
+            probe = self._generation_probe
+            if probe is None:
+                probe = self._generation_probe = sqlite3.connect(
+                    f"{self.path.resolve().as_uri()}?mode=ro",
+                    uri=True,
+                    check_same_thread=False,
+                    timeout=0.05,
+                )
+            rows = dict(
+                probe.execute(
+                    "SELECT key, value FROM meta WHERE key IN (?, ?)",
+                    ("data_gen", change_tracker.SEQ_KEY),
+                ).fetchall()
+            )
+        gen = rows.get("data_gen", "0")
+        seq = rows.get(change_tracker.SEQ_KEY)
+        return gen if seq is None else f"{gen}.{seq}"
 
     def _read_cache_identity(self) -> tuple:
         """納入檔案生命週期與 WAL 變化，包含外部 SQL 寫入。"""

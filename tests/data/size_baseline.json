@@ -39,7 +39,7 @@
     "app/views/moddb/review_scope_dialog.py": 802,
     "app/views/moddb/smart_review_batch_reviewer.py": 1053,
     "app/views/moddb/smart_review_reviewer.py": 828,
-    "app/views/moddb/smart_review_run_panel.py": 878,
+    "app/views/moddb/smart_review_run_panel.py": 896,
     "app/views/moddb/species_dialog.py": 855,
     "app/views/moddb/translate_panel.py": 1106,
     "app/views/moddb_view.py": 942

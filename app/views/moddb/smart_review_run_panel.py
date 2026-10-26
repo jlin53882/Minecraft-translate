@@ -20,6 +20,7 @@ from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
+from app.ui.update_scope import update_regions
 from app.views._log.log_view import LogView
 from app.views.moddb.formatting import format_count
 from app.views.moddb.smart_review_context import SmartReviewContext
@@ -38,9 +39,12 @@ from app.views.moddb.smart_review_run_status import (
     run_status_color,
     run_status_label,
 )
+from translation_tool.translation_db.query_interrupt import QueryInterrupt
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 _POLL_SECONDS = 0.4
+_TYPING_DEBOUNCE_SECONDS = 0.3  # 搜尋、上限、模型：停筆多久後重新預估
+_SCOPE_DEBOUNCE_SECONDS = 0.15  # 下拉選單這類一次到位的範圍變更
 
 
 class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
@@ -68,7 +72,10 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         self._scope_loading = False
         self._attached = False
         self._poller = PollerHandle()
-        self._debounce = Debouncer(lambda: ctx.page, 0.6)
+        self._debounce = Debouncer(lambda: ctx.page, _TYPING_DEBOUNCE_SECONDS)
+        self._plan_debounce = Debouncer(lambda: ctx.page, _TYPING_DEBOUNCE_SECONDS)
+        self._scope_debounce = Debouncer(lambda: ctx.page, _SCOPE_DEBOUNCE_SECONDS)
+        self._count_interrupt: QueryInterrupt | None = None
         self._last_sync_signature: tuple[object, ...] | None = None
         self._scope_modules: tuple[str, ...] = ()
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
@@ -484,7 +491,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         if self._scope_loading:
             self._update_estimate_text()
             return
-        self._debounce.call(self.refresh_estimate)
+        self._scope_debounce.call(self.refresh_estimate)
 
     def _scope_values(self) -> tuple[str | None, str | None, int | None, str]:
         """讀取模組、類型、來源與搜尋條件，並把「全部」轉成 None。"""
@@ -507,9 +514,11 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             return
         path, priority = database
         mod_id, kind, source, query = self._scope_values()
+        self._plan_debounce.cancel()  # 下面會一併重新讀取規劃預估
         ticket = self.ctx.begin_request(self._CANDIDATE_COUNT_REQUEST_DOMAIN)
+        interrupt = self._count_interrupt = QueryInterrupt()
         self.estimate_text.value = "正在計算符合條件的候選筆數…"
-        self.ctx.update()
+        self._update_estimate_region()
 
         def work() -> int:
             """唯讀計算符合範圍的未審核候選數。"""
@@ -522,6 +531,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
                 effective_source=source,
                 review_status="unreviewed",
                 query=query,
+                interrupt=interrupt,
             )
 
         def done(total, error: str | None) -> None:
@@ -534,7 +544,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             else:
                 self._total = int(total or 0)
                 self._update_estimate_text(update=False)
-            self.ctx.update()
+            self._update_estimate_region()
 
         self.ctx.run_background(
             work,
@@ -602,7 +612,13 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             )
             self.estimate_text.color = C.MUTED
         if update:
-            self.ctx.update()
+            self._update_estimate_region()
+
+    def _update_estimate_region(self) -> None:
+        """只重畫兩段預估文字；整個視窗（含數千個模組選項）的差異計算要數十毫秒。"""
+        update_regions(
+            self.estimate_text, self.plan_preview_text, self.plan_progress_bar
+        )
 
     # ──────────────── 啟動、停止與狀態 ────────────────
 
@@ -711,6 +727,8 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             reason="視窗關閉",
         )
         self._debounce.cancel()
+        self._plan_debounce.cancel()
+        self._scope_debounce.cancel()
         self._poller.stop()
         self.job.remove_finish_listener(self._on_finished)
 

@@ -393,7 +393,8 @@ def test_run_panel_filters_modules_and_updates_sources_without_starting(
     panel.mod_dd.value = "jar_mod"
     # 這個測試頁面用 asyncio.run 立即執行 run_task；避免 debounce callback
     # 在 callback 內再次呼叫 run_background 時巢狀建立 event loop。
-    panel._debounce.call = lambda *_args, **_kwargs: None
+    for debounce in (panel._debounce, panel._plan_debounce, panel._scope_debounce):
+        debounce.call = lambda *_args, **_kwargs: None
     panel._on_mod()
     assert len(scope_calls) == 1
 
@@ -1042,7 +1043,8 @@ def test_resume_scope_change_invalidates_inflight_count_and_plan_preview(
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     panel = dialog.run_panel
     panel._scope_loading = False
-    panel._debounce.call = lambda *_a, **_k: None
+    for debounce in (panel._debounce, panel._plan_debounce, panel._scope_debounce):
+        debounce.call = lambda *_a, **_k: None
     pending = []
 
     def hold(work, done, **kwargs):
@@ -1092,7 +1094,8 @@ def test_scope_and_preview_invalidations_follow_one_contract(db, monkeypatch):
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     panel = dialog.run_panel
     panel._scope_loading = False
-    panel._debounce.call = lambda *_args, **_kwargs: None
+    for debounce in (panel._debounce, panel._plan_debounce, panel._scope_debounce):
+        debounce.call = lambda *_args, **_kwargs: None
     panel._total = 70_000
     panel._plan_preview_result = {"selected_count": 70_000}
 

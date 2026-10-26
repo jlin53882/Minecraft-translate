@@ -16,7 +16,9 @@ from app.services_impl.moddb_smart_review_service import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.update_scope import suppress_auto_update
 from app.views.moddb.smart_review_job import SmartReviewRequest
+from translation_tool.translation_db.query_interrupt import QueryInterrupt
 from translation_tool.utils.config_manager import get_smart_review_settings
 
 
@@ -279,10 +281,13 @@ class SmartReviewPlanningController:
     def __init__(self, ctx) -> None:
         """保存共用 UI context；不保存面板控制項或 job 狀態。"""
         self.ctx = ctx
+        self._interrupt: QueryInterrupt | None = None
 
     def invalidate(self) -> None:
-        """讓目前預估失效，下一次 refresh 會取得新的 request ticket。"""
+        """讓目前預估失效並中斷進行中的查詢，下一次 refresh 會取得新的 request ticket。"""
         self.ctx.invalidate_request(self._REQUEST_DOMAIN)
+        if self._interrupt is not None:
+            self._interrupt.cancel()
 
     def refresh(
         self,
@@ -294,6 +299,7 @@ class SmartReviewPlanningController:
     ) -> bool:
         """以明確 request 執行背景預估，完成後透過 callback 回傳結果。"""
         ticket = self.ctx.begin_request(self._REQUEST_DOMAIN)
+        interrupt = self._interrupt = QueryInterrupt()
 
         def current() -> bool:
             return self.ctx.is_current(ticket) and still_valid()
@@ -324,6 +330,7 @@ class SmartReviewPlanningController:
                 skip_valid_history=request.skip_valid_history,
                 model=request.model,
                 progress=report_progress,
+                interrupt=interrupt,
             )
 
         def done(result: dict[str, Any] | None, error: str | None) -> None:
@@ -359,7 +366,11 @@ class SmartReviewRunPlanningMixin:
             self.ctx.invalidate_request(self._SCOPE_OPTIONS_REQUEST_DOMAIN)
             self.ctx.invalidate_request(self._CANDIDATE_COUNT_REQUEST_DOMAIN)
             self._total = None
+            if self._count_interrupt is not None:
+                self._count_interrupt.cancel()  # 結果已作廢，連查詢一併中斷
         self._debounce.cancel()
+        self._plan_debounce.cancel()
+        self._scope_debounce.cancel()
         if hasattr(self, "plan_preview_text"):
             self.plan_preview_text.value = f"條件已變更（{reason}），等待重新計算…"
             self.plan_preview_text.color = C.MUTED
@@ -376,7 +387,8 @@ class SmartReviewRunPlanningMixin:
         )
 
     def _query_changed(self, _e=None) -> None:
-        """搜尋條件變更時先撤銷舊規劃，再 debounce 重新計算。"""
+        """搜尋條件變更時先撤銷舊規劃，停筆後才重新計算（輸入中沒有畫面變更）。"""
+        suppress_auto_update()
         self._invalidate_scope_queries(
             candidate_scope_changed=True,
             reason="搜尋條件",
@@ -384,20 +396,22 @@ class SmartReviewRunPlanningMixin:
         self._debounce.call(self.refresh_estimate)
 
     def _model_changed(self, _e=None) -> None:
-        """模型變更時明確失效舊規劃並重新計算。"""
-        self._invalidate_scope_queries(
-            candidate_scope_changed=False,
-            reason="校對模型",
-        )
-        self._debounce.call(self._refresh_plan_preview)
+        """模型變更：候選範圍沒變，只重算歷史規劃預估。"""
+        self._plan_inputs_changed("校對模型")
 
     def _limit_changed(self, _e=None) -> None:
         """處理上限只影響 plan preview，不重查候選總數。"""
+        self._plan_inputs_changed("本次處理上限")
+
+    def _plan_inputs_changed(self, reason: str) -> None:
+        """上限或模型變更：立刻用既有的候選筆數更新文字，停筆後才重新讀取規劃。"""
+        suppress_auto_update()
         self._invalidate_scope_queries(
             candidate_scope_changed=False,
-            reason="本次處理上限",
+            reason=reason,
         )
-        self._debounce.call(self._refresh_plan_preview)
+        self._update_estimate_region()
+        self._plan_debounce.call(self._refresh_plan_preview)
 
     def _build_history_controls(self) -> None:
         """建立新批次的最近兩批重用與執行前規劃控制項。"""
@@ -475,7 +489,7 @@ class SmartReviewRunPlanningMixin:
         self.plan_preview_text.color = C.MUTED
         self.plan_progress_bar.value = None
         self.plan_progress_bar.visible = True
-        self.ctx.update()
+        self._update_estimate_region()
 
     def _hide_plan_preview_loading(self) -> None:
         """輸入無效或背景工作未啟動時，清除不再有效的 loading 狀態。"""
@@ -487,7 +501,7 @@ class SmartReviewRunPlanningMixin:
         self.plan_progress_bar.value = None
         self.plan_preview_text.value = message
         self.plan_preview_text.color = C.MUTED
-        self.ctx.update()
+        self._update_estimate_region()
 
     def _finish_plan_preview(
         self,
@@ -514,7 +528,7 @@ class SmartReviewRunPlanningMixin:
             )
             self.plan_preview_text.color = C.MUTED
             self._update_estimate_text(update=False)
-        self.ctx.update()
+        self._update_estimate_region()
 
     def _refresh_plan_preview(self) -> None:
         """以同一個 planner 讀取歷史 KPI；預覽不會呼叫 provider。"""

@@ -31,6 +31,7 @@ from translation_tool.translation_db import (
     SmartReviewSnapshot,
     TranslationDB,
 )
+from translation_tool.translation_db.query_interrupt import QueryInterrupt
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_DEFAULT_BATCH_SIZE as _SMART_REVIEW_DEFAULT_BATCH_SIZE,
@@ -215,6 +216,7 @@ def preview_moddb_smart_review_plan_from_path(
     skip_valid_history: bool = True,
     model: str | None = None,
     progress: Callable[[str], None] | None = None,
+    interrupt: QueryInterrupt | None = None,
 ) -> dict[str, Any]:
     """回傳唯讀歷史規劃 KPI，不呼叫 provider。
 
@@ -238,7 +240,11 @@ def preview_moddb_smart_review_plan_from_path(
         skip_valid_history=skip_valid_history,
     )
     db = _open(path, priority, readonly=True)
+    if interrupt is not None:
+        interrupt.attach(db._conn)
     try:
+        if interrupt is not None:
+            interrupt.raise_if_cancelled()
         notify("正在讀取目前符合範圍的候選…")
         snapshots = db.smart_review_candidates(
             **plan_input.candidate_kwargs(include_context=False)
@@ -265,6 +271,8 @@ def preview_moddb_smart_review_plan_from_path(
         )
         return _preview_plan_summary(plan, batch_size)
     finally:
+        if interrupt is not None:
+            interrupt.detach()
         db.close()
 
 
@@ -506,10 +514,15 @@ def count_moddb_smart_review_candidates_from_path(
     review_status: str = "unreviewed",
     query: str | None = None,
     require_reviewed_reference: bool = False,
+    interrupt: QueryInterrupt | None = None,
 ) -> int:
-    """計算指定資料庫目前範圍內的智慧校對候選數量。"""
+    """計算指定資料庫目前範圍內的智慧校對候選數量；``interrupt`` 讓過期的請求提早停止掃描。"""
     db = _open(path, priority, readonly=True)
+    if interrupt is not None:
+        interrupt.attach(db._conn)
     try:
+        if interrupt is not None:
+            interrupt.raise_if_cancelled()
         return db.count_smart_review_candidates(
             version=version,
             mod_id=mod_id,
@@ -520,6 +533,8 @@ def count_moddb_smart_review_candidates_from_path(
             require_reviewed_reference=require_reviewed_reference,
         )
     finally:
+        if interrupt is not None:
+            interrupt.detach()
         db.close()
 
 

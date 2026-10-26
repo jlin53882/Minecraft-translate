@@ -88,7 +88,10 @@ class SmartReviewContext:
             identity += f"::{stat.st_dev}:{stat.st_ino}"
         if not include_generation:
             return identity
-        generation_getter = getattr(db, "_cache_generation", None)
+        # 畫面執行緒呼叫：用不等主連線鎖的版本（寫入或長查詢進行中也不會卡住畫面）
+        generation_getter = getattr(db, "cache_generation_nowait", None) or getattr(
+            db, "_cache_generation", None
+        )
         if callable(generation_getter):
             try:
                 identity += f"::{generation_getter()}"
