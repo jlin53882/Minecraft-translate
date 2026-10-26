@@ -44,6 +44,10 @@ class TestJarProcessorExports:
         assert regex.search("assets/mymod/lang/en_us.json")
         assert regex.search("assets/mymod/lang/zh_cn.json")
         assert regex.search("assets/mymod/lang/zh_tw.json")
+        assert regex.search("data/mymod/lang/en_us.json")
+        assert not regex.search("data/mymod/advancements/lang/en_us.json")
+        assert not regex.search("assets/mymod/books/lang/en_us.json")
+        assert not regex.search("wrapper/assets/mymod/lang/en_us.json")
 
     def test_extraction_rejects_input_folder_as_output(self, tmp_path):
         """An already-suffixed source must not be overwritten in place."""
