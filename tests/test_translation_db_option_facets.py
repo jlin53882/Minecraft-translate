@@ -383,3 +383,77 @@ def test_quality_filter_options_are_cached_per_data_generation(db, quality):
     statements.clear()
     db.filter_option_values(criteria)
     assert [s for s in statements if "FROM entry e" in s]
+
+
+# ------------------------------------------------------------------ 搜尋：平行掃描與一次掃描
+@pytest.fixture
+def parallel(monkeypatch):
+    """讓小資料庫也切成多個編號區間（正式門檻是每區間 6 萬個編號）。"""
+    from translation_tool.translation_db import parallel_scan
+
+    monkeypatch.setattr(parallel_scan, "MIN_SPAN_PER_WORKER", 3)
+    monkeypatch.setattr(parallel_scan.os, "cpu_count", lambda: 4)
+    calls: list[list[tuple[int, int]]] = []
+    original = parallel_scan.scan
+
+    def recording(path, sql, params, ranges):
+        calls.append(list(ranges))
+        return original(path, sql, params, ranges)
+
+    monkeypatch.setattr(parallel_scan, "scan", recording)
+    return calls
+
+
+@pytest.mark.parametrize("query", ["block", "BLOCK", "o", "zzz", "a.t"])
+def test_parallel_search_facets_equal_the_serial_scan(db, parallel, query):
+    criteria = EntryFilter(version=VERSION, query=query)
+    facets = db._option_facets(criteria)
+    assert parallel, "搜尋的掃描分面要切成多個區間"
+    assert len(parallel[0]) > 1
+
+    serial = TranslationDB(db.path)
+    try:
+        serial_query = serial._facet_query(criteria)
+        rows = serial._q(serial_query[1], serial_query[2])
+        expected = option_facets.build(rows, serial_query[3])
+    finally:
+        serial.close()
+    assert sorted(facets["rows"]) == sorted(expected["rows"])
+    assert db.filter_option_values(criteria) == _old_options(db, criteria)
+
+
+def test_search_scans_the_version_once_for_total_and_options(db, parallel):
+    criteria = EntryFilter(version=VERSION, query="block")
+    rows, total = db.list_entries(criteria=criteria, limit=50)
+    options = db.filter_option_values(criteria)
+
+    assert len(parallel) == 1  # 筆數與下拉選項共用同一次掃描
+    assert total == _old_total(db, criteria) == len(rows)
+    assert options == _old_options(db, criteria)
+
+
+def test_search_with_a_selected_module_keeps_the_indexed_count(db, parallel):
+    criteria = EntryFilter(version=VERSION, query="block", mod_id="alpha")
+    _rows, total = db.list_entries(criteria=criteria, limit=50)
+    assert parallel == []  # 指定模組時索引已縮小範圍，不掃整個版本
+    assert total == _old_total(db, criteria)
+
+
+def test_parallel_scan_stops_when_the_task_is_cancelled(db, parallel, monkeypatch):
+    from translation_tool.translation_db import parallel_scan
+    from translation_tool.utils.cancellation import cancel_scope
+
+    monkeypatch.setattr(parallel_scan, "_PROGRESS_STEP", 1)
+    with cancel_scope(lambda: True), pytest.raises(sqlite3.OperationalError):
+        db._option_facets(EntryFilter(version=VERSION, query="block"))
+
+
+def test_split_ranges_cover_the_span_without_overlap():
+    from translation_tool.translation_db import parallel_scan
+
+    for low, high, parts in ((1, 10, 3), (5, 5, 4), (1, 283594, 4), (100, 103, 8)):
+        ranges = parallel_scan.split_ranges(low, high, parts)
+        assert ranges[0][0] == low and ranges[-1][1] == high
+        assert all(a <= b for a, b in ranges)
+        assert all(ranges[i][1] + 1 == ranges[i + 1][0] for i in range(len(ranges) - 1))
+    assert parallel_scan.worker_count(10) == 1

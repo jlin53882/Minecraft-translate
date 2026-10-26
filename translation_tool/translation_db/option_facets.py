@@ -71,17 +71,40 @@ def summary_sql(criteria: EntryFilter, codes: Sequence[int]) -> tuple[str, list]
     return sql, [*codes, *params]
 
 
-def scan_sql(candidate_source: str, condition: str, codes: Sequence[int]) -> str:
+def scan_sql(
+    candidate_source: str,
+    condition: str,
+    codes: Sequence[int],
+    *,
+    ranged: bool = False,
+) -> str:
     """條目掃描版分面的 SQL（``candidate_source`` 為已連接所需資料表的 FROM 子句）。
 
     ``GROUP BY e.mod_id`` 沿 ``idx_entry_list_order`` 的模組順序串流彙總，
     不需要暫存排序；各來源的數量用條件加總，不另外分組。
+    ``ranged=True`` 時只掃 ``e.id`` 的一段（結尾多兩個 ``?``：下限與上限），
+    供 :mod:`parallel_scan` 切段同時掃；各段的結果用 :func:`merge_rows` 合併。
     """
+    where = f"({condition}) AND e.id BETWEEN ? AND ?" if ranged else condition
     return (
         "SELECT e.mod_id, COUNT(*), SUM(f.source IS NOT NULL)"
         f"{_source_sums(codes, 'f.source', '1')} "
-        f"{candidate_source} WHERE {condition} GROUP BY e.mod_id"
+        f"{candidate_source} WHERE {where} GROUP BY e.mod_id"
     )
+
+
+def merge_rows(rows: Sequence[Sequence]) -> list[list]:
+    """合併多段掃描的列：同一個模組的各欄數量相加，結果依模組排序。"""
+    merged: dict[str, list[int]] = {}
+    for row in rows:
+        values = [int(value or 0) for value in row[1:]]
+        current = merged.get(str(row[0]))
+        if current is None:
+            merged[str(row[0])] = values
+        else:
+            for index, value in enumerate(values):
+                current[index] += value
+    return [[mod, *merged[mod]] for mod in sorted(merged)]
 
 
 def build(rows: Sequence[Sequence], codes: Sequence[int]) -> Facets:

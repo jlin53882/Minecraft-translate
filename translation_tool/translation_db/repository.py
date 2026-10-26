@@ -33,6 +33,7 @@ from translation_tool.translation_db import (
     effective_columns,
     entry_activity,
     option_facets,
+    parallel_scan,
     quality_flags,
     stat_summary,
 )
@@ -1600,10 +1601,11 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
 
     def _facet_query(
         self, criteria: EntryFilter
-    ) -> tuple[str, str, list, list[int]] | None:
-        """分面的（快取鍵, SQL, 參數, 來源代碼）；篩選含品質條件時沒有分面（``None``）。
+    ) -> tuple[str, str, list, list[int], str | None] | None:
+        """分面的（快取鍵, SQL, 參數, 來源代碼, 切段掃描用 SQL）；篩選含品質條件時沒有分面（``None``）。
 
         ``criteria`` 的模組與來源選擇不影響分面，所以這兩個欄位一律清掉。
+        切段 SQL 只在搜尋條件（逐列 ``LIKE``，無法用索引）的掃描分面才有，其餘為 ``None``。
         """
         if criteria.quality.active:
             return None
@@ -1611,16 +1613,57 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         codes = list(self.effective_source_codes(base.version))
         if option_facets.summary_eligible(base) and self._stat_summary_ready():
             sql, params = option_facets.summary_sql(base, codes)
-            return self._facet_key("facets-summary", sql, params), sql, params, codes
+            return (
+                self._facet_key("facets-summary", sql, params),
+                sql,
+                params,
+                codes,
+                None,
+            )
         condition, params = self._filter_sql(base)
-        sql = option_facets.scan_sql(
-            self._candidate_source(f"{condition} f.source"), condition, codes
+        source = self._candidate_source(f"{condition} f.source")
+        sql = option_facets.scan_sql(source, condition, codes)
+        ranged = (
+            option_facets.scan_sql(source, condition, codes, ranged=True)
+            if base.query.strip()
+            else None
         )
         params = [*codes, *params]
-        return self._facet_key("facets-scan", sql, params), sql, params, codes
+        return (
+            self._facet_key("facets-scan", sql, params),
+            sql,
+            params,
+            codes,
+            ranged,
+        )
+
+    def _facet_rows(
+        self,
+        criteria: EntryFilter,
+        sql: str,
+        params: list,
+        ranged_sql: str | None,
+    ) -> list[tuple]:
+        """分面的原始列；搜尋的整個版本逐列比對切成編號區間，用多條唯讀連線同時掃。"""
+        # 寫入交易中的變更其他連線看不到：交易內一律在本連線掃描
+        if ranged_sql is not None and not self._write_transaction:
+            bounds = self._one(
+                "SELECT MIN(e.id), MAX(e.id) FROM entry e WHERE e.mc_version = ?",
+                (criteria.version,),
+            )
+            if bounds and bounds[0] is not None:
+                workers = parallel_scan.worker_count(bounds[1] - bounds[0] + 1)
+                if workers > 1:
+                    ranges = parallel_scan.split_ranges(bounds[0], bounds[1], workers)
+                    rows = parallel_scan.scan(self.path, ranged_sql, params, ranges)
+                    return option_facets.merge_rows(rows)
+        return self._q(sql, params)
 
     def _option_facets(
-        self, criteria: EntryFilter, *, compute: bool = True
+        self,
+        criteria: EntryFilter,
+        *,
+        compute: bool = True,
     ) -> option_facets.Facets | None:
         """目前篩選條件的「模組 × 來源」分面（依資料世代快取）；不適用時回傳 ``None``。
 
@@ -1629,12 +1672,14 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         query = self._facet_query(criteria)
         if query is None:
             return None
-        key, sql, params, codes = query
+        key, sql, params, codes, ranged_sql = query
         with self._lock:
             if compute or key.startswith("facets-summary"):
                 facets = self._cached(
                     key,
-                    lambda: option_facets.build(self._q(sql, params), codes),
+                    lambda: option_facets.build(
+                        self._facet_rows(criteria, sql, params, ranged_sql), codes
+                    ),
                     persist=False,
                 )
             else:
@@ -1664,9 +1709,14 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             )
         return option_facets.pairs(facets)
 
-    def _facet_total(self, criteria: EntryFilter) -> int | None:
-        """分面已算過（或由摘要即時算出）時的符合總筆數；否則 ``None``，由呼叫端另行計數。"""
-        facets = self._option_facets(criteria, compute=False)
+    def _facet_total(
+        self, criteria: EntryFilter, *, compute: bool = False
+    ) -> int | None:
+        """分面已算過（或由摘要即時算出）時的符合總筆數；否則 ``None``，由呼叫端另行計數。
+
+        ``compute=True`` 時沒有快取就掃描計算（結果同時是下拉選單的選項，之後直接命中快取）。
+        """
+        facets = self._option_facets(criteria, compute=compute)
         if facets is None:
             return None
         return option_facets.total(facets, criteria.mod_id, criteria.source)
@@ -2398,11 +2448,23 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             )
         else:
             total = self._facet_total(criteria)
+            if total is None and self._scans_whole_version_for_search(criteria):
+                # 搜尋（整個版本逐列比對）只掃一次：同一份分面同時回答總筆數與下拉選項
+                total = self._facet_total(criteria, compute=True)
             if total is None:
                 cond, params = self._filter_sql(criteria)
                 total = self._cached_count(self._count_sql(criteria, cond), params)
             rows = self._plain_page_rows(criteria, total, limit, offset)
         return [self._row(row) for row in rows], total
+
+    @staticmethod
+    def _scans_whole_version_for_search(criteria: EntryFilter) -> bool:
+        """搜尋且沒有選模組／來源：筆數查詢本來就要掃整個版本，改由分面一次回答（指定模組時索引已縮小範圍）。"""
+        return (
+            bool(criteria.query.strip())
+            and criteria.mod_id is None
+            and criteria.source is None
+        )
 
     def _plain_page_rows(
         self, criteria: EntryFilter, total: int, limit: int | None, offset: int
