@@ -127,6 +127,20 @@ def test_unsupported_mdx_is_ignored_by_archive_sniffer(tmp_path: Path):
     assert not any(item.kind == "guide" for item in result.items)
 
 
+def test_invalid_non_book_json_is_not_reported_as_invalid_book(tmp_path: Path):
+    jar = tmp_path / "broken-display.jar"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr(
+            "assets/tacz/custom/tacz_default_gun/assets/tacz/display/guns/ai_awp_display.json",
+            '{"broken": true\n',
+        )
+
+    result = scan_jar(jar, ScanOptions(version="1.20.1"), dir_names=())
+    assert result.error == ""
+    assert result.invalid_books == []
+    assert result.items == []
+
+
 def test_standard_patchouli_and_known_non_book_paths_keep_their_boundaries():
     assert resolve_book_format(
         "assets/demo/patchouli_books/manual/en_us/entries/start.json"

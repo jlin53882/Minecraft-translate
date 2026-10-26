@@ -100,7 +100,7 @@ def _kind_of(
         try:
             data = json.loads(raw.decode("utf-8-sig"), strict=False)
         except (UnicodeDecodeError, ValueError):
-            if invalid_members is not None:
+            if invalid_members is not None and path_format.name != "unknown":
                 invalid_members.append(member)
             return None
         if looks_like_advancement(data):
