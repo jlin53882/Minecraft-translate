@@ -926,10 +926,10 @@ def test_open_species_entry_redraws_page(tmp_path):
         panel = EntriesPanel(page, lambda: db)
         panel.refresh()
         entry_id = panel.rows[1].id
-        before = page.updated
         panel.open_species_entry(entry_id)
-        assert page.updated > before
+        page._run_all_tasks()
         assert panel.selected.id == entry_id
+        assert panel.sug_tab == "species"
     finally:
         db.close()
 

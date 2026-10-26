@@ -12,7 +12,7 @@
 
 目前功能另外補上幾項與上述 backlog 直接相關、可供後續維護沿用的規則：
 
-- 使用者可見的條目換頁、智慧校對換筆／換頁、狀態篩選和歷史重新整理必須在同一個 UI 事件內完成；只有預載、完整範圍選取、批次寫入等耗時工作才放到背景。詳細邊界見 [MODDB_VIEW_ARCHITECTURE.md](views/MODDB_VIEW_ARCHITECTURE.md) 與 [moddb.md](../page_flows/moddb.md)。
+- 智慧校對換筆／換頁和歷史重新整理必須在同一個 UI 事件內完成；條目校對的換頁與篩選則在 worker 讀取（畫面先顯示載入中，並以請求序號丟棄過期結果），避免大型資料庫在 UI 執行緒查詢；預載、完整範圍選取、批次寫入等耗時工作同樣放到背景。詳細邊界見 [MODDB_VIEW_ARCHITECTURE.md](views/MODDB_VIEW_ARCHITECTURE.md) 與 [moddb.md](../page_flows/moddb.md)。
 - 歷史批次列表先讀取 manifest 前綴，候選分片只在真正進入該頁時解析；projection reconciliation 以資料庫歷史最大 id 作為失效條件，避免每次換頁重掃全部 JSON。
 - 「解除人工審核」只改目前生效譯文的審核狀態，不改譯文與來源；資料層必須以譯文、來源、審核者和狀態作 CAS，並寫入可還原的 `review_unmark` history。UI 只有在 `reviewed` 或 `legacy_unknown` 時顯示按鈕。
 - 進階設定與產生的 `.codebase-memory/` 索引不應混入產品提交；索引留在本機並由 `.gitignore` 排除，文件只記錄可重現的行為與驗證證據。

@@ -45,37 +45,64 @@ def load_panel_snapshot(key: str, request: dict, settings) -> dict:
         raise ValueError(f"未知 Mod DB 頁籤：{key}")
 
 
+def _read_entries_page(db, criteria, request: dict) -> dict:
+    """讀一頁條目、這頁的智慧校對標記與要顯示的詳情（頁碼超過最後一頁就退回最後一頁）。
+
+    詳情選取規則：沿用 ``selected_id``；它不在這一頁時用 ``fallback_index``（儲存後
+    選同一個位置的下一筆），都沒有就選第一筆。
+    """
+    page = max(1, int(request.get("page", 1)))
+    rows, total, error, detail = [], 0, None, None
+    marks: dict = {}
+    try:
+        rows, total = db.list_entries(
+            criteria=criteria, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE
+        )
+        last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+        if page > last_page:
+            page = last_page
+            rows, total = db.list_entries(
+                criteria=criteria, limit=PAGE_SIZE, offset=(page - 1) * PAGE_SIZE
+            )
+    except ValueError as exc:
+        error = str(exc)
+    row_ids = {row.id for row in rows}
+    selected_id = request.get("selected_id")
+    fallback_index = request.get("fallback_index")
+    if selected_id in row_ids:
+        target_id = selected_id
+    elif rows and fallback_index is not None:
+        target_id = rows[min(max(fallback_index, 0), len(rows) - 1)].id
+    else:
+        target_id = rows[0].id if rows else None
+    if target_id is not None:
+        detail = db.entry_detail(target_id)
+    if error is None:
+        marks = db.smart_review_marks(sorted(row_ids))
+    return {
+        "rows": rows,
+        "total": total,
+        "page": page,
+        "list_error": error,
+        "detail": detail,
+        "smart_review_marks": marks,
+    }
+
+
 def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
     scope = _resolve_entries_scope(db, request, settings)
-    rows, total, error, detail = [], 0, None, None
-    smart_review_marks: dict = {}
-    page = max(1, int(request.get("page", 1)))
+    page_data = {
+        "rows": [],
+        "total": 0,
+        "page": max(1, int(request.get("page", 1))),
+        "list_error": None,
+        "detail": None,
+        "smart_review_marks": {},
+    }
     if db is not None and scope["version"]:
-        try:
-            rows, total = db.list_entries(
-                criteria=scope["criteria"],
-                limit=PAGE_SIZE,
-                offset=(page - 1) * PAGE_SIZE,
-            )
-            last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-            if page > last_page:
-                page = last_page
-                rows, total = db.list_entries(
-                    criteria=scope["criteria"],
-                    limit=PAGE_SIZE,
-                    offset=(page - 1) * PAGE_SIZE,
-                )
-        except ValueError as exc:
-            error = str(exc)
-        selected_id = request.get("selected_id")
-        row_ids = {row.id for row in rows}
-        target_id = (
-            selected_id if selected_id in row_ids else (rows[0].id if rows else None)
-        )
-        detail = db.entry_detail(target_id) if target_id is not None else None
-        smart_review_marks = db.smart_review_marks(sorted(row_ids))
+        page_data = _read_entries_page(db, scope["criteria"], request)
     snapshot.update(
-        smart_review_marks=smart_review_marks,
+        page_data,
         versions=scope["versions"],
         version=scope["version"],
         mods=scope["mods"],
@@ -83,13 +110,8 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
         effective_source_codes=scope["source_codes"],
         source=scope["source"],
         filter_options_are_filtered=scope["options_are_filtered"],
-        page=page,
         mod_id=scope["mod_id"],
         kind=scope["kind"],
-        rows=rows,
-        total=total,
-        list_error=error,
-        detail=detail,
     )
     return snapshot
 
@@ -101,16 +123,15 @@ def load_entries_filter_snapshot(settings, request: dict) -> dict:
 
 
 def _entries_filter_snapshot(db, settings, request: dict) -> dict:
-    page = max(1, int(request.get("page", 1)))
-    rows, total, error, detail = [], 0, None, None
+    page_only = bool(request.get("page_only"))
     snapshot = {
         "key": "entries",
         "identity": _database_identity(db),
         "source_catalog": source_catalog_for(db),
         "db_generation": None,
         "filter_only": True,
+        "filter_options_ready": not page_only,
         "keep_scroll": bool(request.get("keep_scroll")),
-        "filter_options_ready": True,
         "versions": [],
         "version": request.get("version"),
         "mods": [],
@@ -120,58 +141,33 @@ def _entries_filter_snapshot(db, settings, request: dict) -> dict:
         "filter_options_are_filtered": False,
         "mod_id": request.get("mod_id"),
         "kind": request.get("kind"),
-        "page": page,
-        "rows": rows,
+        "page": max(1, int(request.get("page", 1))),
+        "rows": [],
         "smart_review_marks": {},
-        "total": total,
-        "list_error": error,
-        "detail": detail,
+        "total": 0,
+        "list_error": None,
+        "detail": None,
     }
-    if db is not None:
-        snapshot["db_generation"] = database_data_generation(db)
-        scope = _resolve_entries_scope(db, request, settings)
-        criteria = scope["criteria"]
-        try:
-            rows, total = db.list_entries(
-                criteria=criteria,
-                limit=PAGE_SIZE,
-                offset=(page - 1) * PAGE_SIZE,
-            )
-            last_page = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-            if page > last_page:
-                page = last_page
-                rows, total = db.list_entries(
-                    criteria=criteria,
-                    limit=PAGE_SIZE,
-                    offset=(page - 1) * PAGE_SIZE,
-                )
-            selected_id = request.get("selected_id")
-            row_ids = {row.id for row in rows}
-            target_id = (
-                selected_id
-                if selected_id in row_ids
-                else (rows[0].id if rows else None)
-            )
-            detail = db.entry_detail(target_id) if target_id is not None else None
-            snapshot["smart_review_marks"] = db.smart_review_marks(sorted(row_ids))
-        except ValueError as exc:
-            error = str(exc)
-        snapshot.update(
-            versions=scope["versions"],
-            version=scope["version"],
-            mods=scope["mods"],
-            kinds=scope["kinds"],
-            effective_source_codes=scope["source_codes"],
-            source=scope["source"],
-            filter_options_are_filtered=scope["options_are_filtered"],
-            mod_id=scope["mod_id"],
-            kind=scope["kind"],
-            page=page,
-            rows=rows,
-            total=total,
-            list_error=error,
-            detail=detail,
-        )
+    if db is None:
+        return snapshot
+    snapshot["db_generation"] = database_data_generation(db)
+    if page_only:
+        # 只換頁：篩選條件與下拉選項都沒變，不必重算版本／模組／來源選項。
+        snapshot.update(_read_entries_page(db, request["criteria"], request))
+        return snapshot
+    scope = _resolve_entries_scope(db, request, settings)
+    snapshot.update(
+        _read_entries_page(db, scope["criteria"], request),
+        versions=scope["versions"],
+        version=scope["version"],
+        mods=scope["mods"],
+        kinds=scope["kinds"],
+        effective_source_codes=scope["source_codes"],
+        source=scope["source"],
+        filter_options_are_filtered=scope["options_are_filtered"],
+        mod_id=scope["mod_id"],
+        kind=scope["kind"],
+    )
     return snapshot
 
 

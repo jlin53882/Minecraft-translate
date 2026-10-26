@@ -8,6 +8,7 @@ from app.services_impl.moddb_service import EntryFilter
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate
 from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
@@ -224,44 +225,50 @@ def _build_flagged_banner(panel) -> None:
 
 def _build_filter_card(panel) -> None:
     """建立 ModDB 篩選條件卡片並放入相關控制項。"""
-    panel.filter_card = kit.section_card(
-        None,
-        ft.Column(
-            [
-                ft.Row(
-                    [
-                        panel.version_dd,
-                        panel.mod_dd,
-                        panel.kind_dd,
-                        panel.source_filter.dropdown,
-                        panel.search_field_dd,
-                        panel.search,
-                    ],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Row(
-                    [panel.state_seg, panel.review_filter, panel.smart_review_filter],
-                    spacing=10,
-                    scroll=ft.ScrollMode.AUTO,
-                ),
-                ft.Row(
-                    [
-                        panel.advanced_filters.toggle_button,
-                        panel.advanced_filters.active_text,
-                        panel.advanced_filters.clear_button,
-                        panel.batch_replace_btn,
-                        panel.bulk_review_btn,
-                        panel.smart_review_btn,
-                        panel.species_scan_btn,
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                panel.advanced_filters.panel,
-            ],
-            spacing=10,
-        ),
+    panel.filter_card = isolate(
+        kit.section_card(
+            None,
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            panel.version_dd,
+                            panel.mod_dd,
+                            panel.kind_dd,
+                            panel.source_filter.dropdown,
+                            panel.search_field_dd,
+                            panel.search,
+                        ],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [
+                            panel.state_seg,
+                            panel.review_filter,
+                            panel.smart_review_filter,
+                        ],
+                        spacing=10,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
+                    ft.Row(
+                        [
+                            panel.advanced_filters.toggle_button,
+                            panel.advanced_filters.active_text,
+                            panel.advanced_filters.clear_button,
+                            panel.batch_replace_btn,
+                            panel.bulk_review_btn,
+                            panel.smart_review_btn,
+                            panel.species_scan_btn,
+                        ],
+                        spacing=8,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    panel.advanced_filters.panel,
+                ],
+                spacing=10,
+            ),
+        )
     )
 
 
@@ -304,16 +311,26 @@ def refresh_entry_filter(
     page: int = 1,
     keep_selection: bool = True,
     full_refresh: bool = False,
-    background: bool = False,
+    background: bool = True,
+    page_only: bool = False,
+    keep_scroll: bool = False,
 ) -> None:
-    """同步重新載入指定結果頁，必要時交給上層維持共用狀態。"""
+    """重新載入指定結果頁，必要時把篩選變更交給上層處理。
+
+    ``page_only`` 表示只有頁碼變了（篩選條件與選項都沒變），``keep_scroll`` 表示維持清單的捲動位置。
+    """
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
         panel._on_filter_changed(
-            page, keep_selection, full_refresh, background=background
+            page,
+            keep_selection,
+            full_refresh,
+            background=background,
+            page_only=page_only,
+            keep_scroll=keep_scroll,
         )
         return
-    panel._load_list(page=page, keep_selection=keep_selection)
+    panel._load_list(page=page, keep_selection=keep_selection, keep_scroll=keep_scroll)
     panel._safe_update()
 
 

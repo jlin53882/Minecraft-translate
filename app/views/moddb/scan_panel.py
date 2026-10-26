@@ -30,10 +30,11 @@ from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
+from app.ui.update_scope import update_regions
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.formatting import format_count
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
 # 翻譯 ZIP 匯入時可選的「譯文來源」標記（預設：自訂補充）
@@ -638,8 +639,9 @@ class ScanPanel(ft.Column):
     def _set_status(self, text: str, tone: str = "neutral") -> None:
         set_chip_status(self.status_chip, text, tone)
 
+    def flush(self) -> None:
+        """把這個頁籤的變更送到畫面；頁籤是更新邊界，頁面層級的 update 不會更新它。"""
+        update_regions(self)
+
     def _safe_update(self) -> None:
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響掃描本身
-            log_debug(f"ScanPanel update 略過：{exc}")
+        self.flush()

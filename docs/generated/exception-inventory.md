@@ -8,8 +8,8 @@
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 320 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 17 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| 已記錄／回報 | 319 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| UI／畫面保護 | 18 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
@@ -65,6 +65,7 @@
 | `app/ui/snack.py:_show_snack_dialog` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/snack.py:show_snack` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/ui/sync_text_field.py:_clean_path_input` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
+| `app/ui/update_scope.py:update_regions` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:_execute_cache_work` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -149,20 +150,21 @@
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
-| `app/views/moddb/entries_panel.py:EntriesPanel._save.save_in_background` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
-| `app/views/moddb/entries_panel.py:EntriesPanel._save` | BLE001 | 已記錄／回報 | restore the editor if the worker cannot launch |
-| `app/views/moddb/entries_panel.py:EntriesPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
+| `app/views/moddb/entry_selection.py:select_entry.load` | BLE001 | 已記錄／回報 | worker 邊界：回報錯誤並恢復編輯區 |
+| `app/views/moddb/entry_selection.py:select_entry` | BLE001 | 已記錄／回報 | 無法啟動時恢復編輯區 |
+| `app/views/moddb/entry_writes.py:run_write.call` | BLE001 | UI／畫面保護 | worker 邊界：交給 apply 顯示 |
+| `app/views/moddb/entry_writes.py:run_write` | BLE001 | 已記錄／回報 | 無法啟動：讓呼叫端恢復畫面 |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._update` | BLE001 | 已記錄／回報 | control may be temporarily detached |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | LM still permits a manual new target |
 | `app/views/moddb/lm_db_options.py:LmDbOptions._refresh_database_state` | BLE001 | 已記錄／回報 | keep the page usable and expose warning |
-| `app/views/moddb/overview_panel.py:OverviewPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料 |
 | `app/views/moddb/repair_reviewer.py:RepairReviewer._apply_async` | BLE001 | 已記錄／回報 | keep the draft and show the worker failure |
 | `app/views/moddb/repair_reviewer.py:RepairReviewer._reload_async` | BLE001 | 已記錄／回報 | keep the review as it was |
 | `app/views/moddb/retranslation_controller.py:_launch_preview_query` | BLE001 | 已記錄／回報 | restore controls when the operation cannot launch |
 | `app/views/moddb/retranslation_controller.py:_schedule_result` | BLE001 | 已記錄／回報 | a disposed page may reject UI work |
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
+| `app/views/moddb/review_scope_dialog.py:ReviewScopeController.request_impact.load` | BLE001 | 已記錄／回報 | 影響預覽失敗不影響編輯 |
+| `app/views/moddb/review_scope_dialog.py:ReviewScopeController.request_impact` | BLE001 | 已記錄／回報 | 無法啟動時保留上一份預覽 |
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
-| `app/views/moddb/scan_panel.py:ScanPanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響掃描本身 |
 | `app/views/moddb/smart_review_context.py:SmartReviewContext.run_background.target` | BLE001 | 已記錄／回報 | UI reports bounded failure |
 | `app/views/moddb/smart_review_context.py:SmartReviewContext.run_inline` | BLE001 | 已記錄／回報 | mirror the background boundary |
 | `app/views/moddb/smart_review_job.py:SmartReviewJob._work` | BLE001 | 已記錄／回報 | job reports bounded failure |
@@ -179,15 +181,13 @@
 | `app/views/moddb/species_suggestion.py:SpeciesSuggestion._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
 | `app/views/moddb/translate_panel.py:TranslatePanel._launch_retranslation_worker` | BLE001 | 已記錄／回報 | caller restores the UI state |
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
-| `app/views/moddb/translate_panel.py:TranslatePanel._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響機翻本身 |
 | `app/views/moddb_view.py:_load_overview_snapshot` | BLE001 | 已記錄／回報 | 顯示載入失敗並恢復頁面 |
 | `app/views/moddb_view.py:ModDbView._request_overview_refresh.load` | BLE001 | 已記錄／回報 | page may detach during load |
 | `app/views/moddb_view.py:ModDbView._request_overview_refresh` | BLE001 | 已記錄／回報 | restore state on launch failure |
 | `app/views/moddb_view.py:ModDbView._request_panel_refresh` | BLE001 | 已記錄／回報 | restore state if admission fails |
 | `app/views/moddb_view.py:ModDbView._launch_panel_refresh.load` | BLE001 | 已記錄／回報 | 顯示載入錯誤並恢復頁籤 |
 | `app/views/moddb_view.py:ModDbView._launch_panel_refresh.load` | BLE001 | 已記錄／回報 | page may detach during load |
-| `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | page may already be detached |
-| `app/views/moddb_view.py:ModDbView._safe_update` | BLE001 | 已記錄／回報 | 頁面已卸載時不影響資料操作 |
+| `app/views/moddb_view.py:ModDbView._mark_snapshot_generation` | BLE001 | 已記錄／回報 | 連線可能剛被關閉：視為過期，讓 UI 重新載入 |
 | `app/views/pipeline/pipeline_extract_dialog.py:_extract_preview_worker` | BLE001 | 已記錄／回報 | 錯誤要顯示在對話框 |
 | `app/views/pipeline/pipeline_session.py:PipelineRunner.start_sequence.worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，確保按鈕會恢復 |
 | `app/views/pipeline/pipeline_session.py:PipelineRunner.run_step` | BLE001 | 已記錄／回報 | 背景步驟邊界：任何錯誤都轉成步驟失敗 |

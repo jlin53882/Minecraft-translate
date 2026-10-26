@@ -18,6 +18,7 @@ from app.services_impl.moddb_service import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.update_scope import update_regions
 
 
 def picked_date(value: date | datetime) -> date:
@@ -246,7 +247,7 @@ class AdvancedFilters:
                 else ""
             )
             self.time_preset.value = "custom"
-            page.update()
+            update_regions(self.panel)
             if not (self.start_date.value and self.end_date.value):
                 # 自訂區間需要起訖兩個日期；另一個還沒選時不套用，也不顯示錯誤
                 other = "結束日" if field is self.start_date else "起始日"

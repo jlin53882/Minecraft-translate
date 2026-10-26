@@ -35,9 +35,11 @@ from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
+from app.ui.page_post import has_background_scheduler
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
+from app.ui.update_scope import update_regions
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
@@ -45,7 +47,7 @@ from app.views.moddb.repair_card import create_repair_card, repair_copy
 from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
 # 四張統計卡的標題列同高（「檢視」按鈕出現時卡片不會變高）
@@ -468,14 +470,25 @@ class TranslatePanel(ft.Column):
         if self.mod_dd.value not in [ALL_MODS, *mods]:
             self.mod_dd.value = ALL_MODS
 
+    def _scope_refresh_in_background(self) -> bool:
+        return callable(self._request_scope_refresh) and has_background_scheduler(
+            self._page
+        )
+
     def _on_scope_changed(self, e=None) -> None:
+        # 背景可用時，模組清單與筆數由上層的背景快照載入，畫面執行緒不查資料庫。
+        background = self._scope_refresh_in_background()
         if e is not None and getattr(e, "control", None) is self.version_dd:
             self.mod_dd.value = ALL_MODS
-            self._refresh_mods()
+            if not background:
+                self._refresh_mods()
         self._clear_repair_preview()
-        self._refresh_counts()
+        if background:
+            self.count_text.value = "正在計算此範圍的筆數…"
+        else:
+            self._refresh_counts()
         self._safe_update()
-        if callable(self._request_scope_refresh):
+        if background:
             self._request_scope_refresh()
 
     def mod_ids(self) -> tuple[str, ...]:
@@ -535,6 +548,11 @@ class TranslatePanel(ft.Column):
 
     def _on_limit_changed(self) -> None:
         self._clear_repair_preview()
+        if self._scope_refresh_in_background():
+            self.count_text.value = "正在計算此範圍的筆數…"
+            self._safe_update()
+            self._request_scope_refresh()
+            return
         self._refresh_counts()
         self._safe_update()
         if callable(self._request_scope_refresh):
@@ -1080,8 +1098,9 @@ class TranslatePanel(ft.Column):
     def _set_status(self, text: str, tone: str = "neutral") -> None:
         set_chip_status(self.status_chip, text, tone)
 
+    def flush(self) -> None:
+        """把這個頁籤的變更送到畫面；頁籤是更新邊界，頁面層級的 update 不會更新它。"""
+        update_regions(self)
+
     def _safe_update(self) -> None:
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響機翻本身
-            log_debug(f"TranslatePanel update 略過：{exc}")
+        self.flush()

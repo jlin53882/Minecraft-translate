@@ -66,7 +66,9 @@ def _make_page(**overrides):
             self._tasks.append((coro, args))
 
         def _run_all_tasks(self):
-            for coro, args in self._tasks:
+            # 執行中又排入的任務也會在同一次跑完；已執行的任務不會被重播
+            while self._tasks:
+                coro, args = self._tasks.pop(0)
                 result = coro(*args)
                 if result is not None:
                     try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 
 import flet as ft
 
@@ -12,12 +13,100 @@ from app.services_impl.moddb_source_service import (
     source_label,
     source_tone,
 )
+from app.tasks.operation_registry import (
+    CancellationPolicy,
+    OperationPresentation,
+    ShutdownPolicy,
+    launch_page_operation,
+)
 from app.ui import design, kit
 from app.ui.design import C
+from app.ui.page_post import has_background_scheduler, post_to_ui
 from app.ui.snack import show_snack
+from app.views.moddb import entry_writes
 from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import impact_text, shorten
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
+
+
+@dataclass(frozen=True)
+class ImpactResult:
+    """某段譯文對應的儲存／審核影響（由資料庫算出，與畫面無關）。
+
+    ``kind``：``none``（沒有影響可顯示）、``changed``（待儲存，``text`` 為影響說明）、
+    ``ready``（可審核，``text`` 為審核範圍說明）、``review_error``（審核預覽被拒絕）。
+    """
+
+    entry_id: int
+    pending_text: str
+    kind: str = "none"
+    text: str = ""
+    preview: tuple[ReviewPreviewItem, ...] = ()
+
+
+def compute_impact(
+    db: TranslationDB, entry: EntryRow, text: str, propagate: bool
+) -> ImpactResult:
+    """查詢「把輸入框內容存成這筆譯文」或「審核目前譯文」會影響哪些版本。
+
+    只讀資料庫，可在背景執行緒呼叫；``text`` 是輸入框的內容（``pending_text``）。
+    """
+    if text and text != entry.zh_tw:
+        impacts = db.preview_manual(entry.id, text, propagate=propagate)
+        return ImpactResult(
+            entry.id, text, "changed", impact_text(entry.mc_version, text, impacts)
+        )
+    ready = bool(
+        entry.zh_tw
+        and text == entry.zh_tw
+        and entry.review_status not in ("reviewed", "legacy_unknown")
+    )
+    if not ready:
+        return ImpactResult(entry.id, text)
+    try:
+        preview = db.preview_manual_review(
+            entry.id,
+            expected_zh_tw=entry.zh_tw,
+            expected_source=entry.source,
+            expected_review_status=entry.review_status,
+            expected_checker=entry.checker,
+            propagate=propagate,
+        )
+    except ValueError as exc:
+        return ImpactResult(entry.id, text, "review_error", str(exc))
+    return ImpactResult(
+        entry.id,
+        text,
+        "ready",
+        _review_impact_text(entry, db, preview),
+        tuple(preview),
+    )
+
+
+def _review_impact_text(
+    entry: EntryRow, db: TranslationDB, preview: list[ReviewPreviewItem]
+) -> str:
+    included = [item for item in preview if item.included]
+    skipped = [item for item in preview if not item.included]
+    lines = [
+        f"本次審核：{entry.mc_version}（{source_label(entry.source, source_catalog_for(db), entry.review_status)}）",
+        "將同步審核："
+        + (
+            "、".join(item.mc_version for item in included if item.entry_id != entry.id)
+            or "無其他版本"
+        ),
+    ]
+    if skipped:
+        lines.append(
+            "略過："
+            + "；".join(f"{item.mc_version}：{item.reason}" for item in skipped)
+        )
+    lines.extend(
+        f"{item.mc_version} 將取代非生效人工譯文：{shorten(item.manual_text or '', 36)}"
+        for item in included
+        if item.manual_text is not None and item.manual_text != item.text
+    )
+    return "\n".join(lines)
 
 
 class ReviewScopeController:
@@ -25,102 +114,125 @@ class ReviewScopeController:
 
     def __init__(self, panel):
         self.panel = panel
+        self._impact_ticket = 0
+        self._executing = False
 
     def update_impact(self) -> None:
+        """同步版本：格式提示、按鈕狀態與影響說明（查詢在呼叫端執行緒）。"""
         panel = self.panel
         panel._update_format_hints()
         entry, db = panel.selected, panel.db()
         text = panel.pending_text()
-        changed = bool(entry and db and text and text != entry.zh_tw)
+        if not entry or not db:
+            self.apply_impact(None)
+            return
+        self.apply_impact(compute_impact(db, entry, text, bool(panel.sync_row.value)))
+
+    def request_impact(self) -> None:
+        """依輸入框內容重算影響預覽（查詢在背景；較新的請求會讓舊結果作廢）。"""
+        panel = self.panel
+        entry, db = panel.selected, panel.db()
+        if entry is None or db is None:
+            return
+        propagate = bool(panel.sync_row.value)
+        text = panel.pending_text()
+        if not has_background_scheduler(panel._page):
+            self.apply_impact(compute_impact(db, entry, text, propagate))
+            return
+        self._impact_ticket += 1
+        ticket = self._impact_ticket
+
+        def load() -> None:
+            result = None
+            try:
+                result = compute_impact(db, entry, text, propagate)
+            except Exception:  # noqa: BLE001 - 影響預覽失敗不影響編輯
+                log_exception(f"Mod 資料庫影響預覽失敗：id={entry.id}")
+            post_to_ui(
+                panel._page,
+                self._apply_requested,
+                ticket,
+                entry.id,
+                text,
+                result,
+                label="Mod 資料庫影響預覽",
+            )
+
+        try:
+            launch_page_operation(
+                panel._page,
+                load,
+                name="Mod 資料庫影響預覽",
+                owner="moddb-entry-impact",
+                cancellation=CancellationPolicy.NON_CANCELLABLE,
+                shutdown=ShutdownPolicy.DRAIN_ONLY,
+                presentation=OperationPresentation.MAINTENANCE,
+            )
+        except Exception as exc:  # noqa: BLE001 - 無法啟動時保留上一份預覽
+            log_warning(f"Mod 資料庫影響預覽無法啟動：{exc!r}")
+
+    def _apply_requested(self, ticket, entry_id, text, result) -> None:
+        panel = self.panel
+        if (
+            ticket != self._impact_ticket
+            or result is None
+            or panel.selected is None
+            or panel.selected.id != entry_id
+            or panel.pending_text() != text
+        ):
+            return  # 輸入又變了、換了條目，或預覽失敗
+        self.apply_impact(result)
+        panel._flush_editor()
+
+    def update_buttons(self, entry: EntryRow | None = None) -> None:
+        """只依輸入框與生效譯文決定儲存／審核按鈕的啟用狀態（不查資料庫）。"""
+        panel = self.panel
+        entry = entry or panel.selected
+        text = panel.pending_text()
+        changed = bool(entry and text and text != entry.zh_tw)
         panel.save_btn.disabled = panel._save_running or not changed
         ready = bool(
             entry
-            and db
             and entry.zh_tw
             and text == entry.zh_tw
             and entry.review_status not in ("reviewed", "legacy_unknown")
-            and not changed
         )
         panel.confirm_btn.visible = ready
         panel.confirm_btn.disabled = not ready
         self._update_clear_review_button(entry, changed)
-        panel._review_preview = []
-        if changed:
-            impacts = db.preview_manual(entry.id, text, propagate=panel.sync_row.value)
-            panel.impact_text.value = impact_text(entry.mc_version, text, impacts)
-            panel.impact_box.visible = True
-        elif ready:
-            self._set_review_impact(entry, db)
-        else:
-            panel.impact_box.visible = False
 
     def update_actions_without_impact(self, entry: EntryRow) -> None:
-        """Set editor actions without querying a cross-version review preview."""
+        """設定編輯區的初始按鈕狀態，不查詢跨版本影響預覽。"""
         panel = self.panel
         panel._update_format_hints()
-        changed = panel.pending_text() != entry.zh_tw
-        ready = bool(
-            entry.zh_tw
-            and entry.review_status not in ("reviewed", "legacy_unknown")
-            and not changed
-        )
-        panel.save_btn.disabled = panel._save_running or not changed
-        panel.confirm_btn.visible = ready
-        panel.confirm_btn.disabled = not ready
-        self._update_clear_review_button(entry, changed)
+        self.update_buttons(entry)
         panel._review_preview = []
         panel.impact_box.visible = False
 
     def _update_clear_review_button(
         self, entry: EntryRow | None, changed: bool
     ) -> None:
+        """「解除人工審核」只在 reviewed／legacy_unknown 顯示；有未儲存的修改時停用。"""
         panel = self.panel
         panel.clear_review_btn.visible = bool(
             entry and entry.review_status in ("reviewed", "legacy_unknown")
         )
         panel.clear_review_btn.disabled = panel._save_running or changed
 
-    def _set_review_impact(self, entry: EntryRow, db: TranslationDB) -> None:
+    def apply_impact(self, result: ImpactResult | None) -> None:
+        """把影響說明顯示在編輯區；``result`` 為 None 代表沒有可用資料庫。"""
         panel = self.panel
-        try:
-            preview = db.preview_manual_review(
-                entry.id,
-                expected_zh_tw=entry.zh_tw,
-                expected_source=entry.source,
-                expected_review_status=entry.review_status,
-                expected_checker=entry.checker,
-                propagate=panel.sync_row.value,
-            )
-        except ValueError as exc:
-            panel.impact_text.value = str(exc)
-            panel.impact_box.visible = True
-            panel.confirm_btn.disabled = True
+        self.update_buttons()
+        panel._review_preview = []
+        if result is None or result.kind == "none":
+            panel.impact_box.visible = False
             return
-        panel._review_preview = preview
-        included = [item for item in preview if item.included]
-        skipped = [item for item in preview if not item.included]
-        lines = [
-            f"本次審核：{entry.mc_version}（{source_label(entry.source, source_catalog_for(db), entry.review_status)}）",
-            "將同步審核："
-            + (
-                "、".join(
-                    item.mc_version for item in included if item.entry_id != entry.id
-                )
-                or "無其他版本"
-            ),
-        ]
-        if skipped:
-            lines.append(
-                "略過："
-                + "；".join(f"{item.mc_version}：{item.reason}" for item in skipped)
-            )
-        lines.extend(
-            f"{item.mc_version} 將取代非生效人工譯文：{shorten(item.manual_text or '', 36)}"
-            for item in included
-            if item.manual_text is not None and item.manual_text != item.text
-        )
-        panel.impact_text.value = "\n".join(lines)
+        panel.impact_text.value = result.text
         panel.impact_box.visible = True
+        if result.kind == "ready":
+            panel._review_preview = list(result.preview)
+        elif result.kind == "review_error":
+            panel.confirm_btn.disabled = True
 
     def confirm(self, _e=None) -> None:
         panel = self.panel
@@ -168,7 +280,8 @@ class ReviewScopeController:
                 C.GOLD,
             )
             return
-        try:
+
+        def work():
             db.clear_manual_review(
                 entry.id,
                 expected_zh_tw=entry.zh_tw,
@@ -177,33 +290,43 @@ class ReviewScopeController:
                 expected_checker=entry.checker,
                 actor="使用者",
             )
-        except ValueError as exc:
-            self._reject_clear(entry, exc)
-            return
-        except sqlite3.Error as exc:
+
+        def apply(_value, error) -> None:
+            if error is not None:
+                self._apply_clear_error(entry, error)
+                return
+            message = "已解除人工審核，譯文與來源未變更"
+            log_info(
+                f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
+            )
+            show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
+            entry_writes.after_data_change(panel, message)
+
+        if not entry_writes.run_write(
+            panel._page,
+            work,
+            apply,
+            name="Mod 資料庫解除人工審核",
+            owner="moddb-clear-review",
+            label="Mod 資料庫解除人工審核結果",
+        ):
+            show_snack(panel._page, "解除審核無法啟動，或應用程式正在關閉。", C.GOLD)
+
+    def _apply_clear_error(self, entry: EntryRow, error: BaseException) -> None:
+        if isinstance(error, ValueError):
+            self._reject_clear(entry, error)
+        elif isinstance(error, sqlite3.Error):
             log_exception(
                 f"Mod 資料庫解除人工審核失敗：{entry.mc_version} "
                 f"{entry.mod_id} {entry.key}"
             )
             show_snack(
-                panel._page,
-                f"解除人工審核失敗（資料庫錯誤：{exc}）；詳情見後台 log",
+                self.panel._page,
+                f"解除人工審核失敗（資料庫錯誤：{error}）；詳情見後台 log",
                 C.RED,
             )
-            return
-
-        message = "已解除人工審核，譯文與來源未變更"
-        log_info(
-            f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
-        )
-        if panel._on_changed:
-            # 父層會負責一次完整刷新；避免先載入清單、再由父層重複載入。
-            panel._notify_changed(keep_scroll=True)
         else:
-            panel._load_list(page=panel.pager.current_page, keep_scroll=True)
-        panel.saved_text.value = message
-        show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
-        panel._safe_update()
+            raise error
 
     def _reject_clear(self, entry: EntryRow, exc: Exception) -> None:
         panel = self.panel
@@ -212,8 +335,7 @@ class ReviewScopeController:
             f"{entry.mod_id} {entry.key}（{exc!r}）"
         )
         show_snack(panel._page, str(exc), C.GOLD)
-        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
-        panel._safe_update()
+        entry_writes.after_data_change(panel)
 
     def _show_scope(
         self,
@@ -545,8 +667,13 @@ class ReviewScopeController:
         propagate: bool,
         preview: list[ReviewPreviewItem] | None = None,
     ) -> None:
+        """審核寫入在背景執行；完成後才關閉確認視窗並重整清單。"""
+        if self._executing:
+            return
         panel = self.panel
-        try:
+        self._executing = True
+
+        def work():
             expected = preview or db.preview_manual_review(
                 entry.id,
                 expected_zh_tw=entry.zh_tw,
@@ -555,7 +682,7 @@ class ReviewScopeController:
                 expected_checker=entry.checker,
                 propagate=False,
             )
-            done = db.review_manual(
+            return db.review_manual(
                 entry.id,
                 expected_zh_tw=entry.zh_tw,
                 expected_source=entry.source,
@@ -565,29 +692,42 @@ class ReviewScopeController:
                 actor="使用者",
                 propagate=propagate,
             )
-        except (ValueError, sqlite3.Error) as exc:
-            self._reject(entry, exc, database=isinstance(exc, sqlite3.Error))
-            return
-        panel._page.pop_dialog()
-        others = [change.mc_version for change in done if not change.is_self]
-        log_info(
-            f"Mod 資料庫人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
-            f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
+
+        def apply(done, error) -> None:
+            self._executing = False
+            if error is not None:
+                if isinstance(error, ValueError | sqlite3.Error):
+                    self._reject(
+                        entry, error, database=isinstance(error, sqlite3.Error)
+                    )
+                    return
+                raise error
+            panel._page.pop_dialog()
+            others = [change.mc_version for change in done if not change.is_self]
+            log_info(
+                f"Mod 資料庫人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
+                f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
+            )
+            message = (
+                f"已審核，並同步 {len(others)} 個版本：{'、'.join(others)}"
+                if others
+                else "已標記為人工已審核（來源不變）"
+            )
+            show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
+            entry_writes.after_data_change(panel, message)
+
+        launched = entry_writes.run_write(
+            panel._page,
+            work,
+            apply,
+            name="Mod 資料庫人工審核",
+            owner="moddb-manual-review",
+            label="Mod 資料庫審核結果",
+            on_failure=lambda: setattr(self, "_executing", False),
         )
-        message = (
-            f"已審核，並同步 {len(others)} 個版本：{'、'.join(others)}"
-            if others
-            else "已標記為人工已審核（來源不變）"
-        )
-        if panel._on_changed:
-            # review_manual 已完成寫入；讓父層以單一路徑刷新清單，避免重複
-            # 執行 smart_review_marks 與選取條目查詢。
-            panel._notify_changed(keep_scroll=True)
-        else:
-            panel._load_list(page=panel.pager.current_page, keep_scroll=True)
-        panel.saved_text.value = message
-        show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
-        panel._safe_update()
+        if not launched:
+            self._executing = False
+            show_snack(panel._page, "審核無法啟動，或應用程式正在關閉。", C.GOLD)
 
     def _reject(
         self, entry: EntryRow, exc: Exception, *, database: bool = False
@@ -605,5 +745,4 @@ class ReviewScopeController:
             f"Mod 資料庫審核被拒絕：{entry.mc_version} {entry.mod_id} {entry.key}（{exc!r}）"
         )
         show_snack(panel._page, str(exc), C.GOLD)
-        panel._load_list(page=panel.pager.current_page, keep_scroll=True)
-        panel._safe_update()
+        entry_writes.after_data_change(panel)

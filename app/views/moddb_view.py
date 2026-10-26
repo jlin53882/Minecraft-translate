@@ -22,6 +22,8 @@ from app.tasks.operation_registry import (
     launch_page_operation,
 )
 from app.ui import kit
+from app.ui.page_post import has_background_scheduler
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.entries_panel import EntriesPanel
 from app.views.moddb.overview_panel import OverviewPanel
 from app.views.moddb.panel_refresh import (
@@ -88,6 +90,9 @@ class ModDbView(ft.Column):
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         super().__init__(expand=True, spacing=16)
+        # 更新邊界：頁面層級的 page.update()（狀態列、Key 輪詢…）不會走進這棵樹；
+        # 這一頁的變更一律由本頁與各頁籤自己更新（見 _safe_update／_update_panel）。
+        isolate(self)
         self._page = page
         self.file_picker = file_picker
         self._db: TranslationDB | None = None
@@ -142,6 +147,8 @@ class ModDbView(ft.Column):
             "scan": self.scan,
             "translate": self.translate,
         }
+        for panel in self._panels.values():
+            isolate(panel)
         # Keep each visited panel attached to the page. Replacing ``body.content``
         # on every click makes Flet detach and resend the full panel tree, including
         # the entries list. Mount tabs on first visit, then switch with visibility
@@ -259,10 +266,7 @@ class ModDbView(ft.Column):
                 self._safe_update()
 
     def _has_background_scheduler(self) -> bool:
-        can_run_worker = getattr(
-            self._page, "operation_registry", None
-        ) is not None or callable(getattr(self._page, "run_thread", None))
-        return can_run_worker and callable(getattr(self._page, "run_task", None))
+        return has_background_scheduler(self._page)
 
     def _apply_overview_result(
         self,
@@ -411,6 +415,15 @@ class ModDbView(ft.Column):
         if update:
             self._safe_update()
 
+    @staticmethod
+    def _hide_indicator(panel) -> None:
+        """隱藏頁籤的背景載入提示，並讓清單恢復正常亮度。"""
+        panel.refresh_indicator.visible = False
+        panel.refresh_indicator.value = ""
+        clear = getattr(panel, "clear_loading", None)
+        if callable(clear):
+            clear()
+
     def _request_panel_refresh(self, key: str, *, message: str | None = None) -> None:
         """Load the selected tab's database data off the UI thread."""
         if key in self._panel_refresh_loading:
@@ -440,10 +453,7 @@ class ModDbView(ft.Column):
             self.entries.set_data_loading(True)
         if self.tab == key:
             if message is not None and key == "entries":
-                try:
-                    panel.refresh_indicator.update()
-                except RuntimeError:
-                    self._safe_update()
+                panel.show_loading()
             else:
                 self._safe_update()
 
@@ -479,6 +489,8 @@ class ModDbView(ft.Column):
                     snapshot = load_entries_filter_snapshot(settings, request)
                 else:
                     snapshot = load_panel_snapshot(key, request, settings)
+                if key == "entries":
+                    self._mark_snapshot_generation(snapshot)
             except Exception as exc:  # noqa: BLE001 - 顯示載入錯誤並恢復頁籤
                 log_debug(f"Mod DB {key} 頁籤資料載入失敗：{exc!r}")
                 snapshot = {
@@ -550,8 +562,7 @@ class ModDbView(ft.Column):
             self.entries.set_data_loading(False)
         if signature != self._settings_signature():
             self._panel_refresh_needed[key] = True
-            panel.refresh_indicator.visible = False
-            panel.refresh_indicator.value = ""
+            self._hide_indicator(panel)
             if self.tab == key:
                 self._request_panel_refresh(key)
             return
@@ -574,8 +585,7 @@ class ModDbView(ft.Column):
                 if not self._panel_refresh_needed[key]:
                     return
                 self._panel_refresh_needed[key] = True
-                panel.refresh_indicator.visible = False
-                panel.refresh_indicator.value = ""
+                self._hide_indicator(panel)
                 if self.tab == key:
                     self._request_panel_refresh(key)
                 return
@@ -615,23 +625,45 @@ class ModDbView(ft.Column):
             self.entries._filter_only_refresh = False
             self.entries._sync_database_identity(None)
             self.reload_db()
-            panel.refresh_indicator.visible = False
-            panel.refresh_indicator.value = ""
+            self._hide_indicator(panel)
             if self.tab == "entries":
                 self._request_panel_refresh("entries")
             return False
-        if (
-            self._db is not None
-            and snapshot.get("db_generation") is not None
-            and database_data_generation(self._db) != snapshot["db_generation"]
-        ):
+        if self._entries_snapshot_is_stale(snapshot):
             self._panel_refresh_needed["entries"] = True
-            panel.refresh_indicator.visible = False
-            panel.refresh_indicator.value = ""
+            self._hide_indicator(panel)
             if self.tab == "entries":
                 self._request_panel_refresh("entries")
             return False
         return True
+
+    def _entries_snapshot_is_stale(self, snapshot: dict) -> bool:
+        """快照讀完之後資料庫又被寫入（含其他程序）時視為過期。
+
+        worker 讀完快照後已在背景比對過世代（``generation_checked``）；這裡不再於 UI 執行緒
+        查詢共用連線，免得和正在寫入的 worker 搶同一把鎖而凍結畫面。沒有 worker 比對結果
+        （同步 fallback、測試）才在這裡查。
+        """
+        generation = snapshot.get("db_generation")
+        if self._db is None or generation is None:
+            return False
+        if snapshot.get("generation_checked"):
+            return bool(snapshot.get("db_stale"))
+        return database_data_generation(self._db) != generation
+
+    def _mark_snapshot_generation(self, snapshot: dict) -> None:
+        """在 worker 內比對快照世代與共用連線目前的世代（結果交給 UI 執行緒判斷）。"""
+        generation = snapshot.get("db_generation")
+        db = self._db
+        if db is None or generation is None:
+            return
+        try:
+            current = database_data_generation(db)
+        except Exception as exc:  # noqa: BLE001 - 連線可能剛被關閉：視為過期，讓 UI 重新載入
+            log_debug(f"Mod DB 快照世代比對失敗：{exc!r}")
+            current = None
+        snapshot["generation_checked"] = True
+        snapshot["db_stale"] = current != generation
 
     def _panel_refresh_request(self, key: str) -> dict:
         if key == "entries":
@@ -642,7 +674,9 @@ class ModDbView(ft.Column):
                 "kind": self.entries.kind,
                 "page": self.entries.pager.current_page,
                 "filter_only": self.entries._filter_only_refresh,
+                "page_only": self.entries._page_only_refresh,
                 "keep_scroll": self.entries._refresh_keep_scroll,
+                "fallback_index": self.entries._refresh_fallback_index,
                 "identity": self.entries._db_identity,
                 "source_catalog": self.entries._render_source_catalog,
                 "selected_id": self.entries.selected.id
@@ -710,32 +744,42 @@ class ModDbView(ft.Column):
         keep_selection: bool = True,
         full_refresh: bool = False,
         *,
-        background: bool = False,
+        background: bool = True,
+        page_only: bool = False,
+        keep_scroll: bool = False,
     ) -> None:
-        """在 UI 執行緒同步更新條目篩選與頁碼，避免畫面出現背景刷新狀態。"""
+        """在 worker 重新載入條目結果頁；沒有背景排程的頁面（測試）同步載入。
+
+        ``page_only``：只換頁，篩選條件與下拉選項都沒變，worker 不必重算選項。
+        ``keep_scroll``：儲存／還原後留在原本的捲動位置。
+        """
         self._invalidate_panel("entries")
-        self.entries._refresh_keep_scroll = False
-        self.entries._refresh_keep_selection = keep_selection
-        self.entries._filter_only_refresh = background and not full_refresh
+        entries = self.entries
+        entries._refresh_keep_selection = keep_selection
+        entries._filter_only_refresh = background and not full_refresh
+        entries._page_only_refresh = page_only and entries._filter_only_refresh
+        entries._refresh_keep_scroll = keep_scroll
         if self.tab != "entries":
             return
         if background and self._has_background_scheduler():
-            self._request_panel_refresh("entries", message="正在篩選條目…")
+            message = f"正在載入第 {page:,} 頁…" if page_only else "正在篩選條目…"
+            self._request_panel_refresh("entries", message=message)
             return
-        if full_refresh or page == 1:
-            # 同步篩選也要更新模組／來源／類型選單；worker snapshot 原本在
-            # apply_filter_options 內完成這一步，不能因改成 inline 而遺失。
-            self.entries._refresh_filter_options()
-        self.entries._load_list(page=page, keep_selection=keep_selection)
-        self._panel_refresh_needed["entries"] = bool(self.entries._list_error)
-        self.entries.refresh_indicator.visible = False
-        self.entries.refresh_indicator.value = ""
+        if not page_only and (full_refresh or page == 1):
+            # 同步篩選也要更新模組／來源／類型選單（背景路徑由快照的 apply_filter_options 完成）。
+            entries._refresh_filter_options()
+        entries._load_list(
+            page=page, keep_selection=keep_selection, keep_scroll=keep_scroll
+        )
+        self._panel_refresh_needed["entries"] = bool(entries._list_error)
+        self._hide_indicator(entries)
         self._safe_update()
 
     def _invalidate_database_snapshots(self) -> None:
         self._data_revision += 1
         self._overview_needs_refresh = True
         self.entries._filter_only_refresh = False
+        self.entries._page_only_refresh = False
         for key in self._panel_refresh_needed:
             self._panel_refresh_needed[key] = True
         self._pending_panel_results.clear()
@@ -745,15 +789,16 @@ class ModDbView(ft.Column):
         self._pending_panel_results.pop(key, None)
         if key == "entries":
             self.entries._filter_only_refresh = False
+            self.entries._page_only_refresh = False
 
     def _refresh_active_panel(self) -> None:
-        """資料庫更新後刷新目前頁籤；條目清單導覽固定同步更新。"""
+        """資料庫更新後刷新目前頁籤（有背景排程時在 worker 讀取，結果以 ticket 丟棄過期者）。"""
         if self.tab == "overview":
             self._request_overview_refresh()
         else:
             self._activate_panel(
                 self.tab,
-                background=(self.tab != "entries" and self._has_background_scheduler()),
+                background=self._has_background_scheduler(),
                 update=True,
             )
 
@@ -779,25 +824,22 @@ class ModDbView(ft.Column):
         self.show_tab(self.tab)
 
     def _safe_update(self) -> None:
-        try:
-            # Updating this subtree keeps unrelated app controls out of each tab
-            # switch diff. Before mount (and in small test pages), fall back to the
-            # page update path.
-            self._tab_stack.update()
-        except RuntimeError:
-            try:
-                self._page.update()
-            except Exception as exc:  # noqa: BLE001 - page may already be detached
-                log_debug(f"ModDbView update 略過：{exc}")
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料操作
-            log_debug(f"ModDbView update 略過：{exc}")
+        """更新分頁堆疊（頁籤顯示／隱藏）與目前的頁籤內容；其他頁籤與頁面外殼不受影響。"""
+        update_regions(self._tab_stack)
+        self._flush_panel(self.tab)
+
+    def _flush_panel(self, key: str) -> None:
+        """把一個頁籤的變更送到畫面（頁籤各區塊是更新邊界，要明確更新）。"""
+        panel = self._panels[key]
+        flush = getattr(panel, "flush", None)
+        if callable(flush):
+            flush()
+        else:
+            update_regions(panel)
 
     def _update_panel(self, key: str) -> None:
         """Apply one panel snapshot without diffing every mounted sibling tab."""
-        try:
-            self._panels[key].update()
-        except RuntimeError:
-            self._safe_update()
+        self._flush_panel(key)
 
     @property
     def page(self):

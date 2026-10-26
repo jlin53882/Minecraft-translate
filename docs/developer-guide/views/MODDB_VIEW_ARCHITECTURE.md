@@ -13,6 +13,27 @@
 與總數，完整列仍從相同資料快照取得。快取有容量與筆數上限，不保證第一次查詢或大量批次
 工作的固定完成時間；資料變動後須重新計算。
 
+## 更新邊界與回應速度
+
+Flet 的 `update()` 成本與被走訪的控制項數成正比：`page.update()` 會 diff 整棵樹，連頁籤切換、
+狀態列刷新都要付出 Mod DB 頁數千個控制項的成本。因此 `ModDbView`、`OverviewPanel`／
+`EntriesPanel`／`ScanPanel`／`TranslatePanel`，以及 `EntriesPanel` 的 `filter_card`、`list_view`、
+`editor_card`、`history_card` 都用 `app/ui/update_scope.py` 的 `isolate` 標成更新邊界，
+由擁有者以 `update_regions` 明確更新；各頁籤提供 `flush()` 把整個頁籤送到畫面，
+`EntriesPanel.flush_all` 用於來源不明的變更，熱路徑只更新變動的區塊。新增會改動邊界內控制項的
+程式時，必須呼叫對應的更新，否則畫面不會變。
+
+畫面執行緒不碰資料庫的規則：翻頁、選取、輸入影響預覽、儲存／還原／審核與批次機翻範圍計數
+都在 worker 執行，結果以請求序號（`_select_ticket`、`ReviewScopeController` 的影響預覽序號、
+`ModDbView` 的快照 generation 與請求內容比對）判斷是否過期；沒有背景排程的頁面
+（`app/ui/page_post.py` 的 `has_background_scheduler` 為假，例如單元測試）同步執行。
+快照世代是否被外部寫入改變，由 worker 讀完後比對（`_mark_snapshot_generation`），
+UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同一把鎖。
+
+模組分工：`entry_row_tile.py`（固定列數的 `EntryTilePool`）、`entry_selection.py`（選取與詳情載入）、
+`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`review_scope_dialog.py`
+（`compute_impact` 與審核確認）。
+
 ## 學名候選流程
 
 `SpeciesCandidateDialog` 開啟時先顯示呼叫端帶入的預填值，再以維護型背景作業依學名候選品質條件建立模組清單與目前生效來源對照；模組切換只重用已載入的對照，不重新掃描資料庫。切換範圍只清除舊掃描結果，不會自動重新掃描；關閉視窗會丟棄晚到的範圍結果。

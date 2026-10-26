@@ -70,18 +70,25 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["選取條目（select → _show_editor）"] --> B["編輯框輸入譯文（pending_text）"]
-    B --> C["按「儲存」→ EntriesPanel._save"]
+    A["選取條目（select_entry：清單立刻標示、編輯區暫停用，背景讀 entry_detail 與影響預覽）"] --> B["編輯框輸入譯文（pending_text）"]
+    B --> C["按「儲存」→ EntriesPanel._save → entry_writes.save_entry"]
     C --> D["捕捉 entry、db、text、_flagged_batch 與同步旗標"]
-    D --> E["launch_page_operation 執行 db.save_manual"]
-    E --> F["run_task 排回 _apply_save_result"]
+    D --> E["run_write 在背景執行 db.save_manual 與來源優先序檢查"]
+    E --> F["run_task 排回 apply_save_result"]
     F --> G{"有錯誤？"}
     G -- 是 --> H["依 validation、database、unexpected 分類顯示提示"]
     G -- 否 --> I{"self.db() 仍是同一個物件？"}
     I -- 是 --> J["_resolve_flagged：新譯文已生效、與原文特殊字元一致，且 batch 與條目編號皆相符才移出 AI 異常清單"]
-    J --> K["保留捲動重載清單，並通知 ModDbView._on_entries_changed"]
+    J --> K["after_data_change：由上層背景快照保留頁碼、捲動與選取位置重載，並通知 ModDbView._on_entries_changed"]
     I -- 否 --> L["僅顯示結果，不改動畫面狀態"]
 ```
+
+條目校對的畫面執行緒不查詢資料庫：
+
+- **翻頁**（`kit.Pager`）只換頁碼，走 `ModDbView._on_entries_filter_changed(page_only=True)` 的背景快照；Pager 立刻標示目標頁、清單變暗並顯示「正在載入第 N 頁…」，worker 只讀當頁條目、詳情與智慧校對標籤，不重算版本／模組／來源選項。連點頁碼時較舊的結果因請求已改變而被丟棄，只套用最後一次。
+- **選取條目**時 `EntriesPanel._select_ticket` 前進：被點的列立刻標示、編輯區停用（載入中不能編輯上一筆的內容，此時輸入事件被忽略，不會把上一筆內容記成新條目草稿），`entry_detail` 與影響預覽在背景讀取；結果到達時 ticket 已過期（又點了別筆，或清單被新快照取代）就丟棄。
+- **輸入譯文**只立刻更新儲存／審核按鈕；格式差異、Minecraft 預覽與影響預覽（`compute_impact`）在停筆 `EDIT_DEBOUNCE_SECONDS` 後才重畫，影響預覽由背景查詢，輸入或條目又變了就丟棄。
+- 儲存、還原、整批還原與審核都經 `entry_writes.run_write` 在背景寫入，畫面執行緒只套用結果；寫入後的清單重載由上層背景快照完成（`prepare_reload_after_change` 保留頁碼、捲動位置，原條目消失時選同一位置的下一筆）。
 
 背景資料庫快照即使在儲存完成後才抵達，也必須只更新條目清單、篩選選項、審核標籤與統計，不得重設使用者正在編輯的譯文。`EntriesPanel` 以條目 id 保存編輯框相對於資料庫值的 resident 草稿；`apply_refresh_snapshot` 套用新快照前先收集目前差異，`_show_editor` 優先還原該草稿。草稿會在資料庫身分改變時清除，或在儲存回呼確認編輯框仍等於剛寫入的值時清除；儲存後繼續輸入的內容會保留並明確提示尚未儲存。
 
@@ -290,7 +297,8 @@ flowchart TD
 - 結果一律以 `page.run_task` 排回 UI 執行緒，worker 本身不操作 Flet 控制項。
 - 掃描與機翻以 `_poll` 協程每 0.2 秒讀取 `TaskSession.snapshot()`；離開頁籤時 `will_unmount` 停止輪詢，切回來時 `resume` 接續。
 - 批次取代對話框以 `_sync_worker` 輪詢，並以 `generation` 判斷結果是否仍有效。
-- `ModDbView._safe_update` 只更新 `_tab_stack` 子樹，避免每次切換都重送整個頁面。
+- 更新範圍：`ModDbView`、四個頁籤、條目頁的篩選列／清單／編輯區／記錄都是更新邊界（`app/ui/update_scope.py` 的 `isolate`），頁面層級的 `page.update()`（狀態列、Key 輪詢）不會走進這棵樹；各處以 `update_regions` 只更新實際變動的區塊（頁籤切換更新分頁堆疊與目前頁籤，翻頁更新清單與頁碼，選取更新兩個清單列、編輯區與記錄）。事件處理函式沒有明確更新時，Flet 只會自動更新最近的邊界。
+- 條目清單列由 `EntryTilePool` 一次建好 50 列並原地更新內容（只改文字、顏色與 `visible`），翻頁不新增或移除控制項；連續點選時只重畫選取狀態改變的兩列。
 
 ## 狀態與資料
 
