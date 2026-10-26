@@ -21,9 +21,13 @@ from translation_tool.core.terminology_model import (
 from translation_tool.utils.text_matching import term_canonical_key
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def index():
-    return load_official_locale_index()
+    """共用的官方索引；命中結果有快取，這裡的測試會改 allowlist，所以每個測試前後都清掉。"""
+    shared = load_official_locale_index()
+    shared._match_cache.clear()
+    yield shared
+    shared._match_cache.clear()
 
 
 def _matches(text: str, index, **extra):

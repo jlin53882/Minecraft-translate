@@ -326,3 +326,16 @@ class TestCorruptCheckpointIsQuarantined:
         assert lm_translator.load_checkpoint() is not None
 
         assert checkpoint.exists() and not Path(f"{checkpoint}.corrupt").exists()
+
+
+def test_checkpoint_drops_shielded_runtime_objects(checkpoint, tmp_path):
+    """指南／Markdown 段落帶有 ShieldedText，不能讓 checkpoint 的 JSON 序列化失敗。"""
+    from translation_tool.plugins.shared.rich_text_shield import shield_text
+
+    text = "Use <b>this</b>"
+    remaining = [{"path": "blocks[0]", "text": text, "_shielded": shield_text(text)}]
+
+    lm_translator.save_checkpoint(1, 1, 2, remaining, str(tmp_path / "out"))
+
+    data = json.loads(checkpoint.read_text("utf-8"))
+    assert data["remaining_sample"] == [{"path": "blocks[0]", "text": text}]
