@@ -15,7 +15,7 @@ import logging
 import os
 import re
 import zipfile
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -90,12 +90,60 @@ def _normalize_jar_base_name(jar_filename: str) -> str:
     return base_name or base_full
 
 
+def build_nested_output_names(
+    jar_paths: Iterable[str | Path],
+    root: str | Path | None = None,
+) -> dict[Path, str]:
+    """為同名 outer JAR 建立穩定且可被 Stage 2 辨識的 nested 目錄名。
+
+    一般情況保留既有的 ``<jar-stem>_extracted`` 路徑；只有同一批來源
+    中有相同 stem 的 JAR 時，才把相對來源路徑的短雜湊插入 stem。這樣既
+    保持既有輸出相容性，也避免 ``client/example.jar`` 與
+    ``server/example.jar`` 的 nested 資源寫到同一個資料夾。命名保留
+    ``_extracted`` 尾碼，讓既有 Stage 2／指南掃描器仍能識別 wrapper。
+    """
+    unique_paths = list(dict.fromkeys(Path(path) for path in jar_paths))
+    grouped: dict[str, list[Path]] = {}
+    for path in unique_paths:
+        grouped.setdefault(path.stem.casefold(), []).append(path)
+
+    if root is not None:
+        root_path = Path(root).resolve()
+    else:
+        try:
+            root_path = Path(
+                os.path.commonpath(
+                    [str(path.resolve().parent) for path in unique_paths]
+                )
+            )
+        except (OSError, ValueError):
+            root_path = None
+
+    output_names: dict[Path, str] = {}
+    for paths in grouped.values():
+        if len(paths) < 2:
+            continue
+        for path in paths:
+            try:
+                if root_path is None:
+                    raise ValueError("no common source root")
+                identity = path.resolve().relative_to(root_path).as_posix()
+            except (OSError, ValueError):
+                identity = path.resolve().as_posix()
+            digest = hashlib.blake2s(
+                identity.casefold().encode("utf-8"), digest_size=4
+            ).hexdigest()
+            output_names[path] = f"{path.stem}_{digest}_extracted"
+    return output_names
+
+
 def _entry_output_path(
     output_root: str,
     jar_filename_base: str,
     jar_stem: str,
     logical_path: str,
     is_nested: bool,
+    nested_output_name: str | None = None,
 ) -> str:
     """把 direct/nested archive member 映射成翻譯流程的 canonical 路徑。"""
     if is_nested:
@@ -103,7 +151,11 @@ def _entry_output_path(
         # normalized name intentionally collapses loader/version suffixes and
         # is therefore not unique in a large modpack (for example, many mods
         # normalize to ``ars`` or ``ftb``).
-        return safe_join(output_root, f"{jar_stem}_extracted", logical_path)
+        return safe_join(
+            output_root,
+            nested_output_name or f"{jar_stem}_extracted",
+            logical_path,
+        )
     if not logical_path.startswith("assets/"):
         return safe_join(
             output_root,
@@ -121,6 +173,7 @@ def _extract_scanned_entries(
     budget: ZipReadBudget,
     get_file_hash_fn: Callable[[bytes], str],
     asset_winners: dict[str, Path] | None = None,
+    nested_output_name: str | None = None,
 ) -> dict[str, Any]:
     """寫出預掃描保留的 direct/nested entries，避免再掃一次 archive tree。"""
     extracted_count = 0
@@ -146,6 +199,7 @@ def _extract_scanned_entries(
                 jar_path.stem,
                 normalized_path,
                 entry.is_nested,
+                nested_output_name,
             )
         except UnsafePathError:
             log_error("拒絕提取不安全路徑: %s（來源 %s）", normalized_path, jar_path)
@@ -221,6 +275,7 @@ def _extract_cached_entries_or_status(
     budget: ZipReadBudget,
     get_file_hash_fn: Callable[[bytes], str],
     scan_results,
+    nested_output_name: str | None = None,
 ) -> dict[str, Any] | None:
     """處理 scan cache 命中、失敗與無目標三種 terminal 狀態。"""
     scanned_entries = getattr(scan_results, "entries", {}).get(jar_path)
@@ -233,6 +288,7 @@ def _extract_cached_entries_or_status(
             budget,
             get_file_hash_fn,
             getattr(scan_results, "asset_winners", None),
+            nested_output_name,
         )
     if jar_path in getattr(scan_results, "failed_jars", set()):
         return {"status": "error", "extracted": 0, "skipped": 0}
@@ -277,6 +333,8 @@ def extract_from_jar_impl(
     target_regex: re.Pattern,
     get_file_hash_fn: Callable[[bytes], str] = get_file_hash,
     scan_results: dict[Path, dict[str, str | None]] | None = None,
+    *,
+    nested_output_name: str | None = None,
 ) -> dict[str, Any]:
     """從單一 JAR 檔案提取符合目標正規表達式的檔案。
 
@@ -318,6 +376,7 @@ def extract_from_jar_impl(
             budget,
             get_file_hash_fn,
             scan_results,
+            nested_output_name,
         )
         if cached_result is not None:
             return cached_result
@@ -412,7 +471,7 @@ def run_extraction_process_impl(
     process_name: str,
     *,
     find_jar_files_fn: Callable[[str], list[str]],
-    extract_from_jar_fn: Callable[[str, str, re.Pattern], dict[str, Any]],
+    extract_from_jar_fn: Callable[..., dict[str, Any]],
     progress_start: float = 0.0,
     progress_end: float = 1.0,
 ) -> Generator[dict[str, Any], None, None]:
@@ -583,6 +642,7 @@ def run_extraction_process_impl(
 
     eligible_jars = [jar for jar in jar_files if Path(jar) in all_scan_results]
     eligible_total = len(eligible_jars)
+    nested_output_names = build_nested_output_names(jar_files, mods_dir)
 
     processed_count = 0
     total_extracted = 0
@@ -637,9 +697,24 @@ def run_extraction_process_impl(
     def submit_extraction(executor, jar_path):
         raise_if_cancelled()
         submit_time = time_module.time()
-        future = executor.submit(
-            extract_from_jar_fn, jar_path, output_dir, target_regex, all_scan_results
-        )
+        nested_output_name = nested_output_names.get(Path(jar_path))
+        if nested_output_name is None:
+            future = executor.submit(
+                extract_from_jar_fn,
+                jar_path,
+                output_dir,
+                target_regex,
+                all_scan_results,
+            )
+        else:
+            future = executor.submit(
+                extract_from_jar_fn,
+                jar_path,
+                output_dir,
+                target_regex,
+                all_scan_results,
+                nested_output_name,
+            )
         submit_times[future] = submit_time
         return future
 

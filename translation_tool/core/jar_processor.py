@@ -136,6 +136,7 @@ def _extract_from_jar(
     output_root: str,
     target_regex: re.Pattern,
     all_scan_results: dict[Path, dict[str, str | None]] | None = None,
+    nested_output_name: str | None = None,
 ) -> dict[str, Any]:
     """從 JAR 檔案提取檔案。
 
@@ -146,7 +147,11 @@ def _extract_from_jar(
         all_scan_results: 預先掃描的 JAR 結果（由 caller 傳入）
     """
     return extract_from_jar_impl(
-        jar_path, output_root, target_regex, scan_results=all_scan_results
+        jar_path,
+        output_root,
+        target_regex,
+        scan_results=all_scan_results,
+        nested_output_name=nested_output_name,
     )
 
 

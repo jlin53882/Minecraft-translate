@@ -15,9 +15,13 @@ from translation_tool.core.jar_processor import (
     build_book_path_regex,
     build_lang_file_regex,
     extract_book_files_generator,
+    extract_lang_files_generator,
 )
 from translation_tool.core.jar_processor_preview import _scan_single_jar_for_preview
-from translation_tool.core.jar_sniff_extract import extract_sniffed_from_jar
+from translation_tool.core.jar_sniff_extract import (
+    extract_sniffed_book_files,
+    extract_sniffed_from_jar,
+)
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.translation_db.scanner import ScanOptions, scan_jar
@@ -136,6 +140,30 @@ def test_direct_extraction_without_pre_scan_includes_nested_entries(tmp_path: Pa
     assert (output / "direct-nested_extracted/assets/sodium/lang/en_us.json").is_file()
 
 
+def test_nested_outputs_are_isolated_for_same_named_outer_jars(tmp_path: Path):
+    """不同來源的同名 outer JAR 不得互相覆蓋 nested 語言檔。"""
+    mods = tmp_path / "mods"
+    _outer_jar(
+        mods / "client" / "example.jar",
+        nested={"META-INF/jarjar/inner.jar": _sodium_like_inner("Client")},
+    )
+    _outer_jar(
+        mods / "server" / "example.jar",
+        nested={"META-INF/jarjar/inner.jar": _sodium_like_inner("Server")},
+    )
+    output = tmp_path / "lang_output"
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    extracted = sorted(output.glob("*_extracted/assets/sodium/lang/en_us.json"))
+    assert len(extracted) == 2
+    assert {
+        json.loads(path.read_text(encoding="utf-8"))["sodium.options.pages.general"]
+        for path in extracted
+    } == {"Client", "Server"}
+    assert len({path.parent.parent.parent.parent.name for path in extracted}) == 2
+
+
 def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path):
     jar = _outer_jar(
         tmp_path / "nested-sniff.jar",
@@ -173,6 +201,36 @@ def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path
         )
     )
     assert (pipeline_output / "nested-sniff_extracted" / member).is_file()
+
+
+def test_nested_sniff_outputs_are_isolated_for_same_named_outer_jars(tmp_path: Path):
+    """內容嗅探與名稱提取使用相同的 nested 來源隔離規則。"""
+    first = _outer_jar(
+        tmp_path / "client" / "guide.jar",
+        nested={"META-INF/jarjar/inner.jar": _custom_book_inner("Client")},
+    )
+    second = _outer_jar(
+        tmp_path / "server" / "guide.jar",
+        nested={"META-INF/jarjar/inner.jar": _custom_book_inner("Server")},
+    )
+    output = tmp_path / "book_output"
+    updates = list(
+        extract_sniffed_book_files(
+            [str(first), str(second)],
+            str(output),
+            lambda _name: False,
+            lang_codes=["en_us"],
+            skip_zh_cn=False,
+        )
+    )
+
+    extracted = sorted(output.glob("*_extracted/assets/demo/books/chapters/foods.json"))
+    assert len(extracted) == 2
+    assert {"Client", "Server"} == {
+        json.loads(path.read_text(encoding="utf-8"))["pages"][0]["summary"]
+        for path in extracted
+    }
+    assert updates[-1]["log"].endswith("2 個手冊／指南檔")
 
 
 def test_nested_content_sniff_preview_reports_partial_nested_archive(

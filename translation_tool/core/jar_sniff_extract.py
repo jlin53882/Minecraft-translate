@@ -19,6 +19,7 @@ from typing import Any
 
 from translation_tool.core.jar_processor_extract import (
     _normalize_jar_base_name,
+    build_nested_output_names,
     get_file_hash,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
@@ -70,9 +71,14 @@ def _output_path(
     *,
     jar_stem: str | None = None,
     is_nested: bool = False,
+    nested_output_name: str | None = None,
 ) -> str:
     if is_nested:
-        return safe_join(output_root, f"{jar_stem or jar_base}_extracted", member)
+        return safe_join(
+            output_root,
+            nested_output_name or f"{jar_stem or jar_base}_extracted",
+            member,
+        )
     if member.startswith("assets/"):
         return safe_join(output_root, member)
     return safe_join(output_root, f"{jar_base}_extracted", member)
@@ -152,10 +158,16 @@ def extract_sniffed_from_jar(
     output_root: str,
     claimed: Callable[[str], bool],
     langs: set[str],
+    *,
+    nested_output_name: str | None = None,
 ) -> tuple[int, int]:
     """回傳 ``(寫出, 略過)``。``claimed(名稱)`` 為真的檔案已由名稱規則提取，不重複處理。"""
     written, skipped, status = _extract_sniffed_from_jar_detailed(
-        jar_path, output_root, claimed, langs
+        jar_path,
+        output_root,
+        claimed,
+        langs,
+        nested_output_name=nested_output_name,
     )
     if status.incomplete:
         log_warning(
@@ -171,6 +183,8 @@ def _extract_sniffed_from_jar_detailed(
     output_root: str,
     claimed: Callable[[str], bool],
     langs: set[str],
+    *,
+    nested_output_name: str | None = None,
 ) -> tuple[int, int, SniffTraversalStatus]:
     """供 pipeline 使用的補掃結果，保留寫入數與完整性狀態。"""
     written = skipped = 0
@@ -191,6 +205,7 @@ def _extract_sniffed_from_jar_detailed(
                 member,
                 jar_stem=Path(jar_path).stem,
                 is_nested=bool(archive_chain),
+                nested_output_name=nested_output_name,
             )
             data = read_limited(zf, member, MAX_FILE_BYTES, budget=budget)
         except UnsafePathError:
@@ -227,12 +242,17 @@ def extract_sniffed_book_files(
 ) -> Generator[dict[str, Any], None, None]:
     """逐個 jar 補提取依內容辨識的手冊／指南，產生進度更新（只含 ``log``）。"""
     langs = _wanted_langs(lang_codes, skip_zh_cn)
+    nested_output_names = build_nested_output_names(jar_paths)
     total_written = 0
     for jar_path in jar_paths:
         raise_if_cancelled()
         try:
             written, _skipped, status = _extract_sniffed_from_jar_detailed(
-                jar_path, output_dir, claimed, langs
+                jar_path,
+                output_dir,
+                claimed,
+                langs,
+                nested_output_name=nested_output_names.get(Path(jar_path)),
             )
         except (zipfile.BadZipFile, OSError, ArchiveBudgetError) as exc:
             log_error("[Sniff] 無法讀取 %s：%s", jar_path, exc)

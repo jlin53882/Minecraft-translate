@@ -42,6 +42,29 @@ class TestMapLangOutputPath:
 
         assert map_lang_output_path(src) == Path(f"assets/demo/lang/{expected}")
 
+    @pytest.mark.parametrize(
+        ("src", "expected"),
+        [
+            (
+                Path("example_1234_extracted/data/demo/lang/en_us.json"),
+                Path("assets/demo/lang/zh_tw.json"),
+            ),
+            (
+                Path("example_1234_extracted/data/demo/advancements/start.json"),
+                Path("data/demo/advancements/start.json"),
+            ),
+            (
+                Path("example_1234_extracted/assets/demo/books/chapters/a.json"),
+                Path("assets/demo/books/chapters/a.json"),
+            ),
+        ],
+    )
+    def test_extracted_wrapper_does_not_leak_into_output_paths(self, src, expected):
+        """提取 wrapper 只供 staging 辨識，不得進入最終輸出。"""
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        assert map_lang_output_path(src) == expected
+
     def test_map_different_case(self):
         """測試不同大小寫的 en_us"""
         from translation_tool.core.translation_path_writer import map_lang_output_path
