@@ -36,12 +36,28 @@ def default_rules():
         ("深色橡木原木", "黑橡木原木"),
         ("去皮橡木柱子", "剝皮橡木柱子"),
         ("去皮橡木原木", "剝皮橡木原木"),
+        ("红树木椅子", "紅樹林木椅子"),
+        ("去皮红树木柱", "剝皮紅樹林木柱"),
+        ("去皮云杉木桿", "剝皮杉木桿"),
+        ("红砖窗户", "紅磚窗戶"),
+        ("下界砖柱", "地獄磚柱"),
     ],
 )
 def test_short_wood_rules_do_not_corrupt_longer_words(
     default_rules, simplified, expected
 ):
     assert convert_text(simplified, default_rules) == expected
+
+
+def test_material_prefix_rules_do_not_append_a_suffix(rule_list):
+    # 規則是子字串替換：以「木」「磚」結尾的材料詞會套用在模組的複合詞上（紅樹木椅子、紅磚窗戶），
+    # 譯詞若多加「塊」「頭」就會變成「紅樹林木塊椅子」「紅磚頭窗戶」。單獨名稱的差異由更長的規則處理。
+    bad = [
+        (rule["from"], rule["to"])
+        for rule in rule_list
+        if rule["from"][-1:] in ("木", "磚") and rule["to"][-1:] != rule["from"][-1:]
+    ]
+    assert bad == []
 
 
 def test_default_rules_are_idempotent_on_their_own_output(default_rules):
@@ -78,14 +94,11 @@ ALLOWED_CROSS_REFERENCES = {
     "水肺之箭": _LONGER_WINS,
     "水肺藥水": _LONGER_WINS,
     "皮革外套": _LONGER_WINS,
-    "紅磚樓梯": _LONGER_WINS,
-    "紅磚臺階": _LONGER_WINS,
     "緋紅菌巖": _LONGER_WINS,
     "緋紅菌核": _LONGER_WINS,
     "詭異菌核": _LONGER_WINS,
     "苔石磚": _LONGER_WINS,
     "蜜脾塊": _LONGER_WINS,
-    "紅磚塊": _AMBIGUOUS,
     "蜜脾": _AMBIGUOUS,
     "力量之箭": _PROTECTION,
     "皮革帽子": _PROTECTION,
@@ -94,7 +107,6 @@ ALLOWED_CROSS_REFERENCES = {
     "力量藥水": _PROTECTION,
     "迅捷藥水": _PROTECTION,
     "迅捷之箭": _PROTECTION,
-    "紅磚牆": _PROTECTION,
 }
 
 # 譯詞含空白：官方譯名本身有空白（含英文、數字或標點），不是多餘空白。
@@ -108,7 +120,6 @@ ALLOWED_SPACE_IN_TO = {
 
 # 輸出與 to 不同：to 恰好等於另一條規則的原詞，編譯時被收斂（見 docs/developer-guide/replace-rules.md）。
 ALLOWED_OUTPUT_DRIFT = {
-    "紅磚塊": "官方 block.minecraft.bricks 是「紅磚」，但 紅磚→紅磚頭（item.minecraft.brick）同詞異譯",
     "蜜脾": "官方 item.minecraft.honeycomb 是「蜂巢」，但 蜂巢→蜂窩（block.minecraft.bee_nest）同詞異譯",
 }
 

@@ -111,7 +111,8 @@ def test_project_rules_keep_real_overlapping_outputs_stable():
         "青苔石磚樓梯": "青苔石磚樓梯",
         "蜜脾": "蜂窩",
         "蜂巢": "蜂窩",
-        "紅磚": "紅磚頭",
+        "紅磚": "紅磚",
+        "紅磚窗戶": "紅磚窗戶",
         "樹脂磚": "樹脂磚",
     }
 
@@ -132,7 +133,7 @@ def test_project_literal_rules_are_idempotent():
         and isinstance(rule.get("to"), str)
         and not any(char in rule["from"] for char in ".?*[]()\\")
     ]
-    assert len(literal_rules) == 1568
+    assert len(literal_rules) == 1566
 
     expected_canonical = {
         "噴濺型力量藥水": "飛濺力量藥水",
@@ -156,7 +157,7 @@ def test_project_literal_rules_are_idempotent():
         "緋紅菌巖": "緋紅菌絲石",
         "緋紅菌核": "緋紅菌絲體",
         "詭異菌核": "扭曲菌絲體",
-        "紅磚塊": "紅磚頭",
+        "紅磚塊": "紅磚",
         "蜜脾塊": "蜂巢塊",
         "蜜脾": "蜂窩",
     }
