@@ -246,66 +246,108 @@ def _resource_pack_folders(
     ignored: list[str] = []
     seen: set[str] = set()
 
-    def add(label: str, path: str) -> None:
-        if not os.path.isdir(path):
-            return
-        key = _norm(path)
-        if key in seen:
-            return
-        seen.add(key)
-        folders.append((label, path, "assets"))
-
-    def has_files(path: str) -> bool:
-        return any(_walk_files(path))
-
-    def inspect_container(container: str, label: str, *, include_children: bool) -> None:
-        if not os.path.isdir(container):
-            return
-        basename = os.path.basename(container.rstrip("/\\")).lower()
-        if basename == "assets":
-            add(label, container)
-            return
-        if basename == "root":
-            add(f"{label}/assets", os.path.join(container, "assets"))
-            return
-
-        add(f"{label}/assets", os.path.join(container, "assets"))
-        if not include_children:
-            return
-        try:
-            children = sorted(os.listdir(container))
-        except OSError:
-            return
-        for child in children:
-            child_path = os.path.join(container, child)
-            if not os.path.isdir(child_path):
-                continue
-            child_lower = child.lower()
-            if child_lower in {"assets", "root"}:
-                inspect_container(child_path, f"{label}/{child}", include_children=False)
-            elif child_lower in {"data", "other_output", "meta-inf", "nested"}:
-                if has_files(child_path):
-                    ignored.append(child_path)
-            elif os.path.isdir(os.path.join(child_path, "assets")):
-                add(f"{label}/{child}/assets", os.path.join(child_path, "assets"))
-            elif has_files(child_path):
-                ignored.append(child_path)
-
-    inspect_container(input_root_dir, "input", include_children=True)
+    _inspect_resource_pack_container(
+        input_root_dir,
+        "input",
+        include_children=True,
+        folders=folders,
+        ignored=ignored,
+        seen=seen,
+    )
     for index, extra in enumerate(extra_folders or []):
         label = f"extra[{index}]"
         if os.path.isfile(extra):
             if not _is_pack_file(extra) and not _is_artifact(extra, None):
                 ignored.append(extra)
-            continue
-        if os.path.isdir(extra):
-            inspect_container(extra, label, include_children=True)
+        elif os.path.isdir(extra):
+            _inspect_resource_pack_container(
+                extra,
+                label,
+                include_children=True,
+                folders=folders,
+                ignored=ignored,
+                seen=seen,
+            )
         elif os.path.exists(extra):
             ignored.append(extra)
         else:
             ignored.append(extra)
 
     return folders, ignored
+
+
+def _add_resource_pack_folder(
+    folders: list[tuple[str, str, str]], seen: set[str], label: str, path: str
+) -> None:
+    if not os.path.isdir(path):
+        return
+    key = _norm(path)
+    if key in seen:
+        return
+    seen.add(key)
+    folders.append((label, path, "assets"))
+
+
+def _has_resource_pack_files(path: str) -> bool:
+    return any(_walk_files(path))
+
+
+def _inspect_resource_pack_container(
+    container: str,
+    label: str,
+    *,
+    include_children: bool,
+    folders: list[tuple[str, str, str]],
+    ignored: list[str],
+    seen: set[str],
+) -> None:
+    if not os.path.isdir(container):
+        return
+    basename = os.path.basename(container.rstrip("/\\")).lower()
+    if basename == "assets":
+        _add_resource_pack_folder(folders, seen, label, container)
+        return
+    if basename == "root":
+        _add_resource_pack_folder(
+            folders, seen, f"{label}/assets", os.path.join(container, "assets")
+        )
+        return
+
+    _add_resource_pack_folder(
+        folders, seen, f"{label}/assets", os.path.join(container, "assets")
+    )
+    if not include_children:
+        return
+    try:
+        children = sorted(os.listdir(container))
+    except OSError:
+        return
+    for child in children:
+        child_path = os.path.join(container, child)
+        if not os.path.isdir(child_path):
+            continue
+        child_lower = child.lower()
+        if child_lower in {"assets", "root"}:
+            _inspect_resource_pack_container(
+                child_path,
+                f"{label}/{child}",
+                include_children=False,
+                folders=folders,
+                ignored=ignored,
+                seen=seen,
+            )
+        elif child_lower in {"data", "other_output", "meta-inf", "nested"}:
+            if _has_resource_pack_files(child_path):
+                ignored.append(child_path)
+        elif os.path.isdir(os.path.join(child_path, "assets")):
+            _add_resource_pack_folder(
+                folders,
+                seen,
+                f"{label}/{child}/assets",
+                os.path.join(child_path, "assets"),
+            )
+        elif _has_resource_pack_files(child_path):
+            ignored.append(child_path)
 
 
 def _collect_sources(
@@ -343,10 +385,7 @@ def _validate_resource_pack_entries(names: list[str]) -> None:
         if (
             _is_invalid_pack_metadata_entry(name)
             or top in {"data", "other_output"}
-            or (
-                name not in {"pack.mcmeta", "pack.png"}
-                and top != "assets"
-            )
+            or (name not in {"pack.mcmeta", "pack.png"} and top != "assets")
         ):
             invalid.append(name)
     if invalid:
