@@ -44,7 +44,8 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
   以 `show_loading` 顯示輕量提示），整個面板由快照套用後的 `flush` 重畫一次，回傳值表示編輯區是否
   由快照重畫。`ModDbView._request_panel_refresh` 先把讀取交給 worker，再重畫載入中提示。
   載入期間 `EntriesPanel.set_data_loading(True)` 停用批次取代、批量審核與 Smart Review 等依賴
-  範圍資料的入口，快照套用後才恢復。
+  範圍資料的入口，快照套用後才恢復；按鈕的停用狀態一改變就直接更新這四顆按鈕，不依賴 `FilterFlush`
+  的差異比對（篩選卡可能在載入中被搜尋欄等事件整張送出，比對記錄不知道畫面上已是停用）。
 - `apply_filter_options` 回傳選項或選值是否改變，並把有變的下拉選單登記到 `FilterFlush`；
   `EntriesPanel.flush_filter_options` 只更新這幾個下拉選單（選項很多的模組選單 diff 成本高，
   整張 `filter_card` 更貴），進階條件摘要、錯誤文字與四個資料操作按鈕（載入中停用）的狀態與上次送出的不同時

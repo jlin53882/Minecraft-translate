@@ -381,6 +381,7 @@ class EntriesPanel(ft.Column):
 
     def _update_data_actions(self) -> None:
         disabled = self._data_loading or bool(self._list_error)
+        changed = []
         for name in (
             "batch_replace_btn",
             "bulk_review_btn",
@@ -388,8 +389,13 @@ class EntriesPanel(ft.Column):
             "species_scan_btn",
         ):
             button = getattr(self, name, None)
-            if button is not None:
+            if button is not None and button.disabled != disabled:
                 button.disabled = disabled
+                changed.append(button)
+        # 篩選卡可能在載入中被別的事件（例如搜尋欄）整張送出，帶著停用狀態；
+        # 篩選列的差異比對不知道這件事，所以按鈕狀態一改變就直接送出這幾顆按鈕。
+        if changed:
+            update_regions(*changed)
 
     @staticmethod
     def _database_identity(db):

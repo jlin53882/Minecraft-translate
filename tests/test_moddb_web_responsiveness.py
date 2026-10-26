@@ -900,3 +900,39 @@ def test_filter_options_wait_for_the_conditions_to_settle(monkeypatch):
 
     assert loaded == ["b"]
     assert applied == ["b"]
+
+
+def test_data_action_buttons_are_resent_when_loading_finishes(view, monkeypatch):
+    """搜尋觸發載入時，若篩選卡在載入中被整張送出（按鈕停用），載入完成後按鈕必須再送出一次。
+
+    篩選列的差異比對只記得自己送出的狀態；按鈕狀態改變時直接更新那幾顆按鈕，
+    畫面才不會一直停在停用（點不了）。
+    """
+    entries = view.entries
+    buttons = (
+        entries.batch_replace_btn,
+        entries.bulk_review_btn,
+        entries.smart_review_btn,
+        entries.species_scan_btn,
+    )
+    sent: list[tuple[str, bool]] = []
+    for button in buttons:
+        monkeypatch.setattr(
+            button,
+            "update",
+            lambda b=button: sent.append((b.content, b.disabled)),
+        )
+
+    entries.set_data_loading(True)
+    assert all(b.disabled for b in buttons)
+    assert {disabled for _name, disabled in sent} == {True}
+    sent.clear()
+
+    entries.set_data_loading(False)
+    assert not any(b.disabled for b in buttons)
+    assert len(sent) == len(buttons)
+    assert {disabled for _name, disabled in sent} == {False}
+
+    sent.clear()
+    entries.set_data_loading(False)  # 狀態沒變就不重送
+    assert sent == []

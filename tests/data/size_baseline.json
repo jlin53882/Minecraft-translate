@@ -34,7 +34,7 @@
     "app/views/icon_preview_view.py": 879,
     "app/views/moddb/batch_replace_dialog.py": 1013,
     "app/views/moddb/bulk_review_dialog.py": 805,
-    "app/views/moddb/entries_panel.py": 1160,
+    "app/views/moddb/entries_panel.py": 1166,
     "app/views/moddb/repair_reviewer.py": 808,
     "app/views/moddb/review_scope_dialog.py": 803,
     "app/views/moddb/smart_review_batch_reviewer.py": 1058,
