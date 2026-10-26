@@ -20,7 +20,7 @@ from app.views.icon_preview.scan_operation import (
     scan_jar_directory,
 )
 from tests.conftest import mock_page
-from tests.test_icon_jar_scan import make_jar, pack
+from tests.test_icon_jar_scan import PNG, make_jar, pack
 
 
 def make_view(source_root, review_root=None, *, page=None):
@@ -225,6 +225,77 @@ def test_prebuilt_index_keeps_same_key_icons_separate_per_jar(tmp_path, monkeypa
         for entry in entries_of(fallback_store)
     }
     assert fallback_icons == direct_icons
+
+
+def test_legacy_l2_cache_is_rebuilt_with_source_specific_icons(tmp_path, monkeypatch):
+    from app.views.icon_preview import entries_cache
+
+    mods = tmp_path / "mods"
+    shared_lang = json.dumps({"item.shared.sword": "Sword"})
+    for jar_name, texture_name in (("a.jar", "sword_a"), ("b.jar", "sword_b")):
+        make_jar(
+            mods / jar_name,
+            {
+                "assets/shared/lang/en_us.json": shared_lang,
+                "assets/shared/models/item/sword.json": json.dumps(
+                    {
+                        "parent": "item/generated",
+                        "textures": {"layer0": f"shared:item/{texture_name}"},
+                    }
+                ),
+                f"assets/shared/textures/item/{texture_name}.png": PNG,
+            },
+        )
+
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: cache_root)
+    identity = _compute_source_identity(mods, "jar_directory")
+    cache_dir = cache_root / entries_cache._cache_key(identity)
+    cache_dir.mkdir(parents=True)
+    stale_rows = [
+        {
+            "modid": "shared",
+            "key": "item.shared.sword",
+            "en": "Sword",
+            "source_jar": jar_name,
+            "icon_path": "jar://stale-icon",
+        }
+        for jar_name in ("a.jar", "b.jar")
+    ]
+    (cache_dir / "0.json").write_text(
+        json.dumps(entries_cache._encode_shard(stale_rows)), encoding="utf-8"
+    )
+    (cache_dir / "index.json").write_text(
+        json.dumps(
+            {
+                "version": 6,
+                "source_identity": identity,
+                "mods": [["shared", 2, "0.json"]],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    view = make_view(mods)
+    assert view._lookup_cached_entries("jar_directory") is None
+
+    rebuilt = scan_jar_directory(view, 0)
+    rebuilt_icons = {
+        (entry.source_jar, entry.key): entry.icon_path for entry in entries_of(rebuilt)
+    }
+    reopened = open_entries_cache_l2(mods, identity)
+    assert reopened is not None
+    assert {
+        (row["source_jar"], row["key"]): row["icon_path"]
+        for row in reopened.load("shared")
+    } == rebuilt_icons
+    assert rebuilt_icons[("a.jar", "item.shared.sword")] != "jar://stale-icon"
+    assert (
+        rebuilt_icons[("a.jar", "item.shared.sword")]
+        != rebuilt_icons[("b.jar", "item.shared.sword")]
+    )
+    saved = json.loads((cache_dir / "index.json").read_text(encoding="utf-8"))
+    assert saved["version"] == entries_cache._CACHE_VERSION == 7
 
 
 # ---------------------------------------------------------------------------

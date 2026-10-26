@@ -701,6 +701,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
                     await asyncio.sleep(0)
                 if self._view_mounted:
                     self._on_load_clicked(None)
+                    while self._loading and self._view_mounted:
+                        await asyncio.sleep(0.01)
             finally:
                 self._cache_recovery_scheduled = False
 

@@ -82,7 +82,7 @@ flowchart TD
   - `current_modid`、`_zh_data`（目前模組的譯文字典，儲存時整份寫出）、`_current_zh_file`。
   - 分頁：模組清單 `mod_page_size`（預設 50，可選 25、50、100），詳情 `page_size`（預設 50）。
 - L1 快取：`_source_cache`（`MemorySource`、`ScannedSource` 或 `ShardSource`）與 `_cache_meta["source_identity"]`，僅保存來源資料（modid、key、en、source_jar、icon_path），不含譯文。命中時依目前的 `review_root` 建立譯文對照（`_build_zh_tw_lookup`），由 `ModEntryStore` 逐模組補上。
-- L2 快取：`get_data_root()/.icon_cache/<key>/`（`entries_cache._get_cache_dir`），只在 `jar_directory` 模式下讀寫：`index.json`（身分、模組與筆數）加每個模組一個欄位式分片。寫入於掃描完成後、仍在背景執行緒（`save_source_cache_l2`），讀取（`open_entries_cache_l2`）命中時只讀 index。快取版本為 `_CACHE_VERSION`，身分由 `_compute_source_identity` 計算。
+- L2 快取：`get_data_root()/.icon_cache/<key>/`（`entries_cache._get_cache_dir`），只在 `jar_directory` 模式下讀寫：`index.json`（身分、模組與筆數）加每個模組一個欄位式分片。寫入於掃描完成後、仍在背景執行緒（`save_source_cache_l2`），讀取（`open_entries_cache_l2`）命中時只讀 index；目前快取版本為 7，舊版本會 miss 並在下一次掃描後重建。延遲讀取分片失敗會使來源失效並排程一次完整重掃，恢復狀態維持到載入作業結束。身分由 `_compute_source_identity` 計算。
 - 圖示快取：`get_data_root()/.icon_cache/jar_icons/`（`_get_icon_cache_dir`）。
 - 寫出檔案：`{review_root}/{modid}/lang/zh_tw.json`，UTF-8、`indent=2`、`ensure_ascii=False`。若找不到既有檔案，`_find_zh_file` 回傳 `None`，儲存會被拒絕。
 

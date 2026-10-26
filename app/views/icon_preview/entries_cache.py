@@ -17,8 +17,8 @@ def _get_cache_dir() -> Path:
 
 
 _SOURCE_ENTRY_FIELDS = ("modid", "key", "en", "source_jar", "icon_path")
-# Version 6：快取改為 index.json + 每個模組一個欄位式分片；舊版單檔快取一律失效。
-_CACHE_VERSION = 6
+# Version 7：icon mapping 的來源歸屬語意變更，舊版分片必須重新掃描建立。
+_CACHE_VERSION = 7
 _INDEX_NAME = "index.json"
 
 

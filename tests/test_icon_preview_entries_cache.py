@@ -317,7 +317,7 @@ def test_l2_cache_rejects_previous_schema_versions(tmp_path, monkeypatch):
     monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: cache_root)
     cache_dir = cache_root / entries_cache._compute_cache_key(source_root)
     cache_dir.mkdir()
-    for version in (1, 2, 5):
+    for version in (1, 2, 5, 6):
         (cache_dir / "index.json").write_text(
             json.dumps(
                 {
@@ -445,8 +445,8 @@ def test_deferred_l2_shard_failure_invalidates_and_queues_recovery(
 
     cache_dir = next(path for path in (tmp_path / "cache").iterdir() if path.is_dir())
     index = json.loads((cache_dir / "index.json").read_text(encoding="utf-8"))
-    third_page_shard = cache_dir / index["mods"][80][2]
-    third_page_shard.write_text("{", encoding="utf-8")
+    for mod_index in (80, 81):
+        (cache_dir / index["mods"][mod_index][2]).write_text("{", encoding="utf-8")
 
     page = mock_page()
     view = IconPreviewView(page)
@@ -456,11 +456,31 @@ def test_deferred_l2_shard_failure_invalidates_and_queues_recovery(
     assert kind == "L2"
 
     reloads = []
-    view._on_load_clicked = lambda _event: reloads.append(True)
+
+    def start_recovery(_event):
+        reloads.append(True)
+        view._loading = True
+
+    view._on_load_clicked = start_recovery
     with pytest.raises(ShardLoadError):
         store["mod080"]
+    with pytest.raises(ShardLoadError):
+        store["mod081"]
 
     assert not cache_dir.exists()
     assert "mod080" not in store._hydrated
-    page._run_all_tasks()
+    assert len(page._tasks) == 1
+
+    import asyncio
+
+    async def finish_recovery():
+        handler, args = page._tasks.pop(0)
+        task = asyncio.create_task(handler(*args))
+        await asyncio.sleep(0)
+        assert view._cache_recovery_scheduled is True
+        view._loading = False
+        await task
+
+    asyncio.run(finish_recovery())
     assert reloads == [True]
+    assert view._cache_recovery_scheduled is False
