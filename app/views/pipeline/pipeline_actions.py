@@ -300,8 +300,7 @@ class PipelineActions:
             )
             message = (
                 f"[系統] 打包暫存完成：複製 {stats.get('copied', 0)} 個、"
-                f"合併 {stats.get('merged', 0)} 個檔案"
-                + _staging_reuse_note(stats)
+                f"合併 {stats.get('merged', 0)} 個檔案" + _staging_reuse_note(stats)
             )
             session.add_log(message)
             for warning in stats.get("warnings", []):

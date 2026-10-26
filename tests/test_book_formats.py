@@ -79,20 +79,32 @@ def test_neutral_pages_identity_matches_existing_database_contract(tmp_path: Pat
 
 
 def test_known_custom_formats_are_not_generic_patchouli_or_json():
-    assert resolve_book_format(
-        "assets/eternal_starlight/eternal_starlight/books/main.json",
-        {"pages": [{"type": "text", "summary": "Do not guess this schema."}]},
-    ).name == FORMAT_ETERNAL_STARLIGHT
-    assert resolve_book_format(
-        "data/example/modonomicon/books/book.json",
-        {"pages": [{"type": "text", "summary": "Do not guess this schema."}]},
-    ).name == FORMAT_MODONOMICON
-    assert resolve_book_format(
-        "assets/example/oracle_index/books/index.mdx",
-    ).name == FORMAT_ORACLE_INDEX
-    assert resolve_book_format(
-        "assets/oracle_index/books/index.mdx",
-    ).name == FORMAT_ORACLE_INDEX
+    assert (
+        resolve_book_format(
+            "assets/eternal_starlight/eternal_starlight/books/main.json",
+            {"pages": [{"type": "text", "summary": "Do not guess this schema."}]},
+        ).name
+        == FORMAT_ETERNAL_STARLIGHT
+    )
+    assert (
+        resolve_book_format(
+            "data/example/modonomicon/books/book.json",
+            {"pages": [{"type": "text", "summary": "Do not guess this schema."}]},
+        ).name
+        == FORMAT_MODONOMICON
+    )
+    assert (
+        resolve_book_format(
+            "assets/example/oracle_index/books/index.mdx",
+        ).name
+        == FORMAT_ORACLE_INDEX
+    )
+    assert (
+        resolve_book_format(
+            "assets/oracle_index/books/index.mdx",
+        ).name
+        == FORMAT_ORACLE_INDEX
+    )
 
 
 def test_unsupported_custom_docs_are_not_detected_as_guides(tmp_path: Path):
@@ -109,7 +121,9 @@ def test_unsupported_custom_docs_are_not_detected_as_guides(tmp_path: Path):
         encoding="utf-8",
     )
 
-    found = {path.relative_to(tmp_path).as_posix() for path in find_guide_files(tmp_path)}
+    found = {
+        path.relative_to(tmp_path).as_posix() for path in find_guide_files(tmp_path)
+    }
     assert "assets/oracle_index/books/docs/index.mdx" not in found
     assert "assets/things/lavender/entries/almanac.md" in found
 
@@ -142,13 +156,19 @@ def test_invalid_non_book_json_is_not_reported_as_invalid_book(tmp_path: Path):
 
 
 def test_standard_patchouli_and_known_non_book_paths_keep_their_boundaries():
-    assert resolve_book_format(
-        "assets/demo/patchouli_books/manual/en_us/entries/start.json"
-    ).name == FORMAT_STANDARD_PATCHOULI
-    assert resolve_book_format(
-        "assets/demo/models/block/start.json",
-        {"pages": [{"type": "text", "summary": "Not a book."}]},
-    ).supported is False
+    assert (
+        resolve_book_format(
+            "assets/demo/patchouli_books/manual/en_us/entries/start.json"
+        ).name
+        == FORMAT_STANDARD_PATCHOULI
+    )
+    assert (
+        resolve_book_format(
+            "assets/demo/models/block/start.json",
+            {"pages": [{"type": "text", "summary": "Not a book."}]},
+        ).supported
+        is False
+    )
 
 
 def test_invalid_custom_book_is_skipped_and_reported(tmp_path: Path):
@@ -166,7 +186,9 @@ def test_invalid_custom_book_is_skipped_and_reported(tmp_path: Path):
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
     assert result.error == ""
     assert any(path.endswith("herbs.json") for path in result.invalid_books)
-    assert any(item.key.endswith("foods.json#pages[0].summary") for item in result.items)
+    assert any(
+        item.key.endswith("foods.json#pages[0].summary") for item in result.items
+    )
 
 
 def _merge_config() -> dict:
@@ -193,10 +215,14 @@ def _mark_text(value, _rules):
     return value
 
 
-def test_neutral_pages_merge_routes_pending_and_preserves_structure(tmp_path: Path, monkeypatch):
+def test_neutral_pages_merge_routes_pending_and_preserves_structure(
+    tmp_path: Path, monkeypatch
+):
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
-    source = input_dir / "assets" / "herbsandharvest" / "books" / "chapters" / "foods.json"
+    source = (
+        input_dir / "assets" / "herbsandharvest" / "books" / "chapters" / "foods.json"
+    )
     source.parent.mkdir(parents=True)
     source.write_text(json.dumps(_neutral_document()), encoding="utf-8")
 
@@ -238,7 +264,9 @@ def test_neutral_pages_merge_routes_pending_and_preserves_structure(tmp_path: Pa
 def test_invalid_neutral_pages_merge_is_quarantined(tmp_path: Path, monkeypatch):
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"
-    source = input_dir / "assets" / "herbsandharvest" / "books" / "chapters" / "herbs.json"
+    source = (
+        input_dir / "assets" / "herbsandharvest" / "books" / "chapters" / "herbs.json"
+    )
     source.parent.mkdir(parents=True)
     source.write_text('{"pages": []}\n{"extra": "document"}', encoding="utf-8")
 

@@ -519,7 +519,9 @@ class TestOutputBundlerIntegration:
 
         assert results[-1].get("progress") == 1.0
 
-    def test_resource_pack_contract_excludes_data_and_nested_pack_metadata(self, tmp_path):
+    def test_resource_pack_contract_excludes_data_and_nested_pack_metadata(
+        self, tmp_path
+    ):
         from translation_tool.core.output_bundler import bundle_outputs_generator
 
         lang = tmp_path / "root" / "assets" / "demo" / "lang"
@@ -534,9 +536,7 @@ class TestOutputBundlerIntegration:
         (tmp_path / "assets" / "demo" / "pack.mcmeta").write_text("{}")
         (tmp_path / "pack_1.mcmeta").write_text("{}")
         (tmp_path / "data" / "demo" / "advancements").mkdir(parents=True)
-        (tmp_path / "data" / "demo" / "advancements" / "start.json").write_text(
-            "{}"
-        )
+        (tmp_path / "data" / "demo" / "advancements" / "start.json").write_text("{}")
         (tmp_path / "other_output" / "assets").mkdir(parents=True)
         (tmp_path / "other_output" / "assets" / "ignored.json").write_text("{}")
 

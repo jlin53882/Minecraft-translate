@@ -401,7 +401,9 @@ def process_content_or_copy_file_impl(
                 source_data,
                 lambda value: recursive_translate_dict_fn(value, rules),
             )
-            output_bytes = json_module.dumps(transformed, option=json_module.OPT_INDENT_2)
+            output_bytes = json_module.dumps(
+                transformed, option=json_module.OPT_INDENT_2
+            )
             target = safe_join(custom_output_root, pending_name, custom_resource_path)
         else:
             output_bytes = reader.read_bytes(input_path)

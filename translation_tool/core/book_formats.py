@@ -88,7 +88,9 @@ def _has_neutral_pages_shape(document: object) -> bool:
         return False
     return any(
         isinstance(page, Mapping)
-        and any(field in page for field in ("type", "summary", "elements", "literal_text"))
+        and any(
+            field in page for field in ("type", "summary", "elements", "literal_text")
+        )
         for page in pages
     )
 
@@ -126,9 +128,13 @@ def resolve_book_format(
     if any(part in BOOK_EXCLUDED_DIRS for part in content_dirs):
         return BookFormatResolution(FORMAT_UNKNOWN, False, "known_non_book_directory")
     if namespace == "oracle_index" or "oracle_index" in content_dirs:
-        return BookFormatResolution(FORMAT_ORACLE_INDEX, False, "oracle_index_is_mdx_docs")
+        return BookFormatResolution(
+            FORMAT_ORACLE_INDEX, False, "oracle_index_is_mdx_docs"
+        )
     if namespace == "modonomicon" or "modonomicon" in content_dirs:
-        return BookFormatResolution(FORMAT_MODONOMICON, False, "modonomicon_requires_own_schema")
+        return BookFormatResolution(
+            FORMAT_MODONOMICON, False, "modonomicon_requires_own_schema"
+        )
     if namespace == "eternal_starlight" or "eternal_starlight" in content_dirs:
         return BookFormatResolution(
             FORMAT_ETERNAL_STARLIGHT,
@@ -183,7 +189,9 @@ def neutral_pages_field_allowed(path: str) -> bool:
     field = _field_name(path)
     if field in _NEUTRAL_REQUIRED_FIELDS:
         return True
-    return field in _NEUTRAL_OPTIONAL_DISPLAY_FIELDS and _has_page_or_element_parent(path)
+    return field in _NEUTRAL_OPTIONAL_DISPLAY_FIELDS and _has_page_or_element_parent(
+        path
+    )
 
 
 def neutral_pages_value_kind(path: str, value: str) -> str:

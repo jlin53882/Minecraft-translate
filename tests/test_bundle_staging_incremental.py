@@ -156,7 +156,9 @@ class TestEquivalenceWithFullRebuild:
         assert (stats["copied"], stats["merged"]) == (0, 0)
         assert _snapshot(out) == {}
 
-    def test_excluded_outputs_are_reported_without_entering_resource_pack(self, tmp_path):
+    def test_excluded_outputs_are_reported_without_entering_resource_pack(
+        self, tmp_path
+    ):
         source = tmp_path / "source"
         _lang(source, "demo", {"item.demo": "Demo"})
         _put(

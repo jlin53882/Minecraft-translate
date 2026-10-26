@@ -170,12 +170,14 @@ def sniffed_groups(
                 (
                     k
                     for _n, m in samples
-                    if (k := _kind_of(
-                        zf,
-                        budget,
-                        _primary(m, translated),
-                        invalid_members=diagnostics,
-                    ))
+                    if (
+                        k := _kind_of(
+                            zf,
+                            budget,
+                            _primary(m, translated),
+                            invalid_members=diagnostics,
+                        )
+                    )
                 ),
                 None,
             )
