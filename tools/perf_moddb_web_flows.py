@@ -23,16 +23,19 @@ def _adv_open(ctx: Ctx) -> bool:
 
 
 def _scroll_find(
-    ctx: Ctx, text, *, region, wheel_at, mode="exact", role="button", tries=6
+    ctx: Ctx, text, *, region, wheel_at, mode="exact", role="button", tries=10
 ):
     """在可捲動欄位內找按鈕；座標不在視窗內就往下滾。"""
     vh = ctx.pg.viewport_size["height"]
-    for _ in range(tries):
+    for attempt in range(tries):
         for it in ctx.find_all(text, role, mode, region):
             if 90 < it[1] < vh - 20:
                 return it
         ctx.pg.mouse.move(*wheel_at)
-        ctx.pg.mouse.wheel(0, 300)
+        if attempt == 2:
+            ctx.pg.mouse.wheel(0, -3000)  # 可能已捲過頭：回到最上面再往下找
+        else:
+            ctx.pg.mouse.wheel(0, 300)
         ctx.pg.wait_for_timeout(250)
     raise ScenarioError(f"捲動後仍找不到 {text!r}")
 
@@ -72,8 +75,16 @@ def _open_edit_tab(ctx: Ctx) -> None:
     ctx.settle(500)
 
 
-def _dialog_button(ctx: Ctx, text, mode="exact"):
-    return ctx.find(text, "button", mode, [0, 0, 5000, 5000])
+def _dialog_button(ctx: Ctx, text, mode="exact", timeout=8.0):
+    """對話框內容多半在背景載入完才出現：輪詢到按鈕出現（或逾時）。"""
+    end = time.time() + timeout
+    while True:
+        items = ctx.find_all(text, "button", mode, [0, 0, 5000, 5000])
+        if items:
+            return items[0]
+        if time.time() > end:
+            raise ScenarioError(f"找不到對話框按鈕 {text!r}")
+        time.sleep(0.1)
 
 
 def _click_dialog_button(ctx: Ctx, text, mode="exact") -> None:
@@ -82,24 +93,23 @@ def _click_dialog_button(ctx: Ctx, text, mode="exact") -> None:
 
 
 def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
-    """關閉最上層對話框；點不到按鈕或沒關掉時改按 Escape，最多等 5 秒。"""
+    """關閉最上層對話框；點不到按鈕或沒關掉時改按 Escape，最多重試 3 次。"""
+    region = [240, 20, 1440, 1100]
     for _ in range(3):
-        clicked = False
+        target = None
         for label in labels:
-            if ctx.find_all(label, "button", "exact", [240, 20, 1440, 1100]):
-                x, y, *_ = ctx.find(label, "button", "exact", [240, 20, 1440, 1100])
-                ctx.click_at(x, y)
-                clicked = True
+            items = ctx.find_all(label, "button", "exact", region)
+            if items:
+                target = items[0]
                 break
-        ctx.pg.wait_for_timeout(500)
-        if not clicked:
-            ctx.pg.keyboard.press("Escape")
-            ctx.pg.wait_for_timeout(500)
-        if not any(
-            ctx.find_all(label, "button", "exact", [240, 20, 1440, 1100])
-            for label in labels
-        ):
+        if target is None:
             return
+        ctx.click_at(target[0], target[1])
+        ctx.pg.wait_for_timeout(500)
+        if not any(ctx.find_all(label, "button", "exact", region) for label in labels):
+            return
+        ctx.pg.keyboard.press("Escape")
+        ctx.pg.wait_for_timeout(500)
 
 
 def _dialog_textboxes(ctx: Ctx):
@@ -230,44 +240,73 @@ def s_edit_save(ctx: Ctx) -> None:
     ctx.op("revert_history", revert_action, hot=min(ctx.hot, 2))
 
 
+def _unreviewed_row(ctx: Ctx, i: int):
+    """清單目前可見的「AI 機翻、尚未審核」條目（沒有時往下捲動清單）。``i`` 只用來挑第幾個。"""
+    for _ in range(12):
+        rows = [
+            r
+            for r in _list_rows(ctx)
+            if "未翻譯" not in r[4] and "人工" not in r[4] and "簡中轉繁" not in r[4]
+        ]
+        if rows:
+            return rows[0]
+        ctx.pg.mouse.move(440, 700)
+        ctx.pg.mouse.wheel(0, 450)
+        ctx.pg.wait_for_timeout(350)
+    raise ScenarioError("找不到未審核的 AI 機翻條目")
+
+
+def _click_review_button(ctx: Ctx):
+    it = _scroll_find(
+        ctx,
+        "審核（確認目前譯文）",
+        region=EDITOR_REGION,
+        wheel_at=(840, 700),
+        mode="start",
+    )
+    ctx.click_at(it[0], it[1])
+
+
+def _open_review_dialog(ctx: Ctx, i: int) -> None:
+    """選一筆未審核條目、點「審核」並等確認視窗載入完成（不計時的準備步驟）。"""
+    row = _unreviewed_row(ctx, i)
+    ctx.click_at(row[0], row[1])
+    ctx.settle(600)
+    for attempt in range(3):
+        _click_review_button(ctx)
+        try:
+            _dialog_button(ctx, "確認審核", "start", timeout=5.0)
+            return
+        except ScenarioError:
+            if attempt == 2:
+                ctx.snap("review_dialog_missing")
+                raise
+    ctx.settle(300)
+
+
 def s_review(ctx: Ctx) -> None:
     _to_entries(ctx)
 
-    def before(i):
-        # 選一筆「AI 機翻」且未審核的條目；審核按鈕只在編輯框與生效譯文相同時出現
-        rows = [
-            r for r in _list_rows(ctx) if "未翻譯" not in r[4] and "人工" not in r[4]
-        ]
-        if not rows:
-            raise ScenarioError("找不到未審核條目")
-        row = rows[i % len(rows)]
-        ctx.click_at(row[0], row[1])
-        ctx.settle(500)
-
-    def action(i):
-        it = _scroll_find(
-            ctx,
-            "審核（確認目前譯文）",
-            region=EDITOR_REGION,
-            wheel_at=(840, 700),
-            mode="start",
-        )
-        ctx.click_at(it[0], it[1])
-
     ctx.op(
         "review_open_confirm",
-        action,
-        before=before,
+        lambda i: _click_review_button(ctx),
+        before=lambda i: _select_unreviewed(ctx, i),
         hot=min(ctx.hot, 3),
         after=lambda i: (ctx.settle(700), _close_dialog(ctx, ("取消",))),
     )
     ctx.op(
         "review_confirm",
         lambda i: _click_dialog_button(ctx, "確認審核", "start"),
-        before=lambda i: (before(i + 4), action(i), ctx.settle(700)),
-        hot=min(ctx.hot, 2),
+        before=lambda i: _open_review_dialog(ctx, i + 4),
+        hot=min(ctx.hot, 3),
     )
     ctx.settle(1000)
+
+
+def _select_unreviewed(ctx: Ctx, i: int) -> None:
+    row = _unreviewed_row(ctx, i)
+    ctx.click_at(row[0], row[1])
+    ctx.settle(600)
 
 
 def s_chars(ctx: Ctx) -> None:
@@ -322,8 +361,18 @@ def s_batch_replace(ctx: Ctx) -> None:
     _close_dialog(ctx)
     ctx.settle(800)
 
+    # 被取代的條目不一定是目前選取的那筆：搜尋取代後的文字，選第一筆才看得到整批還原按鈕
+    ctx.set_search("Nxt")
+    ctx.settle(1500)
+    _select_row(ctx, 0)
+
     def undo(i):
-        it = ctx.find("整批還原這次取代", region=HISTORY_REGION)
+        it = _scroll_find(
+            ctx,
+            "整批還原這次取代",
+            region=HISTORY_REGION,
+            wheel_at=(1290, 700),
+        )
         ctx.click_at(it[0], it[1])
 
     ctx.op("batch_replace_undo", undo, hot=0)
@@ -355,6 +404,7 @@ def s_bulk_review(ctx: Ctx) -> None:
 
 
 def s_cleanup(ctx: Ctx) -> None:
+    """清理：開啟 → 匯出檢查檔 → 預覽 → 套用刪除 → 還原（需要 ``--seed-cleanup``）。"""
     x, y, *_ = ctx.tab("總覽")
     ctx.click_at(x, y)
     ctx.settle(900)
@@ -376,6 +426,23 @@ def s_cleanup(ctx: Ctx) -> None:
     ctx.op("cleanup_preview", lambda i: _click_dialog_button(ctx, "預覽刪除"), hot=1)
     ctx.settle(600)
     ctx.snap("cleanup_preview")
+    if not ctx.find_all("確認刪除 0 筆", "button", "contain"):
+        ctx.op(
+            "cleanup_apply",
+            lambda i: _click_dialog_button(ctx, "確認刪除", "start"),
+            hot=0,
+        )
+        ctx.settle(1500)
+        ctx.snap("cleanup_applied")
+        ctx.op(
+            "cleanup_revert",
+            lambda i: _click_dialog_button(ctx, "還原選取的清理"),
+            hot=0,
+        )
+        ctx.settle(1500)
+        ctx.snap("cleanup_reverted")
+    else:
+        ctx.notes_add("cleanup 沒有可刪項目（請用 --seed-cleanup 建立）")
     _close_dialog(ctx, ("關閉",))
 
 
@@ -537,23 +604,7 @@ def s_review_clear(ctx: Ctx) -> None:
     _to_entries(ctx)
 
     def confirm_review(i):
-        rows = [
-            r for r in _list_rows(ctx) if "未翻譯" not in r[4] and "人工" not in r[4]
-        ]
-        if not rows:
-            raise ScenarioError("找不到未審核條目")
-        row = rows[i % len(rows)]
-        ctx.click_at(row[0], row[1])
-        ctx.settle(500)
-        it = _scroll_find(
-            ctx,
-            "審核（確認目前譯文）",
-            region=EDITOR_REGION,
-            wheel_at=(840, 700),
-            mode="start",
-        )
-        ctx.click_at(it[0], it[1])
-        ctx.settle(700)
+        _open_review_dialog(ctx, i)
         _click_dialog_button(ctx, "確認審核", "start")
         ctx.settle(900)
 

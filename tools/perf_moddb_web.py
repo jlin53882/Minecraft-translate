@@ -342,7 +342,13 @@ def summarize(samples: list[dict]) -> dict:
         return {}
     hot = samples[1:]
     result: dict = {"cold": samples[0]}
-    for field in ("server_ms", "first_patch_ms", "e2e_ms", "loop_block_ms"):
+    for field in (
+        "server_ms",
+        "first_patch_ms",
+        "list_patch_ms",
+        "e2e_ms",
+        "loop_block_ms",
+    ):
         values = [s[field] for s in hot if s.get(field) is not None]
         if values:
             result[f"hot_{field}_median"] = round(statistics.median(values), 1)
@@ -355,11 +361,11 @@ def summarize(samples: list[dict]) -> dict:
 SEMANTICS_JS = """
 () => {
   if (window.__perf) return;
-  const state = {last: 0, count: 0};
+  const state = {last: 0, count: 0, times: []};
   window.__perf = state;
   const host = document.querySelector('flt-semantics-host') || document.body;
   const obs = new MutationObserver((records) => {
-    state.last = performance.now(); state.count += records.length;
+    state.last = performance.now(); state.count += records.length; if (state.times.length < 400) state.times.push(state.last);
   });
   obs.observe(host, {subtree: true, childList: true, characterData: true, attributes: true});
 }
@@ -434,7 +440,7 @@ class Driver:
         """執行 ``action()``（會觸發一次前端操作），回傳 server/e2e 延遲。"""
         self.drain()
         self.page.evaluate(
-            "() => { if (window.__perf) { window.__perf.last = 0; window.__perf.t0 = 0; } }"
+            "() => { if (window.__perf) { window.__perf.last = 0; window.__perf.t0 = 0; window.__perf.times = []; } }"
         )
         t0 = time.perf_counter()
         action()
@@ -460,21 +466,34 @@ class Driver:
             ):
                 break
         recvs = [e for e in events if e["kind"] == "recv"]
+        # 與這次操作無關的前端事件（提示訊息自動消失、對話框自行關閉）不計入：
+        # 它們發生在操作之後數百毫秒到數秒，會把「最後一次 patch」拉長。
+        foreign = [e for e in recvs[1:] if e.get("name") == "dismiss"]
+        cut = min((e["t"] for e in foreign), default=None)
+        if cut is not None:
+            events = [e for e in events if e["t"] < cut]
+            recvs = [e for e in events if e["kind"] == "recv"]
         sends = [e for e in events if e["kind"] == "send"]
         server_ms = None
         first_ms = None
+        list_ms = None
         if recvs and sends:
             first_recv = recvs[0]["t"]
-            # 外殼每隔幾秒的 API Key 輪詢也會 patch；它與這次操作無關，不計入
+            # 外殼每隔幾秒的 API Key 輪詢、寫入後 250ms 合併的外殼狀態刷新（整頁 patch）與這次操作的內容更新無關，不計入
             patches = [
                 e
                 for e in events
                 if e["kind"] == "patch"
-                and not any("_poll_keys" in c for c in e["callers"])
+                and not any(
+                    "_poll_keys" in c or "_coalesced_refresh" in c for c in e["callers"]
+                )
             ]
             last_send = max([e["t"] for e in patches] or [s["t"] for s in sends])
             server_ms = round((last_send - first_recv) * 1000, 1)
             first_ms = round((min(s["t"] for s in sends) - first_recv) * 1000, 1)
+            list_patches = [e for e in patches if e["control"] == "ListView"]
+            if list_patches:
+                list_ms = round((list_patches[-1]["t"] - first_recv) * 1000, 1)
         db_calls = [e for e in events if e["kind"] == "db"]
         db_summary: dict[str, float] = {}
         for call in db_calls:
@@ -482,9 +501,18 @@ class Driver:
             db_summary[key] = round(db_summary.get(key, 0.0) + call["ms"], 1)
         db_top = dict(sorted(db_summary.items(), key=lambda kv: -kv[1])[:6])
         sem = self.page.evaluate(
-            "() => window.__perf ? [window.__perf.t0, window.__perf.last] : [0, 0]"
+            "() => window.__perf ? [window.__perf.t0, window.__perf.last, window.__perf.times || []] : [0, 0, []]"
         )
-        e2e_ms = round(sem[1] - sem[0], 1) if sem[0] and sem[1] >= sem[0] else None
+        last_mutation = sem[1]
+        if cut is not None and recvs and sem[0]:
+            limit = sem[0] + (cut - recvs[0]["t"]) * 1000
+            inside = [t for t in sem[2] if sem[0] <= t <= limit]
+            last_mutation = max(inside) if inside else sem[0]
+        e2e_ms = (
+            round(last_mutation - sem[0], 1)
+            if sem[0] and last_mutation >= sem[0]
+            else None
+        )
         stalls = [e for e in events if e["kind"] == "stall"]
         origin = recvs[0]["t"] if recvs else t0
         timeline = [
@@ -505,6 +533,7 @@ class Driver:
             "timeline": timeline,
             "server_ms": server_ms,
             "first_patch_ms": first_ms,
+            "list_patch_ms": list_ms,
             "db_ms": db_top,
             "e2e_ms": e2e_ms,
             "action_ms": round((t_action_done - t0) * 1000, 1),
@@ -547,6 +576,8 @@ def prepare_environment(args: argparse.Namespace, work: Path) -> dict:
                 shutil.copyfile(sidecar, Path(str(db_path) + suffix))
     else:
         db_path = Path(args.db)
+    if getattr(args, "seed_cleanup", 0):
+        seed_cleanup_entries(db_path, args.seed_cleanup)
     config = {"translation_db": {"enabled": True, "path": str(db_path)}}
     (data_dir / "config.json").write_text(
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -555,6 +586,23 @@ def prepare_environment(args: argparse.Namespace, work: Path) -> dict:
     env["MCT_DATA_DIR"] = str(data_dir)
     env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
     return env
+
+
+def seed_cleanup_entries(db_path: Path, count: int) -> None:
+    """在複本最舊的版本加入沒有譯文也沒有歷史、會被清理規則判定「不是文字」的條目。"""
+    from translation_tool.translation_db import TranslationDB
+    from translation_tool.translation_db.models import ScanItem
+
+    db = TranslationDB(db_path)
+    try:
+        version = db.versions()[0]
+        items = [
+            ScanItem("lang", "perf_cleanup", f"_comment.{n}", f"translator note {n}")
+            for n in range(count)
+        ]
+        db.ingest(version, items)
+    finally:
+        db.close()
 
 
 def free_port() -> int:
@@ -639,6 +687,12 @@ def main() -> None:
     runp.add_argument("--timeout-ms", type=int, default=20000)
     runp.add_argument("--stall-ms", type=float, default=40.0)
     runp.add_argument("--viewport", default="1440x1100")
+    runp.add_argument(
+        "--seed-cleanup",
+        type=int,
+        default=0,
+        help="複本加入 N 筆可被清理規則刪除的條目（清理套用／還原情境需要）",
+    )
     runp.add_argument(
         "--scan-source", help="含 jar 的資料夾；掃描情境會複製其中前 3 個 jar"
     )

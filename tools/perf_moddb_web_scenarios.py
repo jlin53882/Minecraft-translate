@@ -17,13 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 INIT_JS = """
 () => {
   if (window.__perf) return true;
-  const state = {last: 0, t0: 0, mut: 0, vis: 0, hash: 0};
+  const state = {last: 0, t0: 0, mut: 0, vis: 0, hash: 0, times: []};
   window.__perf = state;
   const mark = () => { state.t0 = performance.now(); };
   window.addEventListener('pointerup', mark, true);
   window.addEventListener('keydown', mark, true);
   const host = document.querySelector('flt-semantics-host') || document.body;
-  new MutationObserver((records) => { state.last = performance.now(); state.mut += records.length; })
+  new MutationObserver((records) => { state.last = performance.now(); state.mut += records.length; if (state.times.length < 400) state.times.push(state.last); })
     .observe(host, {subtree: true, childList: true, characterData: true, attributes: true});
   return true;
 }
@@ -100,6 +100,9 @@ class Ctx:
                 return True
             time.sleep(0.05)
         raise ScenarioError(f"{text!r} 沒有消失")
+
+    def notes_add(self, text):
+        print("  note:", text, flush=True)
 
     def snap(self, name):
         if self.shots:
@@ -262,16 +265,25 @@ def s_overview(ctx: Ctx) -> None:
 
 
 def _to_entries(ctx: Ctx) -> None:
-    """切到條目校對並等清單載入完成（至少 3 列）。"""
+    """切到條目校對並等清單載入完成（至少 3 列條目；頁碼按鈕與「沒有資料」不算）。"""
     x, y, *_ = ctx.tab("條目校對")
     ctx.click_at(x, y)
     vh = ctx.pg.viewport_size["height"]
-    end = time.time() + 30
+    end = time.time() + 60
     while time.time() < end:
-        rows = ctx.find_all(None, "button", region=[262, 410, 612, vh - 90])
-        if len(rows) >= 3:
+        rows = [
+            r
+            for r in ctx.find_all(None, "button", region=[262, 410, 612, vh - 150])
+            if r[3] > 30
+        ]
+        loading = ctx.find_all("背景更新條目資料中", None, "contain")
+        empty = ctx.find_all("沒有資料", None, "contain")
+        if len(rows) >= 3 and not loading and not empty:
             break
         time.sleep(0.2)
+    else:
+        ctx.snap("to_entries_timeout")
+        raise ScenarioError("條目清單沒有載入（<3 列或仍顯示沒有資料）")
     ctx.settle(800)
 
 
@@ -385,6 +397,39 @@ def s_search(ctx: Ctx) -> None:
     ctx.settle(900)
 
 
+def s_search_incremental(ctx: Ctx) -> None:
+    """像人一樣逐字輸入（字元間隔 ``gap_ms``）：量「最後一個字 → 清單更新」。
+
+    每個字之間的停頓若超過 debounce，就會每個字元各查一次；這裡驗證舊查詢被中斷、不堆積。
+    """
+    _to_entries(ctx)
+    words = ["scroll", "inventory", "gui", "alt", "ctrl", "button"]
+    gap_ms = 260  # 每個字都超過 debounce：最壞情況（每字元都查詢）
+
+    def before(i):
+        ctx.set_search("")
+        ctx.settle(900)
+        x, y, *_ = ctx.search_box()
+        ctx.click_at(x, y)
+
+    def action(i):
+        ctx.pg.keyboard.type(words[i % len(words)], delay=gap_ms)
+
+    ctx.op("search_typing_slow", action, before=before, hot=min(ctx.hot, 4))
+    samples = ctx.drv.results.get("search_typing_slow", [])
+    adjusted = []
+    for sample, word in zip(samples, words, strict=False):
+        base = dict(sample)
+        typed_ms = (len(word) - 1) * gap_ms
+        for field in ("server_ms", "list_patch_ms"):
+            if base.get(field) is not None:
+                base[field] = round(max(0.0, base[field] - typed_ms), 1)
+        adjusted.append(base)
+    ctx.drv.results["search_typing_slow_after_last_key"] = adjusted
+    ctx.set_search("")
+    ctx.settle(900)
+
+
 def s_search_enter(ctx: Ctx) -> None:
     _to_entries(ctx)
 
@@ -414,6 +459,7 @@ SCENARIOS = {
     "dropdowns": s_dropdown_filters,
     "search": s_search,
     "search_enter": s_search_enter,
+    "search_slow": s_search_incremental,
 }
 
 
@@ -507,6 +553,15 @@ def print_table(output: dict) -> None:
             f"{s.get('hot_e2e_ms_median', 0):9.0f} {s.get('hot_e2e_ms_p95', 0):7.0f} | "
             f"{s.get('hot_loop_block_ms_median', 0):6.0f} {cold.get('patch_kb') or 0:7.1f}"
         )
+    listed = {
+        n: s for n, s in output["summary"].items() if "hot_list_patch_ms_median" in s
+    }
+    if listed:
+        print("\n清單內容最後一次 patch（收到事件 → ListView，ms）：")
+        for name, s in listed.items():
+            print(
+                f"  {name:32} 熱 med {s['hot_list_patch_ms_median']:7.0f}  p95 {s['hot_list_patch_ms_p95']:7.0f}"
+            )
     for name, s in output["summary"].items():
         if s.get("db_last_hot"):
             calls = ", ".join(f"{k}={v:.0f}" for k, v in s["db_last_hot"].items())
