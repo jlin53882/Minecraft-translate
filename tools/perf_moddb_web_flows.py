@@ -93,23 +93,48 @@ def _click_dialog_button(ctx: Ctx, text, mode="exact") -> None:
 
 
 def _close_dialog(ctx: Ctx, labels=("取消", "關閉")) -> None:
-    """關閉最上層對話框；點不到按鈕或沒關掉時改按 Escape，最多重試 3 次。"""
+    """關閉最上層對話框。
+
+    語意樹在對話框開啟／關閉的瞬間會暫時是空的，或同時留著舊頁面的節點，所以不能只看頁面
+    外殼在不在：先等到看得到關閉按鈕再點，點完等「按鈕消失且外殼回來」，連續兩次確認才算關閉。
+    開啟後 2 秒內都沒出現按鈕、外殼也在，視為沒有對話框；8 秒內關不掉才改按 Escape。
+    """
     region = [240, 20, 1440, 1100]
-    for _ in range(3):
-        target = None
+    started = time.time()
+    escape_at = started + 8
+    stable = 0
+
+    def button():
         for label in labels:
             items = ctx.find_all(label, "button", "exact", region)
             if items:
-                target = items[0]
-                break
-        if target is None:
-            return
-        ctx.click_at(target[0], target[1])
-        ctx.pg.wait_for_timeout(500)
-        if not any(ctx.find_all(label, "button", "exact", region) for label in labels):
-            return
-        ctx.pg.keyboard.press("Escape")
-        ctx.pg.wait_for_timeout(500)
+                return items[0]
+        return None
+
+    def shell() -> bool:
+        return bool(ctx.find_all("Mod 資料庫", "button", "exact", [0, 0, 240, 1100]))
+
+    clicked = False
+    while time.time() < started + 14:
+        item = button()
+        if item is not None:
+            stable = 0
+            if time.time() - started > 0.4:
+                ctx.click_at(item[0], item[1])
+                clicked = True
+                ctx.pg.wait_for_timeout(500)
+        elif shell() and (clicked or time.time() - started > 2.0):
+            stable += 1
+            if stable >= 2:
+                ctx.pg.wait_for_timeout(200)
+                return
+        else:
+            stable = 0
+        if time.time() > escape_at:
+            ctx.pg.keyboard.press("Escape")
+            escape_at = time.time() + 2
+        time.sleep(0.15)
+    raise ScenarioError("對話框關不掉")
 
 
 def _dialog_textboxes(ctx: Ctx):
