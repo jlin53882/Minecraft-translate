@@ -737,7 +737,7 @@ def test_repair_batches_group_profiles_and_preview_reports_breakdown(
     assert snap["summary"]["batches"] == 6
     assert snap["summary"]["updated"] == 66
     logs = "\n".join(entry.text for entry in snap["logs"])
-    assert "找到 66 筆待處理來源項目" in logs
+    assert "找到 66 筆符合條件的來源項目" in logs
     assert "來源：AI 機翻" in logs
     assert "Lang 60 筆" in logs
     assert "Patchouli 6 筆" in logs

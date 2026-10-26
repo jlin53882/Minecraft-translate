@@ -189,7 +189,7 @@ def test_run_completes_unlocks_dialog_and_reports_stats(env, mode, expected_gene
     assert _button(dialog, "開啟輸出資料夾").visible is True
     texts = _texts(dialog)
     assert "3" in texts and "1" in texts and "0" in texts  # 成功／跳過／失敗
-    assert any("[完成] 成功 3 / 跳過 1 / 失敗 0" in t for t in texts)
+    assert any("[完成] 成功 3 個檔案 / 跳過 1 個檔案（內容相同）/ 失敗 0 個 JAR" in t for t in texts)
     assert "100%" in texts
     assert len(env.completed) == 1 and env.completed[0][0] is True
     assert env.out.exists()
@@ -329,7 +329,7 @@ def test_cancelled_run_is_not_reported_as_complete(env, monkeypatch):
     texts = _texts(dialog)
     assert not any("[完成]" in t for t in texts)
     assert "任務完成" not in texts and "100%" not in texts
-    assert any("[取消] 已處理部分：成功 2 / 跳過 0 / 失敗 0" in t for t in texts)
+    assert any("[取消] 已處理部分：成功 2 個檔案 / 跳過 0 個檔案（內容相同）/ 失敗 0 個 JAR" in t for t in texts)
     assert "已取消" in texts
     assert env.completed[0][0] is False
     assert dialog.modal is False

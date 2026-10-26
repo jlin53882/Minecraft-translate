@@ -35,6 +35,8 @@ ROLLING_SHARD_SIZE = 2500
 ACTIVE_SHARD_FILE = ".active"
 # 初始化失敗後的重試冷卻秒數；避免持續故障時每次讀寫都重跑完整載入並洗版 log。
 _INIT_RETRY_COOLDOWN_SECONDS = 30.0
+# 本次執行最近一次成功寫入分片的時間（本機 HH:MM:SS）；快取頁「最近儲存」顯示用
+_last_save_at: str | None = None
 _SEARCH_INDEX_CHECK_INTERVAL_SECONDS = 1.0
 _monotonic = time.monotonic
 _CACHE_DIR_NAME = "快取資料"
@@ -275,10 +277,11 @@ def reload_translation_cache_type(cache_type: str):
 def _save_entries_to_active_shards(
     cache_type: str, entries: dict, force_new_shard: bool = False
 ):
-    """儲存項目到作用中分片，容量滿時自動輪轉"""
+    """儲存項目到作用中分片，容量滿時自動輪轉；成功後記下時間（快取頁「最近儲存」）。"""
+    global _last_save_at
     state = _state()
     type_dir = state.cache_file_path[cache_type].parent
-    return cache_shards._save_entries_to_active_shards(
+    result = cache_shards._save_entries_to_active_shards(
         type_dir=type_dir,
         cache_type=cache_type,
         entries=entries,
@@ -287,6 +290,8 @@ def _save_entries_to_active_shards(
         force_new_shard=force_new_shard,
         logger=log,
     )
+    _last_save_at = time.strftime("%H:%M:%S")
+    return result
 
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
@@ -621,6 +626,7 @@ def get_cache_overview() -> dict[str, Any]:
         )
         # 初始化失敗（冷卻中）時記憶體是空的：筆數 0 不代表沒有快取
         overview["initialized"] = bool(state.initialized)
+        overview["last_save_at"] = _last_save_at
         return overview
 
 

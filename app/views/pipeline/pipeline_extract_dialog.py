@@ -30,6 +30,10 @@ from app.ui.dialogs import (
     set_dialog_feedback,
 )
 from app.ui.safe_file_picker import ensure_output_dir
+from app.views.extractor.extract_summary import (
+    preview_file_count,
+    preview_summary_lines,
+)
 from app.views.extractor.extractor_state import PreviewState
 from app.views.pipeline.pipeline_forms import (
     ExtractFormState,
@@ -326,30 +330,24 @@ def _extract_preview_worker(
 
 
 def _extract_preview_result_content(
-    result: dict, mode: str, jar_count: int, width: int
+    result: dict, mode: str, width: int
 ) -> ft.Container:
-    """預覽完成後的結果內容（只列出有可提取檔案的 JAR）。"""
-    total_files = result.get("total_files", 0)
-    preview_results = result.get("preview_results", [])
-    total_size_mb = result.get("total_size_mb", 0)
+    """預覽完成後的結果內容（只列出有可提取檔案的 JAR）；摘要與提取頁的預覽共用。"""
+    preview_results = [
+        pr
+        for pr in result.get("preview_results", [])
+        if preview_file_count(pr, mode) > 0
+    ]
+    summary = [
+        ft.Text(
+            line,
+            size=13 if i < 2 else 12,
+            color=C.RED if "失敗：" in line else (None if i < 2 else C.MUTED),
+        )
+        for i, line in enumerate(preview_summary_lines(result, mode))
+    ]
 
     list_items = []
-
-    def _count(pr):
-        if mode == "dual":
-            return (pr.get("lang_count", 0) or 0) + (pr.get("book_count", 0) or 0)
-        return pr.get("count", 0) or 0
-
-    empty_count = sum(1 for pr in preview_results if _count(pr) == 0)
-    preview_results = [pr for pr in preview_results if _count(pr) > 0]
-    if empty_count:
-        list_items.append(
-            ft.Text(
-                f"  另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出",
-                size=12,
-                color=C.MUTED,
-            )
-        )
     for pr in preview_results:
         jar_name = pr.get("jar", "unknown")
         if mode == "dual":
@@ -369,8 +367,7 @@ def _extract_preview_result_content(
         width=width,
         content=ft.Column(
             [
-                ft.Text(f"JAR 數量：{jar_count} 個"),
-                ft.Text(f"預計提取：{total_files} 個檔案（約 {total_size_mb:.1f} MB）"),
+                *summary,
                 ft.Divider(),
                 ft.Text("詳細清單：", weight="bold"),
                 ft.ListView(
@@ -401,7 +398,7 @@ def _extract_preview_apply_final(
         )
     else:
         preview_dialog.content = _extract_preview_result_content(
-            preview_state.result or {}, mode, preview_state.total, width
+            preview_state.result or {}, mode, width
         )
     preview_dialog.actions = [
         ft.TextButton(

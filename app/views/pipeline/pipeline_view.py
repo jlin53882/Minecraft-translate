@@ -320,7 +320,9 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         steps = self.actions.one_click_steps(
             config, cfg, mode, lang_codes, merge_options
         )
-        self.runner.start_sequence(steps, self._end_run)
+        self.runner.start_sequence(
+            steps, self._end_run, dry_run=bool(config.get("dry_run", False))
+        )
         return True
 
     def _prepare_one_click(self, config: dict):

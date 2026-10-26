@@ -5,8 +5,8 @@
 ## 職責
 
 - 彙整四張統計卡（快取條目、替換規則、可用 API Key、本次任務）、翻譯流程五步的狀態、快取分佈、最近活動、API Key 與模型配額狀態，以及 Mod 資料庫摘要。
-- 資料來源：`cache_get_overview_service`（`app/services_impl/cache/cache_services.py`）、`get_replace_rules_count` 與共用 `ReplaceRulesStore`（`app/services_impl/config_service.py`／`translation_tool/utils/text_processor.py`）、`get_key_health_snapshot`／`get_model_quota_snapshot`（`app/services_impl/key_health_service.py`）、`summarize_database`（`app/services_impl/moddb_service.py`），以及 `TaskManager` 的 `active()`／`recent()`（`app/shell/task_manager.py`）。
-- 頁面本身不啟動翻譯或提取任務，只做重新載入與導覽；導覽函式由外殼透過 `set_shell` 注入。
+- 資料來源：`cache_get_overview_service`（`app/services_impl/cache/cache_services.py`）、`get_replace_rules_count` 與共用 `ReplaceRulesStore`（`app/services_impl/config_service.py`／`translation_tool/utils/text_processor.py`）、`get_key_health_snapshot`／`get_model_quota_snapshot`（`app/services_impl/key_health_service.py`）、`summarize_database`（`app/services_impl/moddb_service.py`），以及 `TaskManager` 的 `active()`／`history()`／`finished_counts()`（`app/shell/task_manager.py`）。
+- 頁面本身不啟動翻譯或提取任務，只做重新載入與導覽；導覽函式與任務清單（`open_task_list`）由外殼透過 `set_shell` 注入。
 
 ## 主要流程
 
@@ -55,7 +55,11 @@ flowchart TD
   K2["點擊活動列（有 view_key）"] --> N
   K3["「前往一鍵流水線」／「前往設定」／「開啟」（Mod 資料庫）"] --> N
   N --> S["shell.navigate(view_key)"]
+  K4["點擊「本次任務」卡"] --> L["_open_task_list → shell.open_task_list"]
+  L --> M["TaskListDialog：本次執行的全部任務，可依狀態篩選，點一列回到該頁"]
 ```
+
+任務清單（`app/shell/task_list_dialog.py`）由外殼持有，頂列任務膠囊（同時有多個任務時）與通知選單的「查看本次全部任務」也開同一個視窗；清單內容由 `build_task_rows` 整理，筆數由 `status_counts` 計算。
 
 ## 背景任務與 UI 更新
 
@@ -73,10 +77,10 @@ flowchart TD
 
 - 頁面狀態：`_cache_overview`、`_rules_count`、`_moddb`（`None` 表示尚未讀取或尚未建立資料庫）、`data`（最近一次的 `DashboardData`）、`_active_task_ids`、`_loading`、`_reload_dirty`。
 - 本頁只讀取，不寫入任何設定或檔案。規則數的卡片標示來源為 `replace_rules.json`，實際數字由共用 Store 的 `get_replace_rules_count()` 取得；初始化或手動工作台重新整理會使用既有快取，規則檔版本變更時才重新讀取。
-- 翻譯流程步驟（`PIPELINE_STEPS`）：提取（extractor）、語系合併（merge）、機器翻譯（lm）、QC 檢驗（qc）、打包輸出（bundler）。`build_step_statuses` 只依 active 任務的 `view_key` 把步驟設為「進行中」（附進度百分比），其餘為「待執行」。
-- 注意：`build_step_statuses` 目前不會產生 `STEP_DONE` 或 `STEP_FAILED`，因此步驟卡的「完成」樣式與「本次完成 N / 5」徽章在現行程式碼中不會出現非零值，完成與失敗只在「最近活動」區呈現。
-- 任務計數：`tasks_running` 為 active 任務數；`tasks_done`（只算 `STATUS_DONE`）、`tasks_failed`（`STATUS_ERROR`）、`tasks_cancelled`（`STATUS_CANCELLED` 與 `STATUS_ABORTED`）由 `recent(20)` 分類，三者互斥，取消或中止的任務不會被算成完成。`TaskManager` 以 `OperationRegistry` 的 `terminal_reason`（無 owner 的舊 session 則用 summary 的 `CANCELLED`／`ABORTED` 與取消旗標）決定終態；最近活動以 `task_status_style` 顯示「完成／失敗／已取消／已中止」。
-- 活動區最多 6 筆（`activity_limit=6`），由 active 與 recent 合併後依 `started_at` 由新到舊排序。
+- 翻譯流程步驟（`PIPELINE_STEPS`）：提取（extractor）、語系合併（merge）、機器翻譯（lm）、QC 檢驗（qc）、打包輸出（bundler）。`build_step_statuses` 依 active 任務的 `view_key` 把步驟設為「進行中」（附進度百分比），其餘為「待執行」（單步驟結束後可以再跑一次）；`runs_done` 是本次執行中該步驟完成（`STATUS_DONE`）的次數，步驟卡顯示「本次完成 N 次」，「本次完成 x / 5」徽章是 `DashboardData.steps_done`（完成過至少一次的步驟數）。提取、QC、打包的背景工作以 `launch_page_operation(view_key=...)` 帶頁面代碼，才對得上步驟；提取預覽不帶，不算完成。
+- 任務計數：`tasks_running` 為 active 任務數；`tasks_done`（只算 `STATUS_DONE`）、`tasks_failed`（`STATUS_ERROR`）、`tasks_cancelled`（`STATUS_CANCELLED` 與 `STATUS_ABORTED`）取自 `TaskManager.finished_counts()`，涵蓋本次執行的全部已結束任務（`history()` 最多保留 `HISTORY_LIMIT` 筆，更早的只留在計數裡），三者互斥，取消或中止的任務不會被算成完成。說明文字由 `DashboardData.tasks_breakdown` 產生。`TaskManager` 以 `OperationRegistry` 的 `terminal_reason`（無 owner 的舊 session 則用 summary 的 `CANCELLED`／`ABORTED` 與取消旗標）決定終態；最近活動以 `task_status_style` 顯示「完成／失敗／已取消／已中止」。
+- 活動區最多 6 筆（`activity_limit=6`），由 active 與本次執行的已結束任務合併後依 `started_at` 由新到舊排序。
+- 「快取條目」卡由 `cache_stat` 決定：概覽尚未讀到顯示「讀取中…」；快取初始化失敗（概覽的 `initialized` 為 False）顯示「—」與「快取未載入，詳見後台記錄」，不把空的記憶體當成 0 筆。
 - Key 狀態以 `summarize_keys`（`app/shell/topbar.py`）整理成「可用／總數」與冷卻數；模型配額列出今日額度用盡的模型，重置時間由 `format_quota_reset` 顯示。
 
 ## 錯誤處理

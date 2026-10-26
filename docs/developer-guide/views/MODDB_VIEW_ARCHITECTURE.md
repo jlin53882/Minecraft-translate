@@ -32,7 +32,12 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
 
 模組分工：`entry_row_tile.py`（固定列數的 `EntryTilePool`）、`entry_selection.py`（選取與詳情載入）、
 `entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`entry_save_result.py`（`apply_save_result`：背景儲存結果的畫面套用，來源優先序資訊由 worker 算好）、`background_read.py`（`run_read`：
-審核範圍預覽這類背景唯讀工作）、`review_scope_dialog.py`（`compute_impact`、審核確認與解除審核）。
+審核範圍預覽這類背景唯讀工作）、`review_scope_dialog.py`（`compute_impact`、審核確認與解除審核）、
+`operation_summaries.py`（清理、批次取代、批量／單筆審核的預覽與結果文字，以及機翻頁各模式的卡片標題
+`translation_kpi_titles`；同一個操作的預覽與結果共用欄位與用語）。
+
+掃描頁的 `ScanPanel._apply_summary` 在預覽與實際掃描填同一組卡片，預覽時在卡片說明標示「預覽（未寫入）」（卡片保留說明列，高度一致）；
+機翻頁的 `TranslatePanel._apply_translation_summary` 同樣處理，第四張卡在兩種情況都是整個範圍仍未翻譯的筆數。
 
 更新範圍的補充規則：
 

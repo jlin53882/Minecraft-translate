@@ -55,6 +55,10 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
+from translation_tool.translation_db.scan_ingest import (
+    PreviewIngestTarget,
+    preview_ingest_many,
+)
 from translation_tool.translation_db.scan_pool import replay_logs, scan_executor
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
@@ -135,7 +139,7 @@ class ScanReport:
     jars_failed: list[str] = field(default_factory=list)
     nested_jars: int = 0
     skipped_nested: int = 0
-    items_found: int = 0  # 讀到的項目數（預覽時用）
+    items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
     stats: IngestStats = field(default_factory=IngestStats)
     cancelled: bool = False
     dry_run: bool = False
@@ -916,13 +920,22 @@ def _progress(
     return {"progress": done / len(jars), "log": log, "level": level}
 
 
-def _ingest_log(result: JarResult, stats: IngestStats) -> str:
+def ingest_counts_text(stats: IngestStats, *, always_changed: bool = False) -> str:
+    """「新增 N　補入 N　略過 N　補上原文 N　原文已變動 N」：預覽與實際掃描共用同一組欄位與用語。"""
     return (
-        f"{result.name}　新增 {stats.new_entries}"
-        f"　補入 {stats.added_translations}　略過 {stats.existing}"
-        + (f"　補上原文 {stats.adopted}" if stats.adopted else "")
-        + (f"　原文已變動 {stats.en_changed}" if stats.en_changed else "")
+        f"新增 {stats.new_entries:,}"
+        f"　補入 {stats.added_translations:,}　略過 {stats.existing:,}"
+        + (f"　補上原文 {stats.adopted:,}" if stats.adopted else "")
+        + (
+            f"　原文已變動 {stats.en_changed:,}"
+            if stats.en_changed or always_changed
+            else ""
+        )
     )
+
+
+def _ingest_log(result: JarResult, stats: IngestStats) -> str:
+    return f"{result.name}　{ingest_counts_text(stats)}"
 
 
 class _IngestBuffer:
@@ -1008,6 +1021,16 @@ def scan_folder_generator(
 
     done = 0
     buffer = _IngestBuffer(db, options.version, convert)
+    # 預覽用與實際寫入相同的分類規則，只是不寫入（見 scan_ingest）
+    preview = (
+        (
+            db.scan_preview_target(options.version)
+            if db is not None
+            else PreviewIngestTarget(None, options.version)
+        )
+        if options.dry_run or db is None
+        else None
+    )
 
     with (
         scan_executor(
@@ -1053,24 +1076,29 @@ def scan_folder_generator(
             else:
                 report.jars_with_lang += 1
                 report.items_found += len(result.items)
-                if options.dry_run or db is None:
-                    log = f"{result.name}　可匯入 {len(result.items)} 項"
-                    yield _progress(done, jars, result, log)
+                if preview is not None:
+                    stats = preview_ingest_many(preview, [result.items], convert)[0]
+                    report.stats.add(stats)
+                    yield _progress(
+                        done, jars, result, f"🔎 {_ingest_log(result, stats)}（預覽）"
+                    )
                 elif buffer.add(done, result):
                     yield from _flush(buffer, report, jars)
         # 取消或結束時，已讀取的 jar 也要寫入
         yield from _flush(buffer, report, jars)
 
-    state = "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
-    if options.dry_run or db is None:
-        unit = "個檔案" if options.translated else "個 jar"
-        summary = f"🔎 預覽{state}：{report.jars_with_lang} {unit}含語言檔，共 {report.items_found} 項（未寫入）"
+    unit = "個檔案" if options.translated else "個 jar"
+    found = f"{report.jars_with_lang:,} {unit} 含語言檔，共 {report.items_found:,} 項"
+    counts = ingest_counts_text(report.stats, always_changed=True)
+    if preview is not None:
+        state = "已取消（只統計已讀取的檔案）" if report.cancelled else "完成"
+        summary = f"🔎 預覽{state}：{found}；{counts}（未寫入）"
     else:
-        db.record_scan(options.version, str(folder), report.as_dict())
-        summary = (
-            f"🎉 掃描{state}：新增 {report.stats.new_entries}　補入 {report.stats.added_translations}"
-            f"　略過 {report.stats.existing}　原文已變動 {report.stats.en_changed}"
+        state = (
+            "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
         )
+        db.record_scan(options.version, str(folder), report.as_dict())
+        summary = f"🎉 掃描{state}：{found}；{counts}"
     if report.jars_failed:
         summary += (
             f"　⚠️ 失敗 {len(report.jars_failed)} 個（{'、'.join(report.jars_failed[:5])}"

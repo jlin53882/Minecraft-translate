@@ -51,9 +51,11 @@ flowchart TD
   J -- 否 --> M["關閉：取消掃描（cancelled 旗標）"]
 ```
 
+預覽結果的摘要由 `extract_summary.py` 的 `preview_summary_lines` 產生（一鍵流水線的提取預覽共用）：預計提取的檔案數（雙模式分列 Lang／Book）與大小、掃描的 JAR 分類（有可提取檔案、沒有、讀取失敗）、讀取失敗的 JAR 與原因，並提醒實際提取時內容與輸出相同的檔案會跳過。實際提取的結果用同樣的單位：「成功 N 個檔案 / 跳過 N 個檔案（內容相同）/ 失敗 N 個 JAR」。
+
 ## 背景任務與 UI 更新
 
-- 提取：按下對話框的「開始提取」後，`launch_page_operation`（名稱「JAR 提取」，owner `extractor`）登記並執行 `in_new_task("extractor", run_extraction)`。
+- 提取：按下對話框的「開始提取」後，`launch_page_operation`（名稱「JAR 提取」，owner `extractor`，`view_key="extractor"`，工作台的流程步驟與任務清單才認得出它）登記並執行 `in_new_task("extractor", run_extraction)`。
 - 此流程不直接建立 `TaskSession`。進度、日誌與統計由對話框的 `add_log`、`update_progress`、`update_stats` 更新。背景執行緒送出的更新先進入 `UiBatcher`（`app/ui/ui_batcher.py`，節流間隔 0.2 秒），再以 `page.run_task` 在 event loop 執行 `_extractor_apply_batch`。
 - 按鈕與 modal 狀態（隱藏開始、顯示取消、`dialog.modal=True`）在 UI 執行緒切換；背景執行緒的 `finally` 只設定 `state["running"]=False` 並排入 `on_done`。
 - 取消：對話框的取消按鈕與 operation 的 `on_cancel` 都會設定 `extraction_cancel_flag[0]=True` 與 `state["cancelled"]=True`。generator 在下一個 JAR 檢查點停止，`run_extraction_loop` 依 `cancelled_flag` 結束。

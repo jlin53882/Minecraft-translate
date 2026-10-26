@@ -417,7 +417,9 @@ def test_show_merge_summary_folder_mode_uses_folder_label_and_assets(monkeypatch
     assert "成功處理 資料夾：1 個" in texts
     assert "失敗 資料夾：0 個" in texts
     assert not any("ZIP" in t for t in texts)
-    assert "├─ assets：31 個" in texts
+    assert "├─ 資源包結構（lang_output/assets）：31 個" in texts
+    # 舊版摘要的「待翻譯」鍵仍會顯示成待翻譯資料夾
+    assert any(t.startswith("├─ 「") and "未過濾" in t and "31 個" in t for t in texts)
 
 
 def test_show_merge_summary_zip_mode_keeps_zip_label(monkeypatch):
@@ -483,3 +485,44 @@ def test_start_merge_logs_the_values_the_backend_actually_received(monkeypatch, 
     assert any(
         "[合併] 開始按鈕" in m and "folder=''" in m and "C:/out" in m for m in messages
     )
+
+
+def test_summary_title_and_errored_files_reflect_failures(monkeypatch):
+    texts = _show_summary_texts(
+        monkeypatch,
+        {
+            "success_zips": 2,
+            "failed_zips": 0,
+            "errored_files": 4,
+            "failed_zips_list": [],
+            "output_counts": {"errordata_output": 4},
+        },
+    )
+    assert "合併完成（有失敗項目）" in texts
+    assert "處理時發生錯誤的檔案：4 個（已放到 errordata_output）" in texts
+
+
+def test_error_status_still_shows_the_failure_summary(monkeypatch):
+    class _FailedSession(_Session):
+        def snapshot(self):
+            return {
+                "status": "ERROR",
+                "progress": 1.0,
+                "logs": self.logs,
+                "summary": {
+                    "success_zips": 0,
+                    "failed_zips": 2,
+                    "failed_zips_list": [{"name": "a.zip", "error": "boom"}],
+                },
+            }
+
+    monkeypatch.setattr(merge_view, "TaskSession", _FailedSession)
+    monkeypatch.setattr(merge_widgets, "TaskSession", _FailedSession)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
+    view = merge_view.MergeView(mock_page(), mock_filepicker())
+    shown = []
+    monkeypatch.setattr(view, "_show_merge_summary", lambda s: shown.append(s))
+    view._sync_ui_once()
+    assert shown and shown[0]["failed_zips"] == 2
+    assert view.status_chip.label.value == "任務發生錯誤"

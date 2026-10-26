@@ -2022,7 +2022,7 @@ def test_batch_replace_requires_second_confirmation_of_same_plan(db_path):
     approved_plan = dialog.plan
     assert approved_plan is not None
     dialog._open_final_confirmation()
-    assert dialog.final_summary.value.find("實際寫入 1") >= 0
+    assert dialog.final_summary.value.find("可替換 1 筆") >= 0
     assert len(page.overlay) == 1
     dialog.final_ack.value = True
     dialog.plan = None  # Any changed preview invalidates the final confirmation.

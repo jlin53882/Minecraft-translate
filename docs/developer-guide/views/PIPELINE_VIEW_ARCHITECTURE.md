@@ -43,7 +43,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 
 ### PipelineProgressPanel
 四步驟狀態列（抽取資源→語系比對→啟動翻譯→打包資源，以 ARROW_FORWARD 相連）+ `current_label` + `LogView`（`mode="append"`、`max_lines=500`、`height=120`）。
-- `start()` / `set_step_running(step_num, name)` / `add_log(msg, level, is_success)` / `finish_step(step_num, success, cancelled)` / `finish_all(success, cancelled)` / `set_running(running)` / `hide()` / `clear_logs()`
+- `start()` / `set_step_running(step_num, name)` / `add_log(msg, level, is_success)` / `finish_step(step_num, success, cancelled)` / `finish_all(success, cancelled, dry_run)` / `set_running(running)` / `hide()` / `clear_logs()`
 - `cancel_button`（「取消」）：執行中顯示，按下呼叫 `PipelineView._on_cancel`
 - 這些方法都會修改 control，只能在 event loop 上呼叫
 - 日誌使用 `LogView` widget；外層為 `kit.section_card("執行進度")`（`container`，預設隱藏，`start()` 後顯示）
@@ -118,7 +118,9 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
    - 否則 `PipelineActions.bundle(input_root_dir=bundle_staging_dir, ...)`；bundle generator 回傳 `error` → session.set_error()。
    - 打包前必須先在暫存目錄中合併各來源：打包 generator 遇到多個來源的同路徑檔案會改名（`_1`）而不合併，因此既有譯文與新譯文須先疊成一份。
 
-全部成功 → `finish_all(True)`；失敗或取消 → `finish_all(False, cancelled=...)`，並恢復按鈕。
+全部成功 → `finish_all(True)`；失敗或取消 → `finish_all(False, cancelled=...)`，並恢復按鈕。翻譯步驟開了 Dry Run 時（`start_sequence(..., dry_run=True)`），完成文字與面板標籤為「✅ 一鍵製作完成（翻譯為 Dry Run，未翻譯）」。
+
+JAR 提取的預覽摘要（一鍵流水線的提取預覽與提取頁的預覽視窗共用）由 `app/views/extractor/extract_summary.py` 的 `preview_summary_lines` 產生：預計提取的檔案數（雙模式分列 Lang／Book）與大小、掃描的 JAR 分類（有可提取檔案、沒有、讀取失敗）、讀取失敗的 JAR 與原因，並提醒實際提取時內容相同的檔案會跳過。
 
 ## 取消（cancellation）
 

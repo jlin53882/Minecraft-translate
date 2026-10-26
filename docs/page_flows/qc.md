@@ -53,7 +53,7 @@ flowchart TD
 
 ## 背景任務與 UI 更新
 
-- `QCBase.task_worker` 以 `launch_page_operation(..., owner="qc")` 啟動，並設定 `CancellationPolicy.NON_CANCELLABLE` 與 `ShutdownPolicy.DRAIN_ONLY`，因此 QC 任務不提供取消，關閉時只等待完成（`app/tasks/operation_registry.py`）。
+- `QCBase.task_worker` 以 `launch_page_operation(..., owner="qc", view_key="qc")` 啟動（頁面代碼讓工作台的流程步驟與任務清單認得出它），並設定 `CancellationPolicy.NON_CANCELLABLE` 與 `ShutdownPolicy.DRAIN_ONLY`，因此 QC 任務不提供取消，關閉時只等待完成（`app/tasks/operation_registry.py`）。
 - 背景執行緒以 `in_new_task("qc", run)` 包裝（`translation_tool/utils/ui_mirror.py`），確保後台日誌歸屬於 QC 任務。
 - 工作函式迭代 service generator：
   - 每筆 `update` 的 `log` 欄位依換行切成多行，等級由 `_guess_level` 依文字推測（含「錯誤」「失敗」「ERROR」「❌」為 error，含「警告」「WARN」「⚠」為 warning）。

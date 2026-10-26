@@ -28,6 +28,7 @@ from app.views.moddb import entry_writes
 from app.views.moddb.background_read import run_read
 from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import impact_text, shorten
+from app.views.moddb.operation_summaries import manual_review_result_text
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 
@@ -520,7 +521,16 @@ class ReviewScopeController:
                 [
                     kit.stat_card("本次審核條目", "1 筆", tone="dia", expand=True),
                     kit.stat_card(
-                        "審核版本", str(len(included)), tone="em", expand=True
+                        "審核版本",
+                        str(len(included)),
+                        tone="em",
+                        delta=(
+                            f"本版本＋同步 {len(included) - 1} 個"
+                            if len(included) > 1
+                            else "只有本版本"
+                        ),
+                        delta_tone="neutral",
+                        expand=True,
                     ),
                     kit.stat_card(
                         "略過版本", str(len(skipped)), tone="gold", expand=True
@@ -758,15 +768,10 @@ class ReviewScopeController:
                     return
                 raise error
             panel._page.pop_dialog()
-            others = [change.mc_version for change in done if not change.is_self]
+            message = manual_review_result_text(done, preview)
             log_info(
-                f"Mod 資料庫人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
-                f"（同步 {len(others)} 個版本：{'、'.join(others) or '無'}）"
-            )
-            message = (
-                f"已審核，並同步 {len(others)} 個版本：{'、'.join(others)}"
-                if others
-                else "已標記為人工已審核（來源不變）"
+                f"Mod 資料庫人工審核：{entry.mc_version} {entry.mod_id} {entry.key}；"
+                f"{message}"
             )
             entry_writes.after_data_change(panel, message)
             show_snack(panel._page, message, C.EM, text_color=C.ON_EM)

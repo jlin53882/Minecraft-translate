@@ -28,6 +28,7 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, shorten
+from app.views.moddb.operation_summaries import bulk_review_result_text
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
@@ -631,16 +632,10 @@ class BulkReviewDialog:
                 self.apply_btn.disabled = True
             self._safe_update()
             return
+        message = bulk_review_result_text(plan, self.excluded, result)
         self.result = result
         self.plan = None
         self.excluded = set()
-        message = f"已審核 {format_count(result.reviewed)} 筆"
-        if result.synced:
-            message += f"，並同步其他版本 {format_count(result.synced)} 筆"
-        if result.stale_skipped:
-            message += (
-                f"（{format_count(result.stale_skipped)} 筆已被其他操作改動而略過）"
-            )
         log_info(
             f"Mod 資料庫批量審核：{plan.version} 模組 {plan.mod_id or '全部'} "
             f"來源 {source_text}；{message}"

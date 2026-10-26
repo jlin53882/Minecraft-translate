@@ -79,7 +79,7 @@ class _Panel:
     def finish_step(self, num, ok, cancelled=False):
         self.steps.append(("finished", num, ok, cancelled))
 
-    def finish_all(self, success, cancelled=False):
+    def finish_all(self, success, cancelled=False, dry_run=False):
         self.finished_all = (success, cancelled)
 
 

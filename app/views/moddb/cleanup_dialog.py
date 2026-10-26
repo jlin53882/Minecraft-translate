@@ -32,6 +32,10 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label
+from app.views.moddb.operation_summaries import (
+    cleanup_category_lines,
+    cleanup_plan_lines,
+)
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 
@@ -39,14 +43,6 @@ def _source_line(sources: dict[str, int]) -> str:
     """依生效譯文來源分組的筆數，例如「譯文來源：人工 3、釘宮翻譯組 5」。"""
     parts = [f"{name} {format_count(n)}" for name, n in sources.items()]
     return "譯文來源：" + "、".join(parts) if parts else ""
-
-
-def _category_lines(counts: dict[str, int]) -> str:
-    return "\n".join(
-        f"　{svc.CLEANUP_CATEGORIES.get(cid, cid)}：{format_count(n)} 筆"
-        for cid, n in counts.items()
-        if n
-    )
 
 
 class CleanupDialog:
@@ -392,7 +388,7 @@ class CleanupDialog:
         total = report.exported_total
         lines = [f"版本 {report.version}：匯出 {format_count(total)} 筆"]
         if total:
-            lines.append(_category_lines(report.counts))
+            lines.append(cleanup_category_lines(report.counts))
         if report.sources:
             lines.append(_source_line(report.sources))
         if report.review_required:
@@ -472,23 +468,7 @@ class CleanupDialog:
             self._safe_update()
             return
         self._plan = (path, plan, self.get_db())
-        lines = [
-            (
-                f"檢查檔標記要刪除 {format_count(plan.requested)} 筆；"
-                f"現在實際可刪 {format_count(plan.deletable)} 筆"
-            )
-        ]
-        if plan.deletable:
-            lines.append(_category_lines(dict(plan.by_category)))
-        if plan.with_translation:
-            lines.append(
-                f"其中 {format_count(plan.with_translation)} 筆已有譯文或歷史："
-                "刪除會連同所有來源的譯文與歷史一起移除，可按「還原上次清理」復原"
-            )
-        lines.extend(
-            f"略過 {format_count(n)} 筆：{reason}" for reason, n in plan.skipped.items()
-        )
-        self.plan_summary.value = "\n".join(lines)
+        self.plan_summary.value = "\n".join(cleanup_plan_lines(plan, applied=False))
         self.plan_summary.visible = True
         self.apply_btn.disabled = plan.deletable == 0
         self.apply_btn.content = f"確認刪除 {format_count(plan.deletable)} 筆"
@@ -542,15 +522,15 @@ class CleanupDialog:
             show_snack(self.page, f"清理未執行：{error}", C.RED)
             self._safe_update()
             return
-        message = (
-            f"已刪除 {format_count(plan.deletable)} 筆（可在「還原」選取這次清理復原）"
-        )
+        lines = cleanup_plan_lines(plan, applied=True)
+        message = lines[0]
         skipped = sum(plan.skipped.values())
         if skipped:
             message += f"；略過 {format_count(skipped)} 筆"
+        message += "（可用「還原選取的清理」復原）"
         log_info(f"Mod 資料庫清理：{plan.version}；{message}")
         self._reset_plan()
-        self.plan_summary.value = message
+        self.plan_summary.value = "\n".join(lines)
         self.plan_summary.visible = True
         self._load_batch_info()
         if plan.batch_id:

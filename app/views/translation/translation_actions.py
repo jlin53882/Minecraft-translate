@@ -101,6 +101,7 @@ def run_ftb(view, *, dry_run: bool):
         show_snack(view.page, "TaskSession 尚未可用", C.RED)
         return
     out_dir = (view.ftb_out_dir.value or "").strip() or None
+    view._run_dry_run = dry_run
     view._set_status(
         "模擬執行" if dry_run else "執行中",
         C.GOLD_BG if dry_run else C.DIA_BG,
@@ -179,6 +180,7 @@ def run_kjs(view, *, dry_run: bool):
         return
     out_dir = (view.kjs_out_dir.value or "").strip() or None
     source_mode = str(getattr(view.kjs_source_mode, "value", None) or "fresh")
+    view._run_dry_run = dry_run
     view._set_status(
         "模擬執行" if dry_run else "執行中",
         C.GOLD_BG if dry_run else C.DIA_BG,
@@ -255,6 +257,7 @@ def run_md(view, *, dry_run: bool):
         show_snack(view.page, "TaskSession 尚未可用", C.RED)
         return
     out_dir = (view.md_out_dir.value or "").strip() or None
+    view._run_dry_run = dry_run
     view._set_status(
         "模擬執行" if dry_run else "執行中",
         C.GOLD_BG if dry_run else C.DIA_BG,
@@ -371,6 +374,9 @@ def _sync_from_session(view):
             view._set_status("任務發生錯誤", C.RED_BG)
         elif getattr(view.session, "cancel_requested", False):
             view._set_status("已取消", C.GOLD_BG)
+        elif getattr(view, "_run_dry_run", False):
+            # 模擬執行只分析、不送 API 也不寫回：結束狀態要和正式執行分得出來
+            view._set_status("模擬完成（未翻譯）", C.GOLD_BG)
         else:
             view._set_status("任務完成", C.EM_BG)
         view._ui_timer_running = False

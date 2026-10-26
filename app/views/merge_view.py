@@ -510,6 +510,10 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             elif status == "ERROR":
                 self._set_status("任務發生錯誤", C.RED_BG)
                 self.cancel_button.visible = False
+                # 全部失敗時服務仍會寫入摘要：顯示失敗清單，不只留一個狀態晶片
+                if snap.get("summary"):
+                    self._merge_stats = snap["summary"]
+                    self._show_merge_summary(self._merge_stats)
                 self._ui_stop.set()
 
             self.progress_bar.value = progress
@@ -560,12 +564,15 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             oc, organized_name, pending_name
         )
         failed_block = self._merge_summary_failed_block(failed_list, unit)
+        errored = int(summary.get("errored_files", 0) or 0)
         content = self._merge_summary_content(
-            f_zips, failed_block, output_block, s_zips, unit
+            f_zips, failed_block, output_block, s_zips, unit, errored
         )
         dialog = ft.AlertDialog(
             modal=True,
-            title=ft.Text("合併完成"),
+            title=ft.Text(
+                "合併完成（有失敗項目）" if f_zips or errored else "合併完成"
+            ),
             content=ft.Container(content=content, width=520),
             actions=[
                 ft.TextButton(

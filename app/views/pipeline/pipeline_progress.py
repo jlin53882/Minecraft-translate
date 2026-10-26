@@ -167,9 +167,13 @@ class PipelineProgressPanel:
         self.cancel_button.visible = running
         self.cancel_button.disabled = not running
 
-    def finish_all(self, success: bool, cancelled: bool = False):
+    def finish_all(self, success: bool, cancelled: bool = False, dry_run: bool = False):
         if success:
-            self.current_label.value = "✅ 一鍵製作完成！"
+            self.current_label.value = (
+                "✅ 一鍵製作完成（翻譯為 Dry Run，未翻譯）"
+                if dry_run
+                else "✅ 一鍵製作完成！"
+            )
         elif cancelled:
             self.current_label.value = "⏹ 已取消"
         else:

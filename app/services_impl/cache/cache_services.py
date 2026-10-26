@@ -236,7 +236,7 @@ def cache_rebuild_index_service() -> dict[str, Any]:
         return {
             "success": True,
             "total_indexed": total,
-            "message": f"✅ 搜尋索引重建完成，共索引 {total:,} 條翻譯",
+            "message": f"✅ 搜尋索引重建完成，共索引 {total:,} 筆翻譯",
             "error": None,
         }
 

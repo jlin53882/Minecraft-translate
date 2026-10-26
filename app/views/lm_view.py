@@ -404,6 +404,7 @@ class LMView(ft.Column):
 
         output_dir = self.output_path.value or get_lm_translate_folder_name()
         dry_run = self.dry_run_switch.value
+        self._run_dry_run = bool(dry_run)
         export_lang = self.export_lang_checkbox.value
         write_new_cache = self.write_new_cache_switch.value
         db_snapshot = self._db_snapshot_for_run()
@@ -568,6 +569,9 @@ class LMView(ft.Column):
                 self._set_status("任務發生錯誤", "red")
             elif getattr(session, "cancel_requested", False):
                 self._set_status("已取消", "gold")
+            elif getattr(self, "_run_dry_run", False):
+                # Dry-run 只分析不翻譯：結束狀態要和正式翻譯分得出來
+                self._set_status("Dry-run 完成（未翻譯）", "gold")
             else:
                 self._set_status("任務完成", "em")
             self._ui_timer_running = False

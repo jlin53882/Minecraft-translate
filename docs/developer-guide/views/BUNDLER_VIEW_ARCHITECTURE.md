@@ -46,7 +46,7 @@ BundlerView.start_bundling_clicked()
 | `root_dir_field` | 翻譯專案根目錄（必填） |
 | `output_zip_field` | ZIP 儲存路徑（留空 → root_dir + `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`） |
 | `extra_folders` / `extra_folders_view` | 額外資料夾/檔案清單。額外資料夾的子資料夾內容與檔案放入 ZIP 根目錄（資料夾本身的名稱不進入 ZIP）；額外檔案放入 ZIP 根目錄 |
-| `progress_bar` / `status_text` | 打包進度（執行時顯示、完成後隱藏）與狀態文字 |
+| `progress_bar` / `status_text` | 打包進度（執行時顯示、完成後隱藏）與狀態文字（完成時由 `bundle_result_text` 顯示檔案數或「沿用上次的 ZIP」） |
 | `log_view` | LogView，`mode="tail"`，tail_lines=250 |
 
 ---

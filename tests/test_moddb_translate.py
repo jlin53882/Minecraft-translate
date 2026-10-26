@@ -3167,3 +3167,26 @@ def test_second_replace_failure_keeps_valid_json_and_no_temp_files(
     names = sorted(p.name for p in tmp_path.iterdir())
     assert names == ["quality-issues-task.json"]
     json.loads((tmp_path / names[0]).read_text(encoding="utf-8"))
+
+
+def test_scope_text_uses_the_preview_batch_plan_until_the_scope_changes(db_path):
+    """範圍說明的批數是粗估；同一範圍預覽過後改顯示預覽精確規劃的批數，避免兩個數字並存。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    panel.refresh_scope()
+    panel.limit_field.value = "0"
+    panel._refresh_counts()
+    assert "粗估" in panel.count_text.value
+
+    panel._run_scope = panel._scope_key()
+    panel._apply_translation_summary(
+        {"dry_run": True, "candidates": 3, "planned_batches": 4, "remaining": 3}
+    )
+    assert "預覽規劃 4 批" in panel.count_text.value
+    assert "粗估" not in panel.count_text.value
+
+    panel.limit_field.value = "1"  # 範圍變了：預覽的批數不再適用
+    panel._refresh_counts()
+    assert "粗估" in panel.count_text.value and "預覽規劃" not in panel.count_text.value
+    db.close()

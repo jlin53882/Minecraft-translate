@@ -78,34 +78,48 @@ def _session_log(session, text: str, level: str = "info") -> None:
     mirror_session_log(session, logger, text, level)
 
 
-def _count_output_files(out_dir: str) -> dict:
-    """掃描各輸出子目錄的檔案數量。2026-08-04: 抽到 module-level 共用。"""
+def _count_output_files(
+    out_dir: str, pending_name: str | None = None, organized_name: str | None = None
+) -> dict:
+    """掃描各輸出子目錄的檔案數量。
+
+    ``lang_output/`` 底下依第一層資料夾分類：``assets``、待翻譯資料夾（``pending``）、
+    待翻譯整理資料夾（``organized``），其餘算 ``lang_output``。資料夾名稱取自設定，
+    比對整個資料夾名稱（預設的整理資料夾名稱也含「待翻譯」，不能用子字串判斷）。
+    """
+    if pending_name is None or organized_name is None:
+        merger_cfg = load_config().get("lang_merger", {})
+        pending_name = pending_name or merger_cfg.get("pending_folder_name", "待翻譯")
+        organized_name = organized_name or merger_cfg.get(
+            "pending_organized_folder_name", "待翻譯整理需翻譯"
+        )
     result = {
         "lang_output": 0,
         "assets": 0,
-        "待翻譯": 0,
+        "pending": 0,
+        "organized": 0,
         "patchouli_output": 0,
         "other_output": 0,
         "errordata_output": 0,
     }
     if not os.path.exists(out_dir):
         return result
-    for root, dirs, files in os.walk(out_dir):
+    lang_buckets = {
+        "assets": "assets",
+        pending_name: "pending",
+        organized_name: "organized",
+    }
+    for root, _dirs, files in os.walk(out_dir):
         # Windows 的 relpath 用反斜線，統一成 "/" 再比對
-        rel = os.path.relpath(root, out_dir).replace("\\", "/")
-        if rel.startswith("lang_output/assets"):
-            result["assets"] += len(files)
-        elif rel.startswith("lang_output"):
-            if "待翻譯" in rel:
-                result["待翻譯"] += len(files)
-            else:
-                result["lang_output"] += len(files)
-        elif rel.startswith("patchouli_output"):
-            result["patchouli_output"] += len(files)
-        elif rel.startswith("other_output"):
-            result["other_output"] += len(files)
-        elif rel.startswith("errordata_output"):
-            result["errordata_output"] += len(files)
+        parts = os.path.relpath(root, out_dir).replace("\\", "/").split("/")
+        top = parts[0]
+        if top == "lang_output":
+            bucket = (
+                lang_buckets.get(parts[1], "lang_output") if len(parts) > 1 else top
+            )
+            result[bucket] += len(files)
+        elif top in result:
+            result[top] += len(files)
     return result
 
 

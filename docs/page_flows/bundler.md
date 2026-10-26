@@ -89,7 +89,7 @@ flowchart TD
     E --> F["batcher.flush"]
     F --> C
     C -. 例外 .-> G["log_error，加入「[錯誤]」行，設定錯誤色"]
-    C --> H["finally：_bundling_running = False，set_state(done)，flush(force)"]
+    C --> H["finally：_bundling_running = False，set_state(done, result)，flush(force)"]
     G --> H
     H --> I["_apply_bundling_ui 在 event loop 上更新進度與狀態列"]
 ```
@@ -112,7 +112,7 @@ flowchart TD
 
 ## 背景任務與 UI 更新
 
-- **背景任務**：`launch_page_operation`（owner `bundler`，`CancellationPolicy.NON_CANCELLABLE`，`CommitPolicy.PARTIAL_ALLOWED`，`DurabilityPolicy.USER_ACTION`，`ShutdownPolicy.DRAIN_ONLY`）。`in_new_task("bundler", …)` 為這次執行建立獨立的任務上下文，讓日誌能對應到此任務。
+- **背景任務**：`launch_page_operation`（owner `bundler`，`view_key="bundler"`，`CancellationPolicy.NON_CANCELLABLE`，`CommitPolicy.PARTIAL_ALLOWED`，`DurabilityPolicy.USER_ACTION`，`ShutdownPolicy.DRAIN_ONLY`）。`in_new_task("bundler", …)` 為這次執行建立獨立的任務上下文，讓日誌能對應到此任務。
 - **節流**：背景執行緒只把日誌與進度累積到 `UiBatcher`；`UiBatcher` 依 0.2 秒間隔（`_UI_FLUSH_INTERVAL_SEC`）把一批資料交給 `_apply_bundling_ui` 在 event loop 上套用，避免每一行都刷新畫面。
 - **日誌顯示**：`LogView`（`app/views/_log/log_view.py`，`tail` 模式，保留最後 250 行）。`add_many` 批次寫入，`dedupe=False`。
 - **旗標與按鈕**：`_bundling_running` 由 worker 的 `finally` 清除；`_apply_bundling_ui` 依此旗標設定開始按鈕的停用狀態。
@@ -140,3 +140,7 @@ flowchart TD
 - **版本無法換算**：輸入格式不合、比表內最新還新、落在表的空隙，或最大使用版本小於 `pack_format` 時，說明列顯示原因，按「開始打包」以 snack 擋下、不啟動；改填 `pack_format` 整數即可繞過對照表。版本與最大版本皆空白時使用預設 `pack_format` 34。
 - **應用程式關閉中**：啟動失敗時恢復開始按鈕、狀態列顯示「應用程式正在關閉，未啟動打包」並提示 snack。
 - **注意（目前行為）**：`_async_pick_root_dir` 設定欄位值後會更新 pack.mcmeta 預覽，但不會重新計算輸出檔名提示；`_async_pick_pack_image` 設定欄位值後會呼叫 `_update_preview` 立即更新封面預覽。
+
+## 結束狀態
+
+產生器最後一次回報帶 `bundle_result`（`files`：加入 ZIP 的檔案數、`duration_sec`；來源未變動而沿用上次 ZIP 時為 `reused`）。`_bundling_worker` 先記住它，最後和 `done` 一起交給畫面（`UiBatcher` 每次送出後會清空狀態），`bundle_result_text` 把狀態文字顯示為「打包完成：N 個檔案加入 ZIP（耗時 X 秒）」或「打包完成：來源與設定皆未變動，沿用上次的 ZIP」；失敗時顯示「打包失敗，請查看日誌」。

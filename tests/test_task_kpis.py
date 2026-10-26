@@ -240,12 +240,22 @@ def test_dashboard_task_card_opens_the_task_list():
     shell = _Shell()
     view = DashboardView(
         _DialogPage(),
-        cache_overview_loader=lambda: {},
+        cache_overview_loader=dict,
         rules_count_loader=lambda: 0,
-        key_snapshot_loader=lambda: [],
-        model_quota_loader=lambda: [],
+        key_snapshot_loader=list,
+        model_quota_loader=list,
         moddb_loader=lambda: None,
     )
     view.set_shell(shell)
     view.stat_tasks.on_click(None)
     assert shell.opened == 1
+
+
+def test_cache_stat_never_reports_zero_for_an_unloaded_cache():
+    from app.views.dashboard.dashboard_data import DashboardData, cache_stat
+
+    assert cache_stat(DashboardData(), loaded=False) == ("—", "讀取中…", "em")
+    failed = DashboardData(cache_ready=False)
+    assert cache_stat(failed, loaded=True) == ("—", "快取未載入，詳見後台記錄", "red")
+    ready = DashboardData(total_entries=1234)
+    assert cache_stat(ready, loaded=True) == ("1,234", "翻譯快取總筆數", "em")

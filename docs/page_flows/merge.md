@@ -44,7 +44,7 @@ flowchart TD
   E -- 是 --> G["狀態晶片：已取消，不顯示摘要"]
   F --> H["_ui_stop.set，停止輪詢，恢復按鈕"]
   G --> H
-  B -- ERROR --> I["狀態晶片：任務發生錯誤，停止輪詢"]
+  B -- ERROR --> I["狀態晶片：任務發生錯誤；有摘要時照樣顯示摘要（失敗清單），停止輪詢"]
 ```
 
 ## 背景任務與 UI 更新
@@ -63,6 +63,7 @@ flowchart TD
 - `session`：TaskSession；`session.snapshot()` 回傳的 `summary`（`success_zips`、`failed_zips`、`failed_zip_details` 或資料夾版本的 `success_folders` 等）是摘要的主要來源。缺少摘要時，`_sync_ui_once` 會依日誌中的 `[完成]`、`[錯誤]` 字串推算。
 - 設定寫入：`_on_merge_field_changed(key, value)` 呼叫 `config_store.set_value(f"lang_merger.{key}", value)`，寫入成功後 `_broadcast_config_change_to_config_view` 會重新讀取已建立的設定頁。
 - 設定讀取：`load_config()` 讀取 `lang_merger.pending_folder_name` 與 `lang_merger.pending_organized_folder_name`，用於摘要文字。
+- 摘要的輸出統計（`output_counts`）由 `merge_service._count_output_files` 依 `lang_output/` 底下的第一層資料夾名稱分類：`assets`、待翻譯資料夾（`pending`）、待翻譯整理資料夾（`organized`），其餘算 `lang_output`；比對整個資料夾名稱，因為預設的整理資料夾名稱也含「待翻譯」。摘要視窗以中文標籤顯示各類，另列「處理時發生錯誤的檔案」（`errored_files`）；有失敗或錯誤檔案時標題為「合併完成（有失敗項目）」。
 - 翻譯記憶庫快照 `MergeDbRunSnapshot`：`use_db`、`version`、`database_settings`。
 - 產出：合併結果寫入 `output_dir_field` 指定的目錄。取消時，merge_service 內的 `_cleanup_cancelled_output` 只刪除「本次新建立」的輸出資料夾（以 `existed_before` 判斷），既有資料夾不動。
 

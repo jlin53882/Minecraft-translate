@@ -579,14 +579,16 @@ class MergeWidgetsMixin:
         """輸出統計區塊的控制項。"""
         # 輸出統計 block
         oc_rows = []
+        # 舊版摘要把待翻譯放在「待翻譯」鍵；新版分成 pending／organized
+        pending = oc.get("pending", oc.get("待翻譯", 0))
         for label, count in [
-            ("lang_output", oc.get("lang_output", 0)),
-            ("assets", oc.get("assets", 0)),
-            (pending_name, oc.get(pending_name, 0)),
-            (organized_name, oc.get(organized_name, 0)),
-            ("patchouli_output", oc.get("patchouli_output", 0)),
-            ("other_output", oc.get("other_output", 0)),
-            ("errordata_output", oc.get("errordata_output", 0)),
+            ("語言檔（lang_output）", oc.get("lang_output", 0)),
+            ("資源包結構（lang_output/assets）", oc.get("assets", 0)),
+            (f"「{organized_name}」（送機器翻譯）", oc.get("organized", 0)),
+            (f"「{pending_name}」（未過濾，不送翻譯）", pending),
+            ("Patchouli 手冊（patchouli_output）", oc.get("patchouli_output", 0)),
+            ("其他檔案（other_output）", oc.get("other_output", 0)),
+            ("錯誤資料（errordata_output）", oc.get("errordata_output", 0)),
         ]:
             if count > 0:
                 oc_rows.append(ft.Text(f"├─ {label}：{count} 個", size=13))
@@ -636,7 +638,9 @@ class MergeWidgetsMixin:
             ]
         return failed_block
 
-    def _merge_summary_content(self, f_zips, failed_block, output_block, s_zips, unit):
+    def _merge_summary_content(
+        self, f_zips, failed_block, output_block, s_zips, unit, errored_files=0
+    ):
         """摘要對話框內容。"""
         content = ft.Column(
             [
@@ -655,6 +659,23 @@ class MergeWidgetsMixin:
                         ft.Text(f"失敗 {unit}：{f_zips} 個", size=14),
                     ],
                     spacing=8,
+                ),
+                *(
+                    [
+                        ft.Row(
+                            [
+                                ft.Icon(ft.Icons.WARNING_AMBER, color=C.GOLD, size=20),
+                                ft.Text(
+                                    f"處理時發生錯誤的檔案：{errored_files} 個"
+                                    "（已放到 errordata_output）",
+                                    size=14,
+                                ),
+                            ],
+                            spacing=8,
+                        )
+                    ]
+                    if errored_files
+                    else []
                 ),
                 *output_block,
                 *failed_block,

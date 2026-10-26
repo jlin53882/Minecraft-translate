@@ -1439,11 +1439,13 @@ def test_batch_lookup_reports_parent_failure_and_partial_stop(
     if stopped:
         assert "限流" in value
         assert result["Olea europaea"] == "未查詢（已因限流停止）"
-        assert final["log"] == "--- 批次查詢已因限流停止（部分完成） ---"
+        assert final["log"] == (
+            "--- 批次查詢已因限流停止（部分完成）：找到 0・未找到 1・未查詢 1 ---"
+        )
     else:
         assert "查詢失敗（連線逾時）" in value
         assert result["Olea europaea"] == "油橄欖"
-        assert final["log"] == "--- 批次查詢完成 ---"
+        assert final["log"] == "--- 批次查詢完成：找到 1・未找到 1 ---"
 
 
 def test_species_suggestion_prefers_parent_completed_by_bulk(isolated_species_cache):

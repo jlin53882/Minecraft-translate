@@ -86,6 +86,14 @@ class DashboardData:
         return sum(1 for step in self.steps if step.runs_done)
 
     @property
+    def tasks_breakdown(self) -> str:
+        """「本次任務」卡的說明：各狀態筆數（與任務清單的篩選相同分類）。"""
+        return (
+            f"完成 {self.tasks_done}・進行中 {self.tasks_running}・"
+            f"失敗 {self.tasks_failed}・已取消 {self.tasks_cancelled}"
+        )
+
+    @property
     def tasks_total(self) -> int:
         return (
             self.tasks_done
@@ -93,6 +101,15 @@ class DashboardData:
             + self.tasks_cancelled
             + self.tasks_running
         )
+
+
+def cache_stat(data: DashboardData, *, loaded: bool) -> tuple[str, str, str]:
+    """「快取條目」卡的 (數字, 說明, 說明色調)；快取未載入時不顯示成 0 筆。"""
+    if not loaded:
+        return format_count(None), "讀取中…", "em"
+    if not data.cache_ready:
+        return format_count(None), "快取未載入，詳見後台記錄", "red"
+    return format_count(data.total_entries), "翻譯快取總筆數", "em"
 
 
 def task_status_style(task: TaskInfo) -> tuple[str, str]:
@@ -130,6 +147,19 @@ def format_ago(seconds: float) -> str:
     if seconds < 86400:
         return f"{int(seconds // 3600)} 小時前"
     return f"{int(seconds // 86400)} 天前"
+
+
+def format_quota_reset(model: ModelQuotaHealth) -> str:
+    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」；不確定視窗內改為說明正在確認。"""
+    if model.uncertain:
+        return "重置時間不確定，正在探測是否已恢復"
+    minutes = max(0, int(model.seconds_remaining // 60))
+    hours, minutes = divmod(minutes, 60)
+    remaining = f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
+    reset_at = (
+        dt.datetime.fromtimestamp(model.reset_at, dt.UTC).astimezone().strftime("%H:%M")
+    )
+    return f"約 {remaining}後重置（{reset_at}）"
 
 
 def build_cache_bars(overview: dict | None) -> list[CacheBar]:

@@ -306,7 +306,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
     if cancelled_flag[0]:
         # 取消：不標記完成、不把進度拉到 100%；只回報已處理的部分
         ctx.add_log(
-            f"[取消] 已處理部分：成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
+            f"[取消] 已處理部分：成功 {result_stats['success']} 個檔案 / 跳過 {result_stats['warnings']} 個檔案（內容相同）/ 失敗 {result_stats['failures']} 個 JAR",
             level="warning",
             forwarded=False,
         )
@@ -314,7 +314,7 @@ def _extractor_report_result(ctx, result_stats: dict, cancelled_flag: list) -> N
     else:
         ctx.state["done"] = True
         ctx.add_log(
-            f"[完成] 成功 {result_stats['success']} / 跳過 {result_stats['warnings']} / 失敗 {result_stats['failures']}",
+            f"[完成] 成功 {result_stats['success']} 個檔案 / 跳過 {result_stats['warnings']} 個檔案（內容相同）/ 失敗 {result_stats['failures']} 個 JAR",
             level="system",
             forwarded=False,
         )
@@ -474,6 +474,7 @@ def _launch_extractor_operation(ctx):
         in_new_task("extractor", ctx.run_extraction),
         name="JAR 提取",
         owner="extractor",
+        view_key="extractor",
         on_cancel=request_operation_cancel,
     )
     if not launched:

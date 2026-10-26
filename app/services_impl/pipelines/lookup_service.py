@@ -55,6 +55,15 @@ def describe_lookup(lookup: SpeciesLookup) -> str:
     return f"查詢失敗，請稍後再試（{lookup.detail}）。"
 
 
+def _batch_category(lookup: SpeciesLookup) -> str:
+    """批次結束摘要的分類；與 ``_batch_value`` 的結果文字一一對應。"""
+    if lookup.status == STATUS_FOUND:
+        return "找到"
+    if lookup.status == STATUS_NOT_FOUND:
+        return "未找到"
+    return "查詢失敗"
+
+
 def _batch_value(lookup: SpeciesLookup) -> str:
     """批次結果 JSON 中每個名稱的值。"""
     if lookup.status == STATUS_FOUND:
@@ -84,6 +93,7 @@ def run_batch_lookup_service(json_text: str):
         results = {}
         total = len(names)
         stopped = False
+        counts = dict.fromkeys(("找到", "未找到", "查詢失敗", "格式錯誤", "未查詢"), 0)
 
         first = GLOBAL_LOG_LIMITER.filter(
             {"log": f"開始批次查詢 {total} 個學名...", "progress": 0}
@@ -94,11 +104,14 @@ def run_batch_lookup_service(json_text: str):
         for i, name in enumerate(names):
             if not is_potential_species_name(name):
                 results[name] = "格式錯誤"
+                counts["格式錯誤"] += 1
             else:
                 lookup = lookup_species(name)
                 results[name] = _batch_value(lookup)
+                counts[_batch_category(lookup)] += 1
                 if lookup.rate_limited:  # 含上一層物種查詢遇到的限流
                     remaining = names[i + 1 :]
+                    counts["未查詢"] += len(remaining)
                     for rest in remaining:
                         results.setdefault(rest, "未查詢（已因限流停止）")
                     message = (
@@ -122,10 +135,16 @@ def run_batch_lookup_service(json_text: str):
         final = GLOBAL_LOG_LIMITER.filter(
             {
                 "log": (
-                    "--- 批次查詢已因限流停止（部分完成） ---"
+                    "--- 批次查詢已因限流停止（部分完成）："
                     if stopped
-                    else "--- 批次查詢完成 ---"
-                ),
+                    else "--- 批次查詢完成："
+                )
+                + "・".join(
+                    f"{label} {n:,}"
+                    for label, n in counts.items()
+                    if n or label in ("找到", "未找到")
+                )
+                + " ---",
                 "result": json.dumps(results, indent=2, ensure_ascii=False),
             }
         )

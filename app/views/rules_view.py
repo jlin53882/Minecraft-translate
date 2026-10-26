@@ -273,7 +273,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
             mode_text = "（正則）" if query.regex else ""
             show_snack(
                 self.page,
-                f"找到 {len(self.search_results)} 筆符合的規則{mode_text}",
+                f"找到 {len(self.search_results)} 條符合的規則{mode_text}",
                 C.EM,
                 text_color=C.ON_EM,
             )

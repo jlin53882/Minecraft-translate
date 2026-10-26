@@ -19,6 +19,10 @@ from app.tasks.operation_registry import launch_page_operation
 from app.ui.design import C
 from app.views._log import LogView
 from app.views.extractor import extractor_dialog as _extractor_dialog
+from app.views.extractor.extract_summary import (
+    preview_file_count,
+    preview_summary_lines,
+)
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
 from translation_tool.utils.cancellation import cancel_scope
@@ -27,15 +31,6 @@ from translation_tool.utils.ui_mirror import in_new_task, new_task_id
 
 # 背景任務 → UI 的刷新間隔（秒）
 _UI_FLUSH_INTERVAL_SEC = 0.2
-
-
-def _preview_file_count(result: dict, mode: str) -> int:
-    """預覽結果中單一 JAR 的可提取檔案數。"""
-    if mode == "dual":
-        return int(result.get("lang_count", 0) or 0) + int(
-            result.get("book_count", 0) or 0
-        )
-    return int(result.get("count", 0) or 0)
 
 
 def open_preview_dialog(
@@ -239,38 +234,24 @@ def _preview_add_log(
 def _preview_result_controls(ctx, result: dict) -> list:
     """預覽結果畫面的內容控制項（統計、JAR 清單）。"""
     preview_results = result.get("preview_results", [])
-    total_files = result.get("total_files", 0)
-    total_size_mb = result.get("total_size_mb", 0)
 
     controls = [
         ft.Text(f"預覽結果（{ctx.mode.upper()}）", size=16, weight=ft.FontWeight.BOLD),
         ft.Text(f"輸出（確認執行後）：{ctx.output_path}", size=12, color=C.MUTED),
         ft.Divider(),
     ]
-
-    if ctx.mode == "dual":
-        total_lang = sum(r.get("lang_count", 0) for r in preview_results)
-        total_book = sum(r.get("book_count", 0) for r in preview_results)
-        controls.append(ft.Text(f"Lang：{total_lang} 個", size=14, color=C.DIA))
-        controls.append(ft.Text(f"Book：{total_book} 個", size=14, color=C.DIA))
-    else:
-        controls.append(ft.Text(f"共找到 {total_files} 個檔案", size=14, color=C.DIA))
-
-    controls.append(ft.Text(f"總大小：{total_size_mb:.2f} MB", size=14, color=C.DIA))
+    # 摘要與一鍵流水線的提取預覽共用（含讀取失敗的 JAR 與單位說明）
+    lines = preview_summary_lines(result, ctx.mode)
+    controls.extend(ft.Text(line, size=14, color=C.DIA) for line in lines[:2])
+    controls.extend(
+        ft.Text(line, size=12, color=C.RED if "失敗：" in line else C.MUTED)
+        for line in lines[2:]
+    )
 
     # 只列出有可提取檔案的 JAR（406 個 JAR 時大多是 0 個檔案，清單會被淹沒）
-    with_files = [r for r in preview_results if _preview_file_count(r, ctx.mode) > 0]
-    empty_count = len(preview_results) - len(with_files)
+    with_files = [r for r in preview_results if preview_file_count(r, ctx.mode) > 0]
     header = f"詳細清單（{len(with_files)} 個 JAR 有可提取檔案）："
     controls.extend([ft.Divider(), ft.Text(header, size=13, weight=ft.FontWeight.BOLD)])
-    if empty_count:
-        controls.append(
-            ft.Text(
-                f"另有 {empty_count} 個 JAR 沒有可提取的檔案，已略過不列出",
-                size=12,
-                color=C.MUTED,
-            )
-        )
 
     jar_list = ft.Column(spacing=4, scroll=ft.ScrollMode.AUTO)
     for r in with_files:
@@ -487,9 +468,8 @@ async def _preview_ui_poller(ctx):
         ctx.preview_dialog.modal = False
         ctx.page.update()
     elif final_result and not cancelled:
-        results = final_result.get("preview_results", [])
         ctx.add_log(
-            f"[完成] 找到 {len(results)} 個 JAR",
+            "[完成] " + "；".join(preview_summary_lines(final_result, ctx.mode)[:2]),
             level="system",
             update=False,
             forwarded=False,

@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 import threading
 import time
@@ -41,8 +40,10 @@ from app.views.dashboard.dashboard_data import (
     DashboardData,
     StepStatus,
     build_dashboard_data,
+    cache_stat,
     format_ago,
     format_count,
+    format_quota_reset,
     greeting,
     task_status_style,
 )
@@ -106,19 +107,6 @@ def _default_model_quota_snapshot() -> list[ModelQuotaHealth]:
     from app.services_impl.key_health_service import get_model_quota_snapshot
 
     return get_model_quota_snapshot()
-
-
-def format_quota_reset(model: ModelQuotaHealth) -> str:
-    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」；不確定視窗內改為說明正在確認。"""
-    if model.uncertain:
-        return "重置時間不確定，正在探測是否已恢復"
-    minutes = max(0, int(model.seconds_remaining // 60))
-    hours, minutes = divmod(minutes, 60)
-    remaining = f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
-    reset_at = (
-        dt.datetime.fromtimestamp(model.reset_at, dt.UTC).astimezone().strftime("%H:%M")
-    )
-    return f"約 {remaining}後重置（{reset_at}）"
 
 
 class DashboardView(ft.Column):
@@ -559,23 +547,7 @@ class DashboardView(ft.Column):
         self.data = data
         self._render_moddb()
         self.title_text.value = f"{greeting()}，歡迎回來"
-        if not self._cache_overview:
-            cache_value, cache_delta, cache_tone = None, "讀取中…", "em"
-        elif not data.cache_ready:
-            cache_value, cache_delta, cache_tone = (
-                None,
-                "快取未載入，詳見後台記錄",
-                "red",
-            )
-        else:
-            cache_value, cache_delta, cache_tone = (
-                data.total_entries,
-                "翻譯快取總筆數",
-                "em",
-            )
-        self.stat_cache.set_value(
-            format_count(cache_value), delta=cache_delta, delta_tone=cache_tone
-        )
+        self.stat_cache.set_value(*cache_stat(data, loaded=bool(self._cache_overview)))
         self.stat_rules.set_value(
             format_count(data.rules_count),
             delta="replace_rules.json" if data.rules_count is not None else "讀取中…",
@@ -592,7 +564,7 @@ class DashboardView(ft.Column):
             )
         self.stat_tasks.set_value(
             str(data.tasks_total),
-            delta=f"完成 {data.tasks_done}・進行中 {data.tasks_running}・失敗 {data.tasks_failed}・已取消 {data.tasks_cancelled}",
+            delta=data.tasks_breakdown,
             delta_tone="red" if data.tasks_failed else "neutral",
         )
         self.steps_row.controls = [

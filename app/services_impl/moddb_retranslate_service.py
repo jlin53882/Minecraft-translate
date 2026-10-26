@@ -2102,7 +2102,7 @@ def _initialize_snapshot_run(db, entries, session, report, options):
     else:
         _log(
             session,
-            f"🔎 掃描完成｜找到 {total:,} 筆待處理來源項目"
+            f"🔎 掃描完成｜找到 {total:,} 筆符合條件的來源項目"
             f"（來源：{source_label(SRC_AI)}；{_format_profile_breakdown(_cache_type_counts(candidates))}）",
         )
         _log(

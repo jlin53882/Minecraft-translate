@@ -456,3 +456,24 @@ def test_count_output_files_handles_windows_separators(tmp_path: Path, monkeypat
 
     assert counts["assets"] == 1
     assert counts["lang_output"] == 1
+
+
+def test_count_output_files_splits_pending_and_organized_folders(tmp_path: Path):
+    """整理資料夾的預設名稱也含「待翻譯」：要依整個資料夾名稱分類，不能用子字串。"""
+    lang = tmp_path / "lang_output"
+    for folder, n in (("待翻譯", 2), ("待翻譯整理需翻譯", 3), ("foo", 1)):
+        target = lang / folder / "sub"
+        target.mkdir(parents=True)
+        for i in range(n):
+            (target / f"{i}.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "errordata_output").mkdir()
+    (tmp_path / "errordata_output" / "bad.json").write_text("{}", encoding="utf-8")
+
+    counts = merge_service._count_output_files(
+        str(tmp_path), pending_name="待翻譯", organized_name="待翻譯整理需翻譯"
+    )
+
+    assert counts["pending"] == 2
+    assert counts["organized"] == 3
+    assert counts["lang_output"] == 1
+    assert counts["errordata_output"] == 1

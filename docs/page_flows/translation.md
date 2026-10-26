@@ -108,7 +108,7 @@ Markdown 只有 `DONE` 才能把翻譯結果寫入完成目錄；`PARTIAL`、`FA
 - 每次執行都會建立新的 `TaskSession`（`tag_session(..., "translation", page=...)`），並以 `reserve_page_operation(owner="translation")` 登錄。預設 `CancellationPolicy.COOPERATIVE`。
 - `worker` 在背景執行緒中呼叫服務函式。`session.start()` 只由服務層的 `run_callable_task` 呼叫一次（單一 owner，一次執行只有一個 task ID 與一組開始／結束紀錄）；動作層用 `add_start_log` 預先登記開頭日誌，`start()` 清空日誌後會放回。`finally` 內一定會呼叫 `session.finish()`。
 - 只有在服務函式拋出未預期例外時，動作層的 `worker` 才會再補寫錯誤日誌、`set_error()` 與 `finish()`（`_report_service_failure` 會以 `session_task_scope` 把堆疊寫入後台）。
-- UI 同步由 `_poll_session`（`translation_actions.py`）負責：在 Flet event loop 上每 0.2 秒讀取 `session.snapshot()`，更新 `ProgressRing`、`LogView` 與狀態晶片。`DONE` 或 `ERROR` 時停止輪詢、停用取消按鈕。
+- UI 同步由 `_poll_session`（`translation_actions.py`）負責：在 Flet event loop 上每 0.2 秒讀取 `session.snapshot()`，更新 `ProgressRing`、`LogView` 與狀態晶片。`DONE` 或 `ERROR` 時停止輪詢、停用取消按鈕；模擬執行（`run_ftb`／`run_kjs`／`run_md` 記在 `view._run_dry_run`）結束時狀態為「模擬完成（未翻譯）」，正式執行為「任務完成」。
 - 取消：`_on_cancel` 呼叫 `session.request_cancel()`，狀態改為「正在取消…」。翻譯迴圈在批次之間、等待 API 限流時檢查取消。
 - 換頁卸載：`will_unmount` 呼叫 `stop_ui_timer`，只停止輪詢；任務仍在背景進行。`did_mount` 呼叫 `resume_ui_timer` 接續輪詢。
 
