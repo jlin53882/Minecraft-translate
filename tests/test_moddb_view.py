@@ -273,7 +273,7 @@ def test_task_completion_invalidates_cached_moddb_panels(db_path, monkeypatch):
     assert refreshed == [True]
 
 
-def test_database_tab_refreshes_and_entry_filters_stay_inline(db_path, monkeypatch):
+def test_database_tab_refreshes_and_entry_filters_run_in_worker(db_path, monkeypatch):
     from app.tasks.operation_registry import OperationRegistry
 
     seed(db_path)
@@ -302,9 +302,9 @@ def test_database_tab_refreshes_and_entry_filters_stay_inline(db_path, monkeypat
     filter_connections = []
     original_filter_snapshot = moddb_view.load_entries_filter_snapshot
 
-    def record_filter_snapshot(settings, request):
+    def record_filter_snapshot(settings, request, interrupt=None):
         filter_connections.append((settings, threading.current_thread().name))
-        return original_filter_snapshot(settings, request)
+        return original_filter_snapshot(settings, request, interrupt)
 
     monkeypatch.setattr(
         moddb_view, "load_entries_filter_snapshot", record_filter_snapshot
@@ -335,16 +335,30 @@ def test_database_tab_refreshes_and_entry_filters_stay_inline(db_path, monkeypat
         query_threads.clear()
         view.show_tab("entries")
         view.entries._on_state("none")
+        # 篩選不在畫面執行緒查詢：先顯示載入中，worker 讀完才套用
+        assert len(view.entries.rows) == 3
+        assert view.entries.refresh_indicator.visible is True
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
         assert [row.key for row in view.entries.rows] == ["item.foo.b"]
+        # 清單先顯示；模組選項（需要另一次掃描）稍後才在背景縮小
+        assert [option.key for option in view.entries.mod_dd.options] == [
+            "全部模組",
+            "bar",
+            "foo",
+        ]
+        assert page.operation_registry.wait_for_idle(timeout=2)
+        page._run_all_tasks()
+        page._tasks.clear()
         assert [option.key for option in view.entries.mod_dd.options] == [
             "全部模組",
             "foo",
         ]
-        assert filter_connections == []
-        assert query_threads
-        assert all(name == threading.current_thread().name for _, name in query_threads)
+        assert len(filter_connections) == 1
+        assert filter_connections[0][1] != threading.current_thread().name
+        assert all(name != threading.current_thread().name for _, name in query_threads)
         assert view.entries.refresh_indicator.visible is False
-        assert view._db is not None
     finally:
         page.operation_registry.begin_shutdown()
         assert page.operation_registry.wait_for_idle(timeout=2)
@@ -489,7 +503,7 @@ def test_entries_worker_snapshot_preserves_requested_page(db_path):
     assert len(snapshot["rows"]) == 5
 
 
-def test_entry_page_navigation_loads_inline_and_discards_stale_filter_snapshot(
+def test_entry_page_navigation_loads_in_worker_and_discards_stale_filter_snapshot(
     db_path, monkeypatch
 ):
     from app.tasks.operation_registry import OperationRegistry
@@ -527,10 +541,19 @@ def test_entry_page_navigation_loads_inline_and_discards_stale_filter_snapshot(
         monkeypatch.setattr(TranslationDB, "list_entries", record_query_thread)
         view.entries.pager.goto(2)
 
+        # 翻頁不在畫面執行緒查詢：先顯示載入中，結果由 worker 讀完後才套用
         assert view.entries.pager.current_page == 2
+        assert len(view.entries.rows) == 50
+        assert view.entries.refresh_indicator.visible is True
+        assert view.entries.list_shell.opacity < 1.0
+        assert page.operation_registry.wait_for_idle(timeout=5)
+        page._run_all_tasks()
+        page._tasks.clear()
+        assert query_threads
+        assert all(name != threading.current_thread().name for name in query_threads)
         assert len(view.entries.rows) == 5
-        assert query_threads[-1] == threading.current_thread().name
         assert view.entries.refresh_indicator.visible is False
+        assert view.entries.list_shell.opacity == 1.0
         assert view._panel_refresh_needed["entries"] is False
 
         scheduled = []
@@ -942,6 +965,13 @@ def entries(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
+    # 停筆 debounce 在單元測試中立即執行（排程用的事件迴圈不存在）
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     yield panel
     db.close()
@@ -982,8 +1012,10 @@ def test_entries_full_refresh_keeps_draft_typed_after_save(entries):
     """儲存後開始輸入時，晚到的完整背景快照不得覆蓋人工草稿。"""
     selected = next(row for row in entries.rows if row.key == "item.foo.a")
     entries.select(selected.id)
+    entries._page._run_all_tasks()
     entries.tw_field.value = "剛儲存的譯文"
     entries._on_text_change()
+    entries._page._run_all_tasks()
     entries._save()
     entries._page._run_all_tasks()
 
@@ -1008,6 +1040,7 @@ def test_entries_full_refresh_keeps_draft_typed_after_save(entries):
     }
     entries.tw_field.value = "儲存後繼續輸入的未儲存草稿"
     entries._on_text_change()
+    entries._page._run_all_tasks()
 
     entries.apply_refresh_snapshot(delayed_snapshot)
 
@@ -1039,6 +1072,7 @@ def test_entries_database_switch_does_not_reuse_old_database_draft(tmp_path):
 
         active_db[0] = TranslationDB(second_path)
         panel.select(1)
+        panel._page._run_all_tasks()
 
         assert panel.selected is not None
         assert panel.selected.id == 1
@@ -1064,6 +1098,7 @@ def test_entries_snapshot_recovery_from_unknown_database_clears_draft(entries):
     assert selected is not None
     entries.tw_field.value = "未知身分期間的舊草稿"
     entries._on_text_change()
+    entries._page._run_all_tasks()
     identity = entries._database_identity(entries.db())
     snapshot = {
         "identity": identity,
@@ -1092,10 +1127,11 @@ def test_entries_snapshot_recovery_from_unknown_database_clears_draft(entries):
 
 
 def test_entries_filters_by_state_mod_and_search(entries):
-    original_keys = {row.id: f"entry-{row.id}" for row in entries.rows}
     entries._on_state("none")
     assert [r.key for r in entries.rows] == ["item.foo.b"]
-    assert entries.list_view.controls[0].key == original_keys[entries.rows[0].id]
+    # 清單列是固定的 tile 池：同一個控制項原地換內容，只有前 N 列可見
+    visible = [t for t in entries.list_view.controls if t.visible]
+    assert [t.data for t in visible] == [r.id for r in entries.rows]
     entries._on_state("diff")
     assert [r.key for r in entries.rows] == ["item.foo.a"]
     entries._on_state("all")
@@ -1242,6 +1278,9 @@ def test_entries_panel_review_filter_updates_module_dropdown(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
 
     panel.review_filter.value = "unreviewed"
@@ -1299,8 +1338,10 @@ def test_advanced_filter_keeps_selected_empty_module_and_source_scope(db_path):
 def test_entries_edit_shows_impact_and_save_propagates(entries):
     foo_a = next(r for r in entries.rows if r.key == "item.foo.a")
     entries.select(foo_a.id)
+    entries._page._run_all_tasks()
     entries.tw_field.value = "鋼製外殼（校對）"
     entries._on_text_change()
+    entries._page._run_all_tasks()
     assert entries.save_btn.disabled is False and entries.impact_box.visible is True
     assert (
         "1.20.1" in entries.impact_text.value
@@ -1322,9 +1363,11 @@ def test_entries_edit_shows_impact_and_save_propagates(entries):
 def test_entries_sync_switch_off_only_changes_current_version(entries):
     foo_a = next(r for r in entries.rows if r.key == "item.foo.a")
     entries.select(foo_a.id)
+    entries._page._run_all_tasks()
     entries.sync_row.value = False
     entries.tw_field.value = "只改這版"
     entries._on_text_change()
+    entries._page._run_all_tasks()
     assert (
         "不會影響其他版本" in entries.impact_text.value
         or "只出現在" in entries.impact_text.value
@@ -1340,17 +1383,20 @@ def test_entries_sync_switch_off_only_changes_current_version(entries):
 def test_entries_suggestions_cover_both_kinds_and_apply_fills_the_field(entries):
     foo_a = next(r for r in entries.rows if r.key == "item.foo.a")
     entries.select(foo_a.id)
+    entries._page._run_all_tasks()
     assert "鋼外殼" in texts_of(entries.sug_col)  # 同鍵值・其他版本
     entries._on_sug_tab("text")
     assert entries.sug_tab == "text"
     assert any("鋼殼" in t for t in texts_of(entries.sug_col))  # bar 模組相同原文
     entries._apply_suggestion("鋼殼")
+    entries._page._run_all_tasks()
     assert entries.tw_field.value == "鋼殼" and entries.save_btn.disabled is False
 
 
 def test_entries_revert_restores_previous_translation(entries):
     foo_a = next(r for r in entries.rows if r.key == "item.foo.a")
     entries.select(foo_a.id)
+    entries._page._run_all_tasks()
     entries.tw_field.value = "新譯文"
     entries._save()
     entries._page._run_all_tasks()
@@ -1366,6 +1412,7 @@ def test_entries_revert_restores_previous_translation(entries):
 def test_ai_retranslation_history_has_no_manual_revert_action(entries):
     row = entries.rows[0]
     entries.select(row.id)
+    entries._page._run_all_tasks()
     entries.detail.history = [
         HistoryRow(
             1,
@@ -1616,6 +1663,9 @@ def special_entries(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     yield panel
     db.close()
@@ -1625,6 +1675,7 @@ def test_list_shows_newline_marker_and_editor_keeps_exact_text(special_entries):
     panel = special_entries
     first = next(r for r in panel.rows if r.key == "tip.a")
     panel.select(first.id)
+    panel._page._run_all_tasks()
     shown = texts_of(panel.list_view)
     assert any("¶" in t for t in shown)  # 清單預覽：換行顯示成 ¶
     assert panel.src_text.value == "Hello %s\nWorld"  # 原文保留真正的換行
@@ -1637,6 +1688,7 @@ def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entr
 
     panel = special_entries
     panel.select(next(r for r in panel.rows if r.key == "tip.a").id)
+    panel._page._run_all_tasks()
     preview = panel.mc_preview
     assert preview.control.visible is True and preview.text.spans
     assert preview.text.visible is True and preview.hint.visible is False
@@ -1672,6 +1724,7 @@ def test_editor_hints_for_missing_tokens_whitespace_and_color_codes(special_entr
 def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries):
     panel = special_entries
     panel.select(next(r for r in panel.rows if r.key == "tip.a").id)
+    panel._page._run_all_tasks()
     panel.tw_field.value = " §c警告§r %s\n第二行\n"
     panel._on_text_change()
     panel._save()
@@ -1773,6 +1826,9 @@ def test_entries_and_overview_show_unknown_original_text(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     assert entries_panel.NO_SOURCE_TEXT == panel.src_text.value
     assert "（原文未知）" in texts_of(panel.list_view)
@@ -1784,10 +1840,10 @@ def test_entries_and_overview_show_unknown_original_text(db_path):
 
 
 def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selection(
-    db_path,
+    db_path, monkeypatch
 ):
     from app.services_impl.moddb_service import EntryFilter
-    from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
+    from app.views.moddb import batch_replace_dialog as module
 
     db = TranslationDB(db_path)
     db.ingest(
@@ -1803,13 +1859,24 @@ def test_batch_replace_dialog_pages_all_rows_and_requires_preview_after_selectio
             for index in range(55)
         ],
     )
-    dialog = BatchReplaceDialog(
+    dialog = module.BatchReplaceDialog(
         mock_page(),
         lambda: db,
         EntryFilter(version="1.21.1"),
         lambda _result: None,
         operation_launcher=lambda target, **_kwargs: (target(), True)[1],
     )
+    shown: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "show_snack",
+        lambda _page, message, *_args, **_kwargs: shown.append(message),
+    )
+    assert "產生預覽" in dialog.apply_btn.tooltip
+    dialog._open_final_confirmation()
+    assert shown == [module.PREVIEW_REQUIRED_HINT]
+    assert module.PREVIEW_REQUIRED_HINT in dialog.summary.value
+
     dialog.find_field.value = "舊"
     dialog.replace_field.value = "新"
     dialog._preview()
@@ -1966,7 +2033,7 @@ def test_batch_replace_requires_second_confirmation_of_same_plan(db_path):
     approved_plan = dialog.plan
     assert approved_plan is not None
     dialog._open_final_confirmation()
-    assert dialog.final_summary.value.find("實際寫入 1") >= 0
+    assert dialog.final_summary.value.find("可替換 1 筆") >= 0
     assert len(page.overlay) == 1
     dialog.final_ack.value = True
     dialog.plan = None  # Any changed preview invalidates the final confirmation.
@@ -2433,6 +2500,9 @@ def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     panel.advanced_filters.time_kind.value = "effective_updated"
     panel.advanced_filters.time_preset.value = "custom"
@@ -2477,6 +2547,7 @@ def test_sync_switch_starts_from_setting_and_refreshes_the_preview(
     assert panel.sync_row.value is False  # 設定關閉就不該預設同步
 
     panel.select(next(r for r in panel.rows if r.key == "item.foo.a").id)
+    panel._page._run_all_tasks()
     panel.tw_field.value = "新譯文"
     panel._on_text_change()
     assert (
@@ -2652,6 +2723,9 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     scrolls: list[float] = []
     panel._scroll_list_to = scrolls.append  # 記錄清單被捲到哪裡
@@ -2661,6 +2735,7 @@ def test_entries_save_keeps_scroll_position_and_selects_the_next_entry(db_path):
     keys = [r.key for r in panel.rows]
     assert len(keys) == 6
     panel.select(panel.rows[2].id)
+    panel._page._run_all_tasks()
     panel._scroll_offset = 420.0  # 使用者已往下捲
 
     panel.tw_field.value = "文字二"
@@ -2695,6 +2770,7 @@ def test_entries_save_keeps_scroll_position_through_parent_refresh(db_path):
             "page": panel.pager.current_page,
             "filter_only": False,
             "keep_scroll": panel._refresh_keep_scroll,
+            "fallback_index": panel._refresh_fallback_index,
             "identity": panel._db_identity,
             "source_catalog": panel._render_source_catalog,
             "selected_id": panel.selected.id if panel.selected else None,
@@ -2705,20 +2781,25 @@ def test_entries_save_keeps_scroll_position_through_parent_refresh(db_path):
         panel.apply_refresh_snapshot(snapshot)
 
     panel = entries_panel.EntriesPanel(page, lambda: db, on_changed=parent_refresh)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     panel._scroll_list_to = scrolls.append
     panel._on_state("none")
     keys = [r.key for r in panel.rows]
     panel.select(panel.rows[2].id)
+    page._run_all_tasks()
     panel._scroll_offset = 420.0
 
     panel.tw_field.value = "文字二"
     panel._on_text_change()
-    refresh_count_before_save = len(scrolls)
+    scrolls_before_save = len(scrolls)
     panel._save()
     page._run_all_tasks()
 
-    assert scrolls[refresh_count_before_save:] == [420.0]
+    # 寫入後只重載一次（由父層快照套用），且沿用原本的捲動位置
+    assert scrolls[scrolls_before_save:] == [420.0]
     assert panel.selected is not None and panel.selected.key == keys[3]
     assert panel._refresh_keep_scroll is False
     db.close()
@@ -2738,6 +2819,9 @@ def test_entries_save_on_the_last_row_of_the_last_page_goes_back_a_page(db_path)
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     panel._on_state("none")
     panel._load_list(page=2, keep_selection=False)

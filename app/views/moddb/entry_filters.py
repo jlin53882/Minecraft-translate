@@ -8,6 +8,7 @@ from app.services_impl.moddb_service import EntryFilter
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate
 from app.views.moddb.advanced_filters import AdvancedFilters
 from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
@@ -38,8 +39,13 @@ def build_filter_controls(panel) -> None:
     _build_filter_card(panel)
 
 
-def apply_filter_options(panel, snapshot: dict) -> None:
-    """套用背景載入的篩選選項，並保持目前選取值有效。"""
+def apply_filter_options(panel, snapshot: dict) -> bool:
+    """套用背景載入的篩選選項，並保持目前選取值有效；回傳篩選列是否有任何顯示內容改變。
+
+    選項與選值都沒變時（例如存檔後重新載入同一頁）篩選列不必重畫；
+    它的下拉選單有上千個模組選項，重畫一次要上百毫秒。內容有變的下拉選單登記在
+    ``panel.filter_flush``，畫面只更新這幾個，不重畫整張篩選列。
+    """
     identity = snapshot.get("identity")
     panel._render_source_catalog = snapshot.get("source_catalog")
     if "identity" in snapshot:
@@ -50,11 +56,20 @@ def apply_filter_options(panel, snapshot: dict) -> None:
             reset_editor_for_database_change(panel)
             panel.source_filter.reset()
             panel._db_identity = identity
-    panel.source_filter.refresh(
-        snapshot.get("effective_source_codes", ()),
-        catalog=snapshot.get("source_catalog"),
-        available_only=bool(snapshot.get("filter_options_are_filtered")),
-    )
+    dropdowns = {
+        "version": panel.version_dd,
+        "mod": panel.mod_dd,
+        "kind": panel.kind_dd,
+        "source": panel.source_filter.dropdown,
+    }
+    values_before = {name: dd.value for name, dd in dropdowns.items()}
+    options_changed = {
+        "source": panel.source_filter.refresh(
+            snapshot.get("effective_source_codes", ()),
+            catalog=snapshot.get("source_catalog"),
+            available_only=bool(snapshot.get("filter_options_are_filtered")),
+        )
+    }
     if "source" in snapshot:
         source = snapshot.get("source")
         source_value = ALL_SOURCES if source is None else str(source)
@@ -65,22 +80,91 @@ def apply_filter_options(panel, snapshot: dict) -> None:
             source_value if source_value in available_values else ALL_SOURCES
         )
     versions = snapshot.get("versions", [])
-    kit.set_dropdown_options(panel.version_dd, [(v, v) for v in versions])
+    options_changed["version"] = kit.set_dropdown_options(
+        panel.version_dd, [(v, v) for v in versions]
+    )
     panel.version = snapshot.get("version")
     panel.version_dd.value = panel.version
     mods = snapshot.get("mods", [])
-    kit.set_dropdown_options(
+    options_changed["mod"] = kit.set_dropdown_options(
         panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
     )
     panel.mod_id = snapshot.get("mod_id")
     panel.mod_dd.value = panel.mod_id or ALL_MODS
     kinds = snapshot.get("kinds", [])
-    kit.set_dropdown_options(
+    options_changed["kind"] = kit.set_dropdown_options(
         panel.kind_dd,
         [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
     )
     panel.kind = snapshot.get("kind")
     panel.kind_dd.value = panel.kind or ALL_KINDS
+    changed = [
+        dd
+        for name, dd in dropdowns.items()
+        if options_changed[name] or dd.value != values_before[name]
+    ]
+    flush_state = getattr(panel, "filter_flush", None)
+    if flush_state is not None:
+        flush_state.mark(changed)
+    return bool(changed)
+
+
+class FilterFlush:
+    """篩選列哪些控制項需要重畫：只更新有變的下拉選單與狀態列，不重畫整張篩選列。
+
+    - 下拉選單：``apply_filter_options`` 登記選項或選值有變的那幾個（``mark``）；
+    - 進階條件摘要、錯誤文字與四個資料操作按鈕（載入中停用）：它們被改了之後沒有人明確更新就不會顯示，
+      所以每次送出時比對上次送出的狀態；
+    - 來源不明的變更（``mark_all``）才整張篩選列重畫。
+    """
+
+    def __init__(self) -> None:
+        self._dropdowns: list[ft.Control] = []
+        self._whole_card = False
+        self._flushed: tuple | None = None
+
+    def mark(self, dropdowns) -> None:
+        self._dropdowns.extend(dd for dd in dropdowns if dd not in self._dropdowns)
+
+    def mark_all(self) -> None:
+        self._whole_card = True
+
+    @staticmethod
+    def _state(panel) -> tuple:
+        advanced = panel.advanced_filters
+        return (
+            (
+                advanced.active_text.value,
+                advanced.clear_button.visible,
+                tuple(
+                    button.disabled
+                    for button in (
+                        panel.batch_replace_btn,
+                        panel.bulk_review_btn,
+                        panel.smart_review_btn,
+                        panel.species_scan_btn,
+                    )
+                ),
+            ),
+            (advanced.error_text.value, advanced.error_text.visible),
+        )
+
+    def take(self, panel) -> list[ft.Control]:
+        """這次要更新的控制項（空清單表示篩選列完全沒變），並清掉待更新記錄。"""
+        state = self._state(panel)
+        if self._whole_card:
+            regions: list[ft.Control] = [panel.filter_card]
+        else:
+            regions = list(self._dropdowns)
+            previous = self._flushed
+            if previous is None or state[0] != previous[0]:
+                regions.append(panel.filter_actions_row)
+            if previous is None or state[1] != previous[1]:
+                regions.append(panel.advanced_filters.error_text)
+        self._flushed = state
+        self._dropdowns = []
+        self._whole_card = False
+        return regions
 
 
 def refresh_after_database_change(panel) -> None:
@@ -224,44 +308,51 @@ def _build_flagged_banner(panel) -> None:
 
 def _build_filter_card(panel) -> None:
     """建立 ModDB 篩選條件卡片並放入相關控制項。"""
-    panel.filter_card = kit.section_card(
-        None,
-        ft.Column(
-            [
-                ft.Row(
-                    [
-                        panel.version_dd,
-                        panel.mod_dd,
-                        panel.kind_dd,
-                        panel.source_filter.dropdown,
-                        panel.search_field_dd,
-                        panel.search,
-                    ],
-                    spacing=12,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                ft.Row(
-                    [panel.state_seg, panel.review_filter, panel.smart_review_filter],
-                    spacing=10,
-                    scroll=ft.ScrollMode.AUTO,
-                ),
-                ft.Row(
-                    [
-                        panel.advanced_filters.toggle_button,
-                        panel.advanced_filters.active_text,
-                        panel.advanced_filters.clear_button,
-                        panel.batch_replace_btn,
-                        panel.bulk_review_btn,
-                        panel.smart_review_btn,
-                        panel.species_scan_btn,
-                    ],
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-                panel.advanced_filters.panel,
-            ],
-            spacing=10,
-        ),
+    panel.filter_actions_row = ft.Row(
+        [
+            panel.advanced_filters.toggle_button,
+            panel.advanced_filters.active_text,
+            panel.advanced_filters.clear_button,
+            panel.batch_replace_btn,
+            panel.bulk_review_btn,
+            panel.smart_review_btn,
+            panel.species_scan_btn,
+        ],
+        spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+    panel.filter_card = isolate(
+        kit.section_card(
+            None,
+            ft.Column(
+                [
+                    ft.Row(
+                        [
+                            panel.version_dd,
+                            panel.mod_dd,
+                            panel.kind_dd,
+                            panel.source_filter.dropdown,
+                            panel.search_field_dd,
+                            panel.search,
+                        ],
+                        spacing=12,
+                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    ),
+                    ft.Row(
+                        [
+                            panel.state_seg,
+                            panel.review_filter,
+                            panel.smart_review_filter,
+                        ],
+                        spacing=10,
+                        scroll=ft.ScrollMode.AUTO,
+                    ),
+                    panel.filter_actions_row,
+                    panel.advanced_filters.panel,
+                ],
+                spacing=10,
+            ),
+        )
     )
 
 
@@ -304,21 +395,35 @@ def refresh_entry_filter(
     page: int = 1,
     keep_selection: bool = True,
     full_refresh: bool = False,
-    background: bool = False,
+    background: bool = True,
+    page_only: bool = False,
+    keep_scroll: bool = False,
+    defer_options: bool = False,
 ) -> None:
-    """同步重新載入指定結果頁，必要時交給上層維持共用狀態。"""
+    """重新載入指定結果頁，必要時把篩選變更交給上層處理。
+
+    ``page_only`` 表示只有頁碼變了（篩選條件與選項都沒變），``keep_scroll`` 表示維持清單的捲動位置。
+    ``defer_options`` 表示只有篩選條件變了（版本、模組、類型都沒換）：先顯示清單，
+    模組／來源選項（需要另一次掃描）稍後在背景補上。
+    """
     panel.pager.set_state(panel.total, page)
     if panel._on_filter_changed is not None:
         panel._on_filter_changed(
-            page, keep_selection, full_refresh, background=background
+            page,
+            keep_selection,
+            full_refresh,
+            background=background,
+            page_only=page_only,
+            keep_scroll=keep_scroll,
+            defer_options=defer_options,
         )
         return
-    panel._load_list(page=page, keep_selection=keep_selection)
+    panel._load_list(page=page, keep_selection=keep_selection, keep_scroll=keep_scroll)
     panel._safe_update()
 
 
 def on_advanced_change(panel) -> None:
-    refresh_entry_filter(panel)
+    refresh_entry_filter(panel, defer_options=True)
 
 
 def open_batch_replace(panel, _e=None) -> None:

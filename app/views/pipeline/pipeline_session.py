@@ -161,8 +161,12 @@ class PipelineRunner:
             )
             self.ui_view(on_end)
 
-    def start_sequence(self, steps, on_end) -> None:
-        """在背景依序執行步驟；任一步驟失敗／取消就停止，最後在 event loop 呼叫 ``on_end``。"""
+    def start_sequence(self, steps, on_end, *, dry_run: bool = False) -> None:
+        """在背景依序執行步驟；任一步驟失敗／取消就停止，最後在 event loop 呼叫 ``on_end``。
+
+        ``dry_run``：翻譯步驟只分析不翻譯；完成訊息要標示，才不會被當成已產出譯文。
+        """
+        self._dry_run = dry_run
 
         def worker():
             success = False
@@ -209,9 +213,14 @@ class PipelineRunner:
 
     def _finish_sequence(self, success: bool, on_end) -> None:
         cancelled = self.cancel_event.is_set()
-        self._panel.finish_all(success, cancelled=cancelled)
+        dry_run = getattr(self, "_dry_run", False)
+        self._panel.finish_all(success, cancelled=cancelled, dry_run=dry_run)
         if success:
-            self._panel.add_log("✅ 一鍵製作完成！")
+            self._panel.add_log(
+                "✅ 一鍵製作完成（翻譯為 Dry Run，未翻譯）"
+                if dry_run
+                else "✅ 一鍵製作完成！"
+            )
         elif cancelled:
             self._panel.add_log("⏹ 一鍵製作已取消", "warning")
         on_end()

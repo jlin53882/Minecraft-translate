@@ -127,6 +127,7 @@ class QCBase:
             in_new_task("qc", run),
             name="品質檢查",
             owner="qc",
+            view_key="qc",
             cancellation=CancellationPolicy.NON_CANCELLABLE,
             shutdown=ShutdownPolicy.DRAIN_ONLY,
         )

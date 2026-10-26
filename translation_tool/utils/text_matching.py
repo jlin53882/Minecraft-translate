@@ -54,6 +54,10 @@ def _contains_normalized_term(normalized_source: str, normalized_term: str) -> b
     """比對已 casefold 正規化的來源與術語，詞界規則與 ``contains_term`` 相同。"""
     if not normalized_source or not normalized_term:
         return False
+    # 前綴索引的候選多數只是前三個字相同；C 層的子字串檢查先排除，免得為每個候選
+    # 都做詞界判斷（候選數 × 來源數是術語比對的主要成本）。
+    if normalized_term not in normalized_source:
+        return False
 
     starts_with_word = _is_word_char(normalized_term[0])
     ends_with_word = _is_word_char(normalized_term[-1])

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -60,6 +61,10 @@ from translation_tool.translation_db import (
     open_db,
 )
 from translation_tool.translation_db.quality import token_issues, whitespace_note
+from translation_tool.translation_db.query_interrupt import (
+    QueryCancelled,
+    QueryInterrupt,
+)
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
     SRC_AI,
@@ -191,18 +196,31 @@ def open_database(
 @contextmanager
 def moddb_read_snapshot(
     settings: DbSettings | None = None,
+    *,
+    interrupt: QueryInterrupt | None = None,
 ) -> Iterator[TranslationDB | None]:
     """開啟 worker 專用的唯讀連線，並在一個讀取交易內提供一致的快照。
 
     資料庫不存在時 yield ``None``。離開時一律 rollback 並關閉連線；交易歸這個
-    context manager 所有，呼叫端不碰 ``_conn``。
+    context manager 所有，呼叫端不碰 ``_conn``。``interrupt`` 讓其他執行緒可以中斷
+    這條連線上的查詢；查詢被中斷時 ``sqlite3.OperationalError`` 會轉成 ``QueryCancelled``。
     """
     db = open_database(create=False, settings=settings, readonly=True)
     try:
         if db is not None:
+            if interrupt is not None:
+                interrupt.raise_if_cancelled()
+                interrupt.attach(db._conn)
             db._conn.execute("BEGIN")
-        yield db
+        try:
+            yield db
+        except sqlite3.OperationalError as exc:
+            if interrupt is not None and interrupt.cancelled:
+                raise QueryCancelled from exc
+            raise
     finally:
+        if interrupt is not None:
+            interrupt.detach()
         if db is not None:
             try:
                 if db._conn.in_transaction:

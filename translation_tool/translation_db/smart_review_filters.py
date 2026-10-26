@@ -226,13 +226,12 @@ class SmartReviewCandidateSelectionMixin:
             query=None,
             require_reviewed_reference=False,
         )
-        query = (
-            selection.reference_cte + "SELECT DISTINCT e.mod_id, f.source "
-            "FROM entry e JOIN effective f ON f.entry_id=e.id "
-            + selection.reference_join
-            + f"WHERE {selection.where_sql} ORDER BY e.mod_id, f.source"
+        rows = self._scope_pairs(
+            version,
+            "FROM entry e JOIN effective f ON f.entry_id=e.id",
+            selection.where_sql,
+            selection.params,
         )
-        rows = self._q(query, selection.params)
         modules: list[str] = []
         sources_by_mod: dict[str, set[int]] = {}
         all_sources: set[int] = set()
@@ -300,11 +299,13 @@ class SmartReviewCandidateSelectionMixin:
                 "SELECT e.id, e.mc_version, e.mod_id, e.kind, e.en_us, "
                 "f.zh_tw AS f_zh_tw, f.source AS f_source, "
                 f"({selection.effective_review}) AS effective_review FROM "
-                + "selected_groups g JOIN "
+                # CROSS JOIN 固定由頁面群組出發：讓規劃器自選順序時會從 f.source 的
+                # 數萬列起頭、每列重掃 json_each，頁面越多越慢（數秒到數十秒）
+                + "selected_groups g CROSS JOIN "
                 + twin_entry_source
                 + " ON e.mc_version IS g.mc_version AND e.mod_id IS g.mod_id "
                 "AND e.kind IS g.kind AND e.en_us IS g.en_us "
-                + "JOIN effective f ON f.entry_id=e.id "
+                + "CROSS JOIN effective f ON f.entry_id=e.id "
                 + "AND f.zh_tw IS g.current_zh_tw "
                 "AND f.source IS g.effective_source "
                 f"AND ({selection.effective_review}) IS g.effective_review "
@@ -520,11 +521,14 @@ class SmartReviewCandidateSelectionMixin:
         )
         candidate_cte = _smart_review_candidate_cte(selection, "entry e")
         group_sql = _smart_review_group_sql("c")
-        row = self._one(
-            candidate_cte
-            + " SELECT COUNT(*) FROM (SELECT 1 FROM candidate_rows c GROUP BY "
-            + group_sql
-            + ")",
-            selection.params,
+        # 同文去重要對所有候選列分組（數十萬筆時 1 秒以上）；候選範圍只取決於條目、
+        # 生效譯文與審核狀態，所以依資料世代快取，面板每次重新整理不重算
+        return int(
+            self._cached_count(
+                candidate_cte
+                + " SELECT COUNT(*) FROM (SELECT 1 FROM candidate_rows c GROUP BY "
+                + group_sql
+                + ")",
+                list(selection.params),
+            )
         )
-        return int(row[0]) if row else 0

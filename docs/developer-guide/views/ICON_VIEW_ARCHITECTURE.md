@@ -16,13 +16,19 @@ IconPreviewView（`app/views/icon_preview_view.py`）是**翻譯校對頁**：�
 ```
 app/views/icon_preview_view.py        ← 主視圖（生命週期、載入編排、進度、雙層 UI 狀態）；列表與詳情邏輯見 icon_preview/
 app/icon_index.py                     ← 預建 icon 索引：build_and_save_icon_index() 建置、load_icon_index() 供載入流程讀取
+app/icon_jar_scan.py                  ← scan_jar()：單一 JAR 開一次 ZIP，讀出所有 `assets/<modid>/lang/en_us.json` 項目並解析每個內容類 key 的圖示（`JarScan`）
+app/icon_scan_pool.py                 ← stream_jar_scans()：依完成順序產出各 JAR 的 `JarScan`；行程池（spawn）為主，無法啟動或中途壞掉時退回執行緒
+app/icon_catalog.py                   ← ModpackAssetCatalog：唯讀索引 JAR 內 model／blockstate／texture 位置（只切出 ZIP 中央目錄的名稱，結構不尋常時退回 `zipfile`），並快取解析後的 model（`ModelInfo`），同一資源只解壓一次
+app/icon_resolve.py                   ← resolve_icon()：lang key → 貼圖的挑選規則（parent 鏈、方塊面、mob_effect、同名貼圖、刷怪蛋）；`hit_to_uri()` 產生含預覽提示的 icon URI
+app/icon_render.py                    ← 影像處理（PIL）：動畫首格、整數倍最近鄰放大、灰階染色、等角方塊、程式繪製的刷怪蛋與佔位圖
+app/icon_preview_image.py             ← render_icon_uri()：URI → 128×128 預覽 PNG（記憶體 LRU）；describe_icon_uri()：懸停提示文字
 app/icon_reader.py                    ← IconRef 解析 + 從 ZIP 讀 icon bytes（read_icon_bytes）
 app/icon_runtime.py                   ← get_runtime_asset_paths()：NeoForge runtime assets（納入 source identity 與索引 manifest）
 app/views/icon_preview_row.py         ← LangItemRow：單筆 key 列（icon 解析 + 翻譯輸入框）
 translation_tool/core/
   ├─ icon_resolver.py                 ← resolve_icon_with_reason() / resolve_icon_for_lang_key()
   ├─ icon_reason.py                   ← IconRisk / IconResult 資料結構
-  ├─ icon_preview_cache.py            ← generate_icon_preview()（64×64 快取）
+  ├─ icon_preview_cache.py            ← generate_icon_preview()（舊式磁碟路徑的預覽快取）
   └─ icon_classifier.py               ← classify_no_icon_reason()，由 icon_resolver.resolve_icon_with_reason 呼叫
 ```
 
@@ -35,7 +41,7 @@ translation_tool/core/
 3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_path_input`、`pick_review_btn` + `review_path_input`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；路徑輸入框預設顯示「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
 4. `save_btn`（僅詳情頁顯示）
 5. `page_bar`（`prev_page_btn` / `page_info` / `next_page_btn`；預設只見左右箭頭，`page_info` 為空）與 `page_size_selector`（「每頁顯示」，預設 50）
-6. `list_view`：模組清單列（`_mod_row`）或詳情頁的 `LangItemRow`
+6. `mod_list_view`（模組清單列 `ModRow`）與 `detail_list_view`（詳情頁 `LangItemRow`）：兩個 ListView 同時存在，以 `_switch_list` 切換 `visible`；`list_view` 屬性回傳目前顯示的那一個。兩種列都放在 view 的列池（`_mod_row_pool`、`_detail_row_pool`），換頁時重新 `bind`，不重建控制項
 
 進入詳情頁時，`_update_detail_search_controls` 會在 `list_view` 前插入 `detail_search_tf` / `detail_search_status`。
 
@@ -45,29 +51,31 @@ translation_tool/core/
 [載入] _on_load_clicked()（sync handler：驗證路徑、顯示掃描提示，之後以 page.run_task 排程 _load_async）
   └─ _load_async(generation, operation) → load_operation.load_icon_preview()：每個阻塞步驟經 _run_blocking 在執行緒執行，每步之後檢查世代（卸載就丟棄）
        ├─ _detect_source_mode()（glob / rglob）
-       ├─ _lookup_cached_entries(mode)：L1（_entries_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，讀磁碟 JSON）→ 命中即 _apply_cached_entries（_rebuild_mods + _render_mod_list，在 event loop）
+        ├─ _lookup_cached_entries(mode)：L1（_source_cache，source identity 相符；extracted_folder 驗證所有 en_us.json 的相對路徑、大小與 mtime_ns，jar_directory 驗證 JAR 與 runtime assets）→ L2（僅 jar_directory，`open_entries_cache_l2` 只讀 index.json）→ 命中時以 `ModEntryStore`（modid → entries，第一次存取才讀該模組分片並補譯文）包裝，背景執行緒只預載第一頁模組；任何後續分頁的 `ShardLoadError` 都會使來源失效並排程重新掃描 → _apply_cached_entries（把 store 設為 mods + _render_mod_list，在 event loop，不讀檔）
        ├─ 未命中 → _count_scan_steps(mode)（glob / rglob）→ _show_scan_started（進度條，在 event loop）
-       └─ _scan_entries(mode, total_steps) → _finish_load(entries, mode)
+       └─ _scan_entries(mode, total_steps, generation) → _finish_load(entries 或 ModEntryStore, mode)
   無 page.run_task（測試替身）時維持同步流程（_try_use_cached_entries / _begin_scan）
   Lifecycle：will_unmount() 遞增 _load_generation／_render_generation 並取消 debounce——進行中的載入結果丟棄、旗標復位；_load_operation 讓只有目前載入 owner 可以清除忙碌狀態，避免舊作業覆蓋新作業；did_mount() 只同步載入按鈕狀態
   _scan_entries(mode, total_steps)
     ├─ extracted_folder → _load_entries()
     │      └─ 掃 source_root 的 en_us.json（modid 取自路徑中 assets 的下一段），建立 entries（modid/key/en）
-    └─ jar_directory → _load_entries_from_jar_directory()
-           ├─ _scan_jar_entries：以 jar_browser.scan_jars 掃 JAR 內 assets/<modid>/lang/en_us.json 建立 entries
-           └─ _extract_and_cache_icons：_batch_extract_jar_icons，再 _save_entries_cache_l2
-    └─ 回傳前以 _hydrate_entries 補上 zh_tw（_build_zh_tw_lookup：直接路徑 review_root/<modid>/lang/zh_tw.json，再 rglob 補漏）
-  _finish_load(entries, mode)：寫 L1 快取、依 modid 分組為 mods、_render_mod_list()（第一層，依模組分頁；page_size_selector 控制每頁模組數）
+    └─ jar_directory → scan_operation.scan_jar_directory(view, generation)（背景執行緒）
+           ├─ 排序 JAR；只有與目前 JAR 一致且每個來源 `complete_by_jar` 都為真的預建索引（`load_icon_index`）才只讀 lang 並以索引覆蓋圖示，否則逐 JAR 解析圖示
+           ├─ icon_scan_pool.stream_jar_scans：每個 JAR 一個工作（icon_jar_scan.scan_jar），依完成順序回傳；累積到 `ScannedSource`，進度走 `_set_progress`
+           ├─ 每 0.5 秒 publish_partial → event loop 上 apply_partial：以快照顯示模組清單（`_scan_partial`；詳情／搜尋中不套用）
+           └─ 完成後 `_build_zh_tw_lookup`（直接路徑 review_root/<modid>/lang/zh_tw.json，再 rglob 補漏）、`save_source_cache_l2` 寫 L2，回傳 `ModEntryStore`
+    └─ extracted_folder 回傳前以 _hydrate_entries 補上 zh_tw
+  _finish_load(entries, mode)：寫 L1 快取、設定 mods、_render_mod_list()（第一層，依模組分頁；page_size_selector 控制每頁模組數）；使用者掃描期間開了詳情就不拉回清單，輸入了模組搜尋就以完整結果重跑搜尋；結果為空或失敗時丟棄部分清單
 
 [進度] _make_progress_callback / _show_progress_phase → 模組層 _set_progress → IconPreviewView._set_progress
   └─ 背景執行緒只記下最新值與載入世代，_refresh_progress 節流（約 0.2 秒）後經 page.run_task 在 event loop 上套用到 progress_bar / progress_text；舊世代排入 UI loop 的更新會丟棄
 
 [校對] _open_mod_detail(modid) → 第二層
   ├─ 讀 zh_tw：背景執行緒 _find_zh_file（review_root/<modid>/lang/zh_tw.json，不存在則 rglob 補找），回到 event loop 後才套用（期間若返回／換頁／卸載則丟棄）
-  ├─ _render_current_page()：頁碼立即更新；每列圖示準備（prepare_row_icon：解析圖示、讀 JAR、產生預覽圖、upscale）在背景執行緒，event loop 上只建構 LangItemRow（prepared_icon），連續渲染只套用最後一次
+  ├─ _render_current_page()：頁碼立即更新；每列圖示準備（prepare_row_icon：解析圖示、讀 JAR、產生預覽圖、upscale）在背景執行緒，event loop 上 `_fill_rows` 只把這一頁的項目 `bind` 到列池的 `LangItemRow`（prepared_icon，欄位值與圖示變動才送 patch），連續渲染以 `_render_generation` 只套用最後一次
   ├─ 儲存 zh_tw.json：_save_current_zh 在背景執行緒寫檔（_write_zh_file），_finish_save 回 event loop 顯示結果
   │    ├─ 依 _detail_filtered_entries（搜尋）或 mods[current_modid] 分頁（每頁 page_size）
-  │    └─ 每筆 → LangItemRow(lang_key, en_text, zh_text, assets_root, preview_root, on_value_changed, icon_path)
+  │    └─ 每筆 → 列池的 LangItemRow.bind(lang_key, en_text, zh_text, prepared_icon)；池不夠時才以 _new_detail_row 新增
   ├─ 搜尋：_on_mod_search_change / _on_detail_search_change → Debouncer（150ms）→ _do_mod_search / _do_detail_search
   │    （詳情搜尋比對 key、英文、譯文）
   └─ _on_value_changed(key, value) → _zh_data 更新（to_halfwidth 正規化）
@@ -79,8 +87,8 @@ translation_tool/core/
 
 1. `icon_path` 已提供（JAR 模式預先解析，可為 `jar://` URI）→ 直接包成 `IconResult`，跳過 resolve
 2. 否則 `resolve_icon_with_reason(lang_key, assets_root)`（`assets_root` = `source_root / "assets"`）
-3. `_resolve_preview_path`：`_HAS_ICON_READER` 且 `IconRef.parse()` 成功 → `read_icon_bytes()` 從 ZIP 讀 bytes 寫入 preview_root 快取；否則 `generate_icon_preview()`（64×64 PNG）
-4. `_build_icon_widget`：`_ensure_icon_size` 將小於 64 的圖以 nearest neighbor 放大，顯示為 128×128 的 `ft.Image`
+3. `_resolve_preview_path`：只處理舊式磁碟路徑（`generate_icon_preview`）；`jar://` 與 `mct-icon://` URI 由 `prepare_row_icon` 直接呼叫 `render_icon_uri()`（讀 JAR bytes、套用 `app/icon_render.py` 規則、結果進記憶體 LRU）
+4. `_build_icon_widget`：以 128×128、`filter_quality=NONE` 的 `ft.Image` 1:1 顯示（`_ensure_icon_size` 只用於舊式磁碟預覽）；懸停提示由 `describe_icon_uri` 產生（貼圖、模型、來源 JAR、等角／染色／UV 展開圖註記）；內容類 key（item／block 等）找不到圖示時顯示共用佔位圖與原因，非內容類 key 不佔版面
 5. 無預覽圖：有 reason 時顯示灰底警示圖示 + 依 `IconRisk` 上色的原因文字；沒有 reason 則不顯示 icon（不中斷 UI）
 
 ## icon_resolver.py 決策鏈（extracted_folder 模式）
@@ -96,17 +104,17 @@ translation_tool/core/
 - 命中 → `IconResult(icon_path=..., reason="", risk=None)`
 - 未命中 → `classify_no_icon_reason(lang_key)`（icon_classifier.py，依 key 關鍵字啟發式分類）→ `IconResult(icon_path=None, reason, risk)`
 
-## JAR 模式 icon 提取（view 模組層函式 + app/icon_index.py）
+## JAR 模式 icon 提取（`app/icon_jar_scan.py`、`app/icon_scan_pool.py`、`app/icon_index.py`）
 
-- `_batch_extract_jar_icons(jar_to_entries, icon_cache_root, source_root, progress_cb)`（`icon_cache_root` 參數保留但不再使用）：
-  1. 先 `icon_index.load_icon_index(source_root)`；有索引就直接套用（`_apply_icon_index`，不做 JAR I/O）
-  2. 無索引則建立 `ModpackAssetCatalog.from_mods_directory(source_root)`，再由 `_run_jar_workers` 以 ThreadPoolExecutor（worker 數取 config `translator.parallel_execution_workers`，預設 4）逐 JAR 處理；只處理 `_key_needs_icon` 為真的 key（item/block/entity 等前綴）
-- 逐 key 解析用 `_resolve_icon_from_catalog`：依 key 前綴（`_CONTENT_ICON_PREFIXES`）、key namespace 與 lang namespace 查 item／block 的 model 與 blockstate，再以 `_follow_parent_chain` 追 parent model 取得 texture；同一批次內以 (modid, key) 記憶結果。
+- 冷載入：`scan_jar(jar_path, catalog)` 對每個 JAR 只開一次 ZIP——先以 `assets/([^/]+)/lang/en_us\.json` 讀出 lang（各 JAR 一份 `ZipReadBudget`，累計超限則整個 JAR 視為沒有項目），再對 `key_needs_icon`（item／block／entity 等前綴）為真的 key 呼叫 `resolve_icon`（獨立的圖示讀取預算，超限後該 JAR 不再解析）。結果是 `JarScan.mods`（`modid → [(key, en, icon_uri)]`）。每個 (modid, key) 只依該 JAR 自己解析，不與其他 JAR 共用結果，因此與完成順序無關。
+- 並行：`icon_scan_pool.stream_jar_scans` 選擇執行器。JAR 數 ≥ `PROCESS_MIN_JARS`、worker 數 > 1 且有預建索引以外的圖示解析需求時用 `spawn` 行程池（worker 數取 `resolve_worker_count("icon_cache")`，不超過 CPU 核心數），每個 worker 第一次工作時建立自己的 `ModpackAssetCatalog`；否則用執行緒池共用一份 catalog。打包後需在入口呼叫 `multiprocessing.freeze_support()`（`main.py`）。行程池啟動失敗或中途整個壞掉時，其餘 JAR 改用執行緒。取消由 `cancel_scope` 的檢查函式經監看執行緒設定共用 `Event`，worker 內 `raise_if_cancelled` 中止。
+- `ModpackAssetCatalog` 只索引 `assets/*/{models,blockstates,textures}` 的名稱；名稱由 `_central_directory_names` 直接切自 ZIP 中央目錄（ZIP64、前置附加資料、結構不一致時退回 `zipfile.namelist()`）。
+- 有完整預建索引時（`load_icon_index`，見下）`scan_jar_directory` 只讀 lang（`with_icons=False`，不建立 catalog），以 `ScannedSource.add(scan, icon_index)` 依來源 JAR 覆蓋圖示；任一 JAR 只有部分 mapping 時不接受整份索引，退回逐 JAR 解析。
+- 逐 key 解析規則：依 key 前綴（`CONTENT_ICON_PREFIXES`）、key namespace 與 lang namespace 查 item／block 的 model 與 blockstate，再追 parent model 取得 texture（`resolve_icon`；`icon_cache._resolve_icon_from_catalog` 是供 `app/icon_index.py` 與測試 patch 的穩定入口）。
   - 找不到 → 回 None，**不做 logo/icon.png 最終 fallback**（錯誤的 icon 比沒有更糟）
-- `_try_extract_mod_icon_from_model(jar, modid, zf, names, key)`：model index 路徑（`_load_model_index_from_cache` / `_build_model_index` / `_save_model_index_to_cache`，以 `_get_jar_hash`＝mtime+size 判斷失效），用 key 轉 model name（`block.<modid>.<name>` → `block/<name>`）精準匹配；預建索引 producer 未傳入 catalog 時使用。
 - 預建索引檔位於 `.icon_cache/icon_index/`。以 JAR 檔名、檔案大小與 `mtime_ns` 建立快速 manifest（另含 NeoForge runtime assets）；modpack 路徑、任一 JAR 的新增／刪除／metadata 變更都會造成 cache miss。這不是內容雜湊：若內容變更但檔案大小與時間戳都被保留，無法偵測。
 - 預建 producer（`app/icon_index.py`）讀取 `assets/<modid>/lang/en_us.json`，並直接從路徑取得 namespace；同一 JAR 的多個 namespace 都會掃描。JSON 缺漏或格式錯誤時退回同 namespace 的 `en_us.lang`；其他語系不作為索引來源。
-- 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；入口為 `build_and_save_icon_index`：建置索引、比對建置前後 manifest，若 JAR 在建置期間變更則拋出錯誤且不儲存。圖示解析（`_batch_extract_jar_icons`）會先以 `load_icon_index` 讀取索引；cache miss 則逐 JAR 解析。JAR 更新後重跑命令即可。
+- 可執行 `python tools/build_icon_index.py "<mods 資料夾>"` 預建索引；入口為 `build_and_save_icon_index`：建置索引、比對建置前後 manifest，並在每個 JAR 寫入完整性標記；若 JAR 在建置期間變更則拋出錯誤且不儲存。冷載入會先以 `load_icon_index` 讀取完整的 version 7 索引；任一 JAR 解析不完整或 cache miss 都逐 JAR 解析。JAR 更新後重跑命令即可。
 - icon 只來自 model 解析（model-only icon contract）；JAR 內通用圖檔與模組 metadata 不作為 icon 來源。
 - `_migrate_old_icon_cache`：選擇模組資料夾時，把舊路徑 `<source_root>/_icon_preview/jar_icons/` 的 png 搬到 `.icon_cache/jar_icons/`
 
@@ -115,19 +123,21 @@ translation_tool/core/
 | 元件 | 說明 |
 |------|------|
 | `source_root` / `review_root` | 原文（en_us + textures）/ 校對（zh_tw）資料夾 |
-| `mods` dict | modid → entries 列表 |
-| `_entries_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>.json`，只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要 |
+| `mods` | modid → entries 列表：JAR 目錄冷載入（含掃描中的部分結果）與快取命中時為 `ModEntryStore`（`mod_store.py`，唯讀 Mapping）；解包資料夾為 dict |
+| `_scan_partial` / `_partial_source` / `_partial_pending` | 冷載入途中 `mods` 是否為部分結果、待套用的快照、是否已排程套用 |
+| `_source_cache` / `_cache_meta` | L1 以 source identity 驗證：`extracted_folder` 比對所有 `en_us.json` 的相對路徑、大小與 `mtime_ns`；`jar_directory` 比對 JAR 與 NeoForge runtime assets 的路徑／檔名、大小與 `mtime_ns`。L2 為 `.icon_cache/<key>/`（`index.json` 列出模組與筆數，每個模組一個欄位式分片 `<n>.json`），只供 `jar_directory` 使用，key 是上述 JAR source identity 的摘要；分片讀取失敗會刪除來源快取並重新掃描，不會把錯誤當成空模組 |
 | `_mod_search_*` / `_detail_search_*` | 兩層即時搜尋（`Debouncer`，150ms） |
 | `mod_page_size` / `page_size` | 模組清單每頁數（`page_size_selector` 可選 25/50/100）/ 詳情頁每頁筆數（50） |
 | `LangItemRow` | 單筆 key：TextField（繁中可編輯）+ lang key + 英文原文 + icon 預覽 |
 
 ## 維護注意
 
-1. 新增 icon 解析策略時，JAR 模式改 `app/views/icon_preview/icon_cache.py`（與 `app/icon_index.py` 共用），資料夾模式改 `translation_tool/core/icon_resolver.py`，不要塞進 view。
-2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
-3. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
-4. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
-5. 背景掃描不可直接改控制項；進度一律走 `IconPreviewView._set_progress`。
+1. 新增 icon 解析策略時，JAR 模式改 `app/icon_resolve.py`（挑選規則）與 `app/icon_render.py`（影像處理）；逐 JAR 掃描在 `app/icon_jar_scan.py`，`app/views/icon_preview/icon_cache.py` 保留穩定的 patch 入口（與 `app/icon_index.py` 共用），資料夾模式改 `translation_tool/core/icon_resolver.py`，不要塞進 view。
+2. 刷新範圍：換頁、搜尋、改每頁筆數只呼叫 `_update_list_area`（清單、`page_bar`、搜尋狀態文字各自 `update()`），不對整個 view `update()`；只有標題、按鈕或搜尋框顯示狀態改變（進出詳情）才整個送出（`_list_chrome` 比對）。模組清單換頁時 `_prefetch_mod_pages` 在背景執行緒預載前後兩頁，詳情換頁時 `_prefetch_next_page_icons` 預先渲染下一頁圖示。
+3. `_render_current_page` 重用列池中的 `LangItemRow`（`bind` 只改值）；entry 需帶 `icon_path` 避免重複解析。新增欄位時在 `LangItemRow.__init__` 建立控制項、在 `bind` 更新值，不要在換頁路徑建立新控制項。
+4. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
+5. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
+6. 背景掃描不可直接改控制項；進度一律走 `IconPreviewView._set_progress`。
 
 ## 分層邊界
 
@@ -142,14 +152,27 @@ translation_tool/core/
 ```
 app/views/icon_preview_view.py            ← IconPreviewView 主體：生命週期、載入流程、進度
 app/views/icon_preview/
-  ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋
+  ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋；`_on_page_size_change` 在詳情頁改 `page_size`，在模組清單改 `mod_page_size`
+  ├─ mod_row.py          ModRow                  可重新綁定的模組清單列
   ├─ detail_mixin.py     IconPreviewDetailMixin  單一模組詳情、載入 entries、翻譯儲存
-  ├─ icon_cache.py       圖示提取與快取輔助函式（ModpackAssetCatalog、model JSON 解析、批次提取、model index 快取）
-  ├─ entries_cache.py    掃描結果（entries）的 L2 磁碟快取
+  ├─ icon_cache.py       舊 icon cache 目錄搬移、`_resolve_icon_from_catalog` 入口、`to_halfwidth`（ModpackAssetCatalog 在 `app/icon_catalog.py`）
+  ├─ scan_operation.py   JAR 目錄冷載入：驅動 `stream_jar_scans`、累積 `ScannedSource`、部分結果快照（`publish_partial`／`apply_partial`）與 L2 寫入
+  ├─ entries_cache.py    掃描結果的 L2 磁碟快取（index + 每模組分片，`ShardSource`；`save_source_cache_l2` 直接由來源寫出）
+  ├─ mod_store.py        `MemorySource` / `ScannedSource` / `ModEntryStore`：依需要載入單一模組的來源項目並補譯文（`ScannedSource` 依 JAR 分塊累積，`snapshot()` 給畫面）
   ├─ load_operation.py   載入編排（模式偵測、快取查詢、掃描），於 page operation 內執行
   ├─ render_operation.py 詳情頁列渲染（分頁、圖示準備），以世代號只套用最後一次結果
   └─ progress.py         Phase 進度顯示輔助
 app/views/icon_preview_row.py             ← 單列（圖示 + 翻譯欄位）
 ```
 
-測試要 monkeypatch 圖示輔助函式（`_get_cache_dir`、`_get_jar_hash`、`_try_extract_mod_icon_from_model` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）；L2 entries 快取目錄 `_get_cache_dir` 在 `entries_cache`。`app/icon_index.py` 也從 `icon_cache` 匯入 `_try_extract_mod_icon_from_model`。
+測試要 monkeypatch 圖示輔助函式（`_get_icon_cache_dir` 等）時，請 patch `app.views.icon_preview.icon_cache`（呼叫者都在該模組內查名稱）；L2 entries 快取目錄 `_get_cache_dir` 在 `entries_cache`。`app/icon_index.py` 也從 `icon_cache` 匯入 `_resolve_icon_from_catalog`。
+
+
+## 圖示解析與渲染規則
+
+- 索引與 L2 entries 快取內的 `icon_path` 是 URI：`jar://<archive>:<png>`，可帶 `#mct=<JSON>` 預覽提示（`k`=`iso` 等角方塊、`f` 與主貼圖不同的面、`t` 染色、`m` 模型、`u` UV 展開圖）；沒有貼圖的刷怪蛋為 `mct-icon://spawn_egg`。
+- 挑選順序：model（item／block／blockstate）→ 同名貼圖（item／block／mob_effect）。texture 優先序 `layer0, front, all, side, top, end, …`，`particle` 最後。
+- 完整方塊（原版 `cube_all`／`cube_column`／`orientable` 等模板或單一 16×16×16 element）使用頂／東／北三面合成等角預覽；其他模型為平面貼圖。
+- 缺少原版 client JAR 時，非原版命名空間的貼圖只在整包恰有一個同名檔案時採用；原版貼圖不猜測（顯示佔位圖）。
+- 預建索引建置：同一 key 出現在多個 JAR 時取 JAR 名稱排序最前者；冷載入則每個 JAR 的項目各自解析；lang JSON 容許註解、結尾逗號與原始控制字元。
+- 版本：`entries_cache._CACHE_VERSION` 與索引檔 `version` 變更會使舊快取內的 icon 失效。

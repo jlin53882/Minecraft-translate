@@ -89,6 +89,9 @@ _NAME_LIKE_KEY_PREFIXES = frozenset(
     }
 )
 
+_MATCH_CACHE_LIMIT = 50_000
+_ALLOWLIST_STATE_KEY = ("\0allowlist", None)
+
 _TERMINOLOGY_INSTRUCTION = (
     "\n【翻譯原則：術語優先、不要無故保留英文】\n"
     "以下逐筆術語映射是已審核或官方的唯一參考；當同一 payload id 的原文包含來源詞時，"
@@ -151,6 +154,11 @@ class OfficialLocaleIndex:
     terminology_terms: tuple[str, ...] = ()
     terminology_prefix_index: dict[str, tuple[tuple[str, str], ...]] = field(
         default_factory=dict
+    )
+    # (來源文字, key) → 命中結果。索引不可變，同一來源的命中結果固定；批次規劃、
+    # token 預算與送出前的提示詞會對同一批項目重複建立術語提示，記住結果就不用重掃術語表。
+    _match_cache: dict[tuple[str, object], Any] = field(
+        default_factory=dict, repr=False, compare=False
     )
 
     def lookup_exact(self, key: object, en_us: object, zh_cn: object) -> str | None:
@@ -216,8 +224,24 @@ class OfficialLocaleIndex:
         ):
             return []
 
-        normalized_source = normalize_terminology_text(source_text)
         source_key = item.get("path") or item.get("key")
+        # 命中結果取決於 standalone allowlist；報表與測試會替換它（或就地修改），
+        # 內容不同時快取整個作廢。
+        allowlist_state = (STANDALONE_ALLOWLIST, tuple(STANDALONE_ALLOWLIST.items()))
+        previous = self._match_cache.get(_ALLOWLIST_STATE_KEY)
+        if (
+            previous is None
+            or previous[0] is not allowlist_state[0]
+            or previous[1] != allowlist_state[1]
+        ):
+            self._match_cache.clear()
+            self._match_cache[_ALLOWLIST_STATE_KEY] = allowlist_state
+        cache_key = (source_text, source_key if isinstance(source_key, str) else None)
+        cached = self._match_cache.get(cache_key)
+        if cached is not None:
+            return list(cached)
+
+        normalized_source = normalize_terminology_text(source_text)
         candidates: list[tuple[int, OfficialTerminologyMatch]] = []
 
         def add(
@@ -364,7 +388,12 @@ class OfficialLocaleIndex:
             selected.append((priority, match))
             if len(selected) >= _MAX_TERMS_PER_ITEM:
                 break
-        return [match for _priority, match in selected]
+        if len(self._match_cache) >= _MATCH_CACHE_LIMIT:
+            self._match_cache.clear()
+            self._match_cache[_ALLOWLIST_STATE_KEY] = allowlist_state
+        result = [match for _priority, match in selected]
+        self._match_cache[cache_key] = tuple(result)
+        return result
 
     def _unique_target_for_source(self, source: str) -> str | None:
         """依正規化英文來源尋找唯一且不歧義的官方繁中目標。"""

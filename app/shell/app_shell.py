@@ -201,7 +201,9 @@ class AppShell:
             on_task_click=self._open_task_view,
             on_api_click=lambda: self.navigate("config"),
             on_recent_click=self._open_task_view,
+            on_task_list_click=self.open_task_list,
         )
+        self._task_list_dialog = None
         self.statusbar = StatusBar(version=read_app_version())
         self.content_area = ft.Container(expand=True)
 
@@ -391,6 +393,16 @@ class AppShell:
     def _open_task_view(self, view_key: str | None) -> None:
         if view_key:
             self.navigate(view_key)
+
+    def open_task_list(self, status_filter: str = "all") -> None:
+        """開啟本次任務清單（頂列膠囊、通知選單與工作台「本次任務」共用）。"""
+        from app.shell.task_list_dialog import TaskListDialog
+
+        if self._task_list_dialog is None:
+            self._task_list_dialog = TaskListDialog(
+                self.page, self.tasks, on_navigate=self.navigate
+            )
+        self._task_list_dialog.open(status_filter)
 
     def _wire_registry(self, view) -> None:
         """頁面第一次建立後，把 view/operation registries 交給需要它的頁面。"""
@@ -634,9 +646,10 @@ class AppShell:
 
     def refresh_tasks(self) -> None:
         """依 TaskManager 更新任務膠囊、側欄徽章、狀態列與通知。"""
+        active = self.tasks.active()
         current = self.tasks.current()
-        self.topbar.set_task(current)
-        running_views = {t.view_key for t in self.tasks.active() if t.view_key}
+        self.topbar.set_task(current, others=max(0, len(active) - 1))
+        running_views = {t.view_key for t in active if t.view_key}
         for key in self.sidebar.items:
             self.sidebar.set_badge(key, "•" if key in running_views else None, "gold")
         if current is not None:
@@ -653,6 +666,8 @@ class AppShell:
             self._unread = True
         self._seen_recent |= fresh
         self.topbar.set_recent(recent_tasks, unread=self._unread)
+        if self._task_list_dialog is not None and self._task_list_dialog.is_open:
+            self._task_list_dialog.refresh(update=False)
 
     def mark_notifications_read(self) -> None:
         self._unread = False

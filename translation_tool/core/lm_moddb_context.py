@@ -121,13 +121,16 @@ def attach_moddb_context(
             item["_reviewed_glossary"] = glossaries[glossary_key]
 
 
+# 只存在於記憶體的執行期欄位（物件無法 JSON 序列化）：翻譯 session、已審核 glossary、
+# 指南／Markdown／任務段落的行內保護（``ShieldedText``）。
+_RUNTIME_ONLY_KEYS = frozenset(
+    {"_translation_session", "_reviewed_glossary", "_shielded"}
+)
+
+
 def strip_runtime_context(item: dict[str, Any]) -> dict[str, Any]:
-    """Remove live session/glossary objects before checkpoint or preview JSON."""
-    return {
-        key: value
-        for key, value in item.items()
-        if key not in {"_translation_session", "_reviewed_glossary"}
-    }
+    """Remove live session/glossary/shield objects before checkpoint or preview JSON."""
+    return {key: value for key, value in item.items() if key not in _RUNTIME_ONLY_KEYS}
 
 
 __all__ = ["attach_moddb_context", "strip_runtime_context"]

@@ -263,11 +263,11 @@ class LogView(ft.Container):
         self.tail_lines = tail_lines
         self._presenter.tail_lines = tail_lines
 
-    def clear(self) -> None:
-        """清空所有 log。"""
+    def clear(self, *, update: bool = True) -> None:
+        """清空所有 log。``update=False`` 時由呼叫端自己更新（它接著就要更新整個面板）。"""
         self._list_view.controls.clear()
         self._presenter.reset()
-        if self._page:
+        if update and self._page:
             self._page.update()
 
     def sync_from_session(self, session: TaskSession) -> list[LogEntry]:

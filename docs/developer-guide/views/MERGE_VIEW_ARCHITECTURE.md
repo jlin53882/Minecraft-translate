@@ -108,12 +108,12 @@ service 結束時以 session.set_summary() 寫入統計摘要
 **Lifecycle**：`will_unmount()` 停止輪詢（idempotent）；`did_mount()` 在合併仍被追蹤（`_merge_tracking` 且 `_ui_stop` 未設定）時接續輪詢，合併於卸載期間結束時補上最終狀態與摘要（只顯示一次）。每次 `_sync_ui_once()` 的內容：
 - `progress` → `progress_bar.value`
 - `logs` → `log_view.sync_from_session(session)`（LogView 管理 append + truncate + scroll）
-- 狀態：RUNNING→執行中 / DONE→任務完成 / ERROR→任務發生錯誤
+- 狀態：RUNNING→執行中 / DONE→任務完成 / ERROR→任務發生錯誤（有 `summary` 時同樣顯示摘要視窗，列出失敗項目）
 
 **DONE 時**顯示 `_show_merge_summary()`：
 - 優先讀 `snapshot()["summary"]`（service 統計，資料夾模式為 `success_folders` / `failed_folders`，ZIP 模式為 `success_zips` / `failed_zips`）
 - fallback：掃 logs 解析 `[完成]` / `[錯誤]` 行數（`_merge_stats`）
-- 以 `page.show_dialog()` 顯示對話框：成功/失敗數、輸出統計（`lang_output`、`assets`、待翻譯資料夾、整理資料夾、`patchouli_output`、`other_output`、`errordata_output`，數量為 0 的不列）、失敗項目詳細錯誤（截斷 80 字）；按鈕為「開啟輸出資料夾」與「關閉」（關閉後進度與狀態重置為尚未開始）
+- 以 `page.show_dialog()` 顯示對話框：成功/失敗數、處理時發生錯誤的檔案數（`errored_files`，0 時不列）、輸出統計（中文標籤：語言檔、資源包結構、整理資料夾〔送機器翻譯〕、待翻譯資料夾〔未過濾〕、Patchouli 手冊、其他檔案、錯誤資料；數量為 0 的不列；鍵為 `lang_output`／`assets`／`organized`／`pending`／`patchouli_output`／`other_output`／`errordata_output`，舊摘要的「待翻譯」鍵視為 `pending`）、失敗項目詳細錯誤（截斷 80 字）；有失敗時標題為「合併完成（有失敗項目）」，任務以 ERROR 結束時（`failed=True`）為「合併失敗」；按鈕為「開啟輸出資料夾」與「關閉」（關閉後進度與狀態重置為尚未開始）
 - 待翻譯與整理資料夾名稱取自 `lang_merger.pending_folder_name` / `lang_merger.pending_organized_folder_name`
 
 終止：`status` 為 DONE 或 ERROR 時復原 UI（`start_button`/`zip_list_view` enabled）並設定 `_ui_stop` 停止輪詢；`_sync_ui_once` 內若 `_ui_stop` 已設定則直接略過，避免摘要重複彈出。「開啟輸出資料夾」走 `open_output_folder`（不等待外部程式）。

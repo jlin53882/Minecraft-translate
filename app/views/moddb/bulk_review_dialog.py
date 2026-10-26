@@ -26,13 +26,16 @@ from app.ui.dialogs import (
 )
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, shorten
+from app.views.moddb.operation_summaries import bulk_review_result_text
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
 ACTOR = "使用者"
 ALL_MODS = "__all__"
 ALL_SOURCES = "__all__"
+PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認批量審核範圍後才能執行。"
 
 
 class BulkReviewDialog:
@@ -145,7 +148,9 @@ class BulkReviewDialog:
         self._refresh_mods()
         self._refresh_sources()
         self.preview_btn = kit.button("產生預覽", "secondary", on_click=self._preview)
-        self.summary = ft.Text("尚未預覽", size=14, weight=ft.FontWeight.BOLD)
+        self.summary = ft.Text(
+            PREVIEW_REQUIRED_HINT, size=14, weight=ft.FontWeight.BOLD
+        )
         self.warning = ft.Text("", size=12, color=C.GOLD, visible=False)
         self.status = ft.Text("", size=12, color=C.MUTED, visible=False)
         self.progress = ft.ProgressBar(visible=False)
@@ -170,6 +175,7 @@ class BulkReviewDialog:
             icon=ft.Icons.VERIFIED_OUTLINED,
             on_click=self._confirm,
             disabled=True,
+            tooltip=PREVIEW_REQUIRED_HINT,
         )
         self.revert_btn = kit.button(
             "還原本次批量審核", "secondary", on_click=self._revert
@@ -224,6 +230,7 @@ class BulkReviewDialog:
     def open(self) -> None:
         """開啟對話框；範圍選單查詢已在背景啟動，完成後會更新選項。"""
         try:
+            isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
             present_page_dialog(self.page, self.dialog)
             self._opened = True
         except (AttributeError, RuntimeError):
@@ -561,7 +568,16 @@ class BulkReviewDialog:
     def _confirm(self, _e=None) -> None:
         """確認目前批量審核預覽，並在背景執行套用前的範圍檢查。"""
         db, plan = self.get_db(), self.plan
-        if db is None or plan is None or self._busy:
+        if db is None:
+            show_snack(self.page, "目前沒有可用的資料庫。", C.GOLD)
+            return
+        if self._busy:
+            show_snack(self.page, "批量審核處理中，請稍候。", C.GOLD)
+            return
+        if plan is None:
+            self.summary.value = PREVIEW_REQUIRED_HINT
+            show_snack(self.page, PREVIEW_REQUIRED_HINT, C.GOLD)
+            self._safe_update()
             return
         excluded = tuple(self.excluded)
         generation = self._generation
@@ -629,16 +645,10 @@ class BulkReviewDialog:
                 self.apply_btn.disabled = True
             self._safe_update()
             return
+        message = bulk_review_result_text(plan, self.excluded, result)
         self.result = result
         self.plan = None
         self.excluded = set()
-        message = f"已審核 {format_count(result.reviewed)} 筆"
-        if result.synced:
-            message += f"，並同步其他版本 {format_count(result.synced)} 筆"
-        if result.stale_skipped:
-            message += (
-                f"（{format_count(result.stale_skipped)} 筆已被其他操作改動而略過）"
-            )
         log_info(
             f"Mod 資料庫批量審核：{plan.version} 模組 {plan.mod_id or '全部'} "
             f"來源 {source_text}；{message}"
@@ -800,7 +810,4 @@ class BulkReviewDialog:
         self._safe_update()
 
     def _safe_update(self) -> None:
-        try:
-            self.page.update()
-        except RuntimeError:
-            pass  # 視窗已關閉
+        update_regions(self.dialog)  # 只重畫這個視窗；視窗已關閉時略過

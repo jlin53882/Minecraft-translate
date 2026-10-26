@@ -44,6 +44,8 @@ class CacheRuntimeState:
     search_generation: int = 0
     search_index_current: bool | None = None
     search_index_checked_at: float | None = None
+    # 最近一次實際寫入分片的時間（本機 HH:MM:SS）；快取頁「最近儲存」顯示用
+    last_save_at: str | None = None
     cache_lock: threading.RLock = field(default_factory=threading.RLock)
 
 

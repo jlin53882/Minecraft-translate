@@ -18,6 +18,7 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
+from app.ui.update_scope import update_regions
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,9 @@ class SmartReviewContext:
         self.on_complete = on_complete
         self.generation = 0
         self.closed = False
+        self.dialog: ft.AlertDialog | None = None  # 視窗外殼：``update()`` 只更新它
+        # 視窗還在建構、還沒有任何控制項掛上畫面時，面板初始化呼叫的 ``update()`` 沒有東西可更新
+        self.building = False
         self._request_sequences: dict[str, int] = {}
 
     def close(self) -> None:
@@ -86,7 +90,10 @@ class SmartReviewContext:
             identity += f"::{stat.st_dev}:{stat.st_ino}"
         if not include_generation:
             return identity
-        generation_getter = getattr(db, "_cache_generation", None)
+        # 畫面執行緒呼叫：用不等主連線鎖的版本（寫入或長查詢進行中也不會卡住畫面）
+        generation_getter = getattr(db, "cache_generation_nowait", None) or getattr(
+            db, "_cache_generation", None
+        )
         if callable(generation_getter):
             try:
                 identity += f"::{generation_getter()}"
@@ -156,6 +163,11 @@ class SmartReviewContext:
 
     def update(self) -> None:
         """在 UI 仍然有效時安全更新頁面。"""
+        if self.building:
+            return
+        if self.dialog is not None:
+            update_regions(self.dialog)  # 只重畫智慧校對視窗，不走訪整個頁面
+            return
         try:
             self.page.update()
         except RuntimeError:

@@ -94,3 +94,16 @@ def test_moddb_stats_missing_db_does_not_create_file(tmp_path, index) -> None:
     with pytest.raises(FileNotFoundError):
         moddb_standalone_stats(missing, index)
     assert not missing.exists()
+
+
+def test_match_cache_is_invalidated_when_allowlist_changes(index, monkeypatch) -> None:
+    from translation_tool.core import official_locale
+
+    item = {"source_text": "Netherite", "path": "item.x"}
+    monkeypatch.setattr(official_locale, "STANDALONE_ALLOWLIST", {})
+    without = index.official_terminology_matches_for_item(item)
+    monkeypatch.undo()
+    with_default = index.official_terminology_matches_for_item(item)
+    monkeypatch.setattr(official_locale, "STANDALONE_ALLOWLIST", {})
+    assert index.official_terminology_matches_for_item(item) == without
+    assert with_default != without or not official_locale.STANDALONE_ALLOWLIST

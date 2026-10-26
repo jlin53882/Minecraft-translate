@@ -27,12 +27,13 @@ rg -n "threading\.Thread|threading\.Timer|Thread\(|run_task\(|run_thread\(|async
 
 行為層測試：`tests/test_view_lifecycle_contracts.py`（poller 的 teardown／重 mount／卸載後不更新、阻塞步驟的執行緒身分、卸載後丟棄結果）、`tests/test_shard_reader.py`、`tests/test_cache_history_store.py`、`tests/test_pipeline_extract_dialog_behavior.py`。
 
-## A. 背景執行緒啟動點（`threading.Thread`，7 個 AST 呼叫點）
+## A. 背景執行緒啟動點（`threading.Thread`，8 個 AST 呼叫點）
 
 | 位置 | 回到 UI 的方式 | owner／結束 |
 |---|---|---|
 | `app/tasks/operation_registry.py`（2 個 raw Thread call） | registry wrapper 對 mounted App work；standalone fallback 仍以 page worker/daemon thread 執行 | reservation 先於 launcher；handle 結束前保留 active membership |
 | `app/startup_tasks.py` | 正式入口傳入 AppShell registry；無 App 的 legacy helper 保留 fallback Thread | `startup-index` non-cancellable / drain-only，關閉時等候完成 |
+| `app/icon_scan_pool.py`（圖示掃描取消監看） | 不碰 UI：只在 `should_cancel()` 為真時設定行程池共用的取消 `Event`；經 `run_in_context` 沿用呼叫端 context，記錄仍歸屬原任務 | 掃描結束時 `finally` 設定 `stop` Event，監看執行緒隨即結束（daemon，不阻擋關閉）；取消旗標由呼叫端提供 |
 | `app/shell/config_effects.py` | AppShell 注入 registry launcher；fallback 只供獨立測試/嵌入用 | `cache-root-reload` 註冊為 non-cancellable / drain-only |
 | `app/views/moddb/scan_panel.py` | mounted App 使用 `launch_page_operation`；module Thread 僅為沒有 registry 時的 standalone fallback | `moddb-scan` handle 由 Registry 擁有；View poller teardown 見 B |
 | `app/views/moddb/translate_panel.py`（批次翻譯、舊 AI 重翻） | 兩種工作均經 `launch_page_operation`；無直接 Thread 啟動 | `moddb-translate`、`moddb-retranslate` 由 Registry 擁有；重翻為 page-bound session、cancel-and-drain；逐筆提交見 B |
@@ -122,7 +123,8 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 |---|---|
 | `icon_preview_view._on_load_clicked` 內的 `_detect_source_mode`（glob／rglob）、`_try_use_cached_entries`（L2 快取 JSON）、`_begin_scan`（glob／rglob 計步） | `_load_async` 內逐步 `asyncio.to_thread`；世代守衛 |
 | 圖示預覽詳情的 `_open_mod_detail`（zh_tw.json 搜尋含 rglob fallback、讀取） | `_find_zh_file` 在 `to_thread` |
-| 圖示預覽詳情的 `_render_current_page`（每列 `resolve_icon_with_reason`、開 JAR ZIP、PIL 開圖／縮放／寫檔） | `prepare_row_icon` 在 `to_thread`；event loop 只建構 `LangItemRow(prepared_icon=...)` |
+| 圖示預覽詳情的 `_render_current_page`（每列 `resolve_icon_with_reason`、開 JAR ZIP、PIL 開圖／縮放／寫檔） | `prepare_row_icon` 在 `to_thread`；event loop 只對列池的 `LangItemRow` 呼叫 `bind(prepared_icon=...)` |
+| 圖示預覽換頁預載（模組清單前後頁的 L2 分片、詳情下一頁的圖示渲染） | `_prefetch_mod_pages`、`_prefetch_next_page_icons` 以 `run_task` 排入 `to_thread`；只暖快取，不改控制項 |
 | 圖示預覽儲存 `_save_current_zh`（寫 zh_tw.json） | `_write_zh_file` 在 `to_thread` |
 | `pipeline_extract_dialog._extract_show_preview_result` 的 `find_jar_files(mods)`（同步走訪資料夾） | 在預覽 worker 內執行 |
 | `open_output_folder`（不得以 `subprocess.run` 等待外部程式） | `Popen` 不等待；Windows `os.startfile`；失敗回傳 False 並記錄 |
@@ -130,6 +132,8 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 | 快取分片頁的分片 JSON 解析（`_load_shard_rows`、`_load_shard_keys`；不得每次渲染都解析所有分片） | `shard_reader`（`app/views/cache_manager/shard_reader.py`）以檔案簽名記憶；背景（`_fetch_overview`、`run_cache_action`）預熱 |
 | 快取歷史 `history_load_recent`（掃描整個 jsonl）、`history_append_event`（每次讀寫整個 ≤10000 筆的 json 陣列） | 索引記憶 + 就地更新；json 鏡像由單一背景執行緒寫入 |
 | Mod DB 舊 AI 重翻預覽的候選查詢、樣本分組與批次估算（不得在 UI handler 同步執行） | Registry-owned `moddb-retranslate-preview` 背景操作；worker 依 path/priority 建立獨立唯讀 DB connection，結果經 `page.run_task` 套用，generation 與 DB identity 不符即丟棄。單次 SQLite 查詢仍不可即時中斷，shutdown 採 drain-only，最大查詢時間尚未證明 |
+| Mod DB 條目頁的資料庫讀取（翻頁、選取、影響預覽、審核範圍預覽、篩選選項）與寫入（儲存、還原、批次取代、審核） | 讀取經 `app/views/moddb/background_read.py` 的 `run_read`、`entry_selection.py` 與 `filter_options_loader.py`，寫入經 `entry_writes.py`，都是 `launch_page_operation`；結果經 `post_to_ui` 排回 UI，ticket／世代不符即丟棄。查詢帶 `QueryInterrupt`（`translation_tool/translation_db/query_interrupt.py`），被新請求取代時由 SQLite progress handler 中斷；全版本逐列比對由 `parallel_scan.py` 在多條唯讀連線上同時掃（`ContextThreadPoolExecutor`，寫入交易中不平行） |
+| Mod DB 掃描匯入的 JAR 解析（純 Python，受 GIL 限制） | `translation_db/scan_pool.py`：JAR 數達 `PROCESS_MIN_JARS` 時用 `spawn` 行程池，否則單一讀取執行緒；取消經共用 `Event`，worker 日誌隨結果送回由呼叫端重送；寫入端累積一批後以單一交易提交 |
 | `merge_view` 輪詢（不得用 `time.sleep`） | event loop 輪詢；`app/` 不得有 `time.sleep`（護欄測試） |
 
 ## D. 仍保留的同步 I/O（皆在「有界」界線內或為非 UI 路徑）

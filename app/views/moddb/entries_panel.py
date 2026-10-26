@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
@@ -29,24 +27,18 @@ from app.services_impl.moddb_source_service import (
     source_label,
     source_tone,
 )
-from app.tasks.operation_registry import (
-    CancellationPolicy,
-    CommitPolicy,
-    DurabilityPolicy,
-    ShutdownPolicy,
-    launch_page_operation,
-)
 from app.ui import design, kit
 from app.ui.debounce import Debouncer
 from app.ui.design import C
-from app.ui.page_post import post_to_ui
-from app.ui.snack import show_snack
-from app.views.moddb import editor_drafts
+from app.ui.page_post import has_background_scheduler
+from app.ui.update_scope import isolate, suppress_auto_update, update_regions
+from app.views.moddb import editor_drafts, entry_selection, entry_writes
 from app.views.moddb.char_inspector import scrolling_list
 from app.views.moddb.editor_save_state import shadowed_versions, shadowing_source
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
+    FilterFlush,
     apply_filter_options,
     build_filter_controls,
     database_identity,
@@ -58,7 +50,7 @@ from app.views.moddb.entry_filters import (
     refresh_entry_filter,
 )
 from app.views.moddb.entry_metadata import build_entry_metadata
-from app.views.moddb.entry_row_tile import build_entry_tile
+from app.views.moddb.entry_row_tile import EntryTilePool
 from app.views.moddb.entry_save_result import apply_save_result
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
@@ -69,7 +61,10 @@ from app.views.moddb.formatting import (
 )
 from app.views.moddb.history_renderer import render_history
 from app.views.moddb.mc_text_preview import MinecraftTextPreview
-from app.views.moddb.review_scope_dialog import ReviewScopeController
+from app.views.moddb.review_scope_dialog import (
+    ImpactResult,
+    ReviewScopeController,
+)
 from app.views.moddb.smart_review_marks import (
     ALL_SMART_REVIEW,
     smart_review_mark_chip,
@@ -85,12 +80,14 @@ from app.views.moddb.species_suggestion import SpeciesSuggestion
 from app.views.moddb.suggestions import build_suggestions
 from translation_tool.utils.log_unit import (
     log_debug,
-    log_exception,
-    log_info,
 )
 
 PAGE_SIZE = 50
-SEARCH_DEBOUNCE_SECONDS = 0.35  # 停止輸入多久後自動搜尋
+LOADING_OPACITY = 0.55  # 背景載入中清單的亮度
+SEARCH_DEBOUNCE_SECONDS = (
+    0.22  # 停止輸入多久後自動搜尋（舊查詢會被新條件中斷，不會堆積）
+)
+EDIT_DEBOUNCE_SECONDS = 0.15  # 停止輸入多久後重畫格式提示與影響預覽
 __all__ = ["EntriesPanel", "SourceFilter"]
 ALL_REVIEW_STATES = "__all__"
 ACTOR = "使用者"
@@ -117,7 +114,10 @@ class EntriesPanel(ft.Column):
         self._on_flagged_resolved = on_flagged_resolved
         self._refresh_keep_selection = True
         self._filter_only_refresh = False
+        self._page_only_refresh = False
+        self._defer_options_refresh = False
         self._refresh_keep_scroll = False
+        self._refresh_fallback_index: int | None = None
         self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
         self.version: str | None = None
         self.mod_id: str | None = None
@@ -143,6 +143,13 @@ class EntriesPanel(ft.Column):
         self._render_source_catalog = None
         self._review_preview: list[ReviewPreviewItem] = []
         self._save_running = False
+        self._select_ticket = 0
+        self._post_refresh_message: str | None = None
+        self._edit_debounce = Debouncer(lambda: self._page, EDIT_DEBOUNCE_SECONDS)
+        self._loading_id: int | None = None
+        self.filter_flush = FilterFlush()
+        # None：整個清單要更新（初次或控制項組成改變）；清單：只有這些列有變
+        self._list_regions_dirty: list[ft.Control] | None = None
         self.refresh_indicator = ft.Text(
             "背景更新條目資料中…", size=12, color=C.MUTED, visible=False
         )
@@ -176,19 +183,21 @@ class EntriesPanel(ft.Column):
     def _build_list_card(self) -> None:
         # 清單高度跟著視窗伸縮（expand），捲軸常駐顯示（全域主題預設只在滑過時出現）
         self._scroll_offset = 0.0  # 清單目前的捲動位置（儲存／還原後要回到同一個位置）
-        self.list_view = ft.ListView(
-            spacing=0,
-            expand=True,
+        self.tiles = EntryTilePool(
+            PAGE_SIZE,
+            self.select,
             on_scroll=self._on_list_scroll,
             scroll_interval=100,
         )
+        self.list_view = self.tiles.list_view
+        self.list_shell = scrolling_list(self.list_view)
         self.pager = kit.Pager(0, page_size=PAGE_SIZE, on_change=self._on_page)
         self.count_badge = ft.Text("", size=12, color=C.MUTED)
         self.list_card = kit.section_card(
             "條目",
             ft.Column(
                 [
-                    scrolling_list(self.list_view),
+                    self.list_shell,
                     self.pager,
                 ],
                 spacing=0,
@@ -338,11 +347,13 @@ class EntriesPanel(ft.Column):
             visible=False,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        self.editor_card = kit.section_card(
-            "編輯",
-            ft.Column([self.empty_editor, self.editor_body], spacing=0),
-            icon=ft.Icons.EDIT_OUTLINED,
-            tone="em",
+        self.editor_card = isolate(
+            kit.section_card(
+                "編輯",
+                ft.Column([self.empty_editor, self.editor_body], spacing=0),
+                icon=ft.Icons.EDIT_OUTLINED,
+                tone="em",
+            )
         )
 
     def _build_history_card(self) -> None:
@@ -350,11 +361,13 @@ class EntriesPanel(ft.Column):
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
         )
-        self.history_card = kit.section_card(
-            "記錄",
-            self.history_col,
-            icon=ft.Icons.HISTORY,
-            tone="gold",
+        self.history_card = isolate(
+            kit.section_card(
+                "記錄",
+                self.history_col,
+                icon=ft.Icons.HISTORY,
+                tone="gold",
+            )
         )
 
     # --------------------------------------------------------------- 資料載入
@@ -368,6 +381,7 @@ class EntriesPanel(ft.Column):
 
     def _update_data_actions(self) -> None:
         disabled = self._data_loading or bool(self._list_error)
+        changed = []
         for name in (
             "batch_replace_btn",
             "bulk_review_btn",
@@ -375,8 +389,13 @@ class EntriesPanel(ft.Column):
             "species_scan_btn",
         ):
             button = getattr(self, name, None)
-            if button is not None:
+            if button is not None and button.disabled != disabled:
                 button.disabled = disabled
+                changed.append(button)
+        # 篩選卡可能在載入中被別的事件（例如搜尋欄）整張送出，帶著停用狀態；
+        # 篩選列的差異比對不知道這件事，所以按鈕狀態一改變就直接送出這幾顆按鈕。
+        if changed:
+            update_regions(*changed)
 
     @staticmethod
     def _database_identity(db):
@@ -404,13 +423,7 @@ class EntriesPanel(ft.Column):
         open_bulk_review(self, _e)
 
     def _after_batch_replace(self, result) -> None:
-        if self._on_changed:
-            # ModDbView 會在這個回呼中以同一份 snapshot 刷新清單；不要先在
-            # 子面板載入一次，否則批次寫入後會重建兩次清單與智慧校對標籤。
-            self._notify_changed(keep_scroll=True)
-        else:
-            self._load_list(page=self.pager.current_page, keep_scroll=True)
-        self._safe_update()
+        entry_writes.after_data_change(self)
 
     def _notify_changed(self, *, keep_scroll: bool = False) -> None:
         """通知父層資料已變更，必要時讓下一次完整刷新保留清單位置。"""
@@ -438,12 +451,18 @@ class EntriesPanel(ft.Column):
         self._load_list(keep_selection=keep_selection, keep_scroll=keep_scroll)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
-        """套用 worker 載入的頁籤快照，不在 UI 執行緒查詢 SQLite。"""
+        """套用 worker 載入的頁籤快照，不在 UI 執行緒查詢 SQLite；呼叫端接著 ``flush()``。"""
         snapshot, refresh_requested = prepare_entries_snapshot(self, snapshot)
         if refresh_requested:
             return
+        self._select_ticket += 1  # 進行中的單筆載入已被這份新快照取代
+        self._loading_id = None
+        self._refresh_fallback_index = None
+        self.editor_card.disabled = False
+        self.list_shell.opacity = 1.0
         filter_only = snapshot.get("filter_only", False)
-        if not filter_only or snapshot.get("filter_options_ready"):
+        options_ready = not filter_only or snapshot.get("filter_options_ready")
+        if options_ready:
             apply_filter_options(self, snapshot)
 
         self._editor_drafts.remember(self.selected, self.tw_field.value)
@@ -456,11 +475,9 @@ class EntriesPanel(ft.Column):
         self.advanced_filters.error_text.value = self._list_error or ""
         self.advanced_filters.error_text.visible = bool(self._list_error)
         self.pager.set_state(self.total, snapshot.get("page", 1))
-        keep_scroll = bool(snapshot.get("keep_scroll"))
-        self._render_list(keep_scroll=keep_scroll)
-        self._refresh_keep_scroll = False
         self.detail = snapshot.get("detail")
         self.selected = self.detail.entry if self.detail else None
+        self._render_list(keep_scroll=bool(snapshot.get("keep_scroll")))
         if (
             not filter_only
             or (self.selected.id if self.selected else None) != previous_selected_id
@@ -473,10 +490,13 @@ class EntriesPanel(ft.Column):
         else:
             # 背景篩選不重建編輯器，以免覆蓋尚未儲存的草稿；但右側狀態膠囊仍須同步。
             self._refresh_smart_review_chip()
-        self._render_list_selection(previous_selected_id)
         self.refresh_indicator.value = str(snapshot.get("error") or "")
         self.refresh_indicator.visible = bool(snapshot.get("error"))
         self.set_data_loading(False)
+        self._refresh_keep_scroll = False
+        if self._post_refresh_message and self.selected is not None:
+            self.saved_text.value = self._post_refresh_message
+        self._post_refresh_message = None
 
     def _load_mods(self) -> None:
         db = self.db()
@@ -590,7 +610,6 @@ class EntriesPanel(ft.Column):
                     keep_scroll=keep_scroll,
                 )
         self.pager.set_state(self.total, page)
-        self._render_list(keep_scroll=keep_scroll)
         keep = keep_selection and self.selected is not None
         current = next(
             (r for r in self.rows if keep and r.id == self.selected.id), None
@@ -600,7 +619,8 @@ class EntriesPanel(ft.Column):
                 current = self.rows[min(old_index, len(self.rows) - 1)]
             else:
                 current = self.rows[0]
-        self.select(current.id if current else None)
+        self._select_now(current.id if current else None)
+        self._render_list(keep_scroll=keep_scroll)
         if self._on_filter_changed is None:
             # standalone panel 與同步 fallback 頁面沒有父層 snapshot worker
             # 可以套用相依下拉選項，因此由面板自行更新。
@@ -614,8 +634,8 @@ class EntriesPanel(ft.Column):
         )
         self._update_data_actions()
         self.advanced_filters.set_summary()
-        tiles = [self._row_tile(r) for r in self.rows]
-        if not tiles:
+        empty = None
+        if not self.rows:
             time_hint = (
                 None
                 if self._list_error or not self.version
@@ -631,9 +651,29 @@ class EntriesPanel(ft.Column):
                 else ft.Icons.SEARCH_OFF,
             )
             empty.key = "entry-empty"
-            tiles = [empty]
-        self.list_view.controls = tiles
+        if self._render_source_catalog is None and self.rows:
+            self._render_source_catalog = source_catalog_for(self.db())
+        changed_tiles = self.tiles.set_rows(
+            self.rows,
+            selected_id=self._highlight_id(),
+            marks=self.smart_review_marks,
+            catalog=self._render_source_catalog,
+            empty=empty,
+        )
+        # 還沒送出的變更（沒有 flush 就又重畫一次）要合併；整個清單待更新時維持 None
+        if changed_tiles is None:
+            self._list_regions_dirty = None
+        elif self._list_regions_dirty is not None:
+            self._list_regions_dirty = list(
+                dict.fromkeys([*self._list_regions_dirty, *changed_tiles])
+            )
         self._scroll_list_to(self._scroll_offset if keep_scroll else 0.0)
+
+    def _highlight_id(self) -> int | None:
+        """清單中要標示為選取的條目：詳情還在載入時是即將顯示的那一筆。"""
+        if self._loading_id is not None:
+            return self._loading_id
+        return self.selected.id if self.selected else None
 
     def _on_list_scroll(self, e) -> None:
         self._scroll_offset = float(getattr(e, "pixels", 0) or 0)
@@ -657,41 +697,12 @@ class EntriesPanel(ft.Column):
         except Exception as exc:  # noqa: BLE001 - 排程失敗不影響清單
             log_debug(f"清單捲動排程失敗：{exc}")
 
-    def _row_tile(self, row: EntryRow) -> ft.Control:
-        return build_entry_tile(self, row, catalog=self._render_source_catalog)
-
     def select(self, entry_id: int | None) -> None:
-        db = self.db()
-        self._sync_database_identity(
-            self._database_identity(db) if db is not None else None
-        )
-        self._editor_drafts.remember(self.selected, self.tw_field.value)
-        previous_selected_id = self.selected.id if self.selected else None
-        detail = db.entry_detail(entry_id) if (db and entry_id) else None
-        self.detail = detail
-        self.selected = detail.entry if detail else None
-        self._show_editor(detail)
-        self._render_list_selection(previous_selected_id)
+        entry_selection.select_entry(self, entry_id)
 
-    def _render_list_selection(self, previous_selected_id: int | None = None) -> None:
-        """Rebuild selected rows because mounted Flet controls are immutable."""
-        selected_id = self.selected.id if self.selected else None
-        changed_ids = {
-            entry_id
-            for entry_id in (previous_selected_id, selected_id)
-            if entry_id is not None
-        }
-        if not changed_ids:
-            return
-        rows_by_id = {row.id: row for row in self.rows if row.id in changed_ids}
-        if not rows_by_id:
-            return
-        self.list_view.controls = [
-            self._row_tile(rows_by_id[entry_id])
-            if (entry_id := getattr(tile, "data", None)) in rows_by_id
-            else tile
-            for tile in self.list_view.controls
-        ]
+    def _select_now(self, entry_id: int | None) -> None:
+        """同步選取（單元測試、沒有背景排程的頁面，以及 ``_load_list`` 內部）。"""
+        entry_selection.select_now(self, entry_id)
 
     def _show_editor(
         self,
@@ -699,6 +710,7 @@ class EntriesPanel(ft.Column):
         *,
         calculate_impact: bool = True,
         catalog=None,
+        impact: ImpactResult | None = None,
     ) -> None:
         self.empty_editor.visible = detail is None
         self.editor_body.visible = detail is not None
@@ -710,21 +722,45 @@ class EntriesPanel(ft.Column):
             return
         entry = detail.entry
         self.src_text.value = entry.en_us or NO_SOURCE_TEXT
+        self._fill_editor_text(entry)
+        if catalog is None:
+            db = self.db() if calculate_impact else None
+            catalog = self._render_source_catalog or source_catalog_for(db)
+        self._fill_status_chips(entry, catalog)
+        self._refresh_smart_review_chip()
+        self.meta_col.controls = build_entry_metadata(detail)
+        self.format_review.render(
+            entry.en_us or NO_SOURCE_TEXT,
+            self.tw_field.value or "",
+            metadata=[self.source_chip, self.review_chip, self.smart_chip],
+            kind=entry.kind,
+        )
+        if impact is not None and impact.entry_id == entry.id:
+            self._update_format_hints()
+            self._review_controller.apply_impact(impact)
+        elif calculate_impact:
+            self._update_impact()
+        else:
+            self._update_editor_actions_without_impact(entry)
+        self._render_suggestions(catalog=catalog)
+        self._render_history(catalog=catalog)
+
+    def _fill_editor_text(self, entry: EntryRow) -> None:
+        """輸入框內容：未儲存草稿 > 本次機翻的預填譯文 > 生效譯文。"""
         editor_draft = self._editor_drafts.get(entry.id)
         machine_draft = self.drafts.get(entry.id) if not entry.zh_tw else None
         if editor_draft is not None:
             self.tw_field.value = editor_draft
         elif machine_draft is not None:
             self.tw_field.value = machine_draft
-        else:
-            self.tw_field.value = entry.zh_tw
-        if machine_draft is not None and editor_draft is None:
             self.saved_text.value = (
                 "已預填本次機翻的 AI 譯文（特殊字元與原文不一致，尚未寫入）"
             )
-        if catalog is None:
-            db = self.db() if calculate_impact else None
-            catalog = source_catalog_for(db)
+        else:
+            self.tw_field.value = entry.zh_tw
+
+    def _fill_status_chips(self, entry: EntryRow, catalog) -> None:
+        """來源與審核狀態膠囊（智慧校對標籤另由 ``_refresh_smart_review_chip`` 處理）。"""
         self.source_chip.content = kit.chip(
             source_label(entry.source, catalog) if entry.zh_tw else "尚無譯文",
             source_tone(entry.source),
@@ -737,20 +773,6 @@ class EntriesPanel(ft.Column):
             if badge
             else None
         )
-        self._refresh_smart_review_chip()
-        self.meta_col.controls = build_entry_metadata(detail)
-        self.format_review.render(
-            entry.en_us or NO_SOURCE_TEXT,
-            self.tw_field.value or "",
-            metadata=[self.source_chip, self.review_chip, self.smart_chip],
-            kind=entry.kind,
-        )
-        if calculate_impact:
-            self._update_impact()
-        else:
-            self._update_editor_actions_without_impact(entry)
-        self._render_suggestions(catalog=catalog)
-        self._render_history(catalog=catalog)
 
     def _refresh_smart_review_chip(self) -> None:
         """只更新目前選中條目的智慧校對標籤，不重建編輯器內容。"""
@@ -798,17 +820,17 @@ class EntriesPanel(ft.Column):
         refresh_entry_filter(self)
 
     def _on_source(self) -> None:
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_smart_review_filter(self) -> None:
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_review_status(self) -> None:
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_state(self, key: str) -> None:
         self.state = key
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_search_field(self, e) -> None:
         """切換搜尋內容欄位，讓目前搜尋文字只比對指定欄位。"""
@@ -816,10 +838,11 @@ class EntriesPanel(ft.Column):
         if value == self.query_field:
             return
         self.query_field = value
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_search_input(self, e) -> None:
         """輸入時即時搜尋：停止輸入一小段時間後才查詢，避免每個字都打資料庫。"""
+        suppress_auto_update()  # 輸入中沒有畫面變更；停筆後的搜尋才更新
         if (e.control.value or "").strip() == self.query:
             self._search_debounce.cancel()
             return
@@ -829,53 +852,85 @@ class EntriesPanel(ft.Column):
         query = (control.value or "").strip()
         if query != self.query:
             self.query = query
-            refresh_entry_filter(self)
+            refresh_entry_filter(self, defer_options=True)
 
     def _on_search(self, e) -> None:
         """按 Enter：立即以目前輸入搜尋（取消尚在等待的即時搜尋）。"""
         self._search_debounce.cancel()
         self.query = (e.control.value or "").strip()
-        refresh_entry_filter(self)
+        refresh_entry_filter(self, defer_options=True)
 
     def _on_page(self, page: int) -> None:
-        refresh_entry_filter(self, page=page, keep_selection=False, background=False)
+        refresh_entry_filter(self, page=page, keep_selection=False, page_only=True)
 
     def _on_species_changed(self) -> None:
         if self.sug_tab == SPECIES_TAB_KEY:
             self._render_suggestions()
-            self._safe_update()
+            self._flush_editor()
 
     def open_species_entry(self, entry_id: int) -> None:
         """從學名掃描視窗跳到條目，並直接顯示「學名」建議分頁。"""
         self.sug_tab = SPECIES_TAB_KEY
         self.sug_seg.select(SPECIES_TAB_KEY)
         self.select(entry_id)
-        self._safe_update()  # 掃描視窗關閉時的重繪發生在選取之前
+        self._flush_editor()  # 掃描視窗關閉時的重繪發生在選取之前
 
     def _on_sug_tab(self, key: str) -> None:
         self.sug_tab = key
         self._render_suggestions()
-        self._safe_update()
+        self._flush_editor()
 
     def _on_text_change(self, _e=None) -> None:
+        """輸入框內容改變（逐字觸發）。
+
+        只立刻更新儲存／審核按鈕；格式差異、Minecraft 預覽與影響預覽等較重的內容
+        等使用者停筆一小段時間後才重畫，連續輸入時只畫最後一次。
+        """
+        if self._loading_id is not None:
+            return  # 詳情載入中，輸入框還是上一筆的內容
         self._editor_drafts.remember(self.selected, self.tw_field.value)
-        self._update_impact()
-        self._safe_update()
+        if not has_background_scheduler(self._page):
+            self._update_impact()
+            self._flush_editor()
+            return
+        self._review_controller.update_buttons()
+        update_regions(self.save_btn, self.confirm_btn)
+        self._edit_debounce.call(self._refresh_after_edit)
+
+    def _on_text_replaced(self) -> None:
+        """程式端換了輸入框內容（還原輸入、套用建議、複製原文）：立刻重畫，不等停筆。"""
+        self._editor_drafts.remember(self.selected, self.tw_field.value)
+        self._edit_debounce.cancel()
+        self._refresh_after_edit()
+
+    def _refresh_after_edit(self) -> None:
+        """重畫格式提示與預覽，並在背景重算儲存／審核的影響預覽。"""
+        if self.selected is None or self._loading_id is not None:
+            return
+        self._update_format_hints()
+        self._request_impact()
+        self._flush_editor()
+
+    def _request_impact(self) -> None:
+        self._review_controller.request_impact()
 
     def _on_sync_change(self, _e=None) -> None:
         """切換「同步其他版本」：影響預覽要跟著重算（儲存時讀的是這個開關）。"""
-        self._update_impact()
-        self._safe_update()
+        if not has_background_scheduler(self._page):
+            self._update_impact()
+            self._flush_editor()
+            return
+        self._request_impact()
 
     def _reset_input(self) -> None:
         if self.selected is not None:
             self._editor_drafts.discard(self.selected.id)
             self.tw_field.value = self.selected.zh_tw
-            self._on_text_change()
+            self._on_text_replaced()
 
     def _apply_suggestion(self, text: str) -> None:
         self.tw_field.value = text
-        self._on_text_change()
+        self._on_text_replaced()
 
     def _step(self, delta: int) -> None:
         if self.selected is None:
@@ -886,7 +941,6 @@ class EntriesPanel(ft.Column):
         idx = ids.index(self.selected.id) + delta
         if 0 <= idx < len(ids):
             self.select(ids[idx])
-            self._safe_update()
 
     def pending_text(self) -> str:
         """輸入框的內容（原樣；前後空白與換行是譯文的一部分）。全是空白視為空。"""
@@ -934,82 +988,19 @@ class EntriesPanel(ft.Column):
 
     def _update_format_hints_and_refresh(self) -> None:
         self._update_format_hints()
-        self._safe_update()
+        self._flush_editor()
 
     def _copy_source(self) -> None:
         """把原文（連同換行與前後空白）原樣放進譯文框，再手動翻譯。"""
         if self.selected is not None and self.selected.en_us:
             self.tw_field.value = self.selected.en_us
-            self._on_text_change()
+            self._on_text_replaced()
 
     def _update_impact(self) -> None:
         self._review_controller.update_impact()
 
     def _save(self, _e=None) -> None:
-        entry, db = self.selected, self.db()
-        text = self.pending_text()
-        if entry is None or db is None or not text or self._save_running:
-            return
-        flagged_batch = self._flagged_batch
-        propagate = bool(self.sync_row.value)
-        self._save_running = True
-        self.save_btn.disabled = True
-        self.saved_text.value = "正在儲存並同步其他版本…" if propagate else "正在儲存…"
-        self._safe_update()
-
-        def save_in_background() -> None:
-            done = None
-            error = None
-            try:
-                done = db.save_manual(entry.id, text, actor=ACTOR, propagate=propagate)
-            except ValueError as exc:
-                error = ("validation", exc)
-            except sqlite3.Error as exc:
-                error = ("database", exc)
-            except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
-                error = ("unexpected", exc)
-                log_exception(
-                    f"Mod 資料庫手動儲存發生未預期錯誤："
-                    f"{entry.mc_version} {entry.mod_id} {entry.key}"
-                )
-
-            result = (db, entry, text, done, error, flagged_batch)
-            post_to_ui(
-                self._page,
-                self._apply_save_result,
-                *result,
-                label="Mod 資料庫儲存結果",
-                on_failure=lambda: setattr(self, "_save_running", False),
-            )
-
-        try:
-            launched = launch_page_operation(
-                self._page,
-                save_in_background,
-                name="Mod 資料庫手動儲存",
-                owner="moddb-manual-save",
-                cancellation=CancellationPolicy.NON_CANCELLABLE,
-                commit=CommitPolicy.ATOMIC,
-                durability=DurabilityPolicy.USER_ACTION,
-                shutdown=ShutdownPolicy.ALLOW_TO_FINISH,
-            )
-        except Exception as exc:  # noqa: BLE001 - restore the editor if the worker cannot launch
-            self._save_running = False
-            log_exception(
-                f"Mod 資料庫手動儲存無法啟動："
-                f"{entry.mc_version} {entry.mod_id} {entry.key}"
-            )
-            self.saved_text.value = ""
-            show_snack(self._page, f"儲存無法啟動：{exc}", C.RED)
-            self._update_impact()
-            self._safe_update()
-            return
-        if not launched:
-            self._save_running = False
-            self.saved_text.value = ""
-            show_snack(self._page, "應用程式正在關閉，未啟動儲存。", C.GOLD)
-            self._update_impact()
-            self._safe_update()
+        entry_writes.save_entry(self)
 
     def _abandon_save(self) -> None:
         """儲存結果無法排回畫面時，解除儲存中狀態讓編輯區可再操作。"""
@@ -1017,11 +1008,34 @@ class EntriesPanel(ft.Column):
         self.saved_text.value = ""
         self._update_impact()
 
-    def _apply_save_result(self, db, entry, text, done, error, flagged_batch) -> None:
-        apply_save_result(self, db, entry, text, done, error, flagged_batch)
+    def _apply_save_result(
+        self, db, entry, text, done, error, flagged_batch, *, source_info=None
+    ) -> None:
+        """套用儲存結果；``source_info`` 為背景已算好的來源優先序資訊，省略時就地查詢。"""
+        apply_save_result(
+            self, db, entry, text, done, error, flagged_batch, source_info=source_info
+        )
 
     _shadowed_versions = staticmethod(shadowed_versions)
     _shadowing_source = staticmethod(shadowing_source)
+
+    def prepare_reload_after_change(self, message: str | None = None) -> None:
+        """寫入完成、由上層背景快照重載目前頁前：維持頁碼、捲動位置與（同位置的）選取。"""
+        self._refresh_keep_selection = True
+        self._refresh_keep_scroll = True
+        self._refresh_fallback_index = self._selected_index()
+        self._post_refresh_message = message
+
+    def reload_page_in_place(self) -> None:
+        """同步重載目前頁（沒有背景排程的頁面）。"""
+        self._load_list(page=self.pager.current_page, keep_scroll=True)
+
+    def _selected_index(self) -> int | None:
+        if self.selected is None:
+            return None
+        return next(
+            (i for i, r in enumerate(self.rows) if r.id == self.selected.id), None
+        )
 
     def _resolve_flagged(self, entry_id: int, flagged_batch: int) -> None:
         """機翻「特殊字元不一致」清單裡的條目已手動儲存：移出清單並通知機翻頁扣掉數量。
@@ -1045,47 +1059,10 @@ class EntriesPanel(ft.Column):
         self._review_controller.clear_review(_e)
 
     def _revert(self, history_id: int) -> None:
-        db = self.db()
-        if db is None:
-            return
-        try:
-            count = db.revert(history_id)
-        except sqlite3.Error as exc:
-            log_exception(f"Mod 資料庫還原失敗：history_id={history_id}")
-            show_snack(
-                self._page,
-                f"還原失敗（資料庫錯誤：{exc}）；詳情見後台 log",
-                C.RED,
-            )
-            return
-        log_info(f"Mod 資料庫還原：history_id={history_id}，還原 {count} 筆")
-        self._load_list(page=self.pager.current_page, keep_scroll=True)
-        show_snack(
-            self._page,
-            f"已還原 {count} 筆" if count else "沒有可還原的內容（之後已被再次修改）",
-            C.EM if count else C.GOLD,
-        )
-        self._notify_changed(keep_scroll=True)
-        self._safe_update()
+        entry_writes.revert_history(self, history_id)
 
     def _revert_batch(self, batch_id: str) -> None:
-        db = self.db()
-        if db is None:
-            return
-        try:
-            result = db.revert_batch_replace(batch_id)
-        except sqlite3.Error as exc:
-            log_exception(f"Mod 資料庫批次取代還原失敗：batch={batch_id}")
-            show_snack(self._page, f"整批還原失敗（資料庫錯誤：{exc}）", C.RED)
-            return
-        self._load_list(page=self.pager.current_page, keep_scroll=True)
-        show_snack(
-            self._page,
-            f"已還原 {result.reverted:,} 筆；因後續修改略過 {result.skipped:,} 筆。",
-            C.EM if result.reverted else C.GOLD,
-        )
-        self._notify_changed(keep_scroll=True)
-        self._safe_update()
+        entry_writes.revert_batch(self, batch_id)
 
     def show_filter(self, state: str) -> None:
         """從其他頁籤（總覽／掃描結果）跳進來時套用狀態篩選。"""
@@ -1135,8 +1112,55 @@ class EntriesPanel(ft.Column):
                 "（AI 譯文尚未寫入，已預填在譯文框；修正後儲存即可，或按「清除篩選」）"
             )
 
+    def apply_options_snapshot(self, snapshot: dict) -> bool:
+        """套用第二階段載入的篩選選項；回傳篩選列是否有顯示內容改變（沒變就不必重畫）。"""
+        return apply_filter_options(self, snapshot)
+
+    def flush_filter_options(self) -> None:
+        """第二階段選項套用後：只重畫有變的篩選控制項。"""
+        update_regions(*self.filter_flush.take(self))
+
+    def _take_list_regions(self) -> list[ft.Control]:
+        """清單這次要更新的控制項：列的內容與順序沒變時只更新有變的列，否則整個清單。"""
+        changed = self._list_regions_dirty
+        self._list_regions_dirty = []
+        return [self.list_view] if changed is None else changed
+
+    def flush(self) -> None:
+        """把整個頁籤的變更送到畫面。
+
+        篩選列、清單、編輯區與記錄是各自的更新邊界（頁面層級的 update 不會走進去）；
+        篩選選項沒變（例如只翻頁）時不更新篩選下拉選單，清單只更新內容有變的列。
+        """
+        update_regions(
+            self,
+            *self._take_list_regions(),
+            self.editor_card,
+            self.history_card,
+        )
+        self.flush_filter_options()  # 下拉選單內容在清單、編輯區之後送出
+
+    def show_loading(self) -> None:
+        """背景載入中：提示文字已設好，清單變暗表示目前內容即將被取代。"""
+        self.list_shell.opacity = LOADING_OPACITY
+        update_regions(self.refresh_indicator, self.list_shell)
+
+    def clear_loading(self) -> None:
+        self.list_shell.opacity = 1.0
+
+    def flush_all(self) -> None:
+        """每個區塊都更新（來源不明的變更）。"""
+        self.filter_flush.mark_all()
+        self._list_regions_dirty = None
+        self.flush()
+
+    def _flush_list(self) -> None:
+        """清單列、頁碼與筆數徽章。"""
+        update_regions(*self._take_list_regions(), self.pager, self.count_badge)
+
+    def _flush_editor(self) -> None:
+        """編輯區與記錄欄。"""
+        update_regions(self.editor_card, self.history_card)
+
     def _safe_update(self) -> None:
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料操作
-            log_debug(f"EntriesPanel update 略過：{exc}")
+        self.flush_all()

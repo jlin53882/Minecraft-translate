@@ -32,6 +32,8 @@ from translation_tool.translation_db import (
     change_tracker,
     effective_columns,
     entry_activity,
+    option_facets,
+    parallel_scan,
     quality_flags,
     stat_summary,
 )
@@ -79,6 +81,12 @@ from translation_tool.translation_db.quality import (
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
+from translation_tool.translation_db.scan_ingest import (
+    DbIngestTarget,
+    PreviewIngestTarget,
+    group_scan_items,
+    ingest_groups,
+)
 from translation_tool.translation_db.schema import (
     DB_EMPTY,
     DB_FOREIGN,
@@ -90,7 +98,6 @@ from translation_tool.translation_db.schema import (
     SRC_AI,
     SRC_AI_REPAIR,
     SRC_JAR_CN,
-    SRC_JAR_TW,
     SRC_MANUAL,
     classify_database,
     connect,
@@ -216,6 +223,9 @@ def _like(text: str) -> str:
     return like_pattern(text)
 
 
+_REVERSIBLE_SORTS = {"default": "default_desc", "default_desc": "default"}
+
+
 class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
@@ -239,6 +249,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         self.priority = tuple(priority)
         self.readonly = readonly
         self._lock = threading.RLock()
+        self._probe_lock = threading.Lock()
+        self._generation_probe: sqlite3.Connection | None = None
         self._write_transaction = False
         self._rank = rank_sql(self.priority, "t.source")
         existed = self.path.is_file()
@@ -315,6 +327,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
         """關閉連線。"""
+        with self._probe_lock:
+            if self._generation_probe is not None:
+                self._generation_probe.close()
+                self._generation_probe = None
         with self._lock:
             self._conn.close()
 
@@ -391,6 +407,32 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         )
         return gen if row is None else f"{gen}.{row[0]}"
 
+    def cache_generation_nowait(self) -> str:
+        """與 :meth:`_cache_generation` 相同的世代值，但不等主連線的鎖，供畫面執行緒使用。
+
+        主連線正在寫入交易或跑長查詢時，``_cache_generation`` 要等鎖，畫面執行緒就會卡住；
+        這裡另用一條唯讀連線讀已提交的 ``data_gen`` 與外部寫入序號（WAL 讀者不被寫入擋住），
+        只在第一次呼叫時開啟，隨 :meth:`close` 關閉。
+        """
+        with self._probe_lock:
+            probe = self._generation_probe
+            if probe is None:
+                probe = self._generation_probe = sqlite3.connect(
+                    f"{self.path.resolve().as_uri()}?mode=ro",
+                    uri=True,
+                    check_same_thread=False,
+                    timeout=0.05,
+                )
+            rows = dict(
+                probe.execute(
+                    "SELECT key, value FROM meta WHERE key IN (?, ?)",
+                    ("data_gen", change_tracker.SEQ_KEY),
+                ).fetchall()
+            )
+        gen = rows.get("data_gen", "0")
+        seq = rows.get(change_tracker.SEQ_KEY)
+        return gen if seq is None else f"{gen}.{seq}"
+
     def _read_cache_identity(self) -> tuple:
         """納入檔案生命週期與 WAL 變化，包含外部 SQL 寫入。"""
         path = self.path.resolve()
@@ -453,6 +495,26 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             self._persist_stat_cache(key, gen, encoded)
         return value
 
+    def _cached_peek(self, key: str) -> Any | None:
+        """只讀取已快取的結果（記憶體或 ``stat_cache``），沒有就回傳 ``None``，不計算。"""
+        if self._write_transaction:
+            return None
+        try:
+            gen = self._cache_generation()
+            cache_key = (self._read_cache_identity(), gen, key)
+            shared = READ_CACHE.get(cache_key)
+            if shared is not None:
+                return json.loads(shared)
+            row = self._one(
+                "SELECT value FROM stat_cache WHERE key = ? AND gen = ?", (key, gen)
+            )
+            if row is not None:
+                READ_CACHE.put(cache_key, row[0])
+                return json.loads(row[0])
+        except (sqlite3.Error, OSError):
+            return None
+        return None
+
     def _persist_stat_cache(self, key: str, gen: str, encoded: str) -> None:
         """把統計結果寫進 ``stat_cache``；失敗時回復本次寫入，不影響呼叫端取得的結果。
 
@@ -463,6 +525,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         with self._lock:
             if self._conn.in_transaction:
                 return
+            # 快取寫不進去就算了：不等其他連線（掃描、批次寫入）持有的寫入鎖。
+            # 預設的等待時間是數秒，這個函式常在畫面執行緒的連線上被呼叫，等鎖會凍結整個畫面。
+            wait_ms = self._conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            self._conn.execute("PRAGMA busy_timeout = 0")
             try:
                 if self._cache_generation() != gen:
                     return  # 計算期間資料又變了：不寫舊世代，也不清掉新世代的快取
@@ -478,6 +544,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 # 不回復會一直持有寫鎖，擋住之後所有寫入。
                 if self._conn.in_transaction:
                     self._conn.rollback()
+            finally:
+                self._conn.execute(f"PRAGMA busy_timeout = {int(wait_ms)}")
 
     def warm_stats(self) -> None:
         """預先算好總覽統計並存入快取（大量寫入後在背景呼叫，之後切到總覽頁就是即時的）。"""
@@ -605,95 +673,29 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
 
         ``convert`` 把簡中轉成繁中（沒有繁中、只有簡中時用）；None 表示不轉換。
         """
-        stats = IngestStats()
-        groups: dict[tuple[str, str], list[ScanItem]] = {}
-        for item in items:
-            groups.setdefault((item.kind, item.mod_id), []).append(item)
+        return self.ingest_many(version, [items], convert)[0]
 
+    def ingest_many(
+        self,
+        version: str,
+        batches: Sequence[Iterable[ScanItem]],
+        convert: Callable[[str], str] | None = None,
+    ) -> list[IngestStats]:
+        """在單一交易內寫入多份掃描結果（例如多個 jar），回傳每一份各自的統計。
+
+        一個交易只提交一次（每次提交的 WAL 寫入與檢查點是掃描的固定成本）。結果與逐份呼叫 :meth:`ingest` 相同；任何一份失敗整個交易回復。
+        """
+        grouped = [group_scan_items(items) for items in batches]
         touched: list[int] = []
         with self._tx() as conn:
-            for (kind, mod_id), group in groups.items():
-                known = {
-                    key: (eid, en)
-                    for eid, key, en in conn.execute(
-                        "SELECT id, key, en_us FROM entry "
-                        "WHERE mc_version=? AND kind=? AND mod_id=?",
-                        (version, kind, mod_id),
-                    )
-                }
-                have = {
-                    (eid, src)
-                    for eid, src in conn.execute(
-                        "SELECT t.entry_id, t.source FROM translation t "
-                        "JOIN entry e ON e.id = t.entry_id "
-                        "WHERE e.mc_version=? AND e.kind=? AND e.mod_id=?",
-                        (version, kind, mod_id),
-                    )
-                }
-                for item in group:
-                    cur = known.get(item.key)
-                    is_new = cur is None
-                    if cur is None:
-                        eid = conn.execute(
-                            "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
-                            "VALUES (?,?,?,?,?)",
-                            (kind, version, mod_id, item.key, item.en_us),
-                        ).lastrowid
-                        known[item.key] = (eid, item.en_us)
-                        stats.new_entries += 1
-                    elif cur[1] != item.en_us and item.en_us and cur[1]:
-                        conn.execute(
-                            "INSERT OR IGNORE INTO src_change "
-                            "(kind, mc_version, mod_id, key, old_en, new_en) "
-                            "VALUES (?,?,?,?,?,?)",
-                            (kind, version, mod_id, item.key, cur[1], item.en_us),
-                        )
-                        stats.en_changed += 1
-                        continue
-                    else:
-                        eid = cur[0]
-                        if cur[1] != item.en_us and item.en_us:
-                            # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
-                            conn.execute(
-                                "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
-                            )
-                            known[item.key] = (eid, item.en_us)
-                            stats.adopted += 1
-                        # 這次沒有原文（item.en_us 為空）時，沿用既有原文，只補譯文
-
-                    adds: list[tuple[int, str, str]] = []
-                    if item.zh_tw.strip():
-                        src_tw = SRC_JAR_TW if item.source is None else item.source
-                        adds.append((src_tw, item.zh_tw, item.zh_cn))
-                    elif item.zh_cn.strip() and convert is not None:
-                        converted = convert(item.zh_cn)
-                        if (
-                            converted.strip()
-                        ):  # 空白判斷用 strip，但存原樣（前後空白在遊戲內可能有意義）
-                            # 翻譯 ZIP 指定了來源（提供者）時，轉繁後仍歸在該來源
-                            src_cn = SRC_JAR_CN if item.source is None else item.source
-                            adds.append((src_cn, converted, item.zh_cn))
-                    added = False
-                    for src, tw, cn in adds:
-                        if (eid, src) in have:
-                            continue
-                        review_status = "unreviewed" if src == SRC_MANUAL else None
-                        conn.execute(
-                            "INSERT INTO translation "
-                            "(entry_id, source, zh_tw, zh_cn, review_status) "
-                            "VALUES (?,?,?,?,?)",
-                            (eid, src, tw, cn, review_status),
-                        )
-                        have.add((eid, src))
-                        touched.append(eid)
-                        added = True
-                    if not is_new:
-                        if added:
-                            stats.added_translations += 1
-                        else:
-                            stats.existing += 1
+            target = DbIngestTarget(conn, version, touched)
+            results = [ingest_groups(target, groups, convert) for groups in grouped]
             self._refresh(conn, touched)
-        return stats
+        return results
+
+    def scan_preview_target(self, version: str) -> PreviewIngestTarget:
+        """掃描預覽用的分類目標：只讀這個資料庫，分類規則與 :meth:`ingest_many` 相同。"""
+        return PreviewIngestTarget(lambda sql, params: self._q(sql, params), version)
 
     def record_scan(self, version: str, folder: str, stats: dict) -> None:
         """記錄一次掃描（總覽頁的「最近掃描」）。"""
@@ -726,6 +728,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return self._cached("versions", self._versions_uncached)
 
     def _versions_uncached(self) -> list[str]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return [row[0] for row in stat_summary.version_totals(self._conn)]
         return [
             r[0]
             for r in self._q(
@@ -742,6 +747,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         return self._cached(f"kinds:{version}", lambda: self._kinds_uncached(version))
 
     def _kinds_uncached(self, version: str) -> list[str]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return stat_summary.kinds(self._conn, version)
         return [
             r[0]
             for r in self._q(
@@ -756,13 +764,21 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         ]
 
     def _mods_uncached(self, version: str) -> list[str]:
-        return [
-            r[0]
-            for r in self._q(
-                "SELECT DISTINCT mod_id FROM entry WHERE mc_version=? ORDER BY mod_id",
-                (version,),
-            )
-        ]
+        if self._stat_summary_ready():
+            with self._lock:
+                return stat_summary.mods(self._conn, version)
+        # 沿 idx_entry_list_order (mc_version, mod_id, …) 逐個跳到下一個模組：
+        # 成本隨模組數而不是條目數成長，也不必暫存排序。
+        rows = self._q(
+            "WITH RECURSIVE m(mod_id) AS ("
+            "SELECT MIN(mod_id) FROM entry WHERE mc_version=? "
+            "UNION ALL SELECT (SELECT MIN(mod_id) FROM entry "
+            "WHERE mc_version=? AND mod_id > m.mod_id) FROM m "
+            "WHERE mod_id IS NOT NULL) "
+            "SELECT mod_id FROM m WHERE mod_id IS NOT NULL",
+            (version, version),
+        )
+        return sorted(row[0] for row in rows)
 
     def version_stats(self) -> list[VersionStat]:
         rows = self._cached("version_stats", self._version_stats_rows)
@@ -831,6 +847,18 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
 
     def effective_source_codes(self, version: str | None = None) -> tuple[int, ...]:
         """取得目前至少贏得一筆生效條目的來源代碼。"""
+        rows = self._cached(
+            f"effective_source_codes:{version!r}",
+            lambda: self._effective_source_codes_uncached(version),
+        )
+        return tuple(int(row[0]) for row in rows)
+
+    def _effective_source_codes_uncached(self, version: str | None) -> list[list]:
+        if self._stat_summary_ready():
+            with self._lock:
+                return [
+                    [code] for code in stat_summary.source_codes(self._conn, version)
+                ]
         if version is None:
             sql, params = "SELECT DISTINCT source FROM effective ORDER BY source", ()
         else:
@@ -840,10 +868,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 "WHERE e.mc_version=? ORDER BY f.source"
             )
             params = (version,)
-        rows = self._cached(
-            f"effective_source_codes:{version!r}", lambda: self._q(sql, params)
-        )
-        return tuple(int(row[0]) for row in rows)
+        return [list(row) for row in self._q(sql, params)]
 
     def _effective_source_stats_by_version_rows(self) -> list[list]:
         if self._stat_summary_ready():
@@ -1016,6 +1041,19 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         "(f.entry_id IS NOT NULL AND e.en_us <> '' AND f.zh_tw <> '' "
         "AND f.zh_tw = e.en_us)"
     )
+
+    def _same_as_source_sql(self) -> str:
+        """生效譯文與原文相同的條件；品質旗標可用時讀部分索引（與原條件結果相同）。"""
+        if self._quality_flags_ready():
+            return f"e.qflags & {quality_flags.SAME_AS_SOURCE}"
+        return self._SAME_AS_SOURCE_SQL
+
+    def _same_as_source_entry_table(self) -> str:
+        """「同原文」查詢的條目表：旗標可用時指定部分索引（規劃器不會自己選它）。"""
+        if self._quality_flags_ready():
+            return "entry e INDEXED BY idx_qflags_same_as_source"
+        return "entry e"
+
     _DIFF_SQL = """EXISTS (
         SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
         WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
@@ -1413,7 +1451,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 f"f.entry_id IS NOT NULL AND f.source<>{SRC_MANUAL} AND NOT {self._DIFF_SQL}"
             )
         elif criteria.state == "same":
-            where.append(self._SAME_AS_SOURCE_SQL)
+            where.append(self._same_as_source_sql())
 
         if criteria.time is not None:
             time_where, time_params = self._time_filter_sql(criteria.time)
@@ -1432,6 +1470,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         因此選項與條目清單使用完全相同的篩選語意。
         """
         option_criteria = replace(criteria, mod_id=None, source=None)
+        facets = self._option_facets(option_criteria)
+        if facets is not None:
+            return option_facets.options(facets, criteria.mod_id, criteria.source)
         if option_criteria.quality.active:
             condition, params = self._filter_sql(option_criteria)
             flags_ready = self._quality_flags_ready()
@@ -1447,14 +1488,14 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                     option_criteria.quality, flags_ready
                 )
                 condition += f" AND ({prefilter})"
-                source = self._candidate_source(f"{condition} f.source")
-                rows = self._q(
-                    f"SELECT DISTINCT e.mod_id, f.source {source} WHERE {condition}",
+                pair_rows = self._scope_pairs(
+                    option_criteria.version,
+                    self._candidate_source(f"{condition} f.source"),
+                    condition,
                     params,
                 )
-                pair_rows = rows
             else:
-                pair_rows = self._quality_option_pairs(option_criteria)
+                pair_rows = self._cached_quality_option_pairs(option_criteria)
         else:
             condition, params = self._filter_sql(option_criteria)
             source = self._candidate_source(f"{condition} f.source")
@@ -1484,6 +1525,149 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             )
         )
         return mods, sources
+
+    def _facet_key(self, kind: str, *parts: Any) -> str:
+        digest = hashlib.sha1(
+            json.dumps(parts, ensure_ascii=False, default=repr).encode("utf-8")
+        ).hexdigest()
+        return f"{kind}:{digest}"
+
+    def _facet_query(
+        self, criteria: EntryFilter
+    ) -> tuple[str, str, list, list[int], str | None] | None:
+        """分面的（快取鍵, SQL, 參數, 來源代碼, 切段掃描用 SQL）；篩選含品質條件時沒有分面（``None``）。
+
+        ``criteria`` 的模組與來源選擇不影響分面，所以這兩個欄位一律清掉。
+        切段 SQL 只在搜尋條件（逐列 ``LIKE``，無法用索引）的掃描分面才有，其餘為 ``None``。
+        """
+        if criteria.quality.active:
+            return None
+        base = replace(criteria, mod_id=None, source=None, sort_by="default")
+        codes = list(self.effective_source_codes(base.version))
+        if option_facets.summary_eligible(base) and self._stat_summary_ready():
+            sql, params = option_facets.summary_sql(base, codes)
+            return (
+                self._facet_key("facets-summary", sql, params),
+                sql,
+                params,
+                codes,
+                None,
+            )
+        condition, params = self._filter_sql(base)
+        source = self._candidate_source(f"{condition} f.source")
+        sql = option_facets.scan_sql(source, condition, codes)
+        ranged = (
+            option_facets.scan_sql(source, condition, codes, ranged=True)
+            if base.query.strip()
+            else None
+        )
+        params = [*codes, *params]
+        return (
+            self._facet_key("facets-scan", sql, params),
+            sql,
+            params,
+            codes,
+            ranged,
+        )
+
+    def _facet_rows(
+        self,
+        criteria: EntryFilter,
+        sql: str,
+        params: list,
+        ranged_sql: str | None,
+    ) -> list[tuple]:
+        """分面的原始列；搜尋的整個版本逐列比對切成編號區間，用多條唯讀連線同時掃。"""
+        # 寫入交易中的變更其他連線看不到：交易內一律在本連線掃描
+        if ranged_sql is not None and not self._write_transaction:
+            bounds = self._one(
+                "SELECT MIN(e.id), MAX(e.id) FROM entry e WHERE e.mc_version = ?",
+                (criteria.version,),
+            )
+            if bounds and bounds[0] is not None:
+                workers = parallel_scan.worker_count(bounds[1] - bounds[0] + 1)
+                if workers > 1:
+                    ranges = parallel_scan.split_ranges(bounds[0], bounds[1], workers)
+                    rows = parallel_scan.scan(self.path, ranged_sql, params, ranges)
+                    return option_facets.merge_rows(rows)
+        return self._q(sql, params)
+
+    def _option_facets(
+        self,
+        criteria: EntryFilter,
+        *,
+        compute: bool = True,
+    ) -> option_facets.Facets | None:
+        """目前篩選條件的「模組 × 來源」分面（依資料世代快取）；不適用時回傳 ``None``。
+
+        ``compute=False`` 時，掃描版分面只在已快取時回傳（摘要版本來就是毫秒級，照常計算）。
+        """
+        query = self._facet_query(criteria)
+        if query is None:
+            return None
+        key, sql, params, codes, ranged_sql = query
+        with self._lock:
+            if compute or key.startswith("facets-summary"):
+                facets = self._cached(
+                    key,
+                    lambda: option_facets.build(
+                        self._facet_rows(criteria, sql, params, ranged_sql), codes
+                    ),
+                    persist=False,
+                )
+            else:
+                facets = self._cached_peek(key)
+        return facets if facets is not None and facets["complete"] else None
+
+    def _scope_pairs(
+        self,
+        version: str | None,
+        candidate_source: str,
+        condition: str,
+        params: Sequence[Any],
+    ) -> list[tuple[str, int | None]]:
+        """符合條件的條目所涉及的（模組, 生效來源）配對，依模組、來源排序（無生效譯文者來源為 ``None``）。
+
+        供範圍下拉選單使用；以一次串流彙總取代 ``SELECT DISTINCT`` 加排序，並依資料世代快取。
+        ``candidate_source`` 必須已連接 ``condition`` 用到的資料表，且別名為 ``e``、``f``。
+        """
+        codes = list(self.effective_source_codes(version))
+        sql = option_facets.scan_sql(candidate_source, condition, codes)
+        args = [*codes, *params]
+        with self._lock:
+            facets = self._cached(
+                self._facet_key("scope-pairs", sql, args),
+                lambda: option_facets.build(self._q(sql, args), codes),
+                persist=False,
+            )
+        return option_facets.pairs(facets)
+
+    def _facet_total(
+        self, criteria: EntryFilter, *, compute: bool = False
+    ) -> int | None:
+        """分面已算過（或由摘要即時算出）時的符合總筆數；否則 ``None``，由呼叫端另行計數。
+
+        ``compute=True`` 時沒有快取就掃描計算（結果同時是下拉選單的選項，之後直接命中快取）。
+        """
+        facets = self._option_facets(criteria, compute=compute)
+        if facets is None:
+            return None
+        return option_facets.total(facets, criteria.mod_id, criteria.source)
+
+    def _cached_quality_option_pairs(
+        self, criteria: EntryFilter
+    ) -> set[tuple[str, int | None]]:
+        """:meth:`_quality_option_pairs` 的結果依資料世代快取（逐列判斷品質的掃描很貴）。"""
+        condition, params = self._filter_sql(criteria)
+        key = self._facet_key(
+            "quality-option-pairs", condition, params, criteria.quality
+        )
+        pairs = self._cached(
+            key,
+            lambda: [list(pair) for pair in self._quality_option_pairs(criteria)],
+            persist=False,
+        )
+        return {(str(mod_id), source) for mod_id, source in pairs}
 
     def _quality_option_pairs(
         self, criteria: EntryFilter
@@ -1598,6 +1782,28 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             return None, None
         without_time = replace(criteria, time=None)
         condition, params = self._filter_sql(without_time)
+        key = self._facet_key("time_range", spec, condition, params)
+        low, high = self._cached(
+            key,
+            lambda: self._time_data_range_uncached(spec, condition, params),
+            persist=False,
+        )
+        return low, high
+
+    def _time_data_range_uncached(
+        self, spec: TimeFilter, condition: str, params: list
+    ) -> list[str | None]:
+        if (
+            spec.kind == "effective_updated"
+            and condition == _VERSION_CONDITION
+            and self._effective_columns_ready()
+        ):
+            # 沒有其他條件時，f.upd（與 et.updated_at 相同）由 idx_eff_ver_upd 直接給最早／最晚
+            row = self._one(
+                "SELECT MIN(upd), MAX(upd) FROM effective WHERE mc_version=?",
+                params,
+            )
+            return [row[0], row[1]] if row else [None, None]
         if spec.kind == "manual_activity":
             actions = {
                 "all": entry_activity.ACTIVITY_ACTIONS,
@@ -1607,10 +1813,15 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 "revert": ("revert", "batch_revert"),
             }[spec.action]
             marks = ",".join("?" for _ in actions)
+            # 從歷史紀錄（筆數遠少於條目）出發，再用主鍵找條目；反過來會逐條目探測整個版本
+            source = self._candidate_source(condition).replace(
+                "FROM entry e",
+                "FROM history h CROSS JOIN entry e ON e.id=h.entry_id",
+                1,
+            )
             sql = (
-                f"SELECT MIN(h.at), MAX(h.at) {self._candidate_source(condition)} "
-                f"JOIN history h ON h.entry_id=e.id AND h.action IN ({marks}) "
-                f"WHERE {condition}"
+                f"SELECT MIN(h.at), MAX(h.at) {source} "
+                f"WHERE h.action IN ({marks}) AND {condition}"
             )
             params = [*actions, *params]
         else:
@@ -1625,7 +1836,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 f"{self._candidate_source(condition + ' ' + column)} WHERE {condition}"
             )
         row = self._one(sql, params)
-        return (row[0], row[1]) if row else (None, None)
+        return [row[0], row[1]] if row else [None, None]
 
     def _sort_sql(self, sort_by: str) -> str:
         if sort_by == "entry_newest":
@@ -2169,10 +2380,49 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 criteria, limit=limit, offset=offset
             )
         else:
-            cond, params = self._filter_sql(criteria)
-            total = self._cached_count(self._count_sql(criteria, cond), params)
-            rows = self._query_entry_rows(criteria, limit=limit, offset=offset)
+            total = self._facet_total(criteria)
+            if total is None and self._scans_whole_version_for_search(criteria):
+                # 搜尋（整個版本逐列比對）只掃一次：同一份分面同時回答總筆數與下拉選項
+                total = self._facet_total(criteria, compute=True)
+            if total is None:
+                cond, params = self._filter_sql(criteria)
+                total = self._cached_count(self._count_sql(criteria, cond), params)
+            rows = self._plain_page_rows(criteria, total, limit, offset)
         return [self._row(row) for row in rows], total
+
+    @staticmethod
+    def _scans_whole_version_for_search(criteria: EntryFilter) -> bool:
+        """搜尋且沒有選模組／來源：筆數查詢本來就要掃整個版本，改由分面一次回答（指定模組時索引已縮小範圍）。"""
+        return (
+            bool(criteria.query.strip())
+            and criteria.mod_id is None
+            and criteria.source is None
+        )
+
+    def _plain_page_rows(
+        self, criteria: EntryFilter, total: int, limit: int | None, offset: int
+    ) -> list[tuple]:
+        """非品質篩選的一頁資料列；``total`` 是同一條件的精確總數。
+
+        - 沒有符合的列（或位移已超過總數）時不必查頁面：頁面查詢會沿排序索引逐列檢查條件，
+          條件幾乎都不符合時等於掃完整個版本。
+        - 預設排序的後半段改從另一端反向讀取（``default`` 與 ``default_desc`` 互為反向、
+          都沿 ``idx_entry_list_order``），最後一頁不必數過前面的所有列。
+        """
+        offset = max(0, int(offset))
+        if limit is None:
+            return self._query_entry_rows(criteria, limit=limit, offset=offset)
+        size = max(0, int(limit))
+        if size == 0 or total <= offset:
+            return []
+        if criteria.sort_by in _REVERSIBLE_SORTS and offset > total // 2:
+            count = min(size, total - offset)
+            reverse = replace(criteria, sort_by=_REVERSIBLE_SORTS[criteria.sort_by])
+            rows = self._query_entry_rows(
+                reverse, limit=count, offset=total - offset - count
+            )
+            return rows[::-1]
+        return self._query_entry_rows(criteria, limit=size, offset=offset)
 
     def _database_identity(self) -> str:
         stat = self.path.stat()
@@ -3150,12 +3400,16 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         self, conn: sqlite3.Connection, batch: str, entry_id: int
     ) -> None:
         """還原人工寫入時，把同一個 batch 退回的審核標記復原（列沒被動過才復原）。"""
-        for hid, source, zh_tw, prev_status, new_revision in conn.execute(
+        # 不寫 ORDER BY id：有排序時規劃器會改走 idx_history_batch（同一批次可有數十萬列，
+        # 每個條目都讀完整批），沒有排序才用 (entry_id, action) 索引；每個條目最多數列，在 Python 排序。
+        cleared = conn.execute(
             "SELECT id, source_id, new_zh_tw, prev_review_status, new_revision "
-            "FROM history WHERE batch=? AND entry_id=? AND action='review_clear' "
-            "ORDER BY id DESC",
-            (batch, entry_id),
-        ).fetchall():
+            "FROM history WHERE entry_id=? AND action='review_clear' AND batch=?",
+            (entry_id, batch),
+        ).fetchall()
+        for hid, source, zh_tw, prev_status, new_revision in sorted(
+            cleared, reverse=True
+        ):
             cur = conn.execute(
                 "SELECT zh_tw, revision, review_status FROM translation "
                 "WHERE entry_id=? AND source=?",
@@ -4379,7 +4633,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     ) -> tuple[str, list]:
         where = [
             "e.mc_version = ?",
-            self._SAME_AS_SOURCE_SQL,
+            self._same_as_source_sql(),
             "f.source = ?",
         ]
         params: list = [version, SRC_AI]
@@ -4394,8 +4648,8 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         """計算目前 effective.source 為 AI 且 effective 譯文等於非空原文的筆數。"""
         where, params = self._same_as_source_ai_where(version, mod_ids)
         sql = (
-            "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-            f"WHERE {where}"
+            f"SELECT COUNT(*) FROM {self._same_as_source_entry_table()} "
+            f"LEFT JOIN effective f ON f.entry_id=e.id WHERE {where}"
         )
         return self._cached_count(sql, params)
 
@@ -4410,8 +4664,9 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         sql = (
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, e.mc_version, "
             "f.source, t.revision, t.checker, t.review_status "
-            "FROM (SELECT e.id FROM entry e JOIN effective f ON f.entry_id = e.id "
-            f"WHERE {where}) c JOIN entry e ON e.id = c.id "
+            f"FROM (SELECT e.id FROM {self._same_as_source_entry_table()} "
+            f"JOIN effective f ON f.entry_id = e.id WHERE {where}) c "
+            "JOIN entry e ON e.id = c.id "
             "JOIN effective f ON f.entry_id = e.id "
             "LEFT JOIN translation t ON t.entry_id=e.id AND t.source=f.source "
             "ORDER BY e.mod_id, e.kind, e.key"

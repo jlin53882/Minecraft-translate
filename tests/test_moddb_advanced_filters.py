@@ -68,6 +68,22 @@ def test_clear_button_resets_active_conditions_and_notifies_once():
     assert changes == ["changed"]
 
 
+def test_toggle_label_follows_panel_state_and_active_count():
+    filters, _ = _filters()
+    filters.quality_status.value = "mismatch"
+    filters.set_summary()
+    assert filters.toggle_button.content == "進階篩選（1）"
+
+    filters._toggle()
+    assert filters.panel.visible is True
+    assert filters.toggle_button.content == "收合進階篩選"
+
+    filters._toggle()
+    assert filters.toggle_button.content == "進階篩選（1）"
+    filters._clear()
+    assert filters.toggle_button.content == "進階篩選"
+
+
 def test_programmatic_sort_value_uses_that_basis_natural_direction():
     filters, _ = _filters()
     filters.sort.value = "entry_newest"  # 沒有走 _selection_changed

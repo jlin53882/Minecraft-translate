@@ -53,6 +53,8 @@ flowchart TD
   K --> L
 ```
 
+FTB 注入清單欄位（`description`、`quest_desc`）時，空行、`{image:...}`、`{@pagebreak}` 與語系鍵引用這類沒送去翻譯的行（`is_extractable_line` 為假者）留在原位，譯文只放回可翻譯的行（`merge_translated_lines`）。語系檔抽取的欄位後綴為 `.title`、`.quest_desc`、`.quest_subtitle`、`.chapter_subtitle`。只勾選步驟 4 時也會正常結束並回報耗時。
+
 FTB 的翻譯結果只有在狀態為 `DONE` 時才可進入最終注入；`PARTIAL`、`FAILED`、`CANCELLED` 只保留續跑標記與部分輸出，不得把未完成資料當成已完成內容注入。
 
 ### KubeJS 流水線（`run_kubejs_pipeline`）
@@ -76,6 +78,8 @@ flowchart TD
   L --> M
 ```
 
+KubeJS 注入使用步驟 1 快照出來的確切來源根目錄（`source_roots`），不再往下搜尋名為 `kubejs` 的資料夾；腳本與 `assets/kubejs/` 並存的標準配置因此也會注入腳本。
+
 KubeJS 的翻譯快照只有 `DONE` 才能提交為可注入版本；`PARTIAL`、`FAILED`、`CANCELLED` 不提交最終快照，也不執行注入，讓下一次續跑仍能從 checkpoint 接續。
 
 ### Markdown 流水線（`run_md_pipeline`）
@@ -95,6 +99,8 @@ flowchart TD
   H --> I
 ```
 
+Markdown 抽取階段已把色碼與物品 ID 換成佔位符並記在待翻譯 JSON 的 `_shields`；翻譯輸出的逐檔 JSON 必須原樣帶回 `_shields`（`PendingItem.shields`），注入階段才能還原。`translation_map_md.json` 是翻譯記錄，注入不會把它當成待注入檔。
+
 Markdown 只有 `DONE` 才能把翻譯結果寫入完成目錄；`PARTIAL`、`FAILED`、`CANCELLED` 不使用 pending JSON 當作完成輸出，也不執行最終注入。
 
 ## 背景任務與 UI 更新
@@ -102,7 +108,7 @@ Markdown 只有 `DONE` 才能把翻譯結果寫入完成目錄；`PARTIAL`、`FA
 - 每次執行都會建立新的 `TaskSession`（`tag_session(..., "translation", page=...)`），並以 `reserve_page_operation(owner="translation")` 登錄。預設 `CancellationPolicy.COOPERATIVE`。
 - `worker` 在背景執行緒中呼叫服務函式。`session.start()` 只由服務層的 `run_callable_task` 呼叫一次（單一 owner，一次執行只有一個 task ID 與一組開始／結束紀錄）；動作層用 `add_start_log` 預先登記開頭日誌，`start()` 清空日誌後會放回。`finally` 內一定會呼叫 `session.finish()`。
 - 只有在服務函式拋出未預期例外時，動作層的 `worker` 才會再補寫錯誤日誌、`set_error()` 與 `finish()`（`_report_service_failure` 會以 `session_task_scope` 把堆疊寫入後台）。
-- UI 同步由 `_poll_session`（`translation_actions.py`）負責：在 Flet event loop 上每 0.2 秒讀取 `session.snapshot()`，更新 `ProgressRing`、`LogView` 與狀態晶片。`DONE` 或 `ERROR` 時停止輪詢、停用取消按鈕。
+- UI 同步由 `_poll_session`（`translation_actions.py`）負責：在 Flet event loop 上每 0.2 秒讀取 `session.snapshot()`，更新 `ProgressRing`、`LogView` 與狀態晶片。`DONE` 或 `ERROR` 時停止輪詢、停用取消按鈕；模擬執行（`run_ftb`／`run_kjs`／`run_md` 記在 `view._run_dry_run`）結束時狀態為「模擬完成（未翻譯）」，正式執行為「任務完成」。
 - 取消：`_on_cancel` 呼叫 `session.request_cancel()`，狀態改為「正在取消…」。翻譯迴圈在批次之間、等待 API 限流時檢查取消。
 - 換頁卸載：`will_unmount` 呼叫 `stop_ui_timer`，只停止輪詢；任務仍在背景進行。`did_mount` 呼叫 `resume_ui_timer` 接續輪詢。
 

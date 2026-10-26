@@ -819,3 +819,46 @@ def test_translation_runtime_uses_trimmed_session_history_between_internal_batch
     assert len(result) == 3
     assert [len(call.get("conversation_history", [])) for call in calls] == [0, 2, 2]
     assert len(state.history) == 2
+
+
+def test_item_matches_are_resolved_once_per_source(monkeypatch) -> None:
+    """批次規劃、token 預算與送出前會對同一筆來源重複建立提示詞：只掃描一次術語表。"""
+    index = load_official_locale_index()
+    scans: list[tuple[str, ...]] = []
+    real_matching_terms = official_locale.matching_terms
+
+    def counting_matching_terms(sources, *args, **kwargs):
+        scans.append(sources)
+        return real_matching_terms(sources, *args, **kwargs)
+
+    monkeypatch.setattr(official_locale, "matching_terms", counting_matching_terms)
+    item = {"path": "custom:q1", "source_text": "Obtain a Netherite-Diamond Block"}
+
+    first = index.official_terminology_matches_for_item(item)
+    for _ in range(5):
+        again = index.official_terminology_matches_for_item(dict(item))
+
+    assert again == first
+    assert len(scans) == 1
+    # 呼叫端可以任意修改回傳的 list，不影響下一次結果
+    again.clear()
+    assert index.official_terminology_matches_for_item(item) == first
+
+
+def test_item_matches_cache_distinguishes_key_and_source() -> None:
+    """同一段文字在不同 key 下的 exact_key 命中不同，快取不能混用。"""
+    index = OfficialLocaleIndex(
+        records_by_key={
+            "item.a": OfficialLocaleRecord("item.a", "Same", "相同", "甲"),
+            "item.b": OfficialLocaleRecord("item.b", "Same", "相同", "乙"),
+        },
+        unique_by_text_pair={},
+        unique_tw_by_en={},
+        revision="test",
+    )
+
+    a = index.official_terminology_matches_for_item({"path": "item.a", "text": "Same"})
+    b = index.official_terminology_matches_for_item({"path": "item.b", "text": "Same"})
+
+    assert [m.target_text for m in a] == ["甲"]
+    assert [m.target_text for m in b] == ["乙"]

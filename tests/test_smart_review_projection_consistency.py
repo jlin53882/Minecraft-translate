@@ -395,3 +395,71 @@ def test_single_file_run_summary_status_counts_follow_candidate_updates(tmp_path
         run_id, {2: {"entry_id": 2, "batch": "b", "applied_at": "2026-01-01 00:00:00"}}
     )
     assert store.get_run(run_id)["status_counts"] == {"applied": 2, "ready": 2}
+
+
+def test_readonly_reads_defer_projection_markers_without_retrying(
+    tmp_path, monkeypatch, caplog
+):
+    """唯讀連線（UI worker 的讀取快照）對帳 JSON，但不寫 SQLite marker、不刷警告、不重複掃描。
+
+    marker 留給下一個可寫連線補上；之後的可寫讀取會把 pending 標成 projected。
+    """
+    path = tmp_path / "readonly.db"
+    _store, run_id, snapshots = seed_ready_run(path, 6, chunk_size=1000)
+    db = TranslationDB(path)
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(
+                SmartReviewHistoryStore, "reconcile_applied", lambda *_a, **_k: 0
+            )
+            original = SmartReviewHistoryStore.update_candidate
+
+            def failing(self, run, ordinal, **updates):
+                if updates.get("status") == "applied":
+                    raise OSError("模擬 JSON 原子替換失敗")
+                return original(self, run, ordinal, **updates)
+
+            patch.setattr(SmartReviewHistoryStore, "update_candidate", failing)
+            assert db.apply_smart_review_candidate(run_id, 2) == "applied"
+    finally:
+        db.close()
+    entry_id = next(s.entry_id for s in snapshots if s.ordinal == 2)
+
+    calls = []
+    original_reconcile = SmartReviewHistoryStore.reconcile_applied
+
+    def counting(self, *args, **kwargs):
+        calls.append(1)
+        return original_reconcile(self, *args, **kwargs)
+
+    monkeypatch.setattr(SmartReviewHistoryStore, "reconcile_applied", counting)
+    readonly = TranslationDB(path, readonly=True)
+    try:
+        with caplog.at_level("WARNING"):
+            rows = readonly.list_smart_review_candidates(run_id)
+            readonly.list_smart_review_candidates(run_id)
+            readonly.smart_review_marks([entry_id])
+        assert {r.ordinal: r.status for r in rows}[2] == "applied"
+        assert "projection marker" not in caplog.text
+        assert len(calls) == 1  # 唯讀對帳完成後同一個 history head 不再重掃
+        assert readonly._one(
+            "SELECT projection_state FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        ) == ("pending",)
+    finally:
+        readonly.close()
+
+    writable = TranslationDB(path)
+    try:
+        writable.list_smart_review_candidates(run_id)
+        assert writable._one(
+            "SELECT projection_state FROM history "
+            "WHERE entry_id=? AND action='smart_review_apply'",
+            (entry_id,),
+        ) == ("projected",)
+        calls.clear()
+        writable.list_smart_review_candidates(run_id)
+        assert calls == []  # marker 補上後回到一般快取
+    finally:
+        writable.close()

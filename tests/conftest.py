@@ -75,11 +75,9 @@ def _isolate_test_runtime_writes(tmp_path, monkeypatch, request):
         index_module = importlib.import_module("app.icon_index")
         icon_cache_root = tmp_path / "icon_cache"
         icon_cache = icon_cache_root / "jar_icons"
-        model_cache = icon_cache_root / "model_index"
         index_cache = icon_cache_root / "icon_index" / "fixture.json"
         monkeypatch.setattr(entries_module, "_get_cache_dir", lambda: icon_cache_root)
         monkeypatch.setattr(module, "_get_icon_cache_dir", lambda: icon_cache)
-        monkeypatch.setattr(module, "_get_model_index_cache_dir", lambda: model_cache)
         monkeypatch.setattr(index_module, "get_index_path", lambda _mods: index_cache)
 
 
@@ -94,6 +92,17 @@ def _no_default_batch_interval(monkeypatch):
     from translation_tool.core import lm_translator_main
 
     monkeypatch.setattr(lm_translator_main, "_DEFAULT_BATCH_SLEEP", 0.0)
+
+
+@pytest.fixture(autouse=True)
+def _no_filter_options_settle_wait(monkeypatch):
+    """篩選選項的第二階段正式會等條件穩定 0.25 秒才查；測試不該真的睡覺。
+
+    要驗證「等待期間被取代」的測試自己把 ``SETTLE_SECONDS`` 設回正值。
+    """
+    from app.views.moddb import filter_options_loader
+
+    monkeypatch.setattr(filter_options_loader, "SETTLE_SECONDS", 0.0)
 
 
 @pytest.fixture(autouse=True)

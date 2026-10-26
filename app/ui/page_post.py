@@ -13,6 +13,18 @@ from typing import Any
 from translation_tool.utils.log_unit import log_warning
 
 
+def has_background_scheduler(page: Any) -> bool:
+    """頁面能把工作丟到背景執行緒，並把結果排回畫面執行緒。
+
+    完整 App 的 Page 有 ``operation_registry``（或 ``run_thread``）與 ``run_task``；
+    單元測試用的精簡頁面沒有，呼叫端要退回同步執行。
+    """
+    can_run_worker = getattr(page, "operation_registry", None) is not None or callable(
+        getattr(page, "run_thread", None)
+    )
+    return can_run_worker and callable(getattr(page, "run_task", None))
+
+
 def post_to_ui(
     page: Any,
     callback: Callable[..., None],

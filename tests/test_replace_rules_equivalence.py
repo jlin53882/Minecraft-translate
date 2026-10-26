@@ -4,7 +4,10 @@ import json
 import random
 from pathlib import Path
 
-from translation_tool.utils.replace_rules import find_replacement_conflicts
+from translation_tool.utils.replace_rules import (
+    exact_source,
+    find_replacement_conflicts,
+)
 from translation_tool.utils.text_processor import apply_replace_rules
 
 
@@ -109,10 +112,11 @@ def test_project_rules_keep_real_overlapping_outputs_stable():
         "苔石磚樓梯": "青苔石磚階梯",
         "青苔石磚": "青苔石磚",
         "青苔石磚樓梯": "青苔石磚樓梯",
-        "蜜脾": "蜂窩",
-        "蜂巢": "蜂窩",
-        "紅磚": "紅磚頭",
-        "樹脂磚": "樹脂磚頭",
+        "蜜脾": "蜂巢",  # 整段規則：item.minecraft.honeycomb
+        "蜂巢": "蜂巢",  # 繁中「蜂巢」是蜜脾（item.minecraft.honeycomb），不能再替換
+        "紅磚": "紅磚",  # 繁中「紅磚」是方塊（block.minecraft.bricks），不能再替換
+        "紅磚窗戶": "紅磚窗戶",
+        "樹脂磚": "樹脂磚",
     }
 
     for source, destination in expected.items():
@@ -131,23 +135,24 @@ def test_project_literal_rules_are_idempotent():
         and isinstance(rule.get("from"), str)
         and isinstance(rule.get("to"), str)
         and not any(char in rule["from"] for char in ".?*[]()\\")
+        and exact_source(rule["from"]) is None
     ]
-    assert len(literal_rules) == 1324
+    assert len(literal_rules) == 1571
 
     expected_canonical = {
-        "噴濺型力量藥水": "飛濺 力量藥水",
-        "噴濺型水肺藥水": "飛濺 水下呼吸藥水",
-        "噴濺型迅捷藥水": "飛濺 迅捷藥水",
-        "滯留型力量藥水": "滯留 力量藥水",
-        "滯留型水肺藥水": "滯留 水下呼吸藥水",
-        "滯留型迅捷藥水": "滯留 迅捷藥水",
+        "噴濺型力量藥水": "飛濺力量藥水",
+        "噴濺型水肺藥水": "飛濺水下呼吸藥水",
+        "噴濺型迅捷藥水": "飛濺迅捷藥水",
+        "滯留型力量藥水": "滯留力量藥水",
+        "滯留型水肺藥水": "滯留水下呼吸藥水",
+        "滯留型迅捷藥水": "滯留迅捷藥水",
         "去皮緋紅菌核": "剝皮緋紅菌絲體",
         "去皮詭異菌核": "剝皮扭曲菌絲體",
         "知識就是力量": "知書就是力量",
         "雕紋樹脂磚塊": "浮雕樹脂磚",
         "樹脂磚樓梯": "樹脂磚階梯",
         "樹脂磚臺階": "樹脂磚半磚",
-        "樹脂磚塊": "樹脂磚頭",
+        "樹脂磚塊": "樹脂磚",
         "水肺之箭": "水下呼吸之箭",
         "水肺藥水": "水下呼吸藥水",
         "皮革外套": "皮革上衣",
@@ -156,9 +161,9 @@ def test_project_literal_rules_are_idempotent():
         "緋紅菌巖": "緋紅菌絲石",
         "緋紅菌核": "緋紅菌絲體",
         "詭異菌核": "扭曲菌絲體",
-        "紅磚塊": "紅磚頭",
+        "紅磚塊": "紅磚",
         "蜜脾塊": "蜂巢塊",
-        "蜜脾": "蜂窩",
+        "蜜脾": "蜂巢",
     }
     assert len(expected_canonical) == 24
     for source, destination in expected_canonical.items():
@@ -243,13 +248,17 @@ def test_project_rules_apply_directly_on_first_pass():
         and isinstance(r.get("to"), str)
         and len(r["from"]) >= 2  # 單字輸入本來就不套用規則
         and not any(char in r["from"] for char in ".?*[]()\\")
+        and exact_source(r["from"]) is None
     ]
     sources = {r["from"] for r in literal}
     destinations = {r["to"] for r in literal}
+    # 整段完全相符規則對單獨的這段文字優先
+    whole_texts = {exact_source(r["from"]) for r in rules if isinstance(r, dict)}
     direct = [
         r
         for r in literal
-        if r["from"] not in r["to"]
+        if r["from"] not in whole_texts
+        and r["from"] not in r["to"]
         and not any(s in r["to"] for s in sources if s != r["from"])
         and not any(d in r["from"] for d in destinations if d != r["to"])
         and not any(s != r["from"] and r["from"] in s for s in sources)

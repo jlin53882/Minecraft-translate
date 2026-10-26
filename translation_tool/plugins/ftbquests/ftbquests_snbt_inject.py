@@ -33,6 +33,7 @@ from ...utils.text_processor import (
     convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
     load_replace_rules,  # 載入替換規則。
 )
+from .ftbquests_snbt_extractor import merge_translated_lines
 
 
 def _normalize_config_dir(path: str) -> str:
@@ -244,6 +245,8 @@ def patch_lang_snbt_file(
                 skipped_type_mismatch.append(k)
                 continue
 
+            # 空行、{image:...}、{@pagebreak} 等沒送去翻譯的行要留在原位
+            parts = merge_translated_lines(list(template_val), parts)
             old_py = _list_to_py(old_val)
             if old_py is not None and old_py == parts:
                 unchanged_keys.append(k)  # ✅ 找到但一樣
@@ -378,6 +381,7 @@ def patch_quest_snbt_file(
                 skipped.append(tag_key)
                 return
 
+            parts = merge_translated_lines(list(old), parts)
             old_py = [str(e) for e in old if isinstance(e, snbt.String)]
             candidates += 1
             if old_py == parts:

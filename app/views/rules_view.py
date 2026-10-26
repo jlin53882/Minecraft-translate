@@ -4,35 +4,52 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import asyncio
 import re
 import threading
+from functools import lru_cache
 
 import flet as ft
 
 from app.services_impl.config_service import load_replace_rules
 from app.tasks.operation_registry import (
     CancellationPolicy,
-    CommitPolicy,
-    DurabilityPolicy,
     ShutdownPolicy,
     launch_page_operation,
 )
 from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.ui.update_scope import update_regions
 from app.views.rules.rules_actions import (
     calc_total_pages,
+    confirm_discard_changes,
+    launch_validate_and_save,
     start_reload_thread,
 )
-from app.views.rules.rules_actions import (
-    translate_regex_error as rules_translate_regex_error,
+from app.views.rules.rules_filter import (
+    RuleQuery,
+    filter_rules,
+    parse_query,
+    rule_matches,
 )
 from app.views.rules.rules_state import RulesTableState
+from app.views.rules.rules_table import (
+    apply_row_status,
+    row_delete_button,
+    set_row_issues,
+)
 from app.views.rules.rules_table import create_rule_row as rules_create_row
+from app.views.rules.rules_validation import (
+    build_from_index,
+    check_rule,
+    rule_hint,
+    translate_regex_error,
+    validate_rule,
+)
 from app.views.rules.rules_widgets import RulesWidgetsMixin
 from translation_tool.utils.log_unit import log_error
-from translation_tool.utils.text_processor import apply_replace_rules
+from translation_tool.utils.replace_rules_diagnostics import diagnose_rules
+from translation_tool.utils.text_processor import apply_replace_rules, safe_convert_text
 
 
 class RulesView(RulesWidgetsMixin, ft.Column):
@@ -58,12 +75,26 @@ class RulesView(RulesWidgetsMixin, ft.Column):
         self.all_rules_data = []
         self.total_pages = self._state.total_pages
 
-        # --- 搜尋狀態（進階版）---
-        self.search_results = None  # 搜尋結果（符合的 rule 物件列表）
-        self.search_keyword = ""  # 當前搜尋關鍵字
-        self.search_case_sensitive = False  # 大小寫區分
-        self.search_regex = False  # Regex 模式
-        self.search_current_idx = 0  # 當前導航位置
+        # --- 搜尋狀態 ---
+        # _query 是「目前的過濾條件」；search_results 永遠由它重算（_apply_filter），
+        # 資料增刪、排序、重載後都要重算，否則畫面會顯示已刪除或過期的規則。
+        self._query: RuleQuery | None = None
+        self.search_results = None  # 符合的 rule 物件列表（None = 未過濾）
+        self.search_keyword = ""
+        self.search_regex = False
+
+        # --- 未儲存變更與刪除復原 ---
+        self._has_unsaved = False
+        self._edit_seq = 0  # 每次改動遞增；儲存完成時用來判斷期間是否又有新的編輯
+        # 診斷（交叉引用、重複等；非阻擋）：rid → [RuleIssue]，編輯後 debounce 重算
+        self._issues: dict[int, list] = {}
+        self._only_issues = False
+        # s2twp 轉換是診斷最貴的部分；原詞字串相同就不必重轉
+        self._convert_cached = lru_cache(maxsize=65536)(safe_convert_text)
+        self._diag_debouncer = Debouncer(lambda: self.page, 0.6)
+        self._row_status: dict[
+            int, tuple[str, str, str]
+        ] = {}  # rid → (欄位, 錯誤, 提醒)
 
         # 背景執行緒 → UI 的暫存佇列（掛載前完成的載入）
         self._ui_lock = threading.Lock()
@@ -190,132 +221,111 @@ class RulesView(RulesWidgetsMixin, ft.Column):
 
     # --- 邏輯功能 ---
     def on_sort_change(self, e):
-        """根據選擇的排序模式重新排序規則資料"""
+        """根據選擇的排序模式重新排序規則資料（搜尋中也會連同結果一起重排）。"""
         mode = e.control.value
         if mode == "from_asc":
             self.all_rules_data.sort(key=lambda r: r.get("from", ""))
-            show_snack(
-                self.page,
-                "✅ 已排序：依 From 字典序",
-                C.EM,
-                text_color=C.ON_EM,
-            )
+            label = "依 From 字典序"
         elif mode == "from_len":
             self.all_rules_data.sort(key=lambda r: len(r.get("from", "")))
-            show_snack(
-                self.page,
-                "✅ 已排序：依 From 長度",
-                C.EM,
-                text_color=C.ON_EM,
-            )
-
+            label = "依 From 長度"
+        else:
+            return
+        self._diag_debouncer.call(self._rediagnose_after_edit)
+        self._apply_filter()
         self.current_page = 1
         self._render_current_page()
+        show_snack(self.page, f"✅ 已排序：{label}", C.EM, text_color=C.ON_EM)
 
     def on_search(self, e: ft.ControlEvent):
-        """根據關鍵字搜尋規則並更新顯示（進階版：過濾顯示 + 多欄位 + Regex）"""
-        # Debounce: 延遲搜尋
+        """搜尋框輸入：清空立即還原，其餘 300ms debounce 後才搜尋。"""
         keyword = e.control.value
 
         if not (keyword or "").strip():
-            # 清除搜尋，回覆顯示全部（並取消尚未執行的搜尋）
             self._search_debouncer.cancel()
             self._do_search("")
             return
 
-        # 300ms 內的連續輸入只搜尋最後一次
         self._search_debouncer.call(self._do_search, keyword)
 
     def _do_search(self, keyword: str):
-        """執行實際搜尋（Debounce 觸發）"""
-        keyword = keyword.strip()
-
-        if not keyword:
-            # 清除搜尋
-            self.search_results = None
-            self.search_keyword = ""
-            self.search_case_sensitive = False
-            self.search_regex = False
-            self.search_current_idx = 0
-            self.current_page = 1
-            self._render_current_page()
-            show_snack(
-                self.page,
-                "已清除搜尋，顯示全部規則",
-                C.EM,
-                text_color=C.ON_EM,
-            )
-            return
-
-        # 檢測 Regex 模式（以 / 開頭和結尾）
-        use_regex = False
-        search_keyword = keyword
-
-        if keyword.startswith("/") and keyword.endswith("/") and len(keyword) > 2:
-            use_regex = True
-            search_keyword = keyword[1:-1]  # 移除 /
-
-        self.search_keyword = search_keyword
-        self.search_regex = use_regex
-
-        # 執行搜尋
-        matched_rules = []
-
-        for rule in self.all_rules_data:
-            if self._rule_matches(rule, search_keyword, use_regex):
-                matched_rules.append(rule)
-
-        self.search_results = matched_rules
-        self.search_current_idx = 0
-
-        if not self.search_results:
-            show_snack(self.page, "找不到符合的規則", C.GOLD, text_color=C.ON_EM)
-            self._render_current_page()
-            return
-
-        # 顯示結果數量
-        count = len(self.search_results)
-        mode_text = "（正則）" if use_regex else ""
-        show_snack(
-            self.page,
-            f"找到 {count} 筆符合的規則{mode_text}",
-            C.EM,
-            text_color=C.ON_EM,
-        )
-
-        # 強制回到第一頁
+        """執行實際搜尋（Debounce 觸發）。"""
+        query = parse_query(keyword)
+        self._query = query
+        self.search_keyword = query.keyword if query else ""
+        self.search_regex = bool(query and query.regex)
+        self._apply_filter()
         self.current_page = 1
         self._render_current_page()
 
+        if query is None:
+            show_snack(self.page, "已清除搜尋，顯示全部規則", C.EM, text_color=C.ON_EM)
+        elif query.regex_invalid:
+            show_snack(
+                self.page,
+                "正則語法有誤，改以一般文字搜尋",
+                C.GOLD,
+                text_color=C.ON_EM,
+            )
+        elif not self.search_results:
+            show_snack(self.page, "找不到符合的規則", C.GOLD, text_color=C.ON_EM)
+        else:
+            mode_text = "（正則）" if query.regex else ""
+            show_snack(
+                self.page,
+                f"找到 {len(self.search_results)} 條符合的規則{mode_text}",
+                C.EM,
+                text_color=C.ON_EM,
+            )
+
+    def _apply_filter(self):
+        """依目前查詢與「只看有問題」重算 search_results（保持與 all_rules_data 同步）。"""
+        results = filter_rules(self.all_rules_data, self._query)
+        if self._only_issues:
+            base = self.all_rules_data if results is None else results
+            results = [r for r in base if r.get("_rid") in self._issues]
+        self.search_results = results
+
+    def _run_diagnostics(self):
+        """重跑規則診斷（載入時同步執行；其他異動交給 debounce，避免大量規則時拖慢熱操作）。"""
+        rules = self.all_rules_data
+        found = diagnose_rules(rules, self._convert_cached)
+        self._issues = {rules[i].get("_rid"): issues for i, issues in found.items()}
+        self.only_issues_box.label = f"只看有問題（{len(self._issues)}）"
+
+    def _rediagnose_after_edit(self):
+        """編輯停頓後重算診斷並刷新畫面上各列的警示圖示（不重新過濾，避免列在輸入中消失）。"""
+        self._run_diagnostics()
+        touched = [self.only_issues_box]
+        for row in self.rules_table.rows:
+            if row.visible and row.data is not None:
+                set_row_issues(row, [i.message for i in self._issues.get(row.data, ())])
+                touched.append(row.cells[3].content)
+        update_regions(*touched)
+
+    def on_only_issues_change(self, e):
+        """切換「只看有問題的規則」。"""
+        self._only_issues = bool(e.control.value)
+        self._apply_filter()
+        self.current_page = 1
+        self._render_current_page()
+        self._scroll_table_to_top()
+
+    def _clear_search(self):
+        """清掉搜尋條件與搜尋框文字（不渲染、不提示；呼叫端負責渲染）。"""
+        self._search_debouncer.cancel()
+        self._query = None
+        self.search_results = None
+        self.search_keyword = ""
+        self.search_regex = False
+        self.search_box.value = ""
+        self._only_issues = False
+        self.only_issues_box.value = False
+
     def _rule_matches(self, rule: dict, keyword: str, use_regex: bool) -> bool:
         """檢查規則是否符合搜尋條件"""
-        # 搜尋欄位
-        fields = ["from", "to", "comment", "category"]
-
-        for field in fields:
-            value = rule.get(field, "")
-            if not value:
-                continue
-
-            # Regex 模式
-            if use_regex:
-                try:
-                    flags = 0 if self.search_case_sensitive else re.IGNORECASE
-                    if re.search(keyword, value, flags):
-                        return True
-                except re.error:
-                    # Regex 錯誤，回退到普通搜尋
-                    pass
-
-            # 普通搜尋模式
-            if not self.search_case_sensitive:
-                if keyword.lower() in value.lower():
-                    return True
-            else:
-                if keyword in value:
-                    return True
-
-        return False
+        query = parse_query(f"/{keyword}/" if use_regex else keyword)
+        return query is not None and rule_matches(rule, query)
 
     # ---------------------------------------------
     # 規則驗證模組
@@ -324,46 +334,12 @@ class RulesView(RulesWidgetsMixin, ft.Column):
     def validate_rule(
         self, src: str, dst: str, all_rules, current_index, from_index=None
     ):
-        """
-        驗證規則格式正確性，回傳 (is_valid: bool, msg: str)
-
-        from_index：可選的 {from: [索引...]}（由 _build_from_index 建立）。
-        批次驗證全部規則時傳入，重複檢查就不必每條都掃過整個清單（O(n²) → O(n)）。
-        """
-        if not src.strip():
-            return False, "from 欄位不可為空"
-
-        try:
-            compiled = re.compile(src)
-        except re.error as err:
-            return False, self.translate_regex_error(err)
-
-        if from_index is not None:
-            candidates = from_index.get(src, ())
-        else:
-            candidates = (
-                idx for idx, rule in enumerate(all_rules) if rule.get("from") == src
-            )
-        for idx in candidates:
-            if idx != current_index:
-                return False, f"⚠ 與第 {idx + 1} 條規則重複"
-
-        group_refs = re.findall(r"(?:\\+(\d+)|\$(\d+))", dst)
-        if group_refs:
-            refs = [int(a or b) for a, b in group_refs]
-            max_group = compiled.groups
-            for ref in refs:
-                if ref > max_group:
-                    return False, f"引用群組 \\{ref} 超出群組數 {max_group}"
-
-        if re.search(r"\\\\(?!\d)", dst):
-            return False, "可能存在無效跳脫（\\\\）"
-
-        return True, ""
+        """驗證規則格式正確性，回傳 (is_valid: bool, msg: str)。"""
+        return validate_rule(src, dst, all_rules, current_index, from_index)
 
     def translate_regex_error(self, err) -> str:
         """翻譯正則表達式錯誤訊息"""
-        return rules_translate_regex_error(err)
+        return translate_regex_error(err)
 
     # --- 執行緒輔助與載入 ---
 
@@ -387,6 +363,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
     def will_unmount(self):
         """換頁／關閉：取消尚未執行的搜尋 debounce（idempotent）。"""
         self._search_debouncer.cancel()
+        self._diag_debouncer.cancel()
 
     def did_mount(self):
         """掛上頁面後執行在掛載前排入的 UI 更新。"""
@@ -425,29 +402,26 @@ class RulesView(RulesWidgetsMixin, ft.Column):
 
     # --- 分頁渲染邏輯 ---
 
-    def _render_current_page(self):
-        """根據當前頁碼渲染規則表格（支援搜尋結果過濾）"""
-        # 決定資料來源：搜尋結果 OR 全部資料
+    def _display_rules(self) -> list:
+        """目前畫面的資料來源：搜尋結果，或全部規則。"""
         if self.search_results is not None:
-            # 搜尋模式：只顯示符合的資料
-            display_data = self.search_results
-            total_count = len(display_data)
-            self.total_pages = max(
-                1, (total_count + self.page_size - 1) // self.page_size
-            )
-            # 確保頁碼在有效範圍內
-            self.current_page = min(self.current_page, self.total_pages)
-            self.current_page = max(self.current_page, 1)
-        else:
-            # 一般模式：顯示全部資料
-            display_data = self.all_rules_data
-            total_count = len(self.all_rules_data)
-            self.total_pages = calc_total_pages(total_count, self.page_size)
+            return self.search_results
+        return self.all_rules_data
 
-        # 計算當前頁的資料範圍
+    def _render_current_page(self):
+        """根據當前頁碼渲染規則表格（支援搜尋結果過濾）。"""
+        display_data = self._display_rules()
+        total_count = len(display_data)
+        self.total_pages = calc_total_pages(total_count, self.page_size)
+        self.current_page = max(1, min(self.current_page, self.total_pages))
+
         start = (self.current_page - 1) * self.page_size
-        end = start + self.page_size
-        current_page_data = display_data[start:end]
+        current_page_data = display_data[start : start + self.page_size]
+
+        # 搜尋中的「#」顯示規則在全部清單中的位置，與「第 N 條規則重複／錯誤」一致
+        positions = None
+        if self.search_results is not None:
+            positions = {r.get("_rid"): i for i, r in enumerate(self.all_rules_data)}
 
         # 重用既有的表格列，只更新內容：
         # 每次都清空重建 50 列（各含兩個多行 TextField）時，Flet 需移除並重新序列化
@@ -462,30 +436,22 @@ class RulesView(RulesWidgetsMixin, ft.Column):
             extra.data = None
 
         for offset, rule in enumerate(current_page_data):
-            # 確保有 RID
             if "_rid" not in rule:
                 rule["_rid"] = self._new_rid()
+            rid = rule["_rid"]
+            display_no = positions[rid] + 1 if positions else start + offset + 1
             self._fill_rule_row(
                 rows[offset],
                 rule.get("from", ""),
                 rule.get("to", ""),
-                rule["_rid"],
-                display_no=start + offset + 1,
+                rid,
+                display_no=display_no,
+                issue_messages=[i.message for i in self._issues.get(rid, ())],
             )
+        self._row_status.clear()
+        self._refresh_row_status(push=False)
 
-        # 顯示搜尋結果數或總數
-        if self.search_results is not None:
-            total_rules = len(self.search_results)
-            status_text = "（搜尋結果）"
-        else:
-            total_rules = len(self.all_rules_data)
-            status_text = ""
-
-        self.page_info.value = f"頁面 {self.current_page} / {self.total_pages}"
-        self.total_pages_text_label.value = f"/ {self.total_pages} 頁"
-        self.total_count_text.value = f"共 {total_rules} 條規則 {status_text}"
-        self._sync_page_jump_field()
-
+        self._refresh_footer()
         self.prev_button.disabled = self.current_page == 1
         self.next_button.disabled = self.current_page == self.total_pages
 
@@ -495,56 +461,98 @@ class RulesView(RulesWidgetsMixin, ft.Column):
         except (AssertionError, RuntimeError):
             self.page.update()
 
+    def _refresh_footer(self):
+        """更新頁碼、規則數與「未儲存」標示的文字（不送出更新）。"""
+        total_rules = len(self.all_rules_data)
+        if self.search_results is None:
+            count_text = f"共 {total_rules} 條規則"
+        else:
+            count_text = f"符合 {len(self.search_results)} 條（全部 {total_rules} 條）"
+        self.page_info.value = f"頁面 {self.current_page} / {self.total_pages}"
+        self.total_pages_text_label.value = f"/ {self.total_pages} 頁"
+        self.total_count_text.value = count_text
+        self.unsaved_text.visible = self._has_unsaved
+        self._sync_page_jump_field()
+
+    def _mark_changed(self):
+        """記錄「有尚未儲存的變更」；第一次出現時顯示標示。"""
+        self._edit_seq += 1
+        if not self._has_unsaved:
+            self._has_unsaved = True
+            self.unsaved_text.visible = True
+            update_regions(self.unsaved_text)
+
+    def _clear_unsaved(self):
+        """儲存或重新載入後，磁碟與畫面一致。"""
+        self._has_unsaved = False
+        self.unsaved_text.visible = False
+
+    def _scroll_table_to_top(self):
+        """換頁後把表格捲回頂端（捲動位置會跨頁保留，否則會停在上一頁的底部）。"""
+        run_task = getattr(self.page, "run_task", None)
+        if run_task is None:
+            return
+        try:
+            run_task(self.rules_list.scroll_to, offset=0)
+        except Exception:  # noqa: BLE001 - 捲動只是輔助，失敗不影響編輯
+            log_error("[Rules] 表格捲回頂端失敗", exc_info=True)
+
+    def _go_to_page(self, page: int):
+        """換頁並把表格捲回頂端。"""
+        self.current_page = page
+        self._render_current_page()
+        self._scroll_table_to_top()
+
     # --- 互動事件處理 ---
 
     def on_text_change(self, e):
-        """當文字輸入變更時即時驗證並更新資料"""
+        """當文字輸入變更時更新資料並即時驗證。"""
         rid = e.control.data["rid"]
         field = e.control.data["field"]
 
         index = self._find_index_by_rid(rid)
-        if index >= 0:
-            self.all_rules_data[index][field] = e.control.value
-            self.validate_row_ui(rid)
-
-    def validate_row_ui(self, rid: int):
-        """驗證特定列並更新 UI 樣式"""
-        row = next((r for r in self.rules_table.rows if r.data == rid), None)
-        if row is None:
+        if index < 0 or self.all_rules_data[index].get(field) == e.control.value:
             return
+        self.all_rules_data[index][field] = e.control.value
+        self._mark_changed()
+        self._refresh_row_status()
+        self._diag_debouncer.call(self._rediagnose_after_edit)
 
-        from_field = row.cells[1].content
-        to_field = row.cells[2].content
+    def _refresh_row_status(self, push: bool = True):
+        """重算畫面上各列的驗證狀態；只有結果變了的列才改樣式（push=True 時送出更新）。
 
-        idx = self._find_index_by_rid(rid)
-        if idx < 0:
-            return
-
-        src = from_field.value
-        dst = to_field.value
-
-        is_valid, msg = self.validate_rule(src, dst, self.all_rules_data, idx)
-
-        if is_valid:
-            from_field.border_color = None
-            to_field.border_color = None
-            from_field.error_text = None
-            to_field.error_text = None
-        else:
-            from_field.border_color = C.RED
-            to_field.border_color = C.RED
-            from_field.error_text = msg
-            to_field.error_text = msg
-
-        from_field.update()
-        to_field.update()
+        一次掃描建立 {from: [索引]} 與 {rid: 索引}，整頁 50 列的重複檢查是 O(n)。
+        """
+        rules = self.all_rules_data
+        from_index = build_from_index(rules)
+        positions = {r.get("_rid"): i for i, r in enumerate(rules)}
+        touched = []
+        for row in self.rules_table.rows:
+            rid = row.data
+            if not row.visible or rid is None or rid not in positions:
+                continue
+            idx = positions[rid]
+            src, dst = rules[idx].get("from", ""), rules[idx].get("to", "")
+            problem = check_rule(src, dst, rules, idx, from_index)
+            status = (
+                ("", "", rule_hint(src, dst)) if problem is None else (*problem, "")
+            )
+            if self._row_status.get(rid) == status:
+                continue
+            self._row_status[rid] = status
+            apply_row_status(row, *status)
+            touched.extend((row.cells[1].content, row.cells[2].content))
+        if push:
+            update_regions(*touched)
 
     @staticmethod
-    def _fill_rule_row(row, from_text, to_text, rid: int, display_no: int):
-        """把既有的表格列改成顯示指定規則（清除先前的驗證錯誤樣式）。"""
+    def _fill_rule_row(
+        row, from_text, to_text, rid: int, display_no: int, issue_messages=()
+    ):
+        """把既有的表格列改成顯示指定規則（清除先前的驗證樣式）。"""
         row.visible = True
         row.data = rid
-        number_cell, from_cell, to_cell, delete_cell = row.cells
+        number_cell, from_cell, to_cell, _ = row.cells
         number_cell.content.value = str(display_no)
         for field, name, value in (
             (from_cell.content, "from", from_text),
@@ -553,8 +561,10 @@ class RulesView(RulesWidgetsMixin, ft.Column):
             field.value = value
             field.data = {"rid": rid, "field": name}
             field.border_color = None
-            field.error_text = None
-        delete_cell.content.data = rid
+            field.error = None
+            field.helper = None
+        row_delete_button(row).data = rid
+        set_row_issues(row, issue_messages)
 
     def create_rule_row(self, from_text, to_text, rid: int, display_no: int):
         """建立規則編輯列 UI 元件"""
@@ -563,63 +573,73 @@ class RulesView(RulesWidgetsMixin, ft.Column):
     # --- 操作邏輯 ---
 
     def reload_rules_clicked(self, e):
-        """觸發重新載入規則的執行緒"""
-        return start_reload_thread(self)
+        """重新載入；有未儲存的變更時先確認，避免編輯被靜默覆蓋。"""
+        if not self._has_unsaved:
+            return start_reload_thread(self)
+        confirm_discard_changes(self.page, lambda: start_reload_thread(self))
 
     def _handle_reload_success(self, rules_data):
         """處理規則重新載入成功後的資料初始化與渲染"""
         self.all_rules_data = rules_data
-        # ✅ 給每條 rule 補上穩定 rid
         for r in self.all_rules_data:
             if "_rid" not in r:
                 r["_rid"] = self._new_rid()
 
+        self._clear_unsaved()
+        self._run_diagnostics()
+        self._apply_filter()  # 搜尋條件保留，但結果要換成新載入的規則物件
         self.current_page = 1
-        self._render_current_page()
         self.loading_indicator.visible = False
+        self._render_current_page()
         show_snack(self.page, "規則載入完成！", C.EM, text_color=C.ON_EM)
-        self.page.update()
 
     def _handle_reload_failure(self, err):
         """處理規則重新載入失敗的錯誤顯示"""
         self.loading_indicator.visible = False
-        self.page.update()
+        update_regions(self.loading_indicator)
         show_snack(self.page, f"載入規則時發生錯誤: {err}", C.RED, text_color=C.ON_EM)
 
     def prev_page(self, e):
         """上一頁，若已在首頁則顯示提示"""
         if self.current_page > 1:
-            self.current_page -= 1
-            self._render_current_page()
+            self._go_to_page(self.current_page - 1)
         else:
             show_snack(self.page, "已在第一頁", C.EM, text_color=C.ON_EM)
 
     def next_page(self, e):
         """下一頁，若已在末頁則顯示提示"""
         if self.current_page < self.total_pages:
-            self.current_page += 1
-            self._render_current_page()
+            self._go_to_page(self.current_page + 1)
         else:
             show_snack(self.page, "已在最後一頁", C.EM, text_color=C.ON_EM)
 
     @staticmethod
     def _build_from_index(all_rules) -> dict:
         """建立 {from: [索引...]}，供批次驗證時 O(1) 查重複。"""
-        index: dict = {}
-        for idx, rule in enumerate(all_rules):
-            index.setdefault(rule.get("from"), []).append(idx)
-        return index
+        return build_from_index(all_rules)
 
     def _validate_all(self, rules):
         """驗證全部規則；回傳 (錯誤索引, 訊息) 或 None。可在背景執行緒執行。"""
-        from_index = self._build_from_index(rules)
+        from_index = build_from_index(rules)
         for idx, rule in enumerate(rules):
-            ok, msg = self.validate_rule(
+            ok, msg = validate_rule(
                 rule["from"], rule["to"], rules, idx, from_index=from_index
             )
             if not ok:
                 return idx, msg
         return None
+
+    def _reveal_rule(self, rid) -> bool:
+        """跳到顯示指定規則的那一頁；規則不在搜尋結果內時先清除搜尋。"""
+        if self.search_results is not None and not any(
+            r.get("_rid") == rid for r in self.search_results
+        ):
+            self._clear_search()
+        for pos, rule in enumerate(self._display_rules()):
+            if rule.get("_rid") == rid:
+                self.current_page = pos // self.page_size + 1
+                return True
+        return False
 
     def save_rules_clicked(self, e):
         """儲存規則點擊事件：驗證（背景執行緒）→ 儲存。
@@ -629,6 +649,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
         if getattr(self, "_saving", False):
             return
         snapshot = [dict(r) for r in self.all_rules_data]
+        seq_at_click = self._edit_seq
 
         def finish(result):
             self._saving = False
@@ -641,7 +662,7 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                     C.RED,
                     text_color=C.ON_EM,
                 )
-                self.current_page = idx // self.page_size + 1
+                self._reveal_rule(snapshot[idx].get("_rid"))
                 self._render_current_page()
                 return
             if result.get("error") is not None:
@@ -652,12 +673,10 @@ class RulesView(RulesWidgetsMixin, ft.Column):
                     text_color=C.ON_EM,
                 )
                 return
-            show_snack(
-                self.page,
-                "規則已成功儲存！",
-                C.EM,
-                text_color=C.ON_EM,
-            )
+            if self._edit_seq == seq_at_click:  # 儲存期間又編輯的話仍算未儲存
+                self._clear_unsaved()
+                update_regions(self.unsaved_text)
+            show_snack(self.page, "規則已成功儲存！", C.EM, text_color=C.ON_EM)
 
         run_task = getattr(self.page, "run_task", None)
         self._saving = True
@@ -665,107 +684,75 @@ class RulesView(RulesWidgetsMixin, ft.Column):
         self._launch_rule_validation(snapshot, finish, run_task)
 
     def _launch_rule_validation(self, snapshot, finish, run_task):
-        """Keep validation and its requested durable save under one operation owner."""
-        result = {}
-        worker_done = threading.Event()
-
-        def validate_and_save():
-            try:
-                failure = self._validate_all(snapshot)
-                result["failure"] = failure
-                if failure is not None:
-                    return
-                clean_rules = [
-                    {"from": rule.get("from", ""), "to": rule.get("to", "")}
-                    for rule in snapshot
-                    if rule.get("from", "").strip()
-                ]
-                from app.services_impl.config_service import save_replace_rules
-
-                save_replace_rules(clean_rules, raise_on_error=True)
-            except Exception as ex:
-                result["error"] = ex
-                raise
-            finally:
-                worker_done.set()
-                if run_task is None:
-                    self._run_on_ui_thread(finish, result)
-
-        operation = launch_page_operation(
-            self.page,
-            validate_and_save,
-            name="規則驗證與儲存",
-            owner="rules-save",
-            cancellation=CancellationPolicy.NON_CANCELLABLE,
-            commit=CommitPolicy.PARTIAL_ALLOWED,
-            durability=DurabilityPolicy.USER_ACTION,
-            shutdown=ShutdownPolicy.DRAIN_ONLY,
-        )
-        if not operation:
-            self._saving = False
-            show_snack(
-                self.page,
-                "應用程式正在關閉，未開始規則驗證或儲存",
-                C.GOLD,
-                text_color=C.ON_EM,
-            )
-            return
-
-        if run_task is None:
-            return
-
-        async def _wait_for_validation_and_save():
-            while not worker_done.is_set():
-                await asyncio.sleep(0.02)
-            finish(result)
-
-        run_task(_wait_for_validation_and_save)
+        """驗證與寫檔的 worker 生命週期由 rules_actions 負責。"""
+        launch_validate_and_save(self, snapshot, finish, run_task)
 
     def add_row_clicked(self, e):
-        """新增一列空白規則並跳轉至最後一頁"""
-        self.all_rules_data.append({"from": "", "to": "", "_rid": self._new_rid()})
-        self.current_page = self.total_pages  # 假設在最後
-        # 重新計算總頁數（因為可能剛好換頁）
-        total_rules = len(self.all_rules_data)
-        self.total_pages = calc_total_pages(total_rules, self.page_size)
-        self.current_page = self.total_pages
-
+        """新增一列空白規則，跳到最後一頁（搜尋中會先清除搜尋，否則新列不會顯示）。"""
+        cleared = self._query is not None or self._only_issues
+        if cleared:
+            self._clear_search()
+        rule = {"from": "", "to": "", "_rid": self._new_rid()}
+        self.all_rules_data.append(rule)
+        self._mark_changed()
+        self.current_page = calc_total_pages(len(self.all_rules_data), self.page_size)
         self._render_current_page()
+        self._focus_new_rule(rule["_rid"])
+        suffix = "，並清除搜尋" if cleared else ""
         show_snack(
             self.page,
-            "➕ 已新增一條規則（已跳至最後一頁）",
+            f"➕ 已新增一條規則（已跳至最後一頁{suffix}）",
             C.EM,
             text_color=C.ON_EM,
         )
 
+    def _focus_new_rule(self, rid: int):
+        """把游標放進新規則列的 from 欄，可以直接打字。"""
+        run_task = getattr(self.page, "run_task", None)
+        row = next((r for r in self.rules_table.rows if r.data == rid), None)
+        if run_task is None or row is None:
+            return
+        try:
+            run_task(row.cells[1].content.focus)
+        except Exception:  # noqa: BLE001 - 取得焦點只是輔助
+            log_error("[Rules] 新規則列取得焦點失敗", exc_info=True)
+
     def delete_row_clicked(self, e):
-        """刪除指定 RID 的規則並重新渲染"""
-        rid_to_delete = e.control.data
-        idx = self._find_index_by_rid(rid_to_delete)
+        """刪除指定 RID 的規則並重新渲染；提示上附「復原」。"""
+        idx = self._find_index_by_rid(e.control.data)
+        if idx < 0:
+            return
+        rule = self.all_rules_data.pop(idx)
+        self._mark_changed()
+        self._diag_debouncer.call(self._rediagnose_after_edit)
+        self._apply_filter()  # 搜尋結果也要拿掉，否則已刪除的列仍留在畫面上
+        self._render_current_page()
 
-        if idx >= 0:
-            # ✅ 先抓預覽文字
-            src = (self.all_rules_data[idx].get("from") or "").strip()
-            dst = (self.all_rules_data[idx].get("to") or "").strip()
+        src = (rule.get("from") or "").strip()
+        dst = (rule.get("to") or "").strip()
+        src_preview = src[:20] + ("…" if len(src) > 20 else "")
+        dst_preview = dst[:20] + ("…" if len(dst) > 20 else "")
+        show_snack(
+            self.page,
+            f"🗑 已刪除：{src_preview} → {dst_preview}",
+            C.RED,
+            text_color=C.ON_EM,
+            action_label="復原",
+            on_action=lambda _e: self._undo_delete(idx, rule),
+        )
 
-            del self.all_rules_data[idx]
-
-            if self.current_page > 1 and (
-                self.current_page - 1
-            ) * self.page_size >= len(self.all_rules_data):
-                self.current_page -= 1
-
-            self._render_current_page()
-
-            # ✅ 顯示簡短提示（避免太長）
-            src_preview = src[:20] + ("…" if len(src) > 20 else "")
-            dst_preview = dst[:20] + ("…" if len(dst) > 20 else "")
-            show_snack(
-                self.page,
-                f"🗑 已刪除：{src_preview} → {dst_preview}",
-                C.RED,
-                text_color=C.ON_EM,
-            )
+    def _undo_delete(self, index: int, rule: dict):
+        """把剛刪除的規則放回原位置，並跳到它所在的頁面。"""
+        if any(r.get("_rid") == rule.get("_rid") for r in self.all_rules_data):
+            return
+        self.all_rules_data.insert(min(index, len(self.all_rules_data)), rule)
+        self._mark_changed()
+        self._diag_debouncer.call(self._rediagnose_after_edit)
+        self._apply_filter()
+        if not self._reveal_rule(rule["_rid"]):
+            self.current_page = 1  # 搜尋條件不含它：留在搜尋結果的第 1 頁
+        self._render_current_page()
+        show_snack(self.page, "已復原刪除的規則", C.EM, text_color=C.ON_EM)
 
     @property
     def page(self):

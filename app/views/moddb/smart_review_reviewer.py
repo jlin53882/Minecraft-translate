@@ -431,6 +431,13 @@ class SmartReviewReviewer:
         self._set_actions_enabled(False, None)
         self.ctx.update()
 
+    def show_run_loading(self) -> None:
+        """對話框正在讀取共用批次摘要：先顯示讀取中，並讓先前批次晚到的結果作廢。"""
+        self.state.begin_request()
+        self.position_input.value = ""
+        self.position_suffix.value = ""
+        self._show_loading("正在載入批次…")
+
     def _show_loading(self, text: str) -> None:
         """顯示讀取中狀態。"""
         self.body.controls = [kit.loading_state(text)]

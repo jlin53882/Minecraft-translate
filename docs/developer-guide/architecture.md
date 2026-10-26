@@ -20,10 +20,14 @@ Minecraft-translate/
 │   ├── shell/                # 外殼：側欄 / 頂列 / 狀態列 / 快速跳轉 / TaskManager
 │   ├── tasks/                # TaskSession、LogEntry（與 UI 無關）
 │   ├── config_store.py       # 設定讀寫與變更通知
+│   ├── icon_*.py             # 圖示預覽的解析／渲染／掃描：icon_catalog（資產目錄）、icon_resolve（解析）、
+│   │                         #   icon_render（影像處理）、icon_jar_scan＋icon_scan_pool（單 JAR 掃描與行程池）、
+│   │                         #   icon_index、icon_reader、icon_preview_image、icon_runtime
 │   ├── ui/                   # UI 元件
 │   │   ├── design.py        # 設計 token / 主題（見 docs/developer-guide/ui-design-system.md）
 │   │   ├── kit/             # 共用元件
 │   │   ├── keyboard_shortcuts.py
+│   │   ├── update_scope.py  # 局部更新邊界（只重畫實際變動的控制項）
 │   │   └── view_wrapper.py
 │   ├── views/               # 各功能頁面（View）
 │   │   ├── bundler_view.py        # 輸出打包
@@ -32,6 +36,8 @@ Minecraft-translate/
 │   │   ├── extractor_view.py      # 擷取頁
 │   │   ├── icon_preview_view.py   # 圖示預覽
 │   │   ├── icon_preview_row.py    # 圖示預覽單筆 UI 列
+│   │   ├── icon_preview/          # 圖示預覽子模組（載入／掃描／快取／模組清單／詳情）
+│   │   ├── moddb/                 # Mod 資料庫頁子模組（條目面板、背景讀寫、對話框、智慧校對）
 │   │   ├── lm_view.py             # LM 翻譯頁
 │   │   ├── lookup_view.py         # 查詢頁
 │   │   ├── merge_view.py          # 合併頁
@@ -40,7 +46,7 @@ Minecraft-translate/
 │   │   ├── cache_manager/         # 快取視圖子模組（actions/state/history/overview/log）
 │   │   ├── config/                # 設定視圖子模組（config_actions/config_form）
 │   │   ├── extractor/             # 擷取視圖子模組（dialog/panels/state）
-│   │   ├── rules/                 # 規則視圖子模組（rules_actions/state/table）
+│   │   ├── rules/                 # 規則視圖子模組（rules_actions/filter/state/table/validation/widgets）
 │   │   ├── translation/           # 翻譯視圖子模組（translation_actions/panels/state）
 │   │   ├── qc_base.py             # QC 基礎
 │   │   ├── qc_view.py             # QC 檢查頁
@@ -110,6 +116,9 @@ Minecraft-translate/
 │       ├── species_cache.py     # 物種快取
 │       ├── text_processor.py    # 文字處理
 │       └── ui_logging_handler.py
+│   │
+│   └── translation_db/         # Mod 翻譯資料庫（SQLite）：repository／scanner／scan_pool／stat_summary／
+│                               #   option_facets／query_interrupt／smart_review_* 等，見 user-guide/mod-translation-db.md
 │
 ├── tests/                     # 測試
 │   ├── conftest.py            # pytest 全域 fixture

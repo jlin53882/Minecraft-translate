@@ -268,3 +268,26 @@ def test_format_quality_comparison_analyzes_each_text_once():
             "# A\n[l](u)", "A\n[l](u)", "# A\n[l](v)", kind="guide"
         )
     assert spy.call_count == 2
+
+
+def test_token_occurrence_positions_match_a_line_by_line_count():
+    """行號與欄號用換行位置的二分搜尋計算，結果要與逐段計數相同（含換行緊鄰標記）。"""
+    from translation_tool.core import format_diagnostics as fd
+    from translation_tool.core.format_tokens import format_token_spans
+
+    text = "§aHello %s\n\n$(br)World\n%d §r\n" + "x\n" * 5 + "\n§l tail %1$s"
+    spans = fd._token_occurrences(text)
+    expected = [
+        (
+            token,
+            start,
+            end,
+            text.count("\n", 0, start) + 1,
+            start - text.rfind("\n", 0, start),
+        )
+        for token, start, end in format_token_spans(text)
+    ]
+    assert expected, "測試文字要含格式標記"
+    assert [(s.token, s.start, s.end, s.line, s.column) for s in spans] == expected
+    assert fd._newline_positions("a\nb\n\nc") == [1, 3, 4]
+    assert fd._newline_positions("no newline") == []

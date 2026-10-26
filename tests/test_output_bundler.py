@@ -512,3 +512,24 @@ class TestOutputBundlerIntegration:
             assert content["pack"]["supported_formats"]["min_inclusive"] == 34
 
         assert results[-1].get("progress") == 1.0
+
+
+def test_bundle_result_matches_the_log_and_marks_reuse(tmp_path):
+    import re
+
+    from app.views.bundler_view import bundle_result_text
+    from translation_tool.core.output_bundler import bundle_outputs_generator
+
+    (tmp_path / "lang").mkdir()
+    (tmp_path / "lang" / "zh_tw.json").write_text('{"test": "value"}')
+    output_zip = tmp_path / "output.zip"
+
+    updates = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
+    result = updates[-1]["bundle_result"]
+    logged = int(re.search(r"總共 (\d+) 個檔案", updates[-1]["log"]).group(1))
+    assert result["reused"] is False and result["files"] == logged
+    assert bundle_result_text(result).startswith(f"打包完成：{logged:,} 個檔案加入 ZIP")
+
+    again = list(bundle_outputs_generator(str(tmp_path), str(output_zip)))
+    assert again[-1]["bundle_result"] == {"reused": True, "files": None}
+    assert "沿用上次的 ZIP" in bundle_result_text(again[-1]["bundle_result"])

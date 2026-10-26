@@ -55,6 +55,20 @@ def assert_summary_matches(db):
         [db_models_stat(row) for row in full_sources]
     )
     assert db._overview_uncached() == db._overview_full()
+    # 模組／類型選項直接讀摘要，與逐條目查詢的結果相同（含已刪光條目的模組）
+    for version in db.versions():
+        assert db._mods_uncached(version) == sorted(
+            row[0]
+            for row in db._q(
+                "SELECT DISTINCT mod_id FROM entry WHERE mc_version=?", (version,)
+            )
+        )
+        assert db._kinds_uncached(version) == sorted(
+            row[0]
+            for row in db._q(
+                "SELECT DISTINCT kind FROM entry WHERE mc_version=?", (version,)
+            )
+        )
     # 其他觸發器維護的衍生資料也在每條寫入路徑後與重算比對
     assert db.verify_entry_activity() == []
     assert db.verify_effective_columns() == []
@@ -109,7 +123,7 @@ def _seed(db):
 
 def test_new_database_installs_ready_summary(db):
     meta = dict(db._q("SELECT key, value FROM meta WHERE key LIKE 'stats%'"))
-    assert meta == {"stats_schema_version": "2", "stats_valid": "1"}
+    assert meta == {"stats_schema_version": "3", "stats_valid": "1"}
     assert stat_summary.is_installed(db._conn)
     assert_summary_matches(db)
 

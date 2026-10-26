@@ -53,9 +53,9 @@ def create_view_for_navigation():
         # Mock detail search UI widgets
         view.detail_search_tf = MagicMock()
         view.detail_search_status = MagicMock()
-        # Mock list_view
-        view.list_view = MagicMock()
-        view.list_view.controls = MagicMock()
+        # 模組清單與詳情清單各自一個 ListView，返回時只切換顯示
+        view.mod_list_view = MagicMock()
+        view.detail_list_view = MagicMock()
         # Mock controls
         view.controls = []
         view.update_count = 0
@@ -157,7 +157,8 @@ class TestGoBack:
         assert view._detail_filtered_entries is None
         view.page_info.value = ""  # verify MagicMock called
         view._update_detail_search_controls.assert_called_once_with(visible=False)
-        view.list_view.controls.clear.assert_called_once()
+        assert view.mod_list_view.visible is True
+        assert view.detail_list_view.visible is False
         view._render_mod_list.assert_called_once()
 
     def test_go_back_calls_update_detail_search_controls(self):
@@ -170,15 +171,17 @@ class TestGoBack:
 
         view._update_detail_search_controls.assert_called_once_with(visible=False)
 
-    def test_go_back_clears_list_view(self):
-        """_go_back 會清除 list_view controls"""
+    def test_go_back_shows_mod_list_and_hides_detail_list(self):
+        """_go_back 切回模組清單，不清除也不重建任何一邊的列"""
         view = create_view_for_navigation()
         view._update_detail_search_controls = MagicMock()
         view._render_mod_list = MagicMock()
 
         view._go_back(MagicMock())
 
-        view.list_view.controls.clear.assert_called_once()
+        assert view.mod_list_view.visible is True
+        assert view.detail_list_view.visible is False
+        view.detail_list_view.controls.clear.assert_not_called()
 
     def test_go_back_renders_mod_list(self):
         """_go_back 最後會呼叫 _render_mod_list"""

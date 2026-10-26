@@ -305,13 +305,13 @@ def run_ftb_pipeline(
 ) -> dict:
     """FTB Quests 全流程 Pipeline（UI / services / CLI 都可用）。"""
     result: dict = {}
+    start_time = time.perf_counter()  # 只勾選部分步驟（例如只注入）時也要有總耗時基準
     translation_cancelled = False
     translation_incomplete = False
     translation_reason: str | None = None
 
     if step_export:
         log_info("📦 [步驟 1/4] 開始抽取 FTB Quests 原始文本...")
-        start_time = time.perf_counter()
         raw_paths = export_ftbquests_raw_json(directory_path, output_dir=output_dir)
         result["raw_paths"] = raw_paths
         log_info(f"✅ 原始資料抽取完成！\n  儲存位置: {raw_paths.get('raw_root')}")
@@ -456,7 +456,7 @@ def run_ftb_pipeline(
         )
 
         input_config_dir = os.path.join(directory_path, "config")
-        output_config_dir = os.path.join(output_dir, "ftbquests", "完成", "config")
+        output_config_dir = os.path.join(out_root, "ftbquests", "完成", "config")
 
         log_info(f"📁 Inject template from = {input_config_dir}")
         log_info(f"📁 Inject write to     = {output_config_dir}")

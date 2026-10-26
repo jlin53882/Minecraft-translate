@@ -44,7 +44,7 @@ flowchart TD
   E -- 是 --> G["狀態晶片：已取消，不顯示摘要"]
   F --> H["_ui_stop.set，停止輪詢，恢復按鈕"]
   G --> H
-  B -- ERROR --> I["狀態晶片：任務發生錯誤，停止輪詢"]
+  B -- ERROR --> I["狀態晶片：任務發生錯誤；有摘要時照樣顯示摘要（失敗清單），停止輪詢"]
 ```
 
 ## 背景任務與 UI 更新
@@ -63,6 +63,7 @@ flowchart TD
 - `session`：TaskSession；`session.snapshot()` 回傳的 `summary`（`success_zips`、`failed_zips`、`failed_zip_details` 或資料夾版本的 `success_folders` 等）是摘要的主要來源。缺少摘要時，`_sync_ui_once` 會依日誌中的 `[完成]`、`[錯誤]` 字串推算。
 - 設定寫入：`_on_merge_field_changed(key, value)` 呼叫 `config_store.set_value(f"lang_merger.{key}", value)`，寫入成功後 `_broadcast_config_change_to_config_view` 會重新讀取已建立的設定頁。
 - 設定讀取：`load_config()` 讀取 `lang_merger.pending_folder_name` 與 `lang_merger.pending_organized_folder_name`，用於摘要文字。
+- 摘要的輸出統計（`output_counts`）由 `merge_service._count_output_files` 依 `lang_output/` 底下的第一層資料夾名稱分類：`assets`、待翻譯資料夾（`pending`）、待翻譯整理資料夾（`organized`），其餘算 `lang_output`；比對整個資料夾名稱，因為預設的整理資料夾名稱也含「待翻譯」。摘要視窗以中文標籤顯示各類，另列「處理時發生錯誤的檔案」（`errored_files`）；有失敗或錯誤檔案時標題為「合併完成（有失敗項目）」；任務以 ERROR 結束（例如輸出資料夾無法寫入，失敗計數可能是 0）時標題為「合併失敗」。
 - 翻譯記憶庫快照 `MergeDbRunSnapshot`：`use_db`、`version`、`database_settings`。
 - 產出：合併結果寫入 `output_dir_field` 指定的目錄。取消時，merge_service 內的 `_cleanup_cancelled_output` 只刪除「本次新建立」的輸出資料夾（以 `existed_before` 判斷），既有資料夾不動。
 
@@ -71,7 +72,7 @@ flowchart TD
 - 輸入缺漏（來源、ZIP 清單或輸出目錄為空）：以 `show_snack` 提示，不啟動任務。
 - 應用程式關閉中無法啟動：還原按鈕與狀態晶片，並顯示提示。
 - 合併例外：`_run_merge_worker` 的 `except Exception` 先以 `session_task_scope` 綁定本頁 session，再以 `log_error` 寫入完整堆疊；畫面只顯示「類型: 訊息（完整堆疊已寫入後台 log）」（`add_log_unmirrored`），接著 `set_error()` → `finish()`，狀態晶片顯示「任務發生錯誤」。
-- 輸出檔替換被拒（OneDrive／防毒掃描暫時鎖檔的 `WinError 5`）：語言檔與 `.translation-provenance.json` 以 `replace_with_retry`（`translation_tool/utils/file_replace.py`）退避重試最多 5 次；仍失敗時，語言檔寫入失敗會讓該模組失敗（其他模組照常處理，但階段 1 標為失敗、階段 2 略過），來源標記檔寫入失敗只記警告，不影響該模組。
+- 輸出檔替換被拒（OneDrive／防毒掃描暫時鎖檔的 `WinError 5`）：語言檔與 `.translation-provenance.json` 以 `replace_with_retry`（`translation_tool/utils/file_replace.py`）退避重試最多 5 次；仍失敗時，語言檔寫入失敗會讓該模組失敗（其他模組照常處理，但階段 1 標為失敗、階段 2 略過），來源標記檔（`.translation-provenance.json`）在合併期間累積於記憶體，整批合併結束（含取消、例外）時才寫出一次（`provenance_batch`，`translation_tool/core/lang_merge_provenance.py`）；寫入失敗只記警告，不影響任何模組。
 - 取消：`TaskCancelled` 視為正常終止，寫入「[取消] 合併已停止」warning，不作為錯誤處理。
 - service 內的致命錯誤（例如 ZIP 無法處理）：service 自行 `set_error()`，並由 `_finish_folder_run` 等函式寫入摘要；`finish` 由 service 負責。
 - 狀態同步例外：`_sync_ui_once` 以 `log_warning` 記錄後繼續，不會中斷輪詢。

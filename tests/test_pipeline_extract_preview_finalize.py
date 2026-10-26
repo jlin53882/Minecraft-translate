@@ -113,7 +113,7 @@ def test_preview_success_finalizes_dialog(monkeypatch, tmp_path):
     dlg = _run_preview(monkeypatch, tmp_path, gen)
     texts = _texts(dlg.content)
     assert not any("預覽掃描中" in t for t in texts)
-    assert any("預計提取：3 個檔案" in t for t in texts)
+    assert any("預計提取 3 個檔案" in t for t in texts)
     assert any("a.jar" in t for t in texts)
     assert not any("b.jar" in t for t in texts)  # N3：0 個檔案的 JAR 不列出
     assert [a.content for a in dlg.actions] == ["確定"]

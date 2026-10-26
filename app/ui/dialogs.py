@@ -8,6 +8,8 @@ from weakref import WeakKeyDictionary
 
 import flet as ft
 
+from app.ui.update_scope import update_regions
+
 RESPONSIVE_DIALOG_MARKER = "pipeline-responsive-dialog"
 RESPONSIVE_FIELD_DATA_KEY = "pipeline-dialog-reserved-width"
 _DIALOG_DIMENSION_KEYS = (
@@ -134,13 +136,16 @@ def _register_responsive_dialog(page: ft.Page, dialog: ft.DialogControl) -> None
         def on_resize(event):
             if callable(original_resize):
                 original_resize(event)
-            changed = False
+            resized = []
             for entry in tuple(entries):
                 if not getattr(entry.dialog, "open", False):
                     _unregister_responsive_dialog(page, entry.dialog)
                     continue
-                changed = _resize_dialog_controls(page, entry.dialog) or changed
-            if changed:
+                if _resize_dialog_controls(page, entry.dialog):
+                    resized.append(entry.dialog)
+            # 視窗可能是更新邊界（頁面層級的更新不會走進去），逐一更新自己；
+            # 視窗尚未掛上頁面時退回整頁更新
+            if resized and not update_regions(*resized):
                 page.update()
 
         binding = _ResponsivePageBinding(original_resize, on_resize, entries)

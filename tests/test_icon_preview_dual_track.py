@@ -26,7 +26,7 @@ def create_view(
         view._page = MockPage()
         view.source_root = source_root
         view.review_root = review_root
-        view._entries_cache = None
+        view._source_cache = None
         view._cache_meta = {}
     return view
 

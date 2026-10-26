@@ -9,6 +9,7 @@ compatibility policy.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -172,19 +173,33 @@ def format_identifier_label(identifier: str, category: str) -> str:
     return identifier
 
 
-def _span(token: str, start: int, end: int, text: str) -> FormatSpan:
+def _newline_positions(text: str) -> list[int]:
+    positions: list[int] = []
+    index = text.find("\n")
+    while index != -1:
+        positions.append(index)
+        index = text.find("\n", index + 1)
+    return positions
+
+
+def _span(token: str, start: int, end: int, newlines: list[int]) -> FormatSpan:
+    # ``newlines`` 為整段文字所有換行的位置（已排序）：行號與欄號用二分搜尋，
+    # 長文字（手冊頁面）有數百個格式標記時，不必每個標記都重新掃描前面的全部內容。
+    before = bisect_left(newlines, start)
     return FormatSpan(
         token=token,
         start=start,
         end=end,
-        line=text.count("\n", 0, start) + 1,
-        column=start - text.rfind("\n", 0, start),
+        line=before + 1,
+        column=start - (newlines[before - 1] if before else -1),
     )
 
 
 def _token_occurrences(text: str) -> tuple[FormatSpan, ...]:
+    newlines = _newline_positions(text)
     return tuple(
-        _span(token, start, end, text) for token, start, end in format_token_spans(text)
+        _span(token, start, end, newlines)
+        for token, start, end in format_token_spans(text)
     )
 
 
@@ -266,11 +281,14 @@ def _analyze_guide_format(
     target_marks = collect_guide_marks(translated)
     source_occurrences = list(token_result.source_occurrences)
     target_occurrences = list(token_result.target_occurrences)
+    source_newlines = _newline_positions(source)
+    target_newlines = _newline_positions(translated)
     source_occurrences.extend(
-        _span(mark.identifier, mark.start, mark.end, source) for mark in source_marks
+        _span(mark.identifier, mark.start, mark.end, source_newlines)
+        for mark in source_marks
     )
     target_occurrences.extend(
-        _span(mark.identifier, mark.start, mark.end, translated)
+        _span(mark.identifier, mark.start, mark.end, target_newlines)
         for mark in target_marks
     )
     source_occurrences.sort(key=lambda item: (item.start, item.end))

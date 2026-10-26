@@ -393,11 +393,11 @@ def test_preview_result_lists_only_non_empty_jars(env):
     dialog = env.open()
     pd = env.preview(dialog)
     texts = _texts(pd.content)
-    assert "JAR 數量：2 個" in texts
-    assert "預計提取：5 個檔案（約 1.5 MB）" in texts
+    assert any(t.startswith("掃描 2 個 JAR") for t in texts)
+    assert "預計提取 5 個檔案，約 1.50 MB" in texts
     assert "  a.jar（5 個檔案）" in texts
     assert not any("b.jar" in t for t in texts)
-    assert "  另有 1 個 JAR 沒有可提取的檔案，已略過不列出" in texts
+    assert any("1 個沒有、0 個讀取失敗" in t for t in texts)
     assert not any("預覽掃描中" in t for t in texts)
     assert [a.content for a in pd.actions] == ["確定"]
 
@@ -420,14 +420,14 @@ def test_preview_dual_result_shows_lang_and_book_counts(env):
     texts = _texts(env.preview(dialog).content)
     assert "  m.jar（Lang: 3, Book: 4）" in texts
     assert not any("z.jar" in t for t in texts)
-    assert "  另有 1 個 JAR 沒有可提取的檔案，已略過不列出" in texts
+    assert any("1 個沒有、0 個讀取失敗" in t for t in texts)
 
 
 def test_preview_with_no_result_shows_zero_summary(env):
     env.updates = []
     dialog = env.open()
     texts = _texts(env.preview(dialog).content)
-    assert "預計提取：0 個檔案（約 0.0 MB）" in texts
+    assert "預計提取 0 個檔案，約 0.00 MB" in texts
 
 
 @pytest.mark.parametrize("failure", ["generator_error", "exception"])
@@ -503,7 +503,7 @@ def test_preview_can_be_run_twice_independently(env):
     env.updates = [{"error": "第二次失敗"}]
     second = env.preview(dialog)
     assert first is not second
-    assert any("預計提取：1 個檔案" in t for t in _texts(first.content))
+    assert any("預計提取 1 個檔案" in t for t in _texts(first.content))
     assert _texts(second.content) == ["❌ 錯誤：第二次失敗"]
 
 
@@ -628,6 +628,7 @@ def test_reopen_after_cancel_is_not_affected_by_the_old_scan(env):
     _drain(env.page)
 
     texts = _texts(second)
-    assert "預計提取：5 個檔案（約 1.5 MB）" in texts
-    assert "JAR 數量：2 個" in texts  # 探索得到的 JAR 數量不會被後續更新蓋成 0
+    assert "預計提取 5 個檔案，約 1.50 MB" in texts
+    # 掃描到的 JAR 數量不會被後續更新蓋成 0
+    assert any(t.startswith("掃描 2 個 JAR") for t in texts)
     assert first not in env.page.overlay and first.open is False

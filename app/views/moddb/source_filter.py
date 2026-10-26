@@ -49,8 +49,8 @@ class SourceFilter:
         *,
         catalog=None,
         available_only: bool = False,
-    ) -> None:
-        """更新來源選項，可選擇只顯示目前篩選結果實際使用的來源。"""
+    ) -> bool:
+        """更新來源選項，可選擇只顯示目前篩選結果實際使用的來源；回傳選項或選值是否改變。"""
         settings = current_settings()
         catalog = catalog or settings.source_catalog
         available_codes = _normalise_source_codes(effective_source_codes)
@@ -69,7 +69,7 @@ class SourceFilter:
         fallback_codes = available_codes if available_only else active_custom_codes
         order.extend(code for code in sorted(fallback_codes) if code not in order)
         selected = self.dropdown.value
-        kit.set_dropdown_options(
+        changed = kit.set_dropdown_options(
             self.dropdown,
             [
                 (ALL_SOURCES, "全部來源"),
@@ -78,6 +78,8 @@ class SourceFilter:
         )
         if selected not in {ALL_SOURCES, *(str(code) for code in order)}:
             self.dropdown.value = ALL_SOURCES
+            changed = True
+        return changed
 
     def reset(self) -> None:
         """回到「全部來源」。"""

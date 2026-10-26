@@ -231,6 +231,39 @@ def _drain(page):
     page._tasks.clear()
 
 
+def test_dialog_confirm_without_preview_explains_that_preview_is_required(
+    db, monkeypatch
+):
+    from app.views.moddb import bulk_review_dialog as module
+    from tests.conftest import mock_page
+
+    monkeypatch.setattr(
+        module,
+        "launch_page_operation",
+        lambda _page, target, **_kwargs: (target(), True)[1],
+    )
+    monkeypatch.setattr(
+        module.BulkReviewDialog,
+        "_post",
+        lambda self, callback, *args, **_kwargs: callback(*args),
+    )
+    dialog = module.BulkReviewDialog(mock_page(), lambda: db, "1.21.1", None)
+    shown: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "show_snack",
+        lambda _page, message, *_args, **_kwargs: shown.append(message),
+    )
+
+    assert "產生預覽" in dialog.summary.value
+    assert "產生預覽" in dialog.apply_btn.tooltip
+
+    dialog._confirm()
+
+    assert shown == [module.PREVIEW_REQUIRED_HINT]
+    assert module.PREVIEW_REQUIRED_HINT in dialog.summary.value
+
+
 def test_dialog_previews_pages_excludes_and_reverts(db):
     """驗證此測試案例的預期結果與相容性。"""
     from app.views.moddb.bulk_review_dialog import ALL_SOURCES, BulkReviewDialog

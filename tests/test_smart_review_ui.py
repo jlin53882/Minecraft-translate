@@ -231,6 +231,34 @@ def test_batch_reviewer_exposes_expired_override_action(ctx):
     assert checkbox.disabled is False
 
 
+def test_batch_reviewer_caches_repeated_format_diagnosis(ctx, monkeypatch):
+    """全選、重畫與確認重複檢查同一草稿時只解析一次格式。"""
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    calls = []
+    original = batch_reviewer_module.SmartReviewEvidencePresenter.diagnose_draft
+
+    def counted(row, draft):
+        calls.append((row.kind, row.en_us, draft))
+        return original(row, draft)
+
+    monkeypatch.setattr(
+        batch_reviewer_module.SmartReviewEvidencePresenter,
+        "diagnose_draft",
+        counted,
+    )
+
+    ready = _candidate()
+    stale = _candidate(status="stale")
+    assert reviewer._can_apply(ready) is True
+    assert reviewer._can_apply(ready) is True
+    assert reviewer._can_override(stale) is True
+    assert len(calls) == 1
+
+    changed = _candidate(suggested_zh_tw="另一個建議")
+    assert reviewer._can_apply(changed) is True
+    assert len(calls) == 2
+
+
 def test_dialog_switches_between_single_and_batch_review_modes(db, monkeypatch):
     """智慧校對審查分頁提供逐筆／批量模式切換而不重建外層分頁。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
@@ -393,7 +421,8 @@ def test_run_panel_filters_modules_and_updates_sources_without_starting(
     panel.mod_dd.value = "jar_mod"
     # 這個測試頁面用 asyncio.run 立即執行 run_task；避免 debounce callback
     # 在 callback 內再次呼叫 run_background 時巢狀建立 event loop。
-    panel._debounce.call = lambda *_args, **_kwargs: None
+    for debounce in (panel._debounce, panel._plan_debounce, panel._scope_debounce):
+        debounce.call = lambda *_args, **_kwargs: None
     panel._on_mod()
     assert len(scope_calls) == 1
 
@@ -502,21 +531,29 @@ def test_run_panel_rejects_batch_size_over_safe_limit(db, monkeypatch):
         panel._request()
 
 
-def test_run_panel_does_not_refresh_page_when_progress_and_log_unchanged(db):
-    """驗證 Smart Review 輪詢沒有可見變更時不會重送整頁 UI。"""
+def test_run_panel_does_not_refresh_dialog_when_progress_and_log_unchanged(
+    db, monkeypatch
+):
+    """驗證 Smart Review 輪詢沒有可見變更時不會重送視窗；有變更時也只更新視窗、不更新整頁。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog
 
     page = _sync_page()
     dialog = SmartReviewDialog(page, lambda: db, "1.21.1", None)
     panel = dialog.run_panel
+    updated_regions = []
+    monkeypatch.setattr(
+        "app.views.moddb.smart_review_context.update_regions",
+        lambda *controls: updated_regions.append(controls) or True,
+    )
 
-    before = page.updated
+    page_updates = page.updated
     panel.sync()
-    first = page.updated
+    first = len(updated_regions)
     panel.sync()
 
-    assert first == before + 1
-    assert page.updated == first
+    assert first == 1
+    assert updated_regions == [(dialog.dialog,)] * first
+    assert page.updated == page_updates  # 沒有整頁更新
 
 
 def test_run_panel_renders_preparation_stage_in_progress_and_status(db):
@@ -649,6 +686,42 @@ def test_dialog_review_tab_loads_missing_run_in_background(db):
 
     assert dialog.nav.value == "review"
     assert background_names == ["載入智慧校對審查摘要"]
+
+
+def test_open_review_shows_loading_while_summary_is_read(db):
+    """從歷史批次開始審查時，摘要讀取期間兩個審查面板都顯示讀取中，而不是「尚未載入批次」。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    pending = []
+    dialog.ctx.run_background = lambda work, done, **_kwargs: (
+        pending.append(done) or True
+    )
+
+    def texts(panel):
+        found = []
+
+        def walk(control):
+            value = getattr(control, "value", None)
+            if isinstance(value, str):
+                found.append(value)
+            for attr in ("controls", "content"):
+                child = getattr(control, attr, None)
+                for item in child if isinstance(child, list) else [child]:
+                    if item is not None and hasattr(item, "__dict__"):
+                        walk(item)
+
+        for control in panel.body.controls:
+            walk(control)
+        return " ".join(found)
+
+    assert "尚未載入批次" in texts(dialog.reviewer)
+    dialog.open_review("run-1")
+
+    assert pending, "摘要應在背景讀取"
+    assert "正在載入批次" in texts(dialog.reviewer)
+    assert "尚未載入批次" not in texts(dialog.reviewer)
+    assert "正在載入批次" in texts(dialog.batch_reviewer)
 
 
 def test_review_modes_share_counts_when_opened_from_running_history(db, monkeypatch):
@@ -1034,7 +1107,8 @@ def test_resume_scope_change_invalidates_inflight_count_and_plan_preview(
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     panel = dialog.run_panel
     panel._scope_loading = False
-    panel._debounce.call = lambda *_a, **_k: None
+    for debounce in (panel._debounce, panel._plan_debounce, panel._scope_debounce):
+        debounce.call = lambda *_a, **_k: None
     pending = []
 
     def hold(work, done, **kwargs):
@@ -1084,7 +1158,8 @@ def test_scope_and_preview_invalidations_follow_one_contract(db, monkeypatch):
     dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
     panel = dialog.run_panel
     panel._scope_loading = False
-    panel._debounce.call = lambda *_args, **_kwargs: None
+    for debounce in (panel._debounce, panel._plan_debounce, panel._scope_debounce):
+        debounce.call = lambda *_args, **_kwargs: None
     panel._total = 70_000
     panel._plan_preview_result = {"selected_count": 70_000}
 

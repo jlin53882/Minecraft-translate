@@ -119,7 +119,6 @@ def test_icon_cache_paths_follow_data_root(monkeypatch, tmp_path):
 
     assert index_path.parent == cache_root / "icon_index"
     assert icon_preview_view._get_icon_cache_dir() == cache_root / "jar_icons"
-    assert icon_preview_view._get_model_index_cache_dir() == cache_root / "model_index"
     assert entries_cache._get_cache_dir() == cache_root
     # 不得寫到 repo 或 cwd
     assert not (REPO_ROOT / ".icon_cache" / "icon_index" / index_path.name).exists()

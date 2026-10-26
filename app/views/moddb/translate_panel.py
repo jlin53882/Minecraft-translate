@@ -35,17 +35,24 @@ from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
+from app.ui.page_post import has_background_scheduler
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
+from app.ui.update_scope import update_regions
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
+from app.views.moddb.operation_summaries import (
+    scope_batches_text,
+    translation_kpi_titles,
+    translation_scope_text,
+)
 from app.views.moddb.repair_card import create_repair_card, repair_copy
 from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
 # 四張統計卡的標題列同高（「檢視」按鈕出現時卡片不會變高）
@@ -82,6 +89,11 @@ class TranslatePanel(ft.Column):
         )
         self.view_flagged_btn = self.result_inspector.button
         self._run_version = ""
+        self._run_scope: tuple = ()
+        # 最近一次預覽的 (精確批數, 範圍, 未翻譯數, 可沿用數)；範圍與資料（兩個筆數）
+        # 都沒變時，範圍說明顯示預覽的批數
+        self._preview_plan: tuple[int, tuple, int, int] | None = None
+        self._last_counts: tuple | None = None
         self._repair_preview = None
         self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
         self._repair_preview_generation = 0
@@ -91,6 +103,9 @@ class TranslatePanel(ft.Column):
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
+        # 範圍快照套用後要更新的下拉選單；``_refresh_full`` 表示其他區塊也有變、要更新整個面板
+        self._refresh_dropdowns: list[ft.Control] = []
+        self._refresh_full = False
         self.refresh_indicator = ft.Text(
             "背景更新機翻範圍中…", size=12, color=C.MUTED, visible=False
         )
@@ -427,19 +442,32 @@ class TranslatePanel(ft.Column):
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply worker-loaded scope and counts without blocking the page thread."""
         identity = snapshot.get("identity")
+        self._refresh_full = False
         if (
             self._repair_preview is not None
             and self._repair_preview_db_identity != identity
         ):
             self._clear_repair_preview()
+            self._refresh_full = True  # 修復預覽區也被清掉：整個面板要更新
         versions = snapshot.get("versions", [])
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        values_before = (self.version_dd.value, self.mod_dd.value)
+        changed_dropdowns: list[ft.Control] = []
+        if kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions]):
+            changed_dropdowns.append(self.version_dd)
         self.version_dd.value = snapshot.get("version")
         mods = snapshot.get("mods", [])
-        kit.set_dropdown_options(
+        if kit.set_dropdown_options(
             self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
-        )
+        ):
+            changed_dropdowns.append(self.mod_dd)
         self.mod_dd.value = snapshot.get("mod", ALL_MODS)
+        if values_before != (self.version_dd.value, self.mod_dd.value):
+            changed_dropdowns.extend(
+                dd
+                for dd in (self.version_dd, self.mod_dd)
+                if dd not in changed_dropdowns
+            )
+        self._refresh_dropdowns = changed_dropdowns
         if snapshot.get("error"):
             self.count_text.value = f"資料載入失敗：{snapshot['error']}"
         elif not versions:
@@ -468,14 +496,25 @@ class TranslatePanel(ft.Column):
         if self.mod_dd.value not in [ALL_MODS, *mods]:
             self.mod_dd.value = ALL_MODS
 
+    def _scope_refresh_in_background(self) -> bool:
+        return callable(self._request_scope_refresh) and has_background_scheduler(
+            self._page
+        )
+
     def _on_scope_changed(self, e=None) -> None:
+        # 背景可用時，模組清單與筆數由上層的背景快照載入，畫面執行緒不查資料庫。
+        background = self._scope_refresh_in_background()
         if e is not None and getattr(e, "control", None) is self.version_dd:
             self.mod_dd.value = ALL_MODS
-            self._refresh_mods()
+            if not background:
+                self._refresh_mods()
         self._clear_repair_preview()
-        self._refresh_counts()
+        if background:
+            self.count_text.value = "正在計算此範圍的筆數…"
+        else:
+            self._refresh_counts()
         self._safe_update()
-        if callable(self._request_scope_refresh):
+        if background:
             self._request_scope_refresh()
 
     def mod_ids(self) -> tuple[str, ...]:
@@ -499,6 +538,13 @@ class TranslatePanel(ft.Column):
         )
         self._set_count_text(missing, reusable)
 
+    def _refresh_counts_after_run(self) -> None:
+        """工作結束後更新範圍筆數：有背景快照時交給它（畫面執行緒不查資料庫），否則就地查詢。"""
+        if self._scope_refresh_in_background():
+            self._request_scope_refresh()
+        else:
+            self._refresh_counts()
+
     def _set_count_text(
         self,
         missing: int,
@@ -515,26 +561,33 @@ class TranslatePanel(ft.Column):
             if planned_items is not None
             else (min(to_ai, limit) if limit else to_ai)
         )
-        text = f"此範圍有 {format_count(missing)} 筆未翻譯"
-        if reusable:
-            text += (
-                f"，其中約 {format_count(reusable)} 筆其他版本已有相同譯文、"
-                "開始時會直接沿用（原文不同的不算）"
-            )
-        text += f"；上限 {format_count(limit)} 筆" if limit else "；上限為 0（不限）"
-        planned_batches = (
-            estimate_batch_count(will) if planned_batches is None else planned_batches
+        self._last_counts = (missing, reusable, planned_batches, planned_items)
+        plan = self._preview_plan
+        if plan and plan[1:] != (self._scope_key(), missing, reusable):
+            # 範圍改了，或其他操作（掃描匯入、批次取代…）改了資料：預覽的批數不再適用
+            self._preview_plan = plan = None
+        self.count_text.value = translation_scope_text(
+            missing,
+            reusable,
+            limit,
+            will,
+            scope_batches_text(
+                planned_batches, plan[0] if plan else None, estimate_batch_count(will)
+            ),
+            warn_large=not limit and will > LARGE_RUN_WARNING,
         )
-        text += (
-            f"，本次送 AI 翻譯{'最多 ' if limit else '全部 '}{format_count(will)} 筆"
-            f"（預估約 {planned_batches:,} 批）"
-        )
-        if not limit and will > LARGE_RUN_WARNING:
-            text += "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
-        self.count_text.value = text
 
     def _on_limit_changed(self) -> None:
+        had_preview = self._repair_preview is not None or self._repair_preview_running
         self._clear_repair_preview()
+        if self._scope_refresh_in_background():
+            self.count_text.value = "正在計算此範圍的筆數…"
+            if had_preview:
+                self._safe_update()  # 修復預覽區也被清掉：更新整個面板
+            else:
+                update_regions(self.count_text)  # 逐字輸入：只有一行提示文字有變
+            self._request_scope_refresh()
+            return
         self._refresh_counts()
         self._safe_update()
         if callable(self._request_scope_refresh):
@@ -545,6 +598,15 @@ class TranslatePanel(ft.Column):
 
     def _update_repair_start_button(self, *, running: bool | None = None) -> None:
         retranslation_controller.update_start_button(self, running=running)
+
+    def _scope_key(self) -> tuple:
+        """預覽批數適用的範圍：版本、模組、上限與是否沿用其他版本。"""
+        return (
+            self.version_dd.value or "",
+            tuple(self.mod_ids()),
+            self.limit(),
+            bool(self.reuse_row.value),
+        )
 
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
         return TranslateOptions(
@@ -577,11 +639,13 @@ class TranslatePanel(ft.Column):
             TaskSession(), "Mod 資料庫機翻", "moddb", page=self._page
         )
         self._run_version = str(self.version_dd.value or "")
+        self._run_scope = self._scope_key()
+        self._preview_plan = None  # 執行會改變資料；預覽的批數只適用到下一次執行前
         self._set_status("預覽中" if dry_run else "機翻中", "dia")
         self._set_running(True)
         self.progress_bar.value = 0
         self.live_text.value = ""
-        self.log_view.clear()
+        self.log_view.clear(update=False)  # 下一行的 _safe_update 會更新整個面板
         self.log_view.height = 0
         self.log_view.visible = False
         self._reset_stats(mode="normal")
@@ -651,7 +715,7 @@ class TranslatePanel(ft.Column):
         self._set_running(True)
         self.progress_bar.value = 0
         self.live_text.value = ""
-        self.log_view.clear()
+        self.log_view.clear(update=False)  # 下一行的 _safe_update 會更新整個面板
         self.log_view.height = 0
         self.log_view.visible = False
         self.repair_summary_text.value = (
@@ -806,7 +870,7 @@ class TranslatePanel(ft.Column):
             self._set_running(False)
             if self._on_finished and not summary.get("dry_run"):
                 self._on_finished()
-            self._refresh_counts()
+            self._refresh_counts_after_run()
         self._safe_update()
 
     def _apply_summary(self, s: dict, *, final: bool = True) -> None:
@@ -863,7 +927,7 @@ class TranslatePanel(ft.Column):
             else f"；狀態 {status}，數字為已提交／已確認的部分結果"
         )
         self.repair_summary_text.value = (
-            f"{progress}：待處理來源項目 {s.get('candidates', 0)}；"
+            f"{progress}：本次處理來源項目 {s.get('candidates', 0)}；"
             f"更新 {s.get('updated', 0)}"
             + (
                 f"（另同步其他版本 {s.get('synced_other_versions', 0)}）"
@@ -976,12 +1040,33 @@ class TranslatePanel(ft.Column):
         }
 
     def _apply_translation_summary(self, s: dict) -> None:
-        self._set_kpi_mode("normal")
-        if s.get("dry_run"):
-            self.stat_remaining.set_value(
-                format_count(s.get("remaining")),
-                delta=f"本次將翻譯 {s.get('candidates', 0):,} 筆",
+        """預覽與實際機翻填同一組卡片；預覽在標題標示，填入估算值。"""
+        dry_run = bool(s.get("dry_run"))
+        self._set_kpi_mode("normal", preview=dry_run)
+        candidates = s.get("candidates", 0) or 0
+        if dry_run:
+            self.stat_reused.set_value(
+                format_count(s.get("reused")),
+                delta="開始機翻時直接沿用（不呼叫 AI）",
             )
+            self.stat_written.set_value(
+                format_count(candidates),
+                delta=f"預估約 {s.get('planned_batches', 0) or 0:,} 批",
+            )
+            self.stat_flagged.set_value("—", delta="開始機翻後才會檢查")
+            self.stat_remaining.set_value(
+                format_count(s.get("scope_remaining", s.get("remaining"))),
+                delta=f"本次將翻譯 {candidates:,} 筆",
+            )
+            # 範圍說明改用預覽精確規劃的批數，畫面上不同時出現兩個批數
+            self._preview_plan = (
+                s.get("planned_batches", 0) or 0,
+                self._run_scope,
+                s.get("scope_remaining", s.get("remaining", 0)) or 0,
+                s.get("reused", 0) or 0,
+            )
+            if self._last_counts is not None:
+                self._set_count_text(*self._last_counts)
             return
         self.stat_reused.set_value(format_count(s.get("reused")))
         self.stat_written.set_value(
@@ -996,7 +1081,15 @@ class TranslatePanel(ft.Column):
         self.result_inspector.set_normal_results(
             {**s, "flagged_entries": flagged_entries}, self._run_version
         )
-        self.stat_remaining.set_value(format_count(s.get("remaining")))
+        # 與預覽相同：整個範圍仍未翻譯；這次候選中沒寫入的筆數放在說明
+        scope = s.get("scope_remaining")
+        left = s.get("remaining", 0) or 0
+        self.stat_remaining.set_value(
+            format_count(left if scope is None else scope),
+            delta=(f"本次未寫入 {left:,} 筆" if left else "本次候選已全部寫入")
+            if scope is not None
+            else "",
+        )
 
     def resolve_flagged(self, entry_id: int) -> None:
         """條目校對裡手動修好一筆「特殊字元不一致」：卡片數量同步減少。"""
@@ -1010,48 +1103,25 @@ class TranslatePanel(ft.Column):
         )
         self._safe_update()
 
-    def _set_kpi_mode(self, mode: str, *, repair_condition: str | None = None) -> None:
+    def _set_kpi_mode(
+        self,
+        mode: str,
+        *,
+        repair_condition: str | None = None,
+        preview: bool = False,
+    ) -> None:
         self._kpi_mode = mode
         if repair_condition is not None:
             self._kpi_repair_condition = repair_condition
         elif mode == "repair":
             self._kpi_repair_condition = self._repair_mode
-        labels = (
-            (
-                "本次來源譯文"
-                if self._kpi_repair_condition == "quality_mismatch"
-                else "本次候選",
-                "成功更新來源譯文"
-                if self._kpi_repair_condition == "quality_mismatch"
-                else "成功更新 AI 譯文",
-                "AI 草稿待人工確認"
-                if self._kpi_repair_condition == "quality_mismatch"
-                else "重翻後仍相同",
-                "範圍內仍不一致"
-                if self._kpi_repair_condition == "quality_mismatch"
-                else "範圍內仍符合修復條件",
-            )
-            if mode == "repair"
-            else (
-                "沿用其他版本",
-                "已寫入（AI 機翻）",
-                "特殊字元不一致",
-                "此範圍仍未翻譯",
-            )
+        titles = translation_kpi_titles(
+            mode, self._kpi_repair_condition, preview=preview
         )
-        for key, label in zip(
-            ("first", "second", "third", "fourth"), labels, strict=True
+        for card, (label, tooltip) in zip(
+            self._kpi_titles.values(), titles, strict=True
         ):
-            self._kpi_titles[key].set_title(
-                label,
-                tooltip=(
-                    "只計入 AI 有效回傳且內容與舊譯文完全相同的筆數；格式不符、失敗與資料競態跳過各自另計。"
-                    if key == "third"
-                    and mode == "repair"
-                    and self._kpi_repair_condition == "same_source_ai"
-                    else None
-                ),
-            )
+            card.set_title(label, tooltip=tooltip)
         self.result_inspector.set_mode(mode, self._kpi_repair_condition)
 
     def _reset_stats(self, *, mode: str = "normal") -> None:
@@ -1080,8 +1150,23 @@ class TranslatePanel(ft.Column):
     def _set_status(self, text: str, tone: str = "neutral") -> None:
         set_chip_status(self.status_chip, text, tone)
 
+    def flush(self) -> None:
+        """把這個頁籤的變更送到畫面；頁籤是更新邊界，頁面層級的 update 不會更新它。"""
+        self._refresh_full = False
+        self._refresh_dropdowns = []
+        update_regions(self)
+
+    def flush_loading(self) -> None:
+        """背景載入範圍資料時：只更新載入提示與筆數文字。"""
+        update_regions(self.refresh_indicator, self.count_text)
+
+    def flush_refresh(self) -> None:
+        """範圍快照套用後：只更新筆數文字、載入提示與內容有變的下拉選單。"""
+        if self._refresh_full:
+            self.flush()
+            return
+        dropdowns, self._refresh_dropdowns = self._refresh_dropdowns, []
+        update_regions(self.refresh_indicator, self.count_text, *dropdowns)
+
     def _safe_update(self) -> None:
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響機翻本身
-            log_debug(f"TranslatePanel update 略過：{exc}")
+        self.flush()

@@ -270,6 +270,24 @@ class ImmutableReplaceRulesSnapshot(Sequence[Mapping[str, str]]):
         return iter(self._items)
 
 
+_EXACT_FORBIDDEN = ".?*[]()\\^$"
+
+
+def exact_source(source: str) -> str | None:
+    """``^文字$`` 形式的整段完全相符規則：回傳中間的文字，其他規則回傳 None。
+
+    整段規則只在「整段文字（例如 lang 檔的一個值）剛好等於這段文字」時套用，
+    先於其他規則且結果不再被其他規則替換；用來處理單獨名稱與複合詞譯法不同的詞
+    （「紅樹木」單獨是方塊「紅樹林木塊」，但「紅樹木椅子」是「紅樹林木椅子」）。
+    """
+    if len(source) < 3 or source[0] != "^" or source[-1] != "$":
+        return None
+    inner = source[1:-1]
+    if any(ch in inner for ch in _EXACT_FORBIDDEN):
+        return None
+    return inner
+
+
 def _rules_signature(rules: Sequence[Mapping[str, str]]):
     """編譯快取的內容簽章。
 
@@ -310,6 +328,7 @@ class _CompiledRules:
         """初始化此測試替身或服務物件所需的狀態。"""
         literal_rules: list[tuple[str, str]] = []
         regex_rules: list[tuple[re.Pattern, str]] = []
+        exact_rules: dict[str, str] = {}
         keywords: set[str] = set()
 
         for rule in rules:
@@ -320,6 +339,11 @@ class _CompiledRules:
 
             src = rule["from"]
             dst = rule["to"]
+
+            whole = exact_source(src)
+            if whole is not None:
+                exact_rules.setdefault(whole, dst)
+                continue
 
             looks_like_regex = any(ch in src for ch in ".?*[]()\\")
             if looks_like_regex:
@@ -342,6 +366,7 @@ class _CompiledRules:
         self.literal_rules = literal_rules
         self.atomic_destinations = [dst for _src, dst in literal_rules]
         self.regex_rules = regex_rules
+        self.exact_rules = exact_rules
         # 與舊版相同的「是否可能命中」預檢：規則前兩字（去空白後）出現在去空白的文字中
         self.spaceless_keywords = {k.replace(" ", "") for k in keywords}
         self.keyword_lengths = sorted({len(k) for k in self.spaceless_keywords})
@@ -649,6 +674,11 @@ def apply_replace_rules(
         return text
 
     compiled = _get_compiled_rules(rules)
+
+    # ---------- 整段完全相符規則（先於其他規則，結果不再替換） ----------
+    exact = compiled.exact_rules.get(text)
+    if exact is not None:
+        return exact
 
     # ---------- 快路徑 1：極短字串 ----------
     if len(text) < 2:

@@ -544,8 +544,20 @@ class CleanupMixin:
             return [d[0] for d in cursor.description], cursor.fetchall()
 
     def _flagged_candidates(self, version: str) -> list[CleanupCandidate]:
-        """目前規則判定「不該收」的條目（不看有沒有譯文）。"""
-        flagged: list[CleanupCandidate] = []
+        """目前規則判定「不該收」的條目（不看有沒有譯文）。
+
+        規則要逐條目在 Python 判斷（數十萬筆約數秒），結果通常只有少數幾筆：依資料世代快取，
+        資料沒變時（重開清理對話框、切換版本再切回）不重掃；寫入交易內一律重算。
+        """
+        rows = self._cached(
+            f"cleanup_flagged:{PATCHOULI_CLASSIFIER_VERSION}:{version}",
+            lambda: self._scan_flagged(version),
+        )
+        # 快取以 JSON 保存，tuple 欄位讀回時是 list
+        return [CleanupCandidate(*row[:8], tuple(row[8]), *row[9:]) for row in rows]
+
+    def _scan_flagged(self, version: str) -> list[list[Any]]:
+        flagged: list[list[Any]] = []
         for entry_id, kind, mod_id, key, en_us, zh_text in self._q(
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, COALESCE(f.zh_tw, '') "
             "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
@@ -563,7 +575,7 @@ class CleanupMixin:
                     else None
                 )
                 flagged.append(
-                    CleanupCandidate(
+                    [
                         entry_id,
                         kind,
                         mod_id,
@@ -571,7 +583,7 @@ class CleanupMixin:
                         en_us,
                         category,
                         *(metadata or ("", "", (), False, "")),
-                    )
+                    ]
                 )
         return flagged
 

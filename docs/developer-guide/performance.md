@@ -54,11 +54,65 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 - `entry_newest` / `entry_oldest` sorts: `entry.created_at` has no index, and
   adding one slows every import for a rarely used sort.
 - Untranslated candidate lists, reusable candidates and same-as-source AI entries: the sorted
-  set is the number of missing or matching rows in one version.
+  set is the number of missing or matching rows in one version (for same-as-source, the rows carrying the flag bit).
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
 - `cleanup_batches()`: sorts the cleanup batches created by manual cleanup operations only.
-- Not measured: a 700k-row database. The plan checks run on a small fixture; no large database was available to compare timings.
+- Large databases: the plan checks run on a small fixture; timings on a database of 700k or more
+  entries are measured with the tools described in "Mod DB large-database measurement" below.
+
+### Mod DB large-database measurement
+
+`tools/benchmark_moddb_700k.py` measures the read operations of `TranslationDB` and of the
+Entries page's snapshot (versions, mods, kinds, source codes, filter options, one page, the first
+entry's detail, Smart Review marks) on a database of 700k or more entries; `tools/benchmark_moddb_700k_write.py`
+measures the write paths on a copy. Use a database built from real mod JARs of at least three Minecraft versions and
+make independent copies with SQLite backup or `cp`; never benchmark the shared file with the write tool.
+
+Every case runs in a fresh process and reports three numbers. **Cold** is the first call. **Hot**
+repeats the call in the same process, so the process-level read cache is warm. **Miss** repeats it with the
+process caches emptied before each call, which is what a new filter combination or the first refresh after a
+write costs (the OS file cache stays warm). Each iteration opens a new read-only connection inside a read
+transaction, like the background workers do, so SQLite's per-connection page cache is never shared. The
+interactive target is the hot value of the combined Entries snapshot; a miss may exceed it, but must scale
+with a scan of one version at most and never with the number of operations already performed on the batch.
+
+When a number looks wrong, check in this order: `EXPLAIN QUERY PLAN` of the exact statement
+(`set_trace_callback` gives the statement with its parameters expanded), whether the planner starts from a
+large table instead of the page's own rows (use `CROSS JOIN` to fix the order), whether a cached value is
+invalidated by an unrelated write, and whether Python does per-row work that SQL can aggregate.
+
+### Mod DB module × source facets
+
+`translation_tool/translation_db/option_facets.py` computes, once per filter (with the module and source
+selection removed), the number of matching entries for every module and every effective source. The same
+facet answers the module and source dropdown options, the total count for any module or source selection, and
+the scope dropdowns of bulk review and Smart Review. Facets are cached per data generation through
+`TranslationDB._cached`, so paging and changing the module or source never rescans.
+
+Filters that only involve the version, the entry kind, the review status or "no translation" read the facet from
+`stat_src` (version, module, kind, source, review), which `stat_summary.py` keeps exact with triggers; all other
+filters use one streaming `GROUP BY e.mod_id` scan along `idx_entry_list_order`. `verify()` of `stat_summary` compares
+the table with a full recompute, and the facet tests compare every facet result with the row queries after each write
+path. A list total is taken from a cached facet when it exists and is otherwise counted separately, so a module-only
+service query never scans the whole version.
+
+Text search (`LIKE '%text%'` on key, source text and effective translation) cannot use an index and is a CPU-bound
+row-by-row comparison whose cost grows with the size of one version. It is not backed by derived data: a trigram
+posting table needs dozens of distinct trigrams per entry (hundreds of millions of rows for a large database) plus as
+many index rows per written entry, which does not pay off (see `docs/adr/0006-moddb-option-facets.md`). Instead
+`translation_tool/translation_db/parallel_scan.py` splits `entry.id` into contiguous ranges and scans them on separate
+read-only connections at once (SQLite releases the GIL while stepping); the ranged facet SQL groups by module per range
+and `option_facets.merge_rows` adds the ranges together. These connections must not use `temp_store = MEMORY` (several
+connections doing `GROUP BY` in memory contend on SQLite's global allocator lock and are slower than one connection when
+many rows match) and are skipped inside a write transaction (other connections cannot see its changes). A search
+without a module or source selection takes its total from this facet (`list_entries`), so the total, the page's
+module/source options and later paging share one scan; with a module selected the index already narrows the count.
+At most `cpu_count - 1` connections (never more than 4) are used so the UI keeps a core. Cancellation reuses `translation_tool/utils/cancellation.py`, so a superseded request stops all ranges.
+
+Pages: when the total is known and zero, or the offset is past it, the page query is skipped (it would otherwise walk
+the whole version looking for rows that do not exist); for the default sort the second half of the list is read from the
+other end through the reversed index and flipped.
 
 ### Mod DB 已審核 lang 術語候選
 
@@ -124,6 +178,57 @@ original queries, the absence of `USE TEMP B-TREE FOR ORDER BY` in the paged
 queries, and `verify()` after every write path; no wall-clock threshold is
 asserted.
 
+### Mod DB derived "same as source" flag and other read paths
+
+`entry.qflags` carries one extra bit, `quality_flags.SAME_AS_SOURCE` (effective text equals a non-empty source), with
+its own partial index `idx_qflags_same_as_source`. The `same` state, `count_same_as_source_ai` and
+`same_as_source_ai_entries` read it (the latter two name the index with `INDEXED BY`, because the planner does not
+pick a partial index on its own there) and fall back to the original comparison while flags are pending. Changing
+the meaning of a bit requires bumping `quality_flags.SCHEMA_VERSION`; the next writable open recomputes every entry in
+chunks.
+
+`cleanup_candidates` evaluates the cleanup rules in Python for every entry of a version, so the flagged entries are
+cached per data generation (`TranslationDB._cached`); inside a write transaction it is always recomputed.
+`time_data_range` for the manual-activity basis starts from `history` (small) and finds entries by primary key; the
+reverse order probes the history index once per entry of the version.
+
+### Mod DB web interaction measurement
+
+`tools/perf_moddb_web.py` drives the real Flet web app through Playwright and records, for every operation, one cold
+and `--hot` warm runs. Every sample carries four server-side numbers; read them together:
+
+- `server_ms`: from the received browser event to the last patch of the main content (list, editor, history, dialog).
+  The shell's 250 ms coalesced refresh and the key poll are never counted.
+- `settled_ms`: the same, but including patches that are deliberately sent after the main content: the filter
+  dropdown options (`EntriesPanel.flush_filter_options`, which waits `FilterOptionsLoader`'s 0.25 s settle time) and the
+  Smart Review estimate text (`_update_estimate_region`). The caller names are listed in `DEFERRED_CALLERS`.
+- `wall_ms`: `server_ms` before subtracting a deliberate wait. Typing operations pass `debounce_ms` (the editor's 0.15 s
+  stop-typing delay) and `after_last_key` (start at the last key event, because the gap between the characters of a
+  multi-character input is the browser's key-event pacing). `first_patch_ms` is the immediate response to the key.
+- `list_patch_ms`: until the last `ListView` patch.
+
+Per-sample timelines (`patch` entries with the calling `app/` frames, DB calls with their thread, patch sizes) and
+`--profile` (cProfile of the event-loop thread) show where a number comes from. Compare runs on the same copy of the
+database, and expect other processes on the machine to move a single sample by tens of milliseconds; use medians.
+
+What the interaction times are made of:
+
+- Most of a write's (save, revert, review, clear) interactive time is Flet: a patch costs time proportional to the
+  number of controls it has to diff, not to what changed. The page therefore updates only what changed:
+  `EntryTilePool.set_rows` reports the rows whose content changed and the panel updates those rows instead of the
+  50-row `ListView` (more than `MAX_ROW_UPDATES` changed rows update the whole list, because one patch per row has a
+  fixed cost); `FilterFlush` updates only the dropdowns whose options or value changed. A dropdown with a very large option list is
+  expensive to diff when its options change, so it is only updated when they did.
+- The write path requests the background reload before it shows the snack bar, and does not recompute the impact
+  preview or redraw the editor that the reload redraws anyway.
+- A quality or search filter that is new for the current data generation scans one version's flags in the worker
+  (cost grows with the version's size and depends on the status). The result is cached per data generation, so selecting
+  it again is a cache hit. State filters (`none` / `all`) are answered by `stat_src` and never scan.
+- Loading the `tiktoken` vocabulary holds the GIL and would stop the event loop at the first batch-translation
+  preview of a process. `app/startup_tasks.py` loads it in the startup worker
+  (`warm_token_encoder`). The preview itself is worker-side work (one sorted read of the version's untranslated
+  entries plus batch planning); it is reported as an interaction time but is not event-loop time.
+
 ### Other metrics
 
 - AppShell mount time and browser-ready time from the real Flet smoke report
@@ -183,6 +288,30 @@ after JSON confirmation; this does not add a full candidate scan to the normal
 retention path. `tests/test_smart_review_manual_edit.py` asserts the plan has no
 `SCAN` or `TEMP B-TREE`, and the recovery regression covers five later history
 writes for the same entry.
+
+## Mod DB scan throughput
+
+Scanning has two serial-ish stages: JAR parsing (pure Python) and ingest in the single writer.
+
+- **Parsing** runs in a `spawn` process pool (`translation_db/scan_pool.py`) when a scan has at least
+  `PROCESS_MIN_JARS` archives and more than one worker; threads are limited by the GIL and get slower with more
+  workers, so the fallback (few JARs, or the pool cannot start) is a single reader thread. Process-pool rules: options
+  cross the process boundary without the replace-rule objects (plain dicts, rebuilt in the worker initializer);
+  cancellation is a shared `Event` set by a watcher thread; worker log records travel back with the result and are
+  replayed in the caller; frozen builds must call `multiprocessing.freeze_support()` in the entry point (`main.py`).
+  Measure the worker count with the parse-only loop (serial, threads 2/4, processes 2/3/4) on at least 300 JARs
+  after the file cache is warm; the process count is bounded by `moddb_scan` in `translation_tool/utils/worker_count.py`.
+- **Ingest** commits once per batch: `TranslationDB.ingest_many` writes up to `_IngestBuffer.MAX_JARS` archives
+  or `MAX_ITEMS` items in one transaction (every commit costs a WAL write and checkpoint regardless of size) and
+  returns per-archive statistics. A cancelled scan still writes the archives already read.
+- **Trigger groups** are attributed by dropping them on a scratch copy (`stat_`, `effcol_`, `qflags_`, `chg_`,
+  `activity_`) and timing the same batched ingest. `frozen()`-style suspension only pays when the recompute after it
+  is cheaper than the triggers it saves. Recomputing by module (counters before/after plus the module's
+  `stat_src` rows and `effective` columns) scans every version of the touched modules, which cost as much as the
+  triggers on a database with several versions per module, so ingest and `write_back` keep the per-row triggers; the
+  full-table `frozen()` is kept for whole-table rewrites such as `_rebuild_effective`. Re-measure before suspending
+  triggers for another write path; a scope has to be proportional to the rows written, not to the modules touched.
+- Compare `process CPU time` with wall time to see how many cores are used, and run every `verify_*` afterwards.
 
 ## Worker 數量
 

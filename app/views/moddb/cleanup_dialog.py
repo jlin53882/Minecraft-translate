@@ -30,22 +30,22 @@ from app.ui.dialogs import (
 )
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label
+from app.views.moddb.operation_summaries import (
+    cleanup_category_lines,
+    cleanup_plan_lines,
+)
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
+
+PREVIEW_REQUIRED_HINT = "請先按「預覽刪除」，確認可刪除筆數後才能執行。"
+NO_DELETABLE_HINT = "預覽完成，但目前沒有可刪除項目；請檢查檢查檔中的 delete 欄位。"
 
 
 def _source_line(sources: dict[str, int]) -> str:
     """依生效譯文來源分組的筆數，例如「譯文來源：人工 3、釘宮翻譯組 5」。"""
     parts = [f"{name} {format_count(n)}" for name, n in sources.items()]
     return "譯文來源：" + "、".join(parts) if parts else ""
-
-
-def _category_lines(counts: dict[str, int]) -> str:
-    return "\n".join(
-        f"　{svc.CLEANUP_CATEGORIES.get(cid, cid)}：{format_count(n)} 筆"
-        for cid, n in counts.items()
-        if n
-    )
 
 
 class CleanupDialog:
@@ -104,7 +104,11 @@ class CleanupDialog:
             "預覽刪除", "secondary", on_click=self._preview, disabled=True
         )
         self.plan_summary = ft.Text(
-            "", size=12.5, color=C.TEXT, selectable=True, visible=False
+            PREVIEW_REQUIRED_HINT,
+            size=12.5,
+            color=C.GOLD,
+            selectable=True,
+            visible=True,
         )
         self.apply_btn = kit.button(
             "確認刪除",
@@ -112,6 +116,7 @@ class CleanupDialog:
             icon=ft.Icons.DELETE_OUTLINE,
             on_click=self._apply,
             disabled=True,
+            tooltip=PREVIEW_REQUIRED_HINT,
         )
         self.revert_info = ft.Text("", size=12, color=C.MUTED)
         self.batch_dd = kit.dropdown(label="尚未還原的清理", dense=True, width=460)
@@ -201,6 +206,7 @@ class CleanupDialog:
         self._closed = False
         self._generation += 1
         try:
+            isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
             present_page_dialog(self.page, self.dialog)
         except (AttributeError, RuntimeError):
             show_snack(self.page, "目前畫面無法開啟資料清理視窗。", C.GOLD)
@@ -352,9 +358,12 @@ class CleanupDialog:
 
     def _reset_plan(self) -> None:
         self._plan = None
-        self.plan_summary.visible = False
+        self.plan_summary.value = PREVIEW_REQUIRED_HINT
+        self.plan_summary.color = C.GOLD
+        self.plan_summary.visible = True
         self.apply_btn.disabled = True
         self.apply_btn.content = "確認刪除"
+        self.apply_btn.tooltip = PREVIEW_REQUIRED_HINT
 
     # ------------------------------------------------------------------ 匯出
     def _export(self, _e=None, *, with_translation: bool = False) -> None:
@@ -390,7 +399,7 @@ class CleanupDialog:
         total = report.exported_total
         lines = [f"版本 {report.version}：匯出 {format_count(total)} 筆"]
         if total:
-            lines.append(_category_lines(report.counts))
+            lines.append(cleanup_category_lines(report.counts))
         if report.sources:
             lines.append(_source_line(report.sources))
         if report.review_required:
@@ -457,6 +466,7 @@ class CleanupDialog:
         self._set_busy(False)
         if error is not None:
             self.plan_summary.value = f"無法預覽：{error}"
+            self.plan_summary.color = C.RED
             self.plan_summary.visible = True
             self._safe_update()
             return
@@ -470,31 +480,30 @@ class CleanupDialog:
             self._safe_update()
             return
         self._plan = (path, plan, self.get_db())
-        lines = [
-            (
-                f"檢查檔標記要刪除 {format_count(plan.requested)} 筆；"
-                f"現在實際可刪 {format_count(plan.deletable)} 筆"
-            )
-        ]
-        if plan.deletable:
-            lines.append(_category_lines(dict(plan.by_category)))
-        if plan.with_translation:
-            lines.append(
-                f"其中 {format_count(plan.with_translation)} 筆已有譯文或歷史："
-                "刪除會連同所有來源的譯文與歷史一起移除，可按「還原上次清理」復原"
-            )
-        lines.extend(
-            f"略過 {format_count(n)} 筆：{reason}" for reason, n in plan.skipped.items()
-        )
-        self.plan_summary.value = "\n".join(lines)
+        self.plan_summary.value = "\n".join(cleanup_plan_lines(plan, applied=False))
+        self.plan_summary.color = C.TEXT if plan.deletable else C.GOLD
         self.plan_summary.visible = True
         self.apply_btn.disabled = plan.deletable == 0
         self.apply_btn.content = f"確認刪除 {format_count(plan.deletable)} 筆"
+        self.apply_btn.tooltip = (
+            "已完成預覽，請核對摘要後確認刪除。"
+            if plan.deletable
+            else NO_DELETABLE_HINT
+        )
         self._safe_update()
 
     def _apply(self, _e=None) -> None:
         db = self.get_db()
-        if db is None or self._plan is None or self._busy:
+        if db is None:
+            show_snack(self.page, "目前沒有可用的資料庫。", C.GOLD)
+            return
+        if self._busy:
+            show_snack(self.page, "資料庫處理中，請稍候。", C.GOLD)
+            return
+        if self._plan is None:
+            self._reset_plan()
+            show_snack(self.page, PREVIEW_REQUIRED_HINT, C.GOLD)
+            self._safe_update()
             return
         path, previewed, previewed_db = self._plan
         if (
@@ -540,15 +549,15 @@ class CleanupDialog:
             show_snack(self.page, f"清理未執行：{error}", C.RED)
             self._safe_update()
             return
-        message = (
-            f"已刪除 {format_count(plan.deletable)} 筆（可在「還原」選取這次清理復原）"
-        )
+        lines = cleanup_plan_lines(plan, applied=True)
+        message = lines[0]
         skipped = sum(plan.skipped.values())
         if skipped:
             message += f"；略過 {format_count(skipped)} 筆"
+        message += "（可用「還原選取的清理」復原）"
         log_info(f"Mod 資料庫清理：{plan.version}；{message}")
         self._reset_plan()
-        self.plan_summary.value = message
+        self.plan_summary.value = "\n".join(lines)
         self.plan_summary.visible = True
         self._load_batch_info()
         if plan.batch_id:
@@ -681,11 +690,17 @@ class CleanupDialog:
         else:
             self.preview_btn.disabled = self.report_dd.value is None
             self.apply_btn.disabled = self._plan is None or self._plan[1].deletable == 0
+            self.apply_btn.tooltip = (
+                PREVIEW_REQUIRED_HINT
+                if self._plan is None
+                else (
+                    "已完成預覽，請核對摘要後確認刪除。"
+                    if self._plan[1].deletable
+                    else NO_DELETABLE_HINT
+                )
+            )
             self.revert_btn.disabled = not self._batches
         self._safe_update()
 
     def _safe_update(self) -> None:
-        try:
-            self.page.update()
-        except RuntimeError:
-            pass  # 視窗已關閉
+        update_regions(self.dialog)  # 只重畫這個視窗；視窗已關閉時略過

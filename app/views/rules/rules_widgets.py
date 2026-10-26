@@ -25,6 +25,9 @@ class RulesWidgetsMixin:
         # 2. 分頁控制
         self.page_info = ft.Text("頁面 0 / 0", size=13, color=C.MUTED)
         self.total_count_text = ft.Text("共 0 條規則", size=13, color=C.MUTED)
+        self.unsaved_text = ft.Text(
+            "● 有未儲存的變更", size=12, color=C.GOLD, visible=False
+        )
 
         nav_style = ft.ButtonStyle(
             bgcolor=C.PANEL2,
@@ -95,6 +98,11 @@ class RulesWidgetsMixin:
             content_padding=ft.Padding.symmetric(horizontal=10, vertical=8),
         )
         self.sort_box.on_select = self.on_sort_change
+        self.only_issues_box = ft.Checkbox(
+            label="只看有問題（0）",
+            tooltip="交叉引用、譯詞含原詞、原詞重複、前後空白、s2twp 轉換後不會命中",
+            on_change=self.on_only_issues_change,
+        )
 
         # 4. 表格
         def heading(text: str, **kwargs):
@@ -117,6 +125,10 @@ class RulesWidgetsMixin:
                 heading("操作", numeric=True),
             ],
             rows=[],
+        )
+
+        self.rules_list = ft.ListView(
+            controls=[self.rules_table], expand=True, spacing=0
         )
 
         # 5. 即時測試：用目前（尚未儲存）的規則試跑一段文字
@@ -150,6 +162,7 @@ class RulesWidgetsMixin:
             [
                 self.search_box,
                 self.sort_box,
+                self.only_issues_box,
                 kit.button(
                     "重新載入",
                     "secondary",
@@ -186,7 +199,7 @@ class RulesWidgetsMixin:
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
             content=ft.Column(
                 [
-                    ft.ListView(controls=[self.rules_table], expand=True, spacing=0),
+                    self.rules_list,
                     self._build_footer(),
                 ],
                 spacing=0,
@@ -203,7 +216,11 @@ class RulesWidgetsMixin:
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 controls=[
-                    self.total_count_text,
+                    ft.Column(
+                        [self.total_count_text, self.unsaved_text],
+                        spacing=2,
+                        width=170,
+                    ),
                     ft.Row(
                         spacing=8,
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -217,7 +234,7 @@ class RulesWidgetsMixin:
                         alignment=ft.MainAxisAlignment.CENTER,
                     ),
                     # 空白佔位，讓分頁列維持置中
-                    ft.Container(width=100),
+                    ft.Container(width=170),
                 ],
             ),
         )

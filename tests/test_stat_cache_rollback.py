@@ -83,3 +83,40 @@ def test_cache_write_does_not_commit_a_callers_pending_transaction(tmp_path):
         real.execute("SELECT 1 FROM meta WHERE key='caller_pending'").fetchone() is None
     )
     db.close()
+
+
+def test_cache_write_does_not_wait_for_another_connections_write_lock(tmp_path):
+    """快取寫入遇到別的連線持有寫入鎖時立刻放棄（不等數秒的 busy timeout），並恢復原本的等待時間。"""
+    path = tmp_path / "cache.db"
+    db = TranslationDB(path)
+    other = sqlite3.connect(path)
+    other.execute("BEGIN IMMEDIATE")  # 模擬掃描／批次寫入持有寫入鎖
+    waits: list[int] = []
+    real = db._conn
+
+    class Spy:
+        def execute(self, sql, *args):
+            cursor = real.execute(sql, *args)
+            if sql == "PRAGMA busy_timeout":
+                waits.append(("read", cursor.fetchone()[0]))
+                return real.execute(sql, *args)
+            if sql.startswith("PRAGMA busy_timeout ="):
+                waits.append(("set", int(sql.rsplit("=", 1)[1])))
+            return cursor
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+
+    db._conn = Spy()
+    try:
+        assert db._cached("k", lambda: {"n": 3}) == {"n": 3}
+    finally:
+        other.rollback()
+        other.close()
+    db._conn = real
+
+    assert waits[0] == ("read", 5000)
+    assert ("set", 0) in waits  # 寫入期間不等鎖
+    assert waits[-1] == ("set", 5000)  # 之後恢復
+    assert db._conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+    assert db._one("SELECT COUNT(*) FROM stat_cache WHERE key = 'k'")[0] == 0

@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 import logging
 import threading
 import time
@@ -41,8 +40,10 @@ from app.views.dashboard.dashboard_data import (
     DashboardData,
     StepStatus,
     build_dashboard_data,
+    cache_stat,
     format_ago,
     format_count,
+    format_quota_reset,
     greeting,
     task_status_style,
 )
@@ -106,19 +107,6 @@ def _default_model_quota_snapshot() -> list[ModelQuotaHealth]:
     from app.services_impl.key_health_service import get_model_quota_snapshot
 
     return get_model_quota_snapshot()
-
-
-def format_quota_reset(model: ModelQuotaHealth) -> str:
-    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」；不確定視窗內改為說明正在確認。"""
-    if model.uncertain:
-        return "重置時間不確定，正在探測是否已恢復"
-    minutes = max(0, int(model.seconds_remaining // 60))
-    hours, minutes = divmod(minutes, 60)
-    remaining = f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
-    reset_at = (
-        dt.datetime.fromtimestamp(model.reset_at, dt.UTC).astimezone().strftime("%H:%M")
-    )
-    return f"約 {remaining}後重置（{reset_at}）"
 
 
 class DashboardView(ft.Column):
@@ -204,6 +192,7 @@ class DashboardView(ft.Column):
         self._rules_count_loader = rules_count_loader
         self._key_snapshot_loader = key_snapshot_loader
         self._navigate: Callable[[str], None] | None = None
+        self._open_tasks: Callable[[], None] | None = None
         self._tasks: TaskManager | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._unsubscribe_rules: Callable[[], None] | None = None
@@ -230,6 +219,10 @@ class DashboardView(ft.Column):
         self.stat_tasks = kit.stat_card(
             "本次任務", "0", icon=ft.Icons.TASK_ALT, tone="em", expand=1
         )
+        # 點開列出本次執行的全部任務（頂列膠囊只顯示最近開始的一個）
+        self.stat_tasks.ink = True
+        self.stat_tasks.tooltip = "查看本次全部任務"
+        self.stat_tasks.on_click = lambda _e: self._open_task_list()
         self.steps_row = ft.Row(spacing=12)
         self.step_badge = ft.Container()
         self.cache_column = ft.Column(spacing=12)
@@ -351,6 +344,7 @@ class DashboardView(ft.Column):
     def set_shell(self, shell) -> None:
         """外殼建立頁面後呼叫：提供導覽，並訂閱任務事件（任務一變就更新流程進度與活動）。"""
         self._navigate = shell.navigate
+        self._open_tasks = getattr(shell, "open_task_list", None)
         self._subscribe_rules()
         self.set_task_manager(shell.tasks)
 
@@ -364,6 +358,10 @@ class DashboardView(ft.Column):
             }
         self._unsubscribe = tasks.subscribe(self._on_tasks_changed)
         self.refresh_view(self._collect())
+
+    def _open_task_list(self) -> None:
+        if self._open_tasks is not None:
+            self._open_tasks()
 
     def _go(self, view_key: str) -> None:
         if self._navigate is not None:
@@ -431,7 +429,8 @@ class DashboardView(ft.Column):
             key_snapshot=keys,
             model_quota=exhausted_models,
             active=tasks.active() if tasks else [],
-            recent=tasks.recent(20) if tasks else [],
+            recent=tasks.history() if tasks else [],
+            finished_counts=tasks.finished_counts() if tasks else None,
         )
 
     def reload(self, *, sync: bool = False, include_rules: bool = True) -> None:
@@ -548,12 +547,7 @@ class DashboardView(ft.Column):
         self.data = data
         self._render_moddb()
         self.title_text.value = f"{greeting()}，歡迎回來"
-        self.stat_cache.set_value(
-            format_count(data.total_entries if self._cache_overview else None)
-        )
-        self.stat_cache.set_value(
-            delta="翻譯快取總筆數" if self._cache_overview else "讀取中…"
-        )
+        self.stat_cache.set_value(*cache_stat(data, loaded=bool(self._cache_overview)))
         self.stat_rules.set_value(
             format_count(data.rules_count),
             delta="replace_rules.json" if data.rules_count is not None else "讀取中…",
@@ -570,13 +564,13 @@ class DashboardView(ft.Column):
             )
         self.stat_tasks.set_value(
             str(data.tasks_total),
-            delta=f"完成 {data.tasks_done}・進行中 {data.tasks_running}・失敗 {data.tasks_failed}・已取消 {data.tasks_cancelled}",
+            delta=data.tasks_breakdown,
             delta_tone="red" if data.tasks_failed else "neutral",
         )
         self.steps_row.controls = [
             self._step_tile(i, s) for i, s in enumerate(data.steps, 1)
         ]
-        done = sum(1 for s in data.steps if s.status == STEP_DONE)
+        done = data.steps_done
         self.step_badge.content = kit.chip(
             f"本次完成 {done} / {len(data.steps)}", "em" if done else "neutral"
         )
@@ -610,7 +604,10 @@ class DashboardView(ft.Column):
 
     def _step_tile(self, number: int, step: StepStatus) -> ft.Control:
         text, tone_name = STEP_STATUS_STYLE[step.status]
-        active = step.status in (STEP_RUNNING, STEP_DONE)
+        if step.status == STEP_PENDING and step.runs_done:
+            # 單步驟結束後回到可再執行；本次完成過就標出次數，與「本次完成 x / 5」一致
+            text, tone_name = f"本次完成 {step.runs_done} 次", "em"
+        active = step.status in (STEP_RUNNING, STEP_DONE) or step.runs_done > 0
         chip_text = (
             f"{text}　{step.detail}"
             if step.detail and step.status == STEP_RUNNING

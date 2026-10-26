@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from app.services_impl.key_health_service import KeyHealth, ModelQuotaHealth
@@ -38,6 +38,7 @@ STEP_FAILED = "failed"
 CACHE_TYPE_LABELS = {
     "lang": "Lang 語言檔",
     "patchouli": "Patchouli 手冊",
+    "advancement": "Advancement 進度文字",
     "ftbquests": "FTB Quests",
     "kubejs": "KubeJS",
     "md": "Markdown",
@@ -51,6 +52,7 @@ class StepStatus:
     desc: str
     status: str
     detail: str = ""
+    runs_done: int = 0  # 本次執行中，這一步完成過幾次（不論目前是否又在執行）
 
 
 @dataclass(frozen=True)
@@ -63,6 +65,7 @@ class CacheBar:
 @dataclass
 class DashboardData:
     total_entries: int = 0
+    cache_ready: bool = True  # 快取已載入；False 時筆數未知（初始化失敗或尚未讀取）
     cache_bars: list[CacheBar] = field(default_factory=list)
     rules_count: int | None = None
     keys: KeySummary | None = None
@@ -78,6 +81,19 @@ class DashboardData:
     tasks_running: int = 0
 
     @property
+    def steps_done(self) -> int:
+        """本次執行完成過的流程步驟數（「本次完成 x / 5」）。"""
+        return sum(1 for step in self.steps if step.runs_done)
+
+    @property
+    def tasks_breakdown(self) -> str:
+        """「本次任務」卡的說明：各狀態筆數（與任務清單的篩選相同分類）。"""
+        return (
+            f"完成 {self.tasks_done}・進行中 {self.tasks_running}・"
+            f"失敗 {self.tasks_failed}・已取消 {self.tasks_cancelled}"
+        )
+
+    @property
     def tasks_total(self) -> int:
         return (
             self.tasks_done
@@ -85,6 +101,15 @@ class DashboardData:
             + self.tasks_cancelled
             + self.tasks_running
         )
+
+
+def cache_stat(data: DashboardData, *, loaded: bool) -> tuple[str, str, str]:
+    """「快取條目」卡的 (數字, 說明, 說明色調)；快取未載入時不顯示成 0 筆。"""
+    if not loaded:
+        return format_count(None), "讀取中…", "em"
+    if not data.cache_ready:
+        return format_count(None), "快取未載入，詳見後台記錄", "red"
+    return format_count(data.total_entries), "翻譯快取總筆數", "em"
 
 
 def task_status_style(task: TaskInfo) -> tuple[str, str]:
@@ -124,6 +149,19 @@ def format_ago(seconds: float) -> str:
     return f"{int(seconds // 86400)} 天前"
 
 
+def format_quota_reset(model: ModelQuotaHealth) -> str:
+    """「約 X 小時 Y 分鐘後重置（本機時間 HH:MM）」；不確定視窗內改為說明正在確認。"""
+    if model.uncertain:
+        return "重置時間不確定，正在探測是否已恢復"
+    minutes = max(0, int(model.seconds_remaining // 60))
+    hours, minutes = divmod(minutes, 60)
+    remaining = f"{hours} 小時 {minutes} 分鐘" if hours else f"{minutes} 分鐘"
+    reset_at = (
+        dt.datetime.fromtimestamp(model.reset_at, dt.UTC).astimezone().strftime("%H:%M")
+    )
+    return f"約 {remaining}後重置（{reset_at}）"
+
+
 def build_cache_bars(overview: dict | None) -> list[CacheBar]:
     """快取概覽 → 各類型的長條（依筆數由多到少，沒有資料的類型也列出）。"""
     types = (overview or {}).get("types") or {}
@@ -143,18 +181,26 @@ def build_step_statuses(
 ) -> list[StepStatus]:
     """依目前執行中的任務決定五個流程步驟的狀態。
 
-    單步驟任務結束後就回到待執行；完成與失敗紀錄仍顯示在任務活動區。「一鍵流水線」
-    與「任務翻譯」不屬於單一步驟，不影響這裡。
+    單步驟任務結束後就回到待執行，可以再跑一次；``runs_done`` 記錄本次執行中這一步
+    完成過幾次（``recent`` 要傳本次執行的全部紀錄；``preview`` 的 Dry-run 不算）。「一鍵流水線」與「任務翻譯」不屬於
+    單一步驟，不影響這裡。
     """
     steps = []
     for key, title, desc in PIPELINE_STEPS:
+        runs_done = sum(
+            1
+            for t in recent
+            if t.view_key == key and t.status == STATUS_DONE and not t.preview
+        )
         running = next((t for t in active if t.view_key == key), None)
         if running is not None:
             steps.append(
-                StepStatus(key, title, desc, STEP_RUNNING, f"{running.percent}%")
+                StepStatus(
+                    key, title, desc, STEP_RUNNING, f"{running.percent}%", runs_done
+                )
             )
         else:
-            steps.append(StepStatus(key, title, desc, STEP_PENDING))
+            steps.append(StepStatus(key, title, desc, STEP_PENDING, "", runs_done))
     return steps
 
 
@@ -167,14 +213,28 @@ def build_dashboard_data(
     active: Sequence[TaskInfo],
     recent: Sequence[TaskInfo],
     activity_limit: int = 6,
+    finished_counts: Mapping[str, int] | None = None,
 ) -> DashboardData:
-    """把各來源的資料整理成工作台要顯示的樣子。"""
+    """把各來源的資料整理成工作台要顯示的樣子。
+
+    ``recent`` 是本次執行的已結束任務；``finished_counts`` 是 ``TaskManager.finished_counts``
+    （含超出保留上限的舊紀錄），沒給時由 ``recent`` 計算。
+    """
     overview = cache_overview or {}
     activity = sorted([*active, *recent], key=lambda t: t.started_at, reverse=True)[
         :activity_limit
     ]
+    counts = (
+        dict(finished_counts)
+        if finished_counts is not None
+        else {
+            status: sum(1 for t in recent if t.status == status)
+            for status in (STATUS_DONE, STATUS_ERROR, STATUS_CANCELLED, STATUS_ABORTED)
+        }
+    )
     return DashboardData(
         total_entries=int(overview.get("total_entries", 0) or 0),
+        cache_ready=overview.get("initialized", True) is not False,
         cache_bars=build_cache_bars(overview),
         rules_count=rules_count,
         keys=summarize_keys(key_snapshot),
@@ -182,10 +242,8 @@ def build_dashboard_data(
         model_rows=list(model_quota),
         steps=build_step_statuses(active, recent),
         activity=activity,
-        tasks_done=sum(1 for t in recent if t.status == STATUS_DONE),
-        tasks_failed=sum(1 for t in recent if t.status == STATUS_ERROR),
-        tasks_cancelled=sum(
-            1 for t in recent if t.status in (STATUS_CANCELLED, STATUS_ABORTED)
-        ),
+        tasks_done=counts.get(STATUS_DONE, 0),
+        tasks_failed=counts.get(STATUS_ERROR, 0),
+        tasks_cancelled=counts.get(STATUS_CANCELLED, 0) + counts.get(STATUS_ABORTED, 0),
         tasks_running=len(active),
     )

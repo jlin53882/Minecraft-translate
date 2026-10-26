@@ -57,6 +57,26 @@ def test_overview_points_protected_entries_to_the_new_button(tmp_path, monkeypat
     assert dialog.export_translated_btn.content == "匯出已有譯文的項目"
 
 
+def test_apply_without_preview_explains_that_preview_is_required(tmp_path, monkeypatch):
+    dialog = _dialog(monkeypatch, _db(tmp_path), [])
+    shown: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "show_snack",
+        lambda _page, message, *_args, **_kwargs: shown.append(message),
+    )
+
+    assert dialog.apply_btn.disabled is True
+    assert "預覽刪除" in dialog.plan_summary.value
+    assert "預覽刪除" in dialog.apply_btn.tooltip
+
+    dialog._apply()
+
+    assert shown == [module.PREVIEW_REQUIRED_HINT]
+    assert dialog._plan is None
+    assert dialog.plan_summary.visible is True
+
+
 def test_translated_export_preview_apply_and_revert_flow(tmp_path, monkeypatch):
     db = _db(tmp_path)
     completed: list[int] = []

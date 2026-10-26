@@ -1,5 +1,6 @@
 """Regression tests for the persistent prebuilt icon-index workflow."""
 
+import json
 import os
 import threading
 import zipfile
@@ -52,11 +53,6 @@ def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch)
         archive.writestr("assets/my_mod/textures/item/apple.png", b"png")
 
     monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
-    from app.views.icon_preview import icon_cache
-
-    monkeypatch.setattr(
-        icon_cache, "_get_model_index_cache_dir", lambda: tmp_path / "model-index"
-    )
     monkeypatch.setattr(
         icon_index,
         "load_config",
@@ -76,7 +72,48 @@ def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch)
 
     assert list(result) == ["item.my_mod.apple"]
     assert "item.my_mod.german" not in result
-    assert icon_index.load_icon_index(mods_dir) == result
+    loaded = icon_index.load_icon_index(mods_dir)
+    assert loaded == result
+    assert loaded.by_jar == {
+        "broken-1.0.jar": {},
+        "my-mod-1.0.jar": {"item.my_mod.apple": result["item.my_mod.apple"]},
+    }
+    assert loaded.complete_by_jar == {
+        "broken-1.0.jar": True,
+        "my-mod-1.0.jar": True,
+    }
+    saved = json.loads(icon_index.get_index_path(mods_dir).read_text(encoding="utf-8"))
+    assert saved["version"] == 7
+    assert all(payload["complete"] for payload in saved["index_by_jar"].values())
+
+
+def test_incomplete_prebuilt_index_is_not_loaded_as_source_aware(tmp_path, monkeypatch):
+    mods_dir = tmp_path / "mods"
+    mods_dir.mkdir()
+    jar = mods_dir / "partial.jar"
+    with zipfile.ZipFile(jar, "w"):
+        pass
+    monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(
+        icon_index,
+        "load_config",
+        lambda: {"translator": {"parallel_execution_workers": 1}},
+    )
+    monkeypatch.setattr(
+        icon_index,
+        "_process_single_jar",
+        lambda _jar_path, _catalog: icon_index.JarIconIndex(
+            {"item.partial.icon": "icon://partial"}, complete=False
+        ),
+    )
+
+    built = icon_index.build_and_save_icon_index(mods_dir)
+
+    assert built.complete_by_jar == {"partial.jar": False}
+    saved = json.loads(icon_index.get_index_path(mods_dir).read_text(encoding="utf-8"))
+    assert saved["version"] == 7
+    assert saved["index_by_jar"]["partial.jar"]["complete"] is False
+    assert icon_index.load_icon_index(mods_dir) is None
 
 
 def test_build_and_save_indexes_every_namespace_in_one_jar(tmp_path, monkeypatch):
@@ -96,11 +133,6 @@ def test_build_and_save_indexes_every_namespace_in_one_jar(tmp_path, monkeypatch
             archive.writestr(f"assets/{namespace}/textures/item/{item}.png", b"png")
 
     monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
-    from app.views.icon_preview import icon_cache
-
-    monkeypatch.setattr(
-        icon_cache, "_get_model_index_cache_dir", lambda: tmp_path / "model-index"
-    )
     monkeypatch.setattr(
         icon_index,
         "load_config",
@@ -123,6 +155,23 @@ def test_json_lang_parser_skips_malformed_file_and_reads_later_valid_file(tmp_pa
         assert list(icon_index._iter_entries_from_lang_files(archive)) == [
             ("good", "item.good.apple", "Apple")
         ]
+
+
+def test_json_lang_parser_preserves_string_punctuation_with_comments_and_trailing_commas():
+    escaped_value = 'Escaped " quote, comma ,} and slash \\'
+    content = (
+        "{\n"
+        '  "item.demo": "Use ,} symbol", // line comment\n'
+        '  /* block comment */ "item.other": "A,]B",\n'
+        f'  "item.escaped": {json.dumps(escaped_value)},\n'
+        "}\n"
+    )
+
+    assert icon_index.loads_lang_json(content) == {
+        "item.demo": "Use ,} symbol",
+        "item.other": "A,]B",
+        "item.escaped": escaped_value,
+    }
 
 
 def test_index_save_is_atomic_and_preserves_previous_file_on_replace_failure(

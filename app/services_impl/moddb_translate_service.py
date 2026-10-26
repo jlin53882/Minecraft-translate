@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -129,7 +130,9 @@ class TranslateReport:
     flagged: int = 0  # 特殊字元與原文不一致，未寫入
     status: str = "DONE"
     dry_run: bool = False
-    remaining: int = 0  # 該範圍內仍未翻譯的筆數
+    remaining: int = 0  # 這次的候選中仍未寫入的筆數（含特殊字元不一致）
+    # 整個範圍（版本＋所選模組）仍未翻譯的筆數；預覽與執行結束時各算一次，讀取失敗為 None
+    scope_remaining: int | None = None
     flagged_samples: list[str] = field(default_factory=list)
     # 特殊字元不一致而沒寫入的條目：條目 id → AI 回傳的譯文（畫面「檢視」用，預填給人工修正）
     flagged_entries: dict[int, str] = field(default_factory=dict)
@@ -172,6 +175,7 @@ class TranslateReport:
             "status": self.status,
             "dry_run": self.dry_run,
             "remaining": self.remaining,
+            "scope_remaining": self.scope_remaining,
             "batches": self.batches,
             "planned_batches": self.planned_batches,
             "elapsed_sec": self.elapsed_sec,
@@ -496,6 +500,7 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
         else report.candidates
     )
     if options.dry_run:
+        report.scope_remaining = report.remaining
         if preview_reuse:
             report.reused = db.count_reusable(options.version, mods)
             _log(
@@ -801,6 +806,15 @@ def _translation_lm_cfg(lm_config: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _count_scope_remaining(db, options: TranslateOptions) -> int | None:
+    """執行結束後整個範圍仍未翻譯的筆數（與預覽的「此範圍仍未翻譯」同一個查詢）。"""
+    try:
+        return db.count_untranslated(options.version, list(options.mod_ids))
+    except sqlite3.Error:
+        logger.warning("Mod 資料庫機翻：讀取範圍內未翻譯筆數失敗", exc_info=True)
+        return None
+
+
 def _translate_rows(
     session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
 ) -> None:
@@ -925,6 +939,9 @@ def _translate_rows(
         )
     flush()
     _settle_report(session, report, options, result, failures, buffer, tracker)
+    if report.status in ("DONE", "DONE_WITH_WARNINGS"):
+        # 取消、中止或資料庫錯誤時不再做整個範圍的計數（使用者在等它停下來）
+        report.scope_remaining = _count_scope_remaining(db, options)
     _log_final_summary(session, report)
     _record_backend_summary(report)
     if result.last_error:

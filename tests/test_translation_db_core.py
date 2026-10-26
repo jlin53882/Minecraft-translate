@@ -2188,7 +2188,8 @@ def test_scan_dry_run_reads_but_never_writes(db, tmp_path):
     for upd in scan_folder_generator(db, tmp_path, opts, workers=1):
         last = upd
     report = last["report"]
-    assert report.dry_run and report.items_found == 4 and report.stats.new_entries == 0
+    # 預覽用與實際寫入相同的規則分類（新增／補入／略過…），但不寫入
+    assert report.dry_run and report.items_found == 4 and report.stats.new_entries == 4
     assert db.count_entries() == 0 and db.last_scans() == []
     # 預覽不需要資料庫
     assert [u for u in scan_folder_generator(None, tmp_path, opts, workers=1)][-1][
@@ -2740,7 +2741,7 @@ def test_ingest_failure_names_the_jar_version_and_database(db, tmp_path, monkeyp
     def boom(*_a, **_k):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(db, "ingest", boom)
+    monkeypatch.setattr(db, "ingest_many", boom)
     with pytest.raises(RuntimeError) as err:
         list(scan_folder_generator(db, tmp_path / "m", ScanOptions("1.21.1")))
     msg = str(err.value)

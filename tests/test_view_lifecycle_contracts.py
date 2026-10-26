@@ -629,7 +629,7 @@ def test_views_with_debounced_work_cancel_it_on_unmount():
     from app.views.icon_preview_view import IconPreviewView
 
     for cls, attrs in (
-        (rules_view.RulesView, ["_search_debouncer"]),
+        (rules_view.RulesView, ["_search_debouncer", "_diag_debouncer"]),
         (IconPreviewView, ["_mod_search_debouncer", "_detail_search_debouncer"]),
     ):
         view = cls.__new__(cls)

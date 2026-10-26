@@ -32,12 +32,23 @@ logger = logging.getLogger(__name__)
 
 # (資料庫路徑, run_id) -> 上次對帳時 history 的最大 id
 _RECONCILED_HISTORY_HEAD: dict[tuple[str, str], int] = {}
+# 唯讀連線已對帳 JSON、但 SQLite projection marker 還沒寫的批次；下一個可寫連線補上
+_MARKERS_DEFERRED: set[tuple[str, str]] = set()
 
 
 def clear_smart_review_caches(db_path: str | None = None) -> None:
     """清除對帳進度快取（只影響效能，下一次會重新對帳）；指定 ``db_path`` 時只清該資料庫。"""
     for key in [key for key in _RECONCILED_HISTORY_HEAD if db_path in (None, key[0])]:
         del _RECONCILED_HISTORY_HEAD[key]
+    for key in [key for key in _MARKERS_DEFERRED if db_path in (None, key[0])]:
+        _MARKERS_DEFERRED.discard(key)
+
+
+def _reconcile_cached(key: tuple[str, str], head_id: int, readonly: bool) -> bool:
+    """這個 history head 已對帳過；可寫連線遇到唯讀時延後的 marker 仍要重跑一次補寫。"""
+    if _RECONCILED_HISTORY_HEAD.get(key) != head_id:
+        return False
+    return readonly or key not in _MARKERS_DEFERRED
 
 
 class SmartReviewProjectionMixin:
@@ -62,7 +73,7 @@ class SmartReviewProjectionMixin:
         key = (str(self.path), run_id)
         head = self._one("SELECT MAX(id) FROM history")
         head_id = int(head[0] or 0) if head else 0
-        if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
+        if _reconcile_cached(key, head_id, self.readonly):
             logger.debug(
                 "Smart Review 對帳快取命中：run=%s history_head=%s",
                 run_id,
@@ -95,10 +106,20 @@ class SmartReviewProjectionMixin:
                 records,
                 confirmed_records=confirmed_records,
             )
-            marker_update_succeeded = (
-                self._mark_smart_review_projection_confirmed(run_id, confirmed_records)
-                is not None
-            )
+            if self.readonly:
+                # 唯讀連線（UI worker 的讀取快照）不能寫 SQLite；JSON 已對齊，
+                # marker 只影響保留政策，留給下一個可寫連線補上，不在每次讀取重試。
+                if confirmed_records:
+                    _MARKERS_DEFERRED.add(key)
+            else:
+                marker_update_succeeded = (
+                    self._mark_smart_review_projection_confirmed(
+                        run_id, confirmed_records
+                    )
+                    is not None
+                )
+                if marker_update_succeeded and entry_ids is None:
+                    _MARKERS_DEFERRED.discard(key)
         if entry_ids is None and marker_update_succeeded:
             _RECONCILED_HISTORY_HEAD[key] = head_id
         logger.debug(
@@ -234,7 +255,7 @@ class SmartReviewProjectionMixin:
         key = (str(self.path), run_id)
         head = self._one("SELECT MAX(id) FROM history")
         head_id = int(head[0] or 0) if head else 0
-        if _RECONCILED_HISTORY_HEAD.get(key) == head_id:
+        if _reconcile_cached(key, head_id, self.readonly):
             return run_id, marks
         try:
             reconciled = self._reconcile_json_applied_candidates(

@@ -31,6 +31,7 @@ from .lang_merge_content_copy import detect_content_wrapper_prefix
 from .lang_merge_db import merge_db_fill
 from .lang_merge_io import FolderReader, ZipReader, register_lang_source
 from .lang_merge_pipeline import _process_single_mod, detect_mod_wrapper_prefix
+from .lang_merge_provenance import provenance_batch
 
 # 掃描檔名清單時每隔多少筆檢查一次取消（逐筆檢查成本小，但清單可達數十萬筆）。
 _CANCEL_CHECK_EVERY = 256
@@ -65,11 +66,14 @@ def merge_zhcn_to_zhtw_from_zip(
     translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（zip）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_zip``。"""
-    with merge_db_fill(
-        use_translation_db,
-        translation_db_version,
-        settings_snapshot=translation_db_settings_snapshot,
-    ) as db_fill:
+    with (
+        provenance_batch(output_dir),
+        merge_db_fill(
+            use_translation_db,
+            translation_db_version,
+            settings_snapshot=translation_db_settings_snapshot,
+        ) as db_fill,
+    ):
         yield from _merge_zhcn_to_zhtw_from_zip(
             zip_file,
             output_dir,
@@ -457,11 +461,14 @@ def merge_zhcn_to_zhtw_from_folder(
     translation_db_settings_snapshot: DbSettings | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """語系合併（folder）：純英文條目會先向 Mod 資料庫補譯（若設定啟用），其餘見 ``_merge_zhcn_to_zhtw_from_folder``。"""
-    with merge_db_fill(
-        use_translation_db,
-        translation_db_version,
-        settings_snapshot=translation_db_settings_snapshot,
-    ) as db_fill:
+    with (
+        provenance_batch(output_dir),
+        merge_db_fill(
+            use_translation_db,
+            translation_db_version,
+            settings_snapshot=translation_db_settings_snapshot,
+        ) as db_fill,
+    ):
         yield from _merge_zhcn_to_zhtw_from_folder(
             input_dir,
             output_dir,

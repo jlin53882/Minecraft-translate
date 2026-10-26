@@ -502,3 +502,23 @@ def test_force_rotate_shard_waits_for_shard_lock(mock_save_path):
 
     assert result["ok"] is True
     assert (type_dir / ".active").read_text(encoding="utf-8") == "00002"
+
+
+def test_successful_shard_save_is_reported_as_last_save_time(monkeypatch, tmp_path):
+    """快取頁「最近儲存」來自實際寫入分片的時間；沒有內容的儲存不算。"""
+    from translation_tool.utils import cache_manager, cache_shards
+
+    state = cache_manager._state()
+    monkeypatch.setitem(state.cache_file_path, "lang", tmp_path / "lang" / "x.json")
+    monkeypatch.setattr(
+        cache_shards, "_save_entries_to_active_shards", lambda **_kwargs: True
+    )
+    monkeypatch.setattr(state, "last_save_at", None)
+    cache_manager._save_entries_to_active_shards("lang", {})
+    assert state.last_save_at is None
+    cache_manager._save_entries_to_active_shards("lang", {"k": {"dst": "v"}})
+    assert state.last_save_at is not None
+
+    monkeypatch.setattr(cache_manager, "initialize_translation_cache", lambda: None)
+    overview = cache_manager.get_cache_overview()
+    assert overview["last_save_at"] == state.last_save_at

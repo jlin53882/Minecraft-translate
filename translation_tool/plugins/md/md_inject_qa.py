@@ -315,7 +315,8 @@ def apply_item_to_md_lines(md_lines: list[str], item: Item) -> None:
 def iter_json_files(root: Path):
     """處理此 generator 並逐步回報進度（yield update dict）。"""
     for p in root.rglob("*.json"):
-        if p.is_file():
+        # translation_map_md.json 是翻譯記錄（list），不是逐檔的 md_pending_blocks
+        if p.is_file() and not p.name.startswith("translation_map_md"):
             yield p
 
 

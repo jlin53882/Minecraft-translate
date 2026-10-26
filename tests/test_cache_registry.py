@@ -11,7 +11,6 @@ import translation_tool.translation_db.smart_review
 import translation_tool.translation_db.smart_review_history  # noqa: F401
 
 # 先 import 所有登錄快取的模組：模組在 import 時登錄，若在隔離登錄表期間才首次 import 會遺失登錄。
-from app.views.icon_preview import icon_cache
 from translation_tool.core import official_locale
 from translation_tool.utils import (
     app_paths,
@@ -86,7 +85,6 @@ def test_module_caches_are_registered_and_clearable():
         "utils.text_processor.conflict_warnings",
         "utils.text_processor.replace_rules",
         "utils.app_paths.migrated_roots",
-        "icon_preview.model_index_memo",
         "translation_db.repository.quality_comparison",
         "utils.text_matching.normalize_term",
         "utils.config_manager.config",
@@ -95,7 +93,6 @@ def test_module_caches_are_registered_and_clearable():
     db_settings._registry_cache["x"] = ((), {})  # type: ignore[index]
     app_paths._migrated_roots.add("x")  # type: ignore[arg-type]
     text_processor._WARNED_CONFLICT_SIGNATURES.add(("x",))
-    icon_cache._MODEL_INDEX_MEMO[("a", "b")] = ("h", {})
     content_copy._patchouli_eff_cache[("k",)] = {"zh_cn": True}
     text_matching.normalize_term_text("Foo_Bar", casefold=True)
     assert text_matching.term_normalize_cache_info().currsize >= 1
@@ -105,7 +102,6 @@ def test_module_caches_are_registered_and_clearable():
     assert not db_settings._registry_cache
     assert not app_paths._migrated_roots
     assert not text_processor._WARNED_CONFLICT_SIGNATURES
-    assert not icon_cache._MODEL_INDEX_MEMO
     assert not content_copy._patchouli_eff_cache
     assert text_matching.term_normalize_cache_info().currsize == 0
     assert official_locale.load_official_locale_index.cache_info().currsize == 0

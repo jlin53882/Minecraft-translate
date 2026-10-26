@@ -488,6 +488,9 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     panel.tw_field.value = "人工修改"
     panel._update_impact()
@@ -509,6 +512,7 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert panel.confirm_btn.visible is True and panel.confirm_btn.disabled is False
 
     panel._confirm()
+    page._run_all_tasks()
     assert page.overlay and page.overlay[-1].title.value == "確認條目審核"
     dialog_text = "\n".join(texts_of(page.overlay[-1].content))
     assert "英文原文・en_us" in dialog_text
@@ -516,6 +520,7 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert "條目內容" in dialog_text
     assert "版本審核範圍" in dialog_text
     page.overlay[-1].actions[-1].on_click(None)
+    page._run_all_tasks()
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
     assert manual.review_status == "reviewed"
@@ -534,6 +539,7 @@ def test_entries_panel_save_and_review_use_separate_manual_states(db_path):
     assert panel.clear_review_btn.disabled is False
 
     panel.clear_review_btn.on_click(None)
+    page._run_all_tasks()
     detail = db.entry_detail(panel.selected.id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
     assert manual.review_status == "unreviewed"
@@ -804,6 +810,7 @@ def test_entries_panel_changed_filter_and_editor_note(db_path):
     panel._load_list()
     assert panel.total == 1
     panel.select(panel.rows[0].id)
+    panel._page._run_all_tasks()
     assert any("Steel Casing II" in t for t in texts_of(panel.meta_col))
     db.close()
 
@@ -822,7 +829,7 @@ def test_pager_buttons_get_fresh_unique_keys_on_every_render():
 
 
 def test_other_translation_filter_never_lists_untranslated_entries(db_path):
-    """「其他譯文」篩選不會出現未翻譯條目；切換篩選後清單項目的 key 全新。"""
+    """「其他譯文」篩選不會出現未翻譯條目；切換篩選後可見的清單列對應新的條目。"""
     from app.views.moddb import entries_panel
     from app.views.moddb.formatting import STATE_LABELS
 
@@ -833,13 +840,13 @@ def test_other_translation_filter_never_lists_untranslated_entries(db_path):
     panel.refresh()
     panel.show_filter("none")
     panel._load_list()
-    none_keys = {c.key for c in panel.list_view.controls}
+    none_ids = {c.data for c in panel.list_view.controls if c.visible}
     assert {r.zh_tw for r in panel.rows} == {""}
     panel.show_filter("ok")
     panel._load_list()
     assert panel.rows and all(r.zh_tw for r in panel.rows)
-    ok_keys = {c.key for c in panel.list_view.controls}
-    assert len(ok_keys) == len(panel.rows) and not ok_keys & none_keys
+    ok_ids = {c.data for c in panel.list_view.controls if c.visible}
+    assert ok_ids == {r.id for r in panel.rows} and not ok_ids & none_ids
     db.close()
 
 
@@ -1095,6 +1102,7 @@ def test_list_counts_are_cached_per_filter_and_invalidated_by_writes(db_path):
     db = TranslationDB(db_path)
     counted = []
     real_one = db._one
+    real_q = db._q
 
     def spy(sql, params=()):
         # 狀態篩選要求有生效譯文時從 effective 計數
@@ -1104,7 +1112,14 @@ def test_list_counts_are_cached_per_filter_and_invalidated_by_writes(db_path):
             counted.append(sql)
         return real_one(sql, params)
 
+    def spy_q(sql, params=()):
+        # 只涉及版本／審核狀態／沒有譯文的條件：由 stat_src 的模組分面計數
+        if sql.startswith("SELECT mod_id, SUM(cnt)"):
+            counted.append(sql)
+        return real_q(sql, params)
+
     db._one = spy
+    db._q = spy_q
     assert db.list_entries("1.21.1", state="none")[1] == 3
     db.list_entries("1.21.1", state="none", offset=1)  # 翻頁不重數
     assert len(counted) == 1
@@ -1532,6 +1547,8 @@ def test_service_logs_batches_eta_and_reports_totals(db_path, monkeypatch):
     assert any("第 2 / 約 2 批" in t and "已處理 2 / 2 筆（100%）" in t for t in texts)
     summary = session.snapshot()["summary"]
     assert summary["batches"] == 2 and summary["elapsed_sec"] >= 0
+    # 完成的執行在結束時重算整個範圍的未翻譯數（與預覽的「此範圍仍未翻譯」同一個查詢）
+    assert isinstance(summary["scope_remaining"], int)
     assert any("共送出 2 批" in t for t in texts)
 
 
@@ -1625,6 +1642,9 @@ def test_entries_list_scrolls_back_to_top_when_content_changes(db_path):
     page = mock_page()
     page.run_task = lambda fn, *a, **k: scheduled.append(fn)
     panel = entries_panel.EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     assert scheduled, "換清單內容時要排程把清單捲回頂端"
     offsets: list = []
@@ -1723,6 +1743,8 @@ def test_aborted_run_ends_session_as_error(db_path, monkeypatch):
     )
     snap = run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
     assert snap["status"] == "ERROR" and snap["summary"]["status"] == "ABORTED"
+    # 中止的執行不再做整個範圍的未翻譯計數（使用者在等它停下）
+    assert snap["summary"]["scope_remaining"] is None
 
 
 def test_db_flush_failure_retries_and_keeps_buffer(db_path, monkeypatch):
@@ -2627,12 +2649,16 @@ def test_review_dialog_sync_switch_defaults_on_and_recomputes_scope(db_path):
     page = mock_page()
     page.run_thread = lambda target: target()
     panel = EntriesPanel(page, lambda: db)
+    panel._edit_debounce = SimpleNamespace(
+        call=lambda fn, *a: fn(*a), cancel=lambda: None
+    )
     panel.refresh()
     assert panel.sync_row.value is True
     panel.tw_field.value = panel.selected.zh_tw
     panel._on_text_change()
 
     panel._confirm()
+    page._run_all_tasks()
     dialog = page.overlay[-1]
     switches = [c for c in _walk(dialog.content) if type(c).__name__ == "Switch"]
     assert len(switches) == 1 and switches[0].value is True
@@ -2641,6 +2667,7 @@ def test_review_dialog_sync_switch_defaults_on_and_recomputes_scope(db_path):
 
     switches[0].value = False
     switches[0].on_change(None)
+    page._run_all_tasks()
     assert dialog.actions[-1].content == "確認審核目前版本"
     assert "已選擇僅審核目前版本" in "\n".join(texts_of(dialog.content))
 
@@ -3144,3 +3171,52 @@ def test_second_replace_failure_keeps_valid_json_and_no_temp_files(
     names = sorted(p.name for p in tmp_path.iterdir())
     assert names == ["quality-issues-task.json"]
     json.loads((tmp_path / names[0]).read_text(encoding="utf-8"))
+
+
+def test_scope_text_uses_the_preview_batch_plan_until_the_scope_changes(db_path):
+    """範圍說明的批數是粗估；同一範圍預覽過後改顯示預覽精確規劃的批數，避免兩個數字並存。"""
+    seed(db_path)
+    db = TranslationDB(db_path)
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: db)
+    panel.refresh_scope()
+    panel.limit_field.value = "0"
+    panel._refresh_counts()
+    assert "粗估" in panel.count_text.value
+
+    missing, reusable = panel._last_counts[:2]
+    panel._run_scope = panel._scope_key()
+    panel._apply_translation_summary(
+        {
+            "dry_run": True,
+            "candidates": 3,
+            "planned_batches": 4,
+            "remaining": missing,
+            "scope_remaining": missing,
+            "reused": reusable,
+        }
+    )
+    assert "預覽規劃 4 批" in panel.count_text.value
+    assert "粗估" not in panel.count_text.value
+
+    # 其他操作改了資料（例如掃描匯入新條目）：筆數不同，預覽批數不再適用
+    panel._set_count_text(missing + 100, reusable)
+    assert "粗估" in panel.count_text.value and "預覽規劃" not in panel.count_text.value
+    assert panel._preview_plan is None
+
+    panel._refresh_counts()  # 資料回到預覽時的筆數後再預覽一次
+    panel._apply_translation_summary(
+        {
+            "dry_run": True,
+            "candidates": 3,
+            "planned_batches": 4,
+            "remaining": missing,
+            "scope_remaining": missing,
+            "reused": reusable,
+        }
+    )
+    assert "預覽規劃 4 批" in panel.count_text.value
+
+    panel.limit_field.value = "1"  # 範圍變了：預覽的批數不再適用
+    panel._refresh_counts()
+    assert "粗估" in panel.count_text.value and "預覽規劃" not in panel.count_text.value
+    db.close()

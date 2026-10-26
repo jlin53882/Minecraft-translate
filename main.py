@@ -11,6 +11,7 @@
 """
 
 import logging
+import multiprocessing
 
 import flet as ft
 
@@ -79,6 +80,8 @@ if __name__ == "__main__":
     腳本直接執行時才初始化 runtime 並啟動 Flet App。
     測試環境 import 此檔案時不會觸發這段邏輯。
     """
+    # 打包後的程式以同一個 exe 啟動掃描 worker 行程；沒有這行 worker 會再開一個視窗
+    multiprocessing.freeze_support()
     try:
         bootstrap_runtime()
     except Exception as e:

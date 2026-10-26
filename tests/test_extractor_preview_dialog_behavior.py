@@ -145,11 +145,10 @@ def test_scan_result_replaces_dialog_content_in_place(env):
     assert dialog.modal is False
     texts = _texts(dialog)
     assert "提取預覽 - LANG" in texts
-    assert "共找到 2 個檔案" in texts
-    assert "總大小：1.50 MB" in texts
+    assert "預計提取 2 個檔案，約 1.50 MB" in texts
     assert any("a.jar" in t and "2 個檔案" in t for t in texts)
     assert not any("empty.jar" in t for t in texts)  # 沒有可提取檔案的 JAR 不列出
-    assert any("另有 1 個 JAR 沒有可提取的檔案" in t for t in texts)
+    assert any("1 個沒有、0 個讀取失敗" in t for t in texts)
     labels = [
         getattr(a, "content", None) or getattr(a, "text", None) for a in dialog.actions
     ]
@@ -171,7 +170,7 @@ def test_dual_mode_result_shows_lang_and_book_counts(env):
     dialog = env.open(mode="dual")
     env.scan(dialog)
     texts = _texts(dialog)
-    assert "Lang：3 個" in texts and "Book：4 個" in texts
+    assert any("（Lang 3／Book 4）" in t for t in texts)
     assert any("Lang 3 個 / Book 4 個" in t for t in texts)
 
 
@@ -285,7 +284,7 @@ def test_rescan_after_a_finished_scan_works_again(env):
     env.updates = [{"result": _result(count=5)}]
     dialog2 = env.open()
     env.scan(dialog2)
-    assert "共找到 5 個檔案" in _texts(dialog2)
+    assert any(t.startswith("預計提取 5 個檔案") for t in _texts(dialog2))
 
 
 def test_start_without_output_path_shows_resolved_output(env):
@@ -325,7 +324,7 @@ def test_rescan_on_the_same_dialog_after_an_error_resets_the_state(env):
 
     env.updates = [{"result": _result(count=7)}]
     env.scan(dialog)
-    assert "共找到 7 個檔案" in _texts(dialog)
+    assert any(t.startswith("預計提取 7 個檔案") for t in _texts(dialog))
 
 
 def test_error_unlocks_modal_so_the_dialog_can_be_closed(env):
@@ -417,3 +416,22 @@ def test_cancel_wins_over_result_ready_before_poller_handles_completion(env):
     assert ctx.start_button.disabled is False
     assert ctx.state["running"] is False
     assert ctx.preview_dialog.modal is False
+
+
+def test_preview_summary_separates_failed_jars_from_empty_ones():
+    from app.views.extractor.extract_summary import preview_summary_lines
+
+    result = {
+        "total_jars": 3,
+        "total_files": 2,
+        "total_size_mb": 0.5,
+        "preview_results": [
+            {"jar": "a.jar", "count": 2, "size_mb": 0.5},
+            {"jar": "empty.jar", "count": 0, "size_mb": 0.0},
+            {"jar": "broken.jar", "count": 0, "size_mb": 0.0},
+        ],
+        "failed_jars": [{"jar": "broken.jar", "error": "BadZipFile"}],
+    }
+    lines = preview_summary_lines(result, "lang")
+    assert lines[1] == "掃描 3 個 JAR：1 個有可提取檔案、1 個沒有、1 個讀取失敗"
+    assert lines[2] == "讀取失敗：broken.jar（BadZipFile）"

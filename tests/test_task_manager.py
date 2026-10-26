@@ -512,5 +512,6 @@ def test_recent_is_bounded_and_newest_first(manager):
         s.start()
         s.finish()
     recent = manager.recent(limit=100)
-    assert len(recent) == 20
+    # 本次執行的已結束任務都保留（上限 HISTORY_LIMIT，見 test_task_kpis）
+    assert len(recent) == 30
     assert recent[0].name == "t29"

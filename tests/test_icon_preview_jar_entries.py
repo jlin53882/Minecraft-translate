@@ -37,9 +37,17 @@ def create_view(
         view.source_root = source_root
         view.review_root = review_root
         # 快取初始狀態
-        view._entries_cache = None
+        view._source_cache = None
         view._cache_meta = {}
     return view
+
+
+def load_entries(view) -> list:
+    """冷載入一個 JAR 目錄，回傳含 zh_tw 的項目清單（與畫面上看到的相同）。"""
+    from app.views.icon_preview.scan_operation import scan_jar_directory
+
+    store = scan_jar_directory(view, 0)
+    return [entry for modid in store for entry in store[modid]]
 
 
 class TestLoadEntriesFromJarDirectory:
@@ -64,7 +72,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         assert len(entries) == 2
         modids = {e.modid for e in entries}
@@ -88,7 +96,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         assert len(entries) == 1
         assert entries[0].modid == "jei"
@@ -114,7 +122,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         assert len(entries) == 2
         modids = {e.modid for e in entries}
@@ -139,7 +147,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         # 好 JAR 應該正常處理
         assert len(entries) == 1
@@ -151,7 +159,7 @@ class TestLoadEntriesFromJarDirectory:
         empty_dir.mkdir()
 
         view = create_view(source_root=empty_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         assert entries == []
 
@@ -170,14 +178,15 @@ class TestLoadEntriesFromJarDirectory:
 
         callback_calls = []
 
-        def progress_callback():
-            callback_calls.append(1)
-
         view = create_view(source_root=jar_dir, review_root=None)
-        view._load_entries_from_jar_directory(processed_callback=progress_callback)
+        with patch(
+            "app.views.icon_preview.scan_operation._make_progress_callback",
+            return_value=lambda done, total: callback_calls.append((done, total)),
+        ):
+            load_entries(view)
 
-        # callback 應該至少被呼叫一次（墊底 + 至少一個 JAR 完成後）
-        assert len(callback_calls) >= 1
+        # 墊底一次（0/1），JAR 完成後一次（1/1）
+        assert callback_calls == [(0, 1), (1, 1)]
 
     def test_source_jar_attribute_set(self, tmp_path):
         """entries 應該包含 source_jar 屬性"""
@@ -197,7 +206,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         assert len(entries) == 1
         assert entries[0].source_jar == "actuallyadditions-1.20.jar"
@@ -221,7 +230,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
 
         assert len(entries) == 2
         modids = {e.modid for e in entries}
@@ -256,7 +265,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=review_dir)
-        entries = view._hydrate_entries(view._load_entries_from_jar_directory())
+        entries = load_entries(view)
 
         assert len(entries) == 2
         key1_entry = next(e for e in entries if e.key == "key1")
@@ -338,7 +347,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=review_dir)
-        entries = view._hydrate_entries(view._load_entries_from_jar_directory())
+        entries = load_entries(view)
 
         # === 總數驗證 ===
         assert len(entries) == 5, f"預期 5 個 entry，實際 {len(entries)}"
@@ -395,7 +404,7 @@ class TestLoadEntriesFromJarDirectory:
         此測試記錄正確預期行為（回傳 []），在 PR53 修復前會失敗。
         """
         view = create_view(source_root=None, review_root=None)
-        entries = view._load_entries_from_jar_directory()
+        entries = load_entries(view)
         assert entries == [], (
             "source_root=None 時應回傳空 list，而非拋出 AttributeError"
         )
@@ -422,7 +431,7 @@ class TestLoadEntriesFromJarDirectory:
         )
 
         view = create_view(source_root=jar_dir, review_root=review_dir)
-        entries = view._hydrate_entries(view._load_entries_from_jar_directory())
+        entries = load_entries(view)
 
         # 非 str 值應被轉為空字串，不應炸錯
         assert len(entries) == 1

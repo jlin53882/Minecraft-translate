@@ -36,10 +36,16 @@ from app.views.moddb.batch_replace_preview import (
     SelectionBar,
     render_batch_preview_rows,
 )
+from app.views.moddb.operation_summaries import (
+    batch_replace_counts_text,
+    batch_replace_result_text,
+)
+from translation_tool.utils.log_unit import log_info
 from translation_tool.utils.redaction import redact_secrets
 
 PREVIEW_PAGE_SIZE = 50
 PROGRESS_UPDATE_INTERVAL = 0.35
+PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認替換範圍後才能繼續。"
 
 
 class BatchReplaceDialog:
@@ -80,6 +86,8 @@ class BatchReplaceDialog:
         self._quality_ack_plan: BatchReplacePlan | None = None
         self._quality_ack_generation: int | None = None
         self._final_plan: BatchReplacePlan | None = None
+        # 已送出寫入的預覽計畫：結果訊息沿用它的跨版本與品質筆數
+        self._applied_plan: BatchReplacePlan | None = None
         self._final_generation: int | None = None
         self._plan_catalog = source_catalog_for(None)
         self._poller = PollerHandle()
@@ -111,7 +119,7 @@ class BatchReplaceDialog:
             on_change=self._on_quality_ack,
         )
         self.summary = ft.Text(
-            "尚未預覽",
+            PREVIEW_REQUIRED_HINT,
             size=14,
             weight=ft.FontWeight.BOLD,
         )
@@ -165,6 +173,7 @@ class BatchReplaceDialog:
             "primary",
             on_click=self._open_final_confirmation,
             disabled=True,
+            tooltip=PREVIEW_REQUIRED_HINT,
         )
         self.confirm_final_btn = kit.button(
             "確認並開始不可取消的寫入",
@@ -659,18 +668,8 @@ class BatchReplaceDialog:
             if self._dialog_open:
                 self._dialog_open = False
                 close_page_dialog(self.page, self.dialog)
-            message = (
-                f"已批次替換 {result.updated:,} 筆；略過 {result.skipped:,} 筆。"
-                "可在記錄中整批還原。"
-            )
-            if result.shadowed:
-                # 新譯文已存進人工來源，但自訂的來源優先序讓別的來源仍然生效
-                message = (
-                    f"已寫入人工來源 {result.updated:,} 筆，其中 {result.shadowed:,} 筆"
-                    f"因目前來源優先序仍顯示原本的譯文，生效譯文只改變 "
-                    f"{result.updated - result.shadowed:,} 筆；略過 {result.skipped:,} 筆。"
-                    "可在記錄中整批還原。"
-                )
+            message = batch_replace_result_text(result, self._applied_plan)
+            log_info(f"Mod 資料庫批次替換：{message}")
             show_snack(
                 self.page,
                 message,
@@ -886,12 +885,13 @@ class BatchReplaceDialog:
         if self.plan is None:
             self.summary.value = "範圍已變更，請重新預覽。"
         else:
-            result = f"可替換 {self.plan.update_count:,d} 筆"
-            if self.plan.extra_version_count:
-                result += f"（含跨版本 {self.plan.extra_version_count:,d} 筆）"
-            if self.plan.skipped_count:
-                result += f"　·　略過 {self.plan.skipped_count:,d} 筆"
-            self.summary.value = result
+            self.summary.value = batch_replace_counts_text(
+                "可替換",
+                self.plan.update_count,
+                self.plan.extra_version_count,
+                self.plan.skipped_count,
+                self.plan,
+            )
         quality_ok = self._quality_ack_is_valid()
         self.apply_btn.disabled = (
             self.plan is None or not self.plan.changes or not quality_ok or self._busy
@@ -931,7 +931,16 @@ class BatchReplaceDialog:
         return f"查看略過原因（{self.plan.skipped_count:,d}）"
 
     def _open_final_confirmation(self, _e=None) -> None:
-        if self._busy or self.plan is None or not self.plan.changes:
+        if self._busy:
+            return
+        if self.plan is None:
+            show_snack(self.page, PREVIEW_REQUIRED_HINT, C.GOLD)
+            self._render(update=False)
+            self.summary.value = PREVIEW_REQUIRED_HINT
+            self._update_dialog()
+            return
+        if not self.plan.changes:
+            show_snack(self.page, "預覽完成，但沒有可替換項目。", C.GOLD)
             return
         if not self._quality_ack_is_valid():
             show_snack(self.page, "請先確認品質警告，或取消這次替換。", C.GOLD)
@@ -942,9 +951,9 @@ class BatchReplaceDialog:
         self.final_summary.value = (
             f"處理範圍：{'僅已勾選根條目' if self.only_checked else '目前篩選範圍'}\n"
             f"個別排除 {len(self.excluded_roots):,d} 個根條目\n"
-            f"根條目 {len(plan.root_ids):,d}；實際寫入 {plan.update_count:,d}；"
-            f"其中跨版本 {plan.extra_version_count:,d}\n"
-            f"略過 {plan.skipped_count:,d}；跨版本衝突 {plan.conflict_count:,d}\n"
+            f"根條目 {len(plan.root_ids):,d}；可替換 {plan.update_count:,d} 筆，"
+            f"含跨版本 {plan.extra_version_count:,d} 筆\n"
+            f"略過 {plan.skipped_count:,d} 筆；跨版本衝突 {plan.conflict_count:,d} 筆\n"
             f"品質惡化 {plan.quality_worsened_count:,d} 筆；"
             f"品質混合變化 {plan.quality_mixed_count:,d} 筆\n"
             "若資料庫快照與此預覽不同，交易會拒絕寫入並要求重新預覽。"
@@ -994,6 +1003,7 @@ class BatchReplaceDialog:
             self._render()
             return
         self._set_job_ui("apply", "重新檢查資料庫快照…")
+        self._applied_plan = plan
 
         def work(session: TaskSession):
             return db.execute_batch_replace(

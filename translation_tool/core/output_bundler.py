@@ -542,6 +542,7 @@ def bundle_outputs_generator(
             yield {
                 "progress": 1.0,
                 "log": f"--- 來源與設定皆未變動，沿用上次的 ZIP：{output_zip_path} ---",
+                "bundle_result": {"reused": True, "files": None},
             }
             return
         # 重建期間不得留下舊的有效狀態：任何中途失敗／取消，下次都必須重建。
@@ -795,7 +796,16 @@ def bundle_outputs_generator(
             log_parts.append(f"跳過 pack.png（已存在於：{skipped_pack_png}）")
         if state_warning:
             log_parts.append(state_warning)
-        yield {"progress": 1.0, "log": "--- " + "；".join(log_parts) + " ---"}
+        yield {
+            "progress": 1.0,
+            "log": "--- " + "；".join(log_parts) + " ---",
+            # 畫面顯示用的結構化結果（與上方記錄同一組數字）
+            "bundle_result": {
+                "reused": False,
+                "files": total_files_added,
+                "duration_sec": round(duration, 2),
+            },
+        }
 
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error(f"打包時發生嚴重錯誤: {e!r}", exc_info=True)

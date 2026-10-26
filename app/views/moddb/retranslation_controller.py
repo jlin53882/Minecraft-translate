@@ -282,10 +282,10 @@ def _display_preview_result(panel, options, db_identity, result):
     if result.mode == "quality_mismatch":
         sources = "、".join(source_label(source, catalog) for source in result.sources)
         panel.repair_preview_text.value = (
-            f"修復候選預覽｜待處理來源項目 {format_count(result.total_candidates)} 筆；"
+            f"修復候選預覽｜符合條件的來源項目 {format_count(result.total_candidates)} 筆；"
             f"候選中有 {format_count(result.input_newline_mismatch_candidates)} 筆輸入換行數不同"
             f"（其中另有硬格式問題 {format_count(result.input_newline_mismatch_with_other_hard_issues)} 筆）。\n"
-            f"本次將送 AI 修復 {format_count(selected)} 筆來源項目。\n"
+            f"本次處理來源項目 {format_count(selected)} 筆（送 AI 修復）。\n"
             + (
                 "已納入只有實際換行數不同的項目（AI 結果換行數須與原文一致）。\n"
                 if result.newline_only_included
@@ -296,8 +296,8 @@ def _display_preview_result(panel, options, db_identity, result):
         )
     else:
         panel.repair_preview_text.value = (
-            f"修復候選預覽｜待處理來源項目 {format_count(result.total_candidates)} 筆；{cap}，"
-            f"本次將重翻 {format_count(selected)} 筆。\n"
+            f"修復候選預覽｜符合條件的來源項目 {format_count(result.total_candidates)} 筆；{cap}，"
+            f"本次處理來源項目 {format_count(selected)} 筆（送 AI 重翻）。\n"
             f"來源：{source_label(result.source, catalog)}；只處理目前生效來源為 AI 且譯文等於原文的項目；"
             "人工、模組自帶及其他來源不會被重新翻譯。\n"
             f"翻譯類型分布：{breakdown}；"

@@ -30,10 +30,11 @@ from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
+from app.ui.update_scope import update_regions
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.formatting import format_count
 from translation_tool.utils.config_manager import load_config
-from translation_tool.utils.log_unit import log_debug, log_info, log_warning
+from translation_tool.utils.log_unit import log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
 # 翻譯 ZIP 匯入時可選的「譯文來源」標記（預設：自訂補充）
@@ -221,6 +222,7 @@ class ScanPanel(ft.Column):
                     ),
                     kit.hint_text(
                         "已存在的條目一律跳過（只新增、不覆蓋）；原文已變動者會另外回報。"
+                        "先預覽用相同規則統計各項數字，但不寫入。"
                     ),
                 ],
                 spacing=10,
@@ -258,39 +260,29 @@ class ScanPanel(ft.Column):
             on_click=self.cancel_clicked,
             disabled=True,
         )
-        self.stat_new = kit.stat_card(
-            "新增條目", "—", icon=ft.Icons.ADD_CIRCLE_OUTLINE, tone="em", expand=1
-        )
-        self.stat_added = kit.stat_card(
-            "補入新來源譯文", "—", icon=ft.Icons.PLAYLIST_ADD, tone="dia", expand=1
-        )
-        self.stat_skip = kit.stat_card(
-            "已存在，略過", "—", icon=ft.Icons.SKIP_NEXT, tone="neutral", expand=1
-        )
-        self.stat_changed = kit.stat_card(
-            "原文已變動", "—", icon=ft.Icons.COMPARE_ARROWS, tone="gold", expand=1
-        )
-        self.stat_nolang = kit.stat_card(
-            "沒有語言檔的檔案",
-            "—",
-            icon=ft.Icons.INSERT_DRIVE_FILE_OUTLINED,
-            tone="neutral",
-            expand=1,
-        )
-        self.stat_failed = kit.stat_card(
-            "失敗（整包未寫入）", "—", icon=ft.Icons.ERROR_OUTLINE, tone="red", expand=1
-        )
-        self.stats_row = ft.Row(
-            [
-                self.stat_new,
-                self.stat_added,
-                self.stat_skip,
-                self.stat_changed,
-                self.stat_nolang,
-                self.stat_failed,
-            ],
-            spacing=10,
-        )
+        # 預覽與實際掃描共用這組卡片；保留說明列讓同一列卡片等高
+        cards = [
+            kit.stat_card(
+                label, "—", icon=icon, tone=tone, expand=1, reserve_delta_space=True
+            )
+            for label, icon, tone in (
+                ("新增條目", ft.Icons.ADD_CIRCLE_OUTLINE, "em"),
+                ("補入新來源譯文", ft.Icons.PLAYLIST_ADD, "dia"),
+                ("已存在，略過", ft.Icons.SKIP_NEXT, "neutral"),
+                ("原文已變動", ft.Icons.COMPARE_ARROWS, "gold"),
+                ("沒有語言檔的檔案", ft.Icons.INSERT_DRIVE_FILE_OUTLINED, "neutral"),
+                ("失敗（整包未寫入）", ft.Icons.ERROR_OUTLINE, "red"),
+            )
+        ]
+        (
+            self.stat_new,
+            self.stat_added,
+            self.stat_skip,
+            self.stat_changed,
+            self.stat_nolang,
+            self.stat_failed,
+        ) = cards
+        self.stats_row = ft.Row(cards, spacing=10)
         self.run_card = kit.section_card(
             "3　掃描",
             ft.Column(
@@ -594,24 +586,26 @@ class ScanPanel(ft.Column):
         self._safe_update()
 
     def _apply_summary(self, s: dict) -> None:
+        """預覽與實際掃描填同一組卡片（後端用相同規則分類）；預覽在說明標示未寫入。"""
         if not s:
             return
-        if s.get("dry_run"):
-            self.stat_new.set_value(
-                format_count(s.get("items_found")), delta="預覽：可匯入的項目數"
-            )
-            self.stat_added.set_value("—")
-            self.stat_skip.set_value("—")
-            self.stat_changed.set_value("—")
-        else:
-            self.stat_new.set_value(format_count(s.get("new_entries")), delta="")
-            adopted = s.get("adopted") or 0
-            self.stat_added.set_value(
-                format_count(s.get("added_translations")),
-                delta=f"另補上原文 {adopted:,} 筆" if adopted else "",
-            )
-            self.stat_skip.set_value(format_count(s.get("existing")))
-            self.stat_changed.set_value(format_count(s.get("en_changed")))
+        preview = "預覽（未寫入）" if s.get("dry_run") else ""
+        found = s.get("items_found") or 0
+        self.stat_new.set_value(
+            format_count(s.get("new_entries")),
+            delta=("預覽・" if preview else "") + f"讀到 {found:,} 項",
+        )
+        adopted = s.get("adopted") or 0
+        self.stat_added.set_value(
+            format_count(s.get("added_translations")),
+            delta="・".join(
+                p
+                for p in (preview, f"另補上原文 {adopted:,} 筆" if adopted else "")
+                if p
+            ),
+        )
+        self.stat_skip.set_value(format_count(s.get("existing")), delta=preview)
+        self.stat_changed.set_value(format_count(s.get("en_changed")), delta=preview)
         self.stat_nolang.set_value(format_count(s.get("jars_without_lang")))
         skipped = s.get("skipped_nested") or 0
         self.stat_failed.set_value(
@@ -638,8 +632,9 @@ class ScanPanel(ft.Column):
     def _set_status(self, text: str, tone: str = "neutral") -> None:
         set_chip_status(self.status_chip, text, tone)
 
+    def flush(self) -> None:
+        """把這個頁籤的變更送到畫面；頁籤是更新邊界，頁面層級的 update 不會更新它。"""
+        update_regions(self)
+
     def _safe_update(self) -> None:
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響掃描本身
-            log_debug(f"ScanPanel update 略過：{exc}")
+        self.flush()

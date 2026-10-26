@@ -1576,3 +1576,37 @@ def test_incremental_cn_priority_end_to_end_step1_then_resume_step2_step3(
     assert resumed["step3"]["patched_js_files"] == 0
     assert resumed["mirror_conflict_count"] == 0
     assert resumed["output_sync_status"] == "synced"
+
+
+def test_pipeline_injects_scripts_when_pack_also_has_assets_kubejs_folder(
+    tmp_path: Path,
+) -> None:
+    """標準配置 kubejs/assets/kubejs/lang 與 client_scripts 並存時，腳本也要被注入。
+
+    來源快照的目錄名是雜湊，不能再往下搜尋名為 kubejs 的資料夾，
+    否則會誤選 assets/kubejs 而找不到任何腳本。
+    """
+    kubejs = tmp_path / "kubejs"
+    (kubejs / "client_scripts").mkdir(parents=True)
+    lang = kubejs / "assets" / "kubejs" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({"item.a": "Item A"}), encoding="utf-8")
+    (kubejs / "client_scripts" / "tip.js").write_text(
+        "ItemEvents.tooltip(event => {\n  event.add('minecraft:stone', [Text.literal('Tooltip text')]);\n});",
+        encoding="utf-8",
+    )
+
+    result = kubejs_translator.run_kubejs_pipeline(
+        input_dir=str(tmp_path),
+        output_dir=str(tmp_path / "Output"),
+        translator_fn=_fake_translate_pending,
+        step_extract=True,
+        step_translate=True,
+        step_inject=True,
+    )
+
+    final = tmp_path / "Output" / "kubejs" / "完成" / "kubejs"
+    assert result["step3"]["patched_js_files"] == 1
+    assert "譯:Tooltip text" in (final / "client_scripts" / "tip.js").read_text(
+        encoding="utf-8"
+    )

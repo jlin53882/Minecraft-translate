@@ -57,6 +57,18 @@ def _preview_format_label(mcmeta_text: str, fallback: str) -> str:
     return fallback
 
 
+def bundle_result_text(result: dict | None) -> str:
+    """打包結束的狀態文字：檔案數與耗時；來源未變動時標示沿用上次的 ZIP。"""
+    if not result:
+        return "打包完成"
+    if result.get("reused"):
+        return "打包完成：來源與設定皆未變動，沿用上次的 ZIP"
+    return (
+        f"打包完成：{int(result.get('files') or 0):,} 個檔案加入 ZIP"
+        f"（耗時 {float(result.get('duration_sec') or 0):.1f} 秒）"
+    )
+
+
 class BundlerView(BundlerWidgetsMixin, ft.Column):
     page: ft.Page
     file_picker: ft.FilePicker
@@ -436,6 +448,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             ),
             name="資源包打包",
             owner="bundler",
+            view_key="bundler",
             cancellation=CancellationPolicy.NON_CANCELLABLE,
             commit=CommitPolicy.PARTIAL_ALLOWED,
             durability=DurabilityPolicy.USER_ACTION,
@@ -472,7 +485,11 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         self.start_button.disabled = self._bundling_running
         if state.get("done"):
             failed = state.get("error_color") is not None
-            self.status_text.value = "打包失敗，請查看日誌" if failed else "打包完成"
+            self.status_text.value = (
+                "打包失敗，請查看日誌"
+                if failed
+                else bundle_result_text(state.get("result"))
+            )
             self.status_text.color = C.RED if failed else C.EM
         self._page.update()
 
@@ -489,6 +506,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         batcher = UiBatcher(
             self._page, self._apply_bundling_ui, interval=self._UI_FLUSH_INTERVAL_SEC
         )
+        final_result = None
         try:
             generator_kwargs = {
                 "input_root_dir": root_dir,
@@ -509,6 +527,9 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
                     batcher.set_state(progress=update["progress"])
                 if update.get("error"):
                     batcher.set_state(error_color=C.RED)
+                if update.get("bundle_result"):
+                    # 批次器每次送出後會清空狀態：結果留到最後和 done 一起送
+                    final_result = update["bundle_result"]
                 batcher.flush()
         except Exception as ex:  # noqa: BLE001 - 背景執行緒邊界，錯誤顯示於日誌
             log_error(f"[打包] 打包執行失敗：{ex!r}\n{traceback.format_exc()}")
@@ -516,7 +537,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             batcher.set_state(error_color=C.RED)
         finally:
             self._bundling_running = False
-            batcher.set_state(done=True)
+            batcher.set_state(done=True, result=final_result)
             batcher.flush(force=True)
 
     @property

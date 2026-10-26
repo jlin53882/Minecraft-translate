@@ -64,6 +64,7 @@ class SmartReviewBatchReviewer:
         self.total = 0
         self.rows: list[SmartReviewCandidate] = []
         self._row_cache: dict[int, SmartReviewCandidate] = {}
+        self._draft_validity_cache: dict[tuple[str, str, str], bool] = {}
         self._selected: set[int] = set()
         self._request_seq = 0
         self._operation_seq = 0
@@ -253,6 +254,7 @@ class SmartReviewBatchReviewer:
         self.total = 0
         self.rows = []
         self._row_cache.clear()
+        self._draft_validity_cache.clear()
         self._selected.clear()
         self._last_result = None
         self.result_box.visible = False
@@ -280,6 +282,7 @@ class SmartReviewBatchReviewer:
             return
         self._selected.clear()
         self._row_cache.clear()
+        self._draft_validity_cache.clear()
         self._load_page(include_run=True, background=False)
 
     def _load_page(
@@ -338,7 +341,9 @@ class SmartReviewBatchReviewer:
                 background=background,
             )
 
-        still_valid = lambda: token == self._request_seq
+        def still_valid() -> bool:
+            return token == self._request_seq
+
         if background:
             self.ctx.run_background(
                 work,
@@ -438,6 +443,7 @@ class SmartReviewBatchReviewer:
         self.page = 1
         self._selected.clear()
         self._row_cache.clear()
+        self._draft_validity_cache.clear()
         self._load_page(background=False)
 
     def _on_page(self, page: int) -> None:
@@ -598,6 +604,11 @@ class SmartReviewBatchReviewer:
             border_radius=design.RADIUS_CONTROL,
         )
 
+    def show_run_loading(self) -> None:
+        """對話框正在讀取共用批次摘要：先顯示讀取中，並讓先前批次晚到的結果作廢。"""
+        self._request_seq += 1
+        self._show_loading("正在載入批次…")
+
     def _show_loading(self, text: str) -> None:
         """顯示讀取中狀態並暫停批量動作。"""
         self.body.controls = [kit.loading_state(text)]
@@ -701,6 +712,7 @@ class SmartReviewBatchReviewer:
         self.page = 1
         self._selected.clear()
         self._row_cache.clear()
+        self._draft_validity_cache.clear()
         token = self._request_seq = self._request_seq + 1
         self._loading = True
         self._set_controls_enabled(False)
@@ -777,23 +789,28 @@ class SmartReviewBatchReviewer:
         """批量套用再加一道純本地格式診斷，避免把已知問題送進寫入流程。"""
         if not self._can_ready_select(row):
             return False
-        try:
-            return not SmartReviewEvidencePresenter.diagnose_draft(
-                row, initial_draft_text(row)
-            ).has_issue
-        except (TypeError, ValueError):
-            return False
+        return self._draft_has_valid_format(row)
 
     def _can_override(self, row: SmartReviewCandidate) -> bool:
         """stale 候選需通過本地格式診斷，才可進入明確覆蓋動作。"""
         if not self._can_stale_select(row):
             return False
+        return self._draft_has_valid_format(row)
+
+    def _draft_has_valid_format(self, row: SmartReviewCandidate) -> bool:
+        """快取同一原文／草稿的純本地格式診斷，避免重畫時重複解析。"""
+        draft = initial_draft_text(row)
+        cache_key = (row.kind, row.en_us, draft)
+        if cache_key in self._draft_validity_cache:
+            return self._draft_validity_cache[cache_key]
         try:
-            return not SmartReviewEvidencePresenter.diagnose_draft(
-                row, initial_draft_text(row)
+            valid = not SmartReviewEvidencePresenter.diagnose_draft(
+                row, draft
             ).has_issue
         except (TypeError, ValueError):
-            return False
+            valid = False
+        self._draft_validity_cache[cache_key] = valid
+        return valid
 
     @staticmethod
     def _selection_reason(row: SmartReviewCandidate) -> str:
@@ -971,6 +988,7 @@ class SmartReviewBatchReviewer:
             self._last_result = result
             self._selected.clear()
             self._row_cache.clear()
+            self._draft_validity_cache.clear()
             self._render_result(result)
             if summarize_outcomes(result).succeeded and callable(self.on_changed):
                 self.on_changed()

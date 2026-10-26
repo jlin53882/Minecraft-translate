@@ -179,6 +179,17 @@ def _get_tiktoken_encoding(name: str):
         return None
 
 
+def warm_token_encoder(estimator: TokenEstimatorConfig | None = None) -> bool:
+    """預先載入 tokenizer，回傳是否可用。
+
+    第一次載入要解析數十萬筆詞表，並在 C 擴充內持有 GIL 約 0.1 秒以上；若發生在使用者操作
+    的當下（例如第一次預覽批次機翻），整個事件迴圈會跟著停住。App 啟動後在背景先載入，
+    之後的批次規劃直接使用快取的 tokenizer。
+    """
+    config = estimator or DEFAULT_TOKEN_ESTIMATOR
+    return _get_tiktoken_encoding(config.tiktoken_encoding) is not None
+
+
 def _tiktoken_count(text: str, estimator: TokenEstimatorConfig) -> int | None:
     encoding = _get_tiktoken_encoding(estimator.tiktoken_encoding)
     if encoding is None:

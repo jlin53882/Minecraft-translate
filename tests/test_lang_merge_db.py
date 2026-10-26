@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.services_impl.pipelines import merge_service
-from translation_tool.core import lang_merge_db, lang_merger
+from translation_tool.core import lang_merge_db, lang_merge_provenance, lang_merger
 from translation_tool.core.lang_merge_db import merge_db_fill
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.lang_merge_provenance import write_translation_provenance
@@ -978,3 +978,46 @@ def test_stage2_database_wins_over_extracted_zh_cn(tmp_path, monkeypatch, db_pat
         )
     )
     assert tw["item.foo.a"] == "鋼製外殼"
+
+
+def test_stage1_writes_the_provenance_manifest_once_for_many_mods(
+    tmp_path, monkeypatch
+):
+    """每個模組都重寫整份標記檔會讓合併時間隨模組數平方成長；整批只能寫一次。"""
+    db_path = tmp_path / "many.db"
+    mods = [f"mod{i}" for i in range(12)]
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(KIND_LANG, mod, "item.a", "Steel Casing", "鋼製外殼")
+            for mod in mods
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path)
+    inp = tmp_path / "in"
+    for mod in mods:
+        _write(
+            inp / "assets" / mod / "lang" / "en_us.json",
+            {"item.a": "Steel Casing"},
+        )
+    manifest_writes: list[str] = []
+    real_write = lang_merge_provenance._write_json_atomic
+
+    def counting_write(path, payload):
+        manifest_writes.append(path.name)
+        return real_write(path, payload)
+
+    monkeypatch.setattr(lang_merge_provenance, "_write_json_atomic", counting_write)
+
+    out = tmp_path / "out"
+    list(merge_zhcn_to_zhtw_from_folder(str(inp), str(out), only_process_lang=True))
+
+    assert manifest_writes == [".translation-provenance.json"]
+    manifest = json.loads(
+        (out / "lang_output" / ".translation-provenance.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert set(manifest["outputs"]) == {f"assets/{m}/lang/zh_tw.json" for m in mods}

@@ -31,6 +31,7 @@ from translation_tool.translation_db import (
     SmartReviewSnapshot,
     TranslationDB,
 )
+from translation_tool.translation_db.query_interrupt import QueryInterrupt
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review import (
     SMART_REVIEW_DEFAULT_BATCH_SIZE as _SMART_REVIEW_DEFAULT_BATCH_SIZE,
@@ -215,6 +216,7 @@ def preview_moddb_smart_review_plan_from_path(
     skip_valid_history: bool = True,
     model: str | None = None,
     progress: Callable[[str], None] | None = None,
+    interrupt: QueryInterrupt | None = None,
 ) -> dict[str, Any]:
     """回傳唯讀歷史規劃 KPI，不呼叫 provider。
 
@@ -238,7 +240,11 @@ def preview_moddb_smart_review_plan_from_path(
         skip_valid_history=skip_valid_history,
     )
     db = _open(path, priority, readonly=True)
+    if interrupt is not None:
+        interrupt.attach(db._conn)
     try:
+        if interrupt is not None:
+            interrupt.raise_if_cancelled()
         notify("正在讀取目前符合範圍的候選…")
         snapshots = db.smart_review_candidates(
             **plan_input.candidate_kwargs(include_context=False)
@@ -265,6 +271,8 @@ def preview_moddb_smart_review_plan_from_path(
         )
         return _preview_plan_summary(plan, batch_size)
     finally:
+        if interrupt is not None:
+            interrupt.detach()
         db.close()
 
 
@@ -506,10 +514,15 @@ def count_moddb_smart_review_candidates_from_path(
     review_status: str = "unreviewed",
     query: str | None = None,
     require_reviewed_reference: bool = False,
+    interrupt: QueryInterrupt | None = None,
 ) -> int:
-    """計算指定資料庫目前範圍內的智慧校對候選數量。"""
+    """計算指定資料庫目前範圍內的智慧校對候選數量；``interrupt`` 讓過期的請求提早停止掃描。"""
     db = _open(path, priority, readonly=True)
+    if interrupt is not None:
+        interrupt.attach(db._conn)
     try:
+        if interrupt is not None:
+            interrupt.raise_if_cancelled()
         return db.count_smart_review_candidates(
             version=version,
             mod_id=mod_id,
@@ -520,6 +533,8 @@ def count_moddb_smart_review_candidates_from_path(
             require_reviewed_reference=require_reviewed_reference,
         )
     finally:
+        if interrupt is not None:
+            interrupt.detach()
         db.close()
 
 
@@ -653,22 +668,30 @@ def _apply_moddb_smart_review_fast_batch(
     if not callable(batch_apply):
         return None
     results: list[SmartReviewBatchItemResult] = []
+    selected_by_ordinal = {candidate.ordinal: candidate for candidate in selected}
     run_id = selected[0].run_id
 
-    def fast_progress(
-        _processed: int,
-        _total: int,
+    def make_item(
         batch_item: tuple[int, str, str | None],
-    ) -> None:
+    ) -> SmartReviewBatchItemResult:
         ordinal, status, error = batch_item
-        candidate = selected[len(results)]
-        item = SmartReviewBatchItemResult(
+        candidate = selected_by_ordinal.get(ordinal)
+        if candidate is None:
+            raise ValueError(f"智慧校對批量結果含未知 ordinal：{ordinal}")
+        return SmartReviewBatchItemResult(
             candidate.run_id,
             ordinal,
             candidate.key,
             status,
             error,
         )
+
+    def fast_progress(
+        _processed: int,
+        _total: int,
+        batch_item: tuple[int, str, str | None],
+    ) -> None:
+        item = make_item(batch_item)
         results.append(item)
         if progress is not None:
             progress(
@@ -700,16 +723,7 @@ def _apply_moddb_smart_review_fast_batch(
     fast_items, cancelled = fast_result
     # Reconstruct only for adapters that omit the progress callback.
     if len(results) != len(fast_items):
-        results = [
-            SmartReviewBatchItemResult(
-                selected[index].run_id,
-                ordinal,
-                selected[index].key,
-                status,
-                error,
-            )
-            for index, (ordinal, status, error) in enumerate(fast_items)
-        ]
+        results = [make_item(batch_item) for batch_item in fast_items]
     return SmartReviewBatchResult(
         action=action,
         requested=len(selected),
@@ -783,8 +797,9 @@ def apply_moddb_smart_review_batch_from_path(
     ``apply`` 與 ``reject`` 維持一般批量的安全語意；``override`` 是明確的過期覆蓋
     動作，只接受 stale 候選，先把 JSON 的目前譯文快照對齊資料庫現況，再沿用人工
     編輯的 CAS 路徑套用草稿／建議。JSON run 會在資料層共用一次歷史鎖並合併
-    分片寫入；每筆 SQLite CAS 仍可獨立成功或略過，方便大型批次在遇到單筆 stale、
-    格式問題或已人工審核資料時繼續處理其他候選。
+    分片寫入；apply 以有界 SQLite transactions 搭配單筆 SAVEPOINT，讓大型批次
+    不必為每筆候選重複取得寫入鎖與刷新 effective，同時仍可獨立略過 stale、格式
+    問題或已人工審核資料。
     """
     if action not in {"apply", "reject", "override"}:
         raise ValueError(f"未知的智慧校對批量動作：{action}")
@@ -855,6 +870,7 @@ __all__ = [
     "SMART_REVIEW_DEFAULT_BATCH_SIZE",
     "SMART_REVIEW_DEFAULT_SOURCE",
     "SMART_REVIEW_MANUAL_EDIT_STATUSES",
+    "QueryInterrupt",
     "SmartReviewBatchItemResult",
     "SmartReviewBatchResult",
     "SmartReviewCandidate",

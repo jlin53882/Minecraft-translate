@@ -41,7 +41,8 @@
 
 ## 常用檢查
 
-- 測試：`python -m pytest tests -q`（UI smoke 相關測試需要 playwright，沒安裝時略過）
+- 測試：`python -m pytest tests -q`（UI smoke 相關測試需要 playwright，沒安裝時略過）；
+  開發依賴含 pytest-xdist，可加 `-n auto` 平行執行
 - Lint／格式：`ruff check <檔案>`、`ruff format <檔案>`（只格式化自己動到的檔案）
 - 產生文件：新增 `except Exception` 後執行 `python tools/gen_exception_inventory.py`；
   修改設定 schema 後執行 `python tools/gen_config_example.py`

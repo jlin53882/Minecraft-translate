@@ -20,6 +20,7 @@ APP = ROOT / "app"
 
 # 與 docs/developer-guide/worker-thread-audit.md 的「背景執行緒啟動點」表一致
 EXPECTED_THREAD_SITES = {
+    "app/icon_scan_pool.py": 1,
     "app/shell/config_effects.py": 1,
     "app/startup_tasks.py": 1,
     "app/tasks/operation_registry.py": 2,

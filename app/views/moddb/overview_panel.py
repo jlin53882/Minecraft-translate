@@ -12,9 +12,9 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.ui.snack import show_snack
+from app.ui.update_scope import update_regions
 from app.views.moddb.cleanup_dialog import CleanupDialog
 from app.views.moddb.formatting import format_count, percent
-from translation_tool.utils.log_unit import log_debug
 
 # 總覽四張 KPI 卡的標題列固定高度（有按鈕的卡比較高，固定後四張才等高）
 OVERVIEW_CARD_HEAD = BUTTON_HEIGHTS["sm"] + 2  # 容得下 sm 按鈕與同高的說明圖示鈕
@@ -338,11 +338,12 @@ class OverviewPanel(ft.Column):
             self._render_missing(missing, stats[0].mc_version)
             self._render_scans(scans)
 
+    def flush(self) -> None:
+        """把這個頁籤的變更送到畫面；頁籤是更新邊界，頁面層級的 update 不會更新它。"""
+        update_regions(self)
+
     def _safe_update(self) -> None:
-        try:
-            self._page.update()
-        except Exception as exc:  # noqa: BLE001 - 頁面已卸載時不影響資料
-            log_debug(f"OverviewPanel update 略過：{exc}")
+        self.flush()
 
     def _version_bar(self, s: VersionStat, source_stats: list, catalog) -> ft.Control:
         segs = [

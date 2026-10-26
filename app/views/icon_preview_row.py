@@ -4,7 +4,6 @@
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
-import hashlib
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
@@ -12,6 +11,13 @@ from pathlib import Path
 import flet as ft
 from PIL import Image as PILImage
 
+from app.icon_preview_image import describe_icon_uri, render_icon_uri
+from app.icon_render import (
+    DISPLAY_PX,
+    SYNTHETIC_SCHEME,
+    render_flat,
+    render_placeholder,
+)
 from app.services_impl.icon_service import (
     IconResult,
     IconRisk,
@@ -20,45 +26,25 @@ from app.services_impl.icon_service import (
 )
 from app.ui import kit
 from app.ui.design import C
-
-_ICON_UPSCALE_SIZE = 64
-"""小於此尺寸的 icon 視為需要 upscale（pixels, 一邊）。"""
+from app.views.icon_preview.icon_cache import _key_needs_icon
 
 
 def _ensure_icon_size(src_path: Path) -> Path:
-    """檢查圖片尺寸，若任一邊 < _ICON_UPSCALE_SIZE 则以 nearest neighbor 放大後寫入快取。
+    """把磁碟上的舊式預覽圖轉成 ``DISPLAY_PX`` 見方、整數倍最近鄰放大的 PNG 並回傳路徑。
 
-    用途：Minecraft JAR 內的 item icon 多為 16x16，直接放大會模糊。
-          用 nearest neighbor 放大至 64x64 可保持像素風格外觀。
+    已是標準預覽（尺寸正確）時直接回傳；任何錯誤都回傳原路徑，不阻斷顯示。
     """
     try:
-        img = PILImage.open(src_path)
-        w, h = img.size
-        if w >= _ICON_UPSCALE_SIZE and h >= _ICON_UPSCALE_SIZE:
-            img.close()
-            return src_path
-
-        # nearest neighbor 放大，不走抗鋸齒
-        upscaled = img.resize(
-            (_ICON_UPSCALE_SIZE, _ICON_UPSCALE_SIZE), PILImage.NEAREST
-        )
-        img.close()
-        # 寫入同目錄，檔名加上 _upscaled 後綴，避免覆蓋原始快取
-        out_path = src_path.parent / f"{src_path.stem}_upscaled{src_path.suffix}"
-        upscaled.save(out_path)
+        with PILImage.open(src_path) as img:
+            if img.size == (DISPLAY_PX, DISPLAY_PX):
+                return src_path
+        out_path = src_path.parent / f"{src_path.stem}_{DISPLAY_PX}{src_path.suffix}"
+        if not out_path.exists():
+            out_path.write_bytes(render_flat(src_path.read_bytes()))
         return out_path
     except Exception:  # noqa: BLE001
-        # 任何錯誤（讀不到、ImageFont 失敗等）都回傳原路徑，不阻斷顯示
+        # 任何錯誤（讀不到、不是有效圖片等）都回傳原路徑，不阻斷顯示
         return src_path
-
-
-# Icon reader（PR59 新增）
-try:
-    from app.icon_reader import IconRef, read_icon_bytes
-
-    _HAS_ICON_READER = True
-except ImportError:
-    _HAS_ICON_READER = False
 
 
 def to_halfwidth(text):
@@ -69,33 +55,16 @@ def to_halfwidth(text):
 
 
 def _resolve_preview_path(icon_result, preview_root: Path) -> Path | None:
-    """依圖示來源（jar:// URI 或磁碟路徑）產生預覽圖並回傳路徑；無法產生時回傳 None。"""
-    # PR59 fix：處理 jar:// URI（新格式）與舊磁碟路徑
-    if icon_result.icon_path and _HAS_ICON_READER:
-        icon_ref = IconRef.parse(str(icon_result.icon_path))
-        if icon_ref is not None:
-            # 從 ZIP 直接讀取 bytes，寫入 preview_root
-            png_bytes = read_icon_bytes(icon_ref.jar_path, icon_ref.png_path)
-            if png_bytes:
-                digest = hashlib.sha256(png_bytes).hexdigest()[:16]
-                preview_root.mkdir(parents=True, exist_ok=True)
-                zip_preview_path = preview_root / f"zip_{digest}.png"
-                if not zip_preview_path.exists():
-                    zip_preview_path.write_bytes(png_bytes)
-                preview_path = zip_preview_path
-            else:
-                preview_path = None
-        else:
-            # 舊磁碟路徑（無法解析 jar://，走一般流程）
-            preview_path = generate_icon_preview(icon_result.icon_path, preview_root)
-    else:
-        # icon_path 為 None，或無 _HAS_ICON_READER：嘗試用磁碟路徑生成預覽
-        preview_path = (
-            generate_icon_preview(icon_result.icon_path, preview_root)
-            if icon_result.icon_path
-            else None
-        )
-    return preview_path
+    """舊式磁碟路徑的預覽圖；``jar://`` 與程式繪製的 URI 由 ``render_icon_uri`` 處理。"""
+    icon_path = icon_result.icon_path
+    if not icon_path or _is_uri_icon(icon_path):
+        return None
+    return generate_icon_preview(icon_path, preview_root)
+
+
+def _is_uri_icon(icon_path) -> bool:
+    text = str(icon_path)
+    return text.startswith(("jar://", SYNTHETIC_SCHEME))
 
 
 def prepare_row_icon(
@@ -103,15 +72,18 @@ def prepare_row_icon(
 ):
     """準備一列的圖示（**會做磁碟／ZIP／圖片 I/O**，必須在背景執行緒呼叫，#114）。
 
-    回傳 ``(icon_result, image_bytes)``：圖片已完成 upscale 並讀取為 bytes，
-    交給 ``LangItemRow(prepared_icon=...)`` 後建構列不再做任何 I/O。Flet Web
-    無法直接載入伺服器上的任意絕對路徑，因此需將 bytes 傳給 ``ft.Image``。
+    回傳 ``(icon_result, image_bytes)``：圖片已渲染成 ``DISPLAY_PX`` 見方的 PNG bytes
+    （取動畫首格、整數倍最近鄰放大、方塊為等角預覽），交給 ``LangItemRow(prepared_icon=...)``
+    後建構列不再做任何 I/O。Flet Web 無法直接載入伺服器上的任意絕對路徑，因此傳 bytes 給
+    ``ft.Image``。
     """
     if icon_path:
         # jar:// URI 不能轉 Path（Windows 上 Path("jar://...") 會變成 jar:\C:\... 格式）
         icon_result = IconResult(icon_path=icon_path, reason="", risk=None)
     else:
         icon_result = resolve_icon_with_reason(lang_key, assets_root)
+    if icon_result.icon_path and _is_uri_icon(icon_result.icon_path):
+        return icon_result, render_icon_uri(str(icon_result.icon_path))
     preview_path = _resolve_preview_path(icon_result, preview_root)
     if preview_path:
         preview_path = _ensure_icon_size(preview_path)
@@ -122,48 +94,76 @@ def prepare_row_icon(
     return icon_result, None
 
 
-def _build_icon_widget(
-    image_bytes: bytes | None, icon_result
-) -> tuple[ft.Control | None, ft.Text | None]:
-    """建立圖示控制項；無預覽但有原因時改顯示警示圖示與風險說明。回傳 (icon_widget, risk_label)。"""
-    risk_label = None
-    # 顯示 icon 或警告
-    # 修復：當 image_bytes 為 None 時，不顯示任何 icon widget（佔位完全空白）
-    icon_widget: ft.Control | None = None
+_placeholder_png: bytes | None = None
+
+
+def _placeholder_bytes() -> bytes:
+    """所有「找不到圖示」列共用同一張佔位圖（只繪製一次）。"""
+    global _placeholder_png
+    if _placeholder_png is None:
+        _placeholder_png = render_placeholder()
+    return _placeholder_png
+
+
+def _image_control(src: bytes, tooltip: str) -> ft.Image:
+    """像素圖以 1:1 顯示並關閉插值，HiDPI 放大時仍維持銳利邊緣。"""
+    return ft.Image(
+        src=src,
+        width=DISPLAY_PX,
+        height=DISPLAY_PX,
+        fit=ft.BoxFit.CONTAIN,
+        filter_quality=ft.FilterQuality.NONE,
+        gapless_playback=True,
+        tooltip=tooltip,
+    )
+
+
+def _risk_text(icon_result) -> tuple[str, str | None]:
+    """找不到圖示時的原因文字與顏色；沒有原因時回傳空字串。"""
+    if not icon_result.reason:
+        return "", None
+    color_map = {
+        IconRisk.IGNORE: C.EM,
+        IconRisk.WARN: C.GOLD,
+        IconRisk.DANGER: C.RED,
+    }
+    return f"⚠ {icon_result.reason}", color_map.get(icon_result.risk, C.MUTED)
+
+
+def _icon_source(image_bytes: bytes | None, icon_result, lang_key: str):
+    """決定圖示欄要顯示的圖片與提示；內容類 key 找不到圖示用共用佔位圖，其他 key 回傳 None。"""
     if image_bytes:
-        icon_widget = ft.Image(
-            src=image_bytes,
-            width=128,
-            height=128,
-        )
-    elif icon_result.reason:
-        # 無法取得 preview 且有 reason：顯示錯誤 icon + 根據 risk 等級上色
-        color_map = {
-            IconRisk.IGNORE: C.EM,
-            IconRisk.WARN: C.GOLD,
-            IconRisk.DANGER: C.RED,
-        }
-        icon_widget = ft.Container(
-            width=128,
-            height=128,
-            alignment=ft.alignment.Alignment.CENTER,
-            bgcolor=C.PANEL2,
-            border_radius=10,
-            content=ft.Icon(ft.Icons.IMAGE_NOT_SUPPORTED, color=C.DIM),
-        )
-        risk_label = ft.Text(
-            f"⚠ {icon_result.reason}",
-            size=12,
-            color=color_map.get(icon_result.risk, C.MUTED),
-        )
-    return icon_widget, risk_label
+        return image_bytes, describe_icon_uri(icon_result.icon_path)
+    if lang_key and _key_needs_icon(lang_key):
+        return _placeholder_bytes(), describe_icon_uri(None)
+    return None
+
+
+def _build_icon_widget(
+    image_bytes: bytes | None, icon_result, lang_key: str = ""
+) -> tuple[ft.Control | None, ft.Text | None]:
+    """建立圖示控制項。回傳 (icon_widget, risk_label)。
+
+    有圖示：顯示預覽並在懸停時列出貼圖／模型／來源。內容類 key（item/block 等）找不到圖示：
+    顯示一致的佔位圖與原因；非內容類 key（tooltip、訊息等）不佔版面。
+    """
+    if image_bytes:
+        return _image_control(
+            image_bytes, describe_icon_uri(icon_result.icon_path)
+        ), None
+    text, color = _risk_text(icon_result)
+    risk_label = ft.Text(text, size=12, color=color) if text else None
+    source = _icon_source(None, icon_result, lang_key)
+    if source is None:
+        return None, risk_label
+    return _image_control(*source), risk_label
 
 
 class LangItemRow(ft.Container):
-    """LangItemRow 類別。
+    """單筆語系列：圖示、繁中翻譯（可編輯）、lang key 與英文原文。
 
-    用途：封裝與 LangItemRow 相關的狀態與行為。
-    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    控制項在建構時建立一次，``bind`` 只更新值；詳情頁換頁時重用同一批列，
+    Flet 只送出變動的欄位，不必重建、序列化每頁數百個控制項。
     """
 
     def __init__(
@@ -187,10 +187,9 @@ class LangItemRow(ft.Container):
             assets_root: 資源根目錄
             preview_root: 預覽根目錄
             on_value_changed: 值變更回調函數
-            icon_path: 圖示路徑（可為 JAR 內的路徑 或已提取到磁碟的路徑）。
-                       若有值則直接使用，跳過 resolve_icon_with_reason。
+            icon_path: 圖示路徑（JAR 內的 URI 或已提取到磁碟的路徑）；有值則跳過 resolve。
             prepared_icon: ``prepare_row_icon`` 在背景執行緒算好的 ``(icon_result, image_bytes)``；
-                       提供時建構列不做任何 I/O（event loop 上使用）。未提供則同步計算（相容舊呼叫）。
+                       提供時建構列不做任何 I/O（event loop 上使用）。未提供則同步計算。
         """
         super().__init__(
             padding=ft.Padding.symmetric(vertical=12, horizontal=12),
@@ -198,77 +197,70 @@ class LangItemRow(ft.Container):
             bgcolor=C.PANEL,
             border=ft.Border.all(1, C.LINE),
         )
-
         self.lang_key = lang_key
         self.on_value_changed = on_value_changed
-
-        # =========================
-        # 🖼 Icon + 分類
-        # =========================
-        if prepared_icon is not None:
-            icon_result, image_bytes = prepared_icon
-            icon_widget, risk_label = _build_icon_widget(image_bytes, icon_result)
-        else:
-            icon_result, image_bytes = prepare_row_icon(
-                lang_key, assets_root, preview_root, icon_path
-            )
-            icon_widget, risk_label = _build_icon_widget(image_bytes, icon_result)
-
-        # =========================
-        # 📝 文字區
-        # =========================
-        text_col = self._build_text_column(zh_text, lang_key, en_text, risk_label)
-
-        # =========================
-        # 🔧 最外層 Row
-        # =========================
-        row_controls: list[ft.Control] = []
-        if icon_widget is not None:
-            row_controls.append(icon_widget)
-        row_controls.append(text_col)
-
+        self.icon_image = _image_control(_placeholder_bytes(), "")
+        self.risk_label = ft.Text("", size=12, visible=False)
         self.content = ft.Row(
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.START,
-            controls=row_controls,
+            controls=[
+                self.icon_image,
+                self._build_text_column(),
+            ],
         )
+        if prepared_icon is None:
+            prepared_icon = prepare_row_icon(
+                lang_key, assets_root, preview_root, icon_path
+            )
+        self.bind(lang_key, en_text, zh_text, prepared_icon)
 
-    def _build_text_column(self, zh_text, lang_key, en_text, risk_label) -> ft.Column:
-        """翻譯、lang key、英文原文欄位組成的文字區。"""
+    def _build_text_column(self) -> ft.Column:
+        """翻譯（可編輯）、lang key、英文原文與找不到圖示的原因。"""
+        self.zh_field = kit.field(
+            value="",
+            label="繁中翻譯:",
+            multiline=True,
+            min_lines=1,
+            max_lines=4,
+            text_size=16,
+            on_change=lambda e: self.on_value_changed(
+                self.lang_key, to_halfwidth(e.control.value)
+            ),
+        )
+        self.key_field = kit.field(
+            value="",
+            label="lang key:",
+            read_only=True,
+            border=ft.NoInputBorder(),
+            text_size=12,
+        )
+        self.en_field = kit.field(
+            value="",
+            label="英文原文:",
+            read_only=True,
+            multiline=True,
+            border=ft.NoInputBorder(),
+            text_size=14,
+        )
         return ft.Column(
             spacing=6,
             expand=True,
-            controls=[
-                # 繁中翻譯（可編輯）
-                kit.field(
-                    value=to_halfwidth(zh_text or ""),
-                    label="繁中翻譯:",
-                    multiline=True,
-                    min_lines=1,
-                    max_lines=4,
-                    text_size=16,
-                    on_change=lambda e: self.on_value_changed(
-                        self.lang_key,
-                        to_halfwidth(e.control.value),
-                    ),
-                ),
-                # lang key（可選取）
-                kit.field(
-                    value=to_halfwidth(lang_key),
-                    label="lang key:",
-                    read_only=True,
-                    border=ft.NoInputBorder(),
-                    text_size=12,
-                ),
-                # 英文原文（可選取）
-                kit.field(
-                    value=to_halfwidth(en_text),
-                    label="英文原文:",
-                    read_only=True,
-                    multiline=True,
-                    border=ft.NoInputBorder(),
-                    text_size=14,
-                ),
-                risk_label if risk_label else ft.Container(),
-            ],
+            controls=[self.zh_field, self.key_field, self.en_field, self.risk_label],
         )
+
+    def bind(self, lang_key: str, en_text: str, zh_text: str, prepared_icon) -> None:
+        """把這一列顯示成指定項目；``prepared_icon`` 為 ``(icon_result, image_bytes)``。"""
+        icon_result, image_bytes = prepared_icon
+        self.lang_key = lang_key
+        self.zh_field.value = to_halfwidth(zh_text or "")
+        self.key_field.value = to_halfwidth(lang_key)
+        self.en_field.value = to_halfwidth(en_text)
+        source = _icon_source(image_bytes, icon_result, lang_key)
+        self.icon_image.visible = source is not None
+        if source is not None:
+            self.icon_image.src, self.icon_image.tooltip = source
+        text, color = _risk_text(icon_result) if not image_bytes else ("", None)
+        self.risk_label.value = text
+        self.risk_label.color = color
+        self.risk_label.visible = bool(text)

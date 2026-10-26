@@ -16,6 +16,7 @@ from translation_tool.translation_db import (
     QualityFilter,
     ScanItem,
     TranslationDB,
+    quality_flags,
 )
 from translation_tool.translation_db.models import TimeFilter
 
@@ -48,6 +49,8 @@ ALLOWED_PLAN_MARKERS = {
     "f.entry_id IS NULL": "未翻譯清單同樣只含單一版本沒有譯文的條目，"
     "依 (類型, 模組, 鍵值) 排序；排序量是缺譯筆數而不是整庫",
     "f.zh_tw = e.en_us": "只列「生效 AI 譯文與原文相同」的條目（實測數百筆），排序量遠小於整庫",
+    f"e.qflags & {quality_flags.SAME_AS_SOURCE}": "同原文 AI 清單只含旗標位元成立的條目"
+    "（部分索引上的列，實測數百筆以下），排序量遠小於整庫",
     "t.zh_tw": "不一致清單先經特殊字元前置篩選，只排序疑似不一致的列；"
     "首次計算受 Python 逐列檢查限制，結果有快取（見 performance.md）",
     "WITH RECURSIVE": "kinds() 只排序不同的條目類型（個位數），與資料量無關",

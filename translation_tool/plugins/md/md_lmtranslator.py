@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +94,8 @@ class PendingItem:
     content_hash: str
     start_line: int
     end_line: int
+    # 抽取階段已保護的片段（色碼、物品 ID）；注入時靠它還原，翻譯輸出必須原樣帶回
+    shields: list[dict[str, Any]] = field(default_factory=list)
 
 
 def load_pending_doc(path: Path) -> tuple[dict[str, Any], list[PendingItem]]:
@@ -111,6 +113,7 @@ def load_pending_doc(path: Path) -> tuple[dict[str, Any], list[PendingItem]]:
                 content_hash=str(it.get("content_hash", "")),
                 start_line=int(it.get("start_line", 0) or 0),
                 end_line=int(it.get("end_line", 0) or 0),
+                shields=list(it.get("_shields") or []),
             )
         )
     return data, items
@@ -436,15 +439,16 @@ def translate_md_pending(
                 else:
                     missing += 1
 
-            out_items.append(
-                {
-                    "id": it.id,
-                    "text": new_text,
-                    "content_hash": it.content_hash,
-                    "start_line": it.start_line,
-                    "end_line": it.end_line,
-                }
-            )
+            out_item = {
+                "id": it.id,
+                "text": new_text,
+                "content_hash": it.content_hash,
+                "start_line": it.start_line,
+                "end_line": it.end_line,
+            }
+            if it.shields:
+                out_item["_shields"] = it.shields
+            out_items.append(out_item)
 
         out_payload = dict(data)
         out_payload["items"] = out_items

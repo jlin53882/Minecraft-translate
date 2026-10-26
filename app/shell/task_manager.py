@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 import weakref
-from collections import deque
+from collections import Counter, deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -63,7 +63,8 @@ STATUS_CANCELLED = "cancelled"
 STATUS_ABORTED = "aborted"
 
 DEFAULT_TASK_NAME = "背景任務"
-RECENT_LIMIT = 20
+# 本次執行保留的已結束任務數（任務清單用）；更早的紀錄只留在狀態統計裡。
+HISTORY_LIMIT = 500
 
 
 def _session_terminal_status(session) -> str:
@@ -104,6 +105,8 @@ class TaskInfo:
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     operation_id: str | None = None
+    # 只分析不寫入的執行（例如機器翻譯 Dry-run）：工作台不算成該步驟「本次完成」
+    preview: bool = False
 
     @property
     def running(self) -> bool:
@@ -132,7 +135,9 @@ class TaskManager:
         self._lock = threading.Lock()
         self._active: dict[int, TaskInfo] = {}
         self._sessions: dict[int, weakref.ReferenceType] = {}
-        self._recent: deque[TaskInfo] = deque(maxlen=RECENT_LIMIT)
+        self._recent: deque[TaskInfo] = deque(maxlen=HISTORY_LIMIT)
+        # 超出 HISTORY_LIMIT 被擠出清單的任務，依終態累計（統計才不會少算）
+        self._evicted_counts: Counter[str] = Counter()
         self._subscribers: list[Callable[[], None]] = []
         self._attached = False
         self._detach_pending = False
@@ -219,6 +224,7 @@ class TaskManager:
                     operation_id=(
                         handle.id if isinstance(handle, OperationHandle) else None
                     ),
+                    preview=bool(getattr(session, "preview", False)),
                 )
                 self._active[sid] = info
                 self._sessions[sid] = weakref.ref(session)
@@ -247,7 +253,7 @@ class TaskManager:
                 info.finished_at = self._clock()
                 self._active.pop(sid, None)
                 self._sessions.pop(sid, None)
-                self._recent.appendleft(info)
+                self._remember(info)
         self._emit()
 
     def _on_registry_event(self, event: str, handle: OperationHandle) -> None:
@@ -285,7 +291,7 @@ class TaskManager:
                 operation_id=handle.id,
             )
             with self._lock:
-                self._recent.appendleft(info)
+                self._remember(info)
         self._emit()
 
     def _record_session_terminal(self, handle: OperationHandle) -> None:
@@ -307,7 +313,7 @@ class TaskManager:
                     recent.status = status
                     recent.progress = min(recent.progress, 0.99)
                 return
-            self._recent.appendleft(
+            self._remember(
                 TaskInfo(
                     id=session_id,
                     name=handle.descriptor.name or DEFAULT_TASK_NAME,
@@ -320,6 +326,12 @@ class TaskManager:
                 )
             )
 
+    def _remember(self, info: TaskInfo) -> None:
+        """記錄一筆已結束的任務（呼叫端持有 ``_lock``）。"""
+        if len(self._recent) == self._recent.maxlen:
+            self._evicted_counts[self._recent[-1].status] += 1
+        self._recent.appendleft(info)
+
     def _drop(self, sid: int) -> None:
         """session 被回收卻沒有 finish：當作中斷，從進行中移除。"""
         with self._lock:
@@ -329,7 +341,7 @@ class TaskManager:
             info.status = STATUS_ERROR
             info.finished_at = self._clock()
             self._sessions.pop(sid, None)
-            self._recent.appendleft(info)
+            self._remember(info)
         self.operation_registry.finish_abandoned_session(sid)
         self._emit()
 
@@ -383,6 +395,23 @@ class TaskManager:
         """最近結束的任務（新的在前）。"""
         with self._lock:
             return list(self._recent)[:limit]
+
+    def history(self) -> list[TaskInfo]:
+        """本次執行保留的所有已結束任務（新的在前，最多 ``HISTORY_LIMIT`` 筆）。"""
+        with self._lock:
+            return list(self._recent)
+
+    def evicted_count(self) -> int:
+        """超出 ``HISTORY_LIMIT`` 而不在 ``history()`` 裡、只計入統計的已結束任務數。"""
+        with self._lock:
+            return sum(self._evicted_counts.values())
+
+    def finished_counts(self) -> dict[str, int]:
+        """本次執行已結束任務依終態的筆數（含已擠出清單的舊紀錄）。"""
+        with self._lock:
+            counts = Counter(task.status for task in self._recent)
+            counts.update(self._evicted_counts)
+        return dict(counts)
 
     # -- 訂閱 ---------------------------------------------------------------
 

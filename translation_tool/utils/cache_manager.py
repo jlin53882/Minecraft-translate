@@ -275,10 +275,10 @@ def reload_translation_cache_type(cache_type: str):
 def _save_entries_to_active_shards(
     cache_type: str, entries: dict, force_new_shard: bool = False
 ):
-    """儲存項目到作用中分片，容量滿時自動輪轉"""
+    """儲存項目到作用中分片，容量滿時自動輪轉；實際寫入後記下時間（快取頁「最近儲存」）。"""
     state = _state()
     type_dir = state.cache_file_path[cache_type].parent
-    return cache_shards._save_entries_to_active_shards(
+    result = cache_shards._save_entries_to_active_shards(
         type_dir=type_dir,
         cache_type=cache_type,
         entries=entries,
@@ -287,6 +287,9 @@ def _save_entries_to_active_shards(
         force_new_shard=force_new_shard,
         logger=log,
     )
+    if entries:
+        state.last_save_at = time.strftime("%H:%M:%S")
+    return result
 
 
 def save_translation_cache(cache_type: str, write_new_shard: bool = True):
@@ -606,7 +609,7 @@ def get_cache_overview() -> dict[str, Any]:
     initialize_translation_cache()
     state = _state()
     with state.cache_lock:
-        return build_cache_overview(
+        overview = build_cache_overview(
             cache_types=CACHE_TYPES,
             translation_cache=state.translation_cache,
             is_dirty=state.is_dirty,
@@ -619,6 +622,10 @@ def get_cache_overview() -> dict[str, Any]:
             cache_dir_name=_CACHE_DIR_NAME,
             resolve_project_path=resolve_project_path,
         )
+        # 初始化失敗（冷卻中）時記憶體是空的：筆數 0 不代表沒有快取
+        overview["initialized"] = bool(state.initialized)
+        overview["last_save_at"] = state.last_save_at
+        return overview
 
 
 def force_rotate_shard(cache_type: str) -> bool:

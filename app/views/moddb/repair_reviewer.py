@@ -27,6 +27,7 @@ from app.ui import design
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.sync_text_field import SyncTextField
+from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
@@ -135,6 +136,7 @@ class RepairReviewer:
         self.content_box.height = height
         self.body.height = height - 28
         self._render()
+        isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
         self.page.show_dialog(self.dialog)
 
     def _load_index_page(self) -> None:
@@ -325,6 +327,10 @@ class RepairReviewer:
             vertical_alignment=ft.CrossAxisAlignment.START,
         )
 
+    def _update_dialogs(self) -> None:
+        """只重畫審查視窗（含套用確認視窗），不走訪整個頁面。"""
+        update_regions(self.dialog, self.apply_confirmation_dialog)
+
     def _render(self) -> None:
         if not self.item_indices:
             counts = moddb_repair_review_store.status_counts(
@@ -341,7 +347,7 @@ class RepairReviewer:
                 self._filter_control(),
                 self.status,
             ]
-            self.page.update()
+            self._update_dialogs()
             return
         index = self.item_indices[self.position]
         self.item = moddb_repair_review_store.load_item(
@@ -349,7 +355,7 @@ class RepairReviewer:
         )
         if self.item is None:
             self.status.value = "無法載入此筆審查資料。"
-            self.page.update()
+            self._update_dialogs()
             return
         self.group_members = [
             moddb_repair_review_store.load_item(self.store_path, self.run_id, i)
@@ -400,7 +406,7 @@ class RepairReviewer:
             self._identity_card(item),
             self._review_columns(item),
         ]
-        self.page.update()
+        self._update_dialogs()
 
     def _filter_control(self):
         status_filter = ft.Dropdown(
@@ -449,7 +455,7 @@ class RepairReviewer:
             self.draft.value or "",
             kind=str(self.item.get("kind") or "lang"),
         )
-        self.page.update()
+        self._update_dialogs()
 
     def _show_review_status(self, status: str) -> None:
         source_id = self.item.get("source_id", "?") if self.item else "?"
@@ -648,7 +654,7 @@ class RepairReviewer:
         self.status.value = "正在重新驗證來源與 revision…"
         self.applying = True
         self._set_controls_disabled(True)
-        self.page.update()
+        self._update_dialogs()
         run_task = getattr(self.page, "run_task", None)
         if callable(run_task):
             run_task(self._apply_async, dict(self.item), value)
@@ -656,7 +662,7 @@ class RepairReviewer:
             self.applying = False
             self._set_controls_disabled(False)
             self.status.value = "目前頁面無法啟動背景工作，草稿已保存。"
-            self.page.update()
+            self._update_dialogs()
 
     async def _apply_async(self, item: dict, value: str) -> None:
         try:
@@ -674,7 +680,7 @@ class RepairReviewer:
                 self._set_controls_disabled(False)
                 self.status.value = f"套用失敗，草稿已保留：{exc}"
                 self.status.color = C.GOLD
-                self.page.update()
+                self._update_dialogs()
             return
         if self.closed:
             return
@@ -707,7 +713,7 @@ class RepairReviewer:
         if self.item and self.item.get("item_index") == item.get("item_index"):
             self.status.value = outcome_text
             self.status.color = C.EM if status == RepairReviewStatus.APPLIED else C.GOLD
-            self.page.update()
+            self._update_dialogs()
         counts = moddb_repair_review_store.status_counts(
             self.store_path, self.run_id, grouped=True
         )
@@ -734,12 +740,12 @@ class RepairReviewer:
         if self._is_finished():
             self.status.value = _FINISHED_MESSAGE
             self.status.color = C.GOLD
-            self.page.update()
+            self._update_dialogs()
             return
         self.applying = True
         self._set_controls_disabled(True)
         self.status.value = "正在重新讀取目前譯文…"
-        self.page.update()
+        self._update_dialogs()
         run_task = getattr(self.page, "run_task", None)
         if callable(run_task):
             run_task(self._reload_async, dict(self.item))
@@ -747,7 +753,7 @@ class RepairReviewer:
             self.applying = False
             self._set_controls_disabled(False)
             self.status.value = "目前頁面無法啟動背景工作。"
-            self.page.update()
+            self._update_dialogs()
 
     async def _reload_async(self, item: dict) -> None:
         try:
@@ -774,7 +780,7 @@ class RepairReviewer:
             self._render()
         self.status.value = message
         self.status.color = color
-        self.page.update()
+        self._update_dialogs()
 
     def _close(self) -> None:
         if self.applying:
