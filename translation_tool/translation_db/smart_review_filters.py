@@ -299,11 +299,13 @@ class SmartReviewCandidateSelectionMixin:
                 "SELECT e.id, e.mc_version, e.mod_id, e.kind, e.en_us, "
                 "f.zh_tw AS f_zh_tw, f.source AS f_source, "
                 f"({selection.effective_review}) AS effective_review FROM "
-                + "selected_groups g JOIN "
+                # CROSS JOIN 固定由頁面群組出發：讓規劃器自選順序時會從 f.source 的
+                # 數萬列起頭、每列重掃 json_each，頁面越多越慢（數秒到數十秒）
+                + "selected_groups g CROSS JOIN "
                 + twin_entry_source
                 + " ON e.mc_version IS g.mc_version AND e.mod_id IS g.mod_id "
                 "AND e.kind IS g.kind AND e.en_us IS g.en_us "
-                + "JOIN effective f ON f.entry_id=e.id "
+                + "CROSS JOIN effective f ON f.entry_id=e.id "
                 + "AND f.zh_tw IS g.current_zh_tw "
                 "AND f.source IS g.effective_source "
                 f"AND ({selection.effective_review}) IS g.effective_review "

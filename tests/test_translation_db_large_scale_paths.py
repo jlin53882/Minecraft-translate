@@ -91,3 +91,26 @@ def test_time_data_range_with_other_filters_uses_generic_scan(db):
         (VERSION,),
     )
     assert (low, high) == tuple(expected)
+
+
+def test_smart_review_twin_completion_starts_from_the_page_groups(tmp_path):
+    """同文補查必須由頁面群組出發；讓規劃器從 effective 數萬列起頭會每列重掃 json_each。"""
+    d = TranslationDB(tmp_path / "twins.db")
+    d.ingest(
+        VERSION,
+        [
+            ScanItem(KIND_LANG, "mod", f"k.{i}", "Same Text", "相同", "", None)
+            for i in range(6)
+        ]
+        + [ScanItem(KIND_LANG, "mod", "z.other", "Other", "其他", "", None)],
+    )
+    statements = _plans(d, "selected_groups AS")
+    snapshots = d.smart_review_candidates(
+        version=VERSION, effective_source=1, review_status="unreviewed", limit=1
+    )
+    d._conn.set_trace_callback(None)
+    assert len(snapshots[0].twin_entry_ids) == 5
+    assert statements
+    plan = [row[3] for row in d._conn.execute("EXPLAIN QUERY PLAN " + statements[0])]
+    assert "json_each" in plan[0]
+    d.close()
