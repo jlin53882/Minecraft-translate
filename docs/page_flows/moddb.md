@@ -76,7 +76,7 @@ flowchart TD
     B --> C["按「儲存」→ EntriesPanel._save → entry_writes.save_entry"]
     C --> D["捕捉 entry、db、text、_flagged_batch 與同步旗標"]
     D --> E["run_write 在背景執行 db.save_manual 與來源優先序檢查"]
-    E --> F["run_task 排回 apply_save_result"]
+    E --> F["run_task 排回 entry_save_result.apply_save_result"]
     F --> G{"有錯誤？"}
     G -- 是 --> H["依 validation、database、unexpected 分類顯示提示"]
     G -- 否 --> I{"self.db() 仍是同一個物件？"}

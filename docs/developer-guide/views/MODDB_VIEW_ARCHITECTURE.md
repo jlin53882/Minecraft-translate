@@ -31,7 +31,7 @@ Flet 的 `update()` 成本與被走訪的控制項數成正比：`page.update()`
 UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同一把鎖。
 
 模組分工：`entry_row_tile.py`（固定列數的 `EntryTilePool`）、`entry_selection.py`（選取與詳情載入）、
-`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`background_read.py`（`run_read`：
+`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`entry_save_result.py`（`apply_save_result`：背景儲存結果的畫面套用，來源優先序資訊由 worker 算好）、`background_read.py`（`run_read`：
 審核範圍預覽這類背景唯讀工作）、`review_scope_dialog.py`（`compute_impact`、審核確認與解除審核）。
 
 更新範圍的補充規則：
@@ -43,6 +43,8 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
 - 條目寫入完成由 `entry_writes.after_data_change` 收尾：背景模式只觸發上層快照（`_refresh_active_panel`
   以 `show_loading` 顯示輕量提示），整個面板由快照套用後的 `flush` 重畫一次，回傳值表示編輯區是否
   由快照重畫。`ModDbView._request_panel_refresh` 先把讀取交給 worker，再重畫載入中提示。
+  載入期間 `EntriesPanel.set_data_loading(True)` 停用批次取代、批量審核與 Smart Review 等依賴
+  範圍資料的入口，快照套用後才恢復。
 - `apply_filter_options` 回傳選項或選值是否改變，只有改變才重畫 `filter_card`。
 - 沒有畫面變更的事件處理函式（全域按鍵 `KeyboardShortcutHandler.handle_keyboard`、
   `EntriesPanel._on_search_input`）呼叫 `suppress_auto_update`，避免 Flet 在事件後補一次自動更新。
