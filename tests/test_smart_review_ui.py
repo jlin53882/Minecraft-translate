@@ -231,6 +231,34 @@ def test_batch_reviewer_exposes_expired_override_action(ctx):
     assert checkbox.disabled is False
 
 
+def test_batch_reviewer_caches_repeated_format_diagnosis(ctx, monkeypatch):
+    """全選、重畫與確認重複檢查同一草稿時只解析一次格式。"""
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    calls = []
+    original = batch_reviewer_module.SmartReviewEvidencePresenter.diagnose_draft
+
+    def counted(row, draft):
+        calls.append((row.kind, row.en_us, draft))
+        return original(row, draft)
+
+    monkeypatch.setattr(
+        batch_reviewer_module.SmartReviewEvidencePresenter,
+        "diagnose_draft",
+        counted,
+    )
+
+    ready = _candidate()
+    stale = _candidate(status="stale")
+    assert reviewer._can_apply(ready) is True
+    assert reviewer._can_apply(ready) is True
+    assert reviewer._can_override(stale) is True
+    assert len(calls) == 1
+
+    changed = _candidate(suggested_zh_tw="另一個建議")
+    assert reviewer._can_apply(changed) is True
+    assert len(calls) == 2
+
+
 def test_dialog_switches_between_single_and_batch_review_modes(db, monkeypatch):
     """智慧校對審查分頁提供逐筆／批量模式切換而不重建外層分頁。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog

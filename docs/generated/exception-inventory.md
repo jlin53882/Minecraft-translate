@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **363** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **365** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 325 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 327 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -346,6 +346,8 @@
 | `translation_tool/translation_db/settings.py:remember_db_path` | BLE001 | 已記錄／回報 | 寫設定失敗不應中斷建立資料庫 |
 | `translation_tool/translation_db/settings.py:open_db` | BLE001 | 已記錄／回報 | 資料庫問題不應中斷翻譯 |
 | `translation_tool/translation_db/smart_review_apply.py:SmartReviewApplyMixin.apply_smart_review_candidate_batch` | BLE001 | 已記錄／回報 | preserve partial batch success |
+| `translation_tool/translation_db/smart_review_apply.py:SmartReviewApplyMixin._apply_smart_review_candidate_chunk` | BLE001 | 已記錄／回報 | report a failed transaction chunk |
+| `translation_tool/translation_db/smart_review_apply.py:SmartReviewApplyMixin._apply_smart_review_candidate_savepoint` | BLE001 | 已記錄／回報 | isolate one candidate with SAVEPOINT |
 | `translation_tool/translation_db/smart_review_repair.py:_ValidationRepair.call_provider` | BLE001 | 已記錄／回報 | safe repair event |
 | `translation_tool/translation_db/smart_review_repair.py:_ValidationRepair.parse` | BLE001 | 已記錄／回報 | strict parser |
 | `translation_tool/translation_db/smart_review_request.py:_BatchRequester._attempt` | BLE001 | 已記錄／回報 | credential-free class |

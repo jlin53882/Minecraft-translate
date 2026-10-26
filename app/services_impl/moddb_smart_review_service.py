@@ -798,8 +798,9 @@ def apply_moddb_smart_review_batch_from_path(
     ``apply`` 與 ``reject`` 維持一般批量的安全語意；``override`` 是明確的過期覆蓋
     動作，只接受 stale 候選，先把 JSON 的目前譯文快照對齊資料庫現況，再沿用人工
     編輯的 CAS 路徑套用草稿／建議。JSON run 會在資料層共用一次歷史鎖並合併
-    分片寫入；每筆 SQLite CAS 仍可獨立成功或略過，方便大型批次在遇到單筆 stale、
-    格式問題或已人工審核資料時繼續處理其他候選。
+    分片寫入；apply 以有界 SQLite transactions 搭配單筆 SAVEPOINT，讓大型批次
+    不必為每筆候選重複取得寫入鎖與刷新 effective，同時仍可獨立略過 stale、格式
+    問題或已人工審核資料。
     """
     if action not in {"apply", "reject", "override"}:
         raise ValueError(f"未知的智慧校對批量動作：{action}")
