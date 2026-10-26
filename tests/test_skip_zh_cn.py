@@ -191,7 +191,7 @@ class TestExtractLangGeneratorSkipZhCn:
         跑 generator,確認 stats 不含 zh_cn 路徑。
         """
         # 建立 mods 目錄內有 zh_cn.json 跟 en_us.json
-        assets_dir = tmp_path / "mymod" / "lang"
+        assets_dir = tmp_path / "assets" / "mymod" / "lang"
         assets_dir.mkdir(parents=True)
 
         # 兩個有效 lang 檔
@@ -208,16 +208,16 @@ class TestExtractLangGeneratorSkipZhCn:
         )
 
         # 用 regex 模擬 production match: zipfile 內 entry 路徑格式
-        # (例如 "mymod/lang/zh_cn.json"),跟實際 production 行為一致
+        # (例如 "assets/mymod/lang/zh_cn.json"),跟實際 production 行為一致
         regex_with_skip = build_lang_file_regex(skip_zh_cn=True)
 
         # skip_zh_cn=True:zh_cn.json 不該 match (核心保證)
-        assert not regex_with_skip.search("mymod/lang/zh_cn.json"), (
-            "回歸:skip_zh_cn=True regex 還是匹配 mymod/lang/zh_cn.json "
+        assert not regex_with_skip.search("assets/mymod/lang/zh_cn.json"), (
+            "回歸:skip_zh_cn=True regex 還是匹配 assets/mymod/lang/zh_cn.json "
             "(skip_zh_cn 開關無效,zh_cn.json 仍會被 generator 處理)"
         )
         # 但還是匹配 en_us
-        assert regex_with_skip.search("mymod/lang/en_us.json"), (
+        assert regex_with_skip.search("assets/mymod/lang/en_us.json"), (
             "回歸:skip_zh_cn=True regex 連 en_us.json 都不匹配"
         )
 
@@ -227,7 +227,7 @@ class TestExtractLangGeneratorSkipZhCn:
         Regression:user 沒開跳過 zh_cn,zh_cn 應該被正常處理。
         """
         # 建立 lang dir (模擬 zip entry 路徑,實際是 jar 內)
-        lang_dir = tmp_path / "mymod" / "lang"
+        lang_dir = tmp_path / "assets" / "mymod" / "lang"
         lang_dir.mkdir(parents=True)
         (lang_dir / "zh_cn.json").write_text("{}")
         (lang_dir / "en_us.json").write_text("{}")
@@ -244,9 +244,9 @@ class TestExtractLangGeneratorSkipZhCn:
 
         # skip_zh_cn=False regex 應該匹配所有三個 zip entry path
         regex = build_lang_file_regex(skip_zh_cn=False)
-        assert regex.search("mymod/lang/zh_cn.json")
-        assert regex.search("mymod/lang/en_us.json")
-        assert regex.search("mymod/lang/zh_tw.json")
+        assert regex.search("assets/mymod/lang/zh_cn.json")
+        assert regex.search("assets/mymod/lang/en_us.json")
+        assert regex.search("assets/mymod/lang/zh_tw.json")
 
 
 class TestExtractDualGeneratorSkipZhCn:
@@ -286,11 +286,11 @@ class TestExtractDualGeneratorSkipZhCn:
         assert len(captured_regexes) >= 1
         lang_phase_regex = captured_regexes[0]
         # 使用 zip entry 路徑格式(模擬實際 production match)
-        assert not lang_phase_regex.search("mymod/lang/zh_cn.json"), (
+        assert not lang_phase_regex.search("assets/mymod/lang/zh_cn.json"), (
             "回歸:extract_dual_files_generator(skip_zh_cn=True) "
             "Lang phase regex 還是匹配 zh_cn (skip_zh_cn 開關無效)"
         )
-        assert lang_phase_regex.search("mymod/lang/en_us.json")
+        assert lang_phase_regex.search("assets/mymod/lang/en_us.json")
 
     def test_skip_zh_cn_false_lang_phase_uses_default_regex(self, tmp_path):
         """skip_zh_cn=False:Lang phase 用預設 regex (匹配 zh_cn)。
@@ -319,7 +319,7 @@ class TestExtractDualGeneratorSkipZhCn:
         assert len(captured_regexes) >= 1
         lang_phase_regex = captured_regexes[0]
         # 使用 zip entry 路徑格式(模擬實際 production match)
-        assert lang_phase_regex.search("mymod/lang/zh_cn.json"), (
+        assert lang_phase_regex.search("assets/mymod/lang/zh_cn.json"), (
             "回歸:extract_dual_files_generator(skip_zh_cn=False) "
             "Lang phase regex 連 zh_cn 都不匹配,誤過濾"
         )
