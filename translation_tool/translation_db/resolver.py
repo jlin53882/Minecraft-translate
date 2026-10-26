@@ -12,7 +12,9 @@
 
 from __future__ import annotations
 
+import itertools
 import re
+import sys
 import threading
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -24,6 +26,12 @@ from translation_tool.translation_db.models import WriteBackItem, WriteBackStats
 from translation_tool.translation_db.repository import TranslationDB
 
 _VER = re.compile(r"\d+(?:\.\d+)+")
+
+# 已載入模組表的記憶體上限（以資料列計）。合併與翻譯都是一個模組處理完才換下一個，
+# 因此只要保留最近用過的模組就不必重新查詢；2000 個模組的整包不會把所有模組表留在記憶體。
+DEFAULT_MAX_CACHED_ROWS = 150_000
+# 不論列數多少至少保留的最近模組數（涵蓋同時處理不同模組的工作執行緒）。
+MIN_CACHED_MODS = 8
 
 
 def version_number(label: str) -> int:
@@ -62,6 +70,7 @@ class TranslationResolver:
         *,
         cross_version: bool = True,
         source_priority: tuple[int, ...] | None = None,
+        max_cached_rows: int = DEFAULT_MAX_CACHED_ROWS,
     ) -> None:
         self.db = db
         self.version = version
@@ -74,25 +83,58 @@ class TranslationResolver:
             str, dict[tuple[str, str], list[tuple[str, str, str, int]]]
         ] = {}
         self._target = version_number(version)
+        self._max_rows = max(0, int(max_cached_rows))
+        self._rows: dict[str, int] = {}  # 模組 → 該表的資料列數
+        self._used: dict[str, int] = {}  # 模組 → 最近使用序號（越大越新）
+        self._clock = itertools.count(1)
+        self.loads = 0  # 實際向資料庫載入模組表的次數
 
     def _mod_table(self, mod_id: str):
         # 已載入的模組不用拿鎖：其他執行緒正在載入另一個模組時（一次查詢要數十毫秒），
-        # 查詢已載入模組的執行緒不該被擋住。字典只會新增完整的表，不會原地修改。
+        # 查詢已載入模組的執行緒不該被擋住。字典只會新增完整的表，不會原地修改；
+        # 最近使用序號只是淘汰排序的提示，競爭時寫入較舊的序號也無妨。
         table = self._mods.get(mod_id)
         if table is not None:
+            self._used[mod_id] = next(self._clock)
             return table
         with self._lock:
             table = self._mods.get(mod_id)
             if table is None:
-                table = {}
-                if self.source_priority is None:
-                    rows = self.db.load_mod(mod_id)
-                else:
-                    rows = self.db.load_mod_for_priority(mod_id, self.source_priority)
-                for kind, key, en, ver, tw, src in rows:
-                    table.setdefault((kind, key), []).append((en, ver, tw, src))
+                table = self._load_table(mod_id)
                 self._mods[mod_id] = table
+                self._used[mod_id] = next(self._clock)
+                self._evict_locked(keep=mod_id)
             return table
+
+    def _load_table(self, mod_id: str):
+        table: dict[tuple[str, str], list[tuple[str, str, str, int]]] = {}
+        if self.source_priority is None:
+            rows = self.db.load_mod(mod_id)
+        else:
+            rows = self.db.load_mod_for_priority(mod_id, self.source_priority)
+        count = 0
+        for kind, key, en, ver, tw, src in rows:
+            table.setdefault((sys.intern(kind), key), []).append(
+                (en, sys.intern(ver), tw, src)
+            )
+            count += 1
+        self._rows[mod_id] = count
+        self.loads += 1
+        return table
+
+    def _evict_locked(self, *, keep: str) -> None:
+        """超過列數上限時淘汰最久沒用的模組表（至少保留最近 ``MIN_CACHED_MODS`` 個與剛載入的）。"""
+        total = sum(self._rows.values())
+        if total <= self._max_rows or len(self._mods) <= MIN_CACHED_MODS:
+            return
+        for victim in sorted(self._used, key=self._used.__getitem__):
+            if total <= self._max_rows or len(self._mods) <= MIN_CACHED_MODS:
+                break
+            if victim == keep:
+                continue
+            total -= self._rows.pop(victim, 0)
+            self._mods.pop(victim, None)
+            self._used.pop(victim, None)
 
     def _bump(self, field: str) -> None:
         """多執行緒共用時，統計計數必須在鎖內遞增（``+=`` 不是原子操作）。"""
