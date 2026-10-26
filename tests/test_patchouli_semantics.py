@@ -18,6 +18,7 @@ from translation_tool.core.patchouli_semantics import (
     iter_patchouli_semantics,
     patchouli_translatable_items,
 )
+from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db import TranslationDB
 from translation_tool.translation_db.cleanup import _text_hash, entry_cleanup_category
 from translation_tool.translation_db.models import ScanItem
@@ -85,6 +86,46 @@ def test_unknown_custom_page_does_not_inherit_global_display_fields():
 
     assert items["name"].kind == UNKNOWN
     assert not items["name"].ai_allowed
+
+
+def test_document_only_unknown_fields_stay_conservative_without_book_context():
+    document = {
+        "pages": [
+            {
+                "type": "patchouli:text",
+                "custom_metadata": "Example Internal Description",
+            },
+            {"type": "demo:custom_page", "name": "Some Internal Name"},
+        ]
+    }
+
+    items = _by_path(document)
+
+    assert items["pages[0].custom_metadata"].kind == UNKNOWN
+    assert items["pages[1].name"].kind == UNKNOWN
+    assert not items["pages[0].custom_metadata"].ai_allowed
+    assert not items["pages[1].name"].ai_allowed
+
+
+def test_unresolved_book_root_keeps_extractor_unknown_fields_conservative(tmp_path):
+    file_path = (
+        tmp_path / "assets" / "demo" / "oddmanual" / "en_us" / "entries" / "start.json"
+    )
+    file_path.parent.mkdir(parents=True)
+    file_path.write_text("{}", encoding="utf-8")
+    document = {
+        "pages": [
+            {
+                "type": "patchouli:text",
+                "custom_metadata": "Example Internal Description",
+            },
+            {"type": "demo:custom_page", "name": "Some Internal Name"},
+        ]
+    }
+
+    items = extract_translatables(document, file_path)
+
+    assert items == []
 
 
 def test_i18n_reference_is_not_sent_to_ai():

@@ -527,9 +527,9 @@ def context_for_path(
     path = Path(file_path)
     if not path.is_file():
         # In-memory document callers (including the long-standing extractor
-        # unit tests) do not have a book root to resolve. Keep their legacy
-        # sentence behaviour; ZIP scanner supplies an explicit archive context
-        # and therefore never falls through to this compatibility path.
+        # unit tests) do not have a book root to resolve. Keep the legacy
+        # compatibility path, but let the classifier require display evidence
+        # before it accepts a value as translatable.
         return context_from_metadata(
             path, resolution_error="document_only_book_missing"
         )
@@ -579,6 +579,8 @@ def _legacy_document_semantic(
     context: PatchouliContext,
     source_fingerprint: str,
     structural: bool,
+    page_type: str,
+    display_context: bool | None,
 ) -> PatchouliSemantic | None:
     if context.resolution_error not in {
         "book_root_unresolved",
@@ -590,6 +592,15 @@ def _legacy_document_semantic(
     elif "entity_data" in _ancestor_fields(path):
         structural = False
     if structural:
+        return None
+    if (
+        page_type
+        and display_context is not True
+        and "entity_data" not in _ancestor_fields(path)
+        and "text_overrides" not in path
+    ):
+        # 舊入口沒有 book/template context 時，只能保留已有顯示欄位證據的
+        # 相容判定；未知頁型或未知欄位不可再靠英文句型猜測用途。
         return None
     verdict = classify_book_string(value, field)
     if verdict == "text":
@@ -692,7 +703,14 @@ def classify_patchouli_value(
     else:
         display = display_context
     legacy = _legacy_document_semantic(
-        value, path, field, context, source_fingerprint, structural
+        value,
+        path,
+        field,
+        context,
+        source_fingerprint,
+        structural,
+        page_type,
+        display,
     )
     if legacy is not None:
         return legacy
