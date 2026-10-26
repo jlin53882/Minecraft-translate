@@ -121,8 +121,8 @@ def _load_rules_uncached(
             f"{source!r}->{destination!r}"
             for _source_index, source, _destination_index, destination in conflicts[:3]
         )
-        log_warning(
-            "替換規則有 %d 個輸出包含來源詞的衝突；固定文字預設只套用一次（例：%s）",
+        log_info(
+            "替換規則有 %d 個輸出包含來源詞；引擎一次掃描、最長匹配優先，不會對結果重複替換（例：%s）",
             len(conflicts),
             examples,
         )
