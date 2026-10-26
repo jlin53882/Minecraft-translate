@@ -299,3 +299,64 @@ def test_old_summary_table_is_rebuilt_with_module_and_kind_columns(tmp_path):
     columns = [r[1] for r in upgraded._q("PRAGMA table_info(stat_src)")]
     assert columns[:3] == ["mc_version", "mod_id", "kind"]
     upgraded.close()
+
+
+def _expected_scope(pairs):
+    modules: list[str] = []
+    by_mod: dict[str, set[int]] = {}
+    for mod_id, source in pairs:
+        if mod_id not in by_mod:
+            modules.append(str(mod_id))
+            by_mod[mod_id] = set()
+        if source is not None:
+            by_mod[mod_id].add(int(source))
+    everything = set().union(*by_mod.values()) if by_mod else set()
+    return (
+        tuple(modules),
+        {
+            None: tuple(sorted(everything)),
+            **{mod: tuple(sorted(sources)) for mod, sources in by_mod.items()},
+        },
+    )
+
+
+def test_smart_review_scope_options_match_distinct_pairs(db):
+    from translation_tool.translation_db.smart_review_filters import (
+        _build_smart_review_selection,
+    )
+
+    entry = db.list_entries(VERSION, mod_id="beta", query="Wood")[0][0]
+    db.save_manual(entry.id, "木材")
+    for kind in (None, KIND_LANG, KIND_PATCHOULI):
+        for review in ("unreviewed", "reviewed", "legacy_unknown"):
+            selection = _build_smart_review_selection(
+                version=VERSION,
+                mod_id=None,
+                kind=kind,
+                effective_source=None,
+                review_status=review,
+                query=None,
+                require_reviewed_reference=False,
+            )
+            old = db._q(
+                "SELECT DISTINCT e.mod_id, f.source FROM entry e "
+                "JOIN effective f ON f.entry_id=e.id "
+                f"WHERE {selection.where_sql} ORDER BY e.mod_id, f.source",
+                selection.params,
+            )
+            assert db.smart_review_scope_options(
+                version=VERSION, kind=kind, review_status=review
+            ) == _expected_scope(old)
+
+
+def test_bulk_review_scope_options_match_candidates_and_are_cached(db):
+    for quality_pass_only in (True, False):
+        modules, sources = db.bulk_review_scope_options(
+            VERSION, quality_pass_only=quality_pass_only
+        )
+        candidates = db._bulk_review_candidates(VERSION, None, quality_pass_only)
+        expected = _expected_scope(sorted((c.mod_id, c.source) for c in candidates))
+        assert (modules, sources) == expected
+    statements = _selects(db)
+    db.bulk_review_scope_options(VERSION)
+    assert not [s for s in statements if "GROUP BY e.mod_id" in s]

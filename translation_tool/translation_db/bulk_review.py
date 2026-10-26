@@ -96,13 +96,12 @@ class BulkReviewMixin:
             )
         # 與 _bulk_review_candidates 相同：空白譯文不應出現在範圍選單。
         condition += " AND f.zh_tw IS NOT NULL AND trim(f.zh_tw) <> ''"
-        rows = self._q(
-            "SELECT DISTINCT e.mod_id, f.source "
-            + self._query_source()
-            + f" WHERE {condition} ORDER BY e.mod_id, f.source",
+        return self._scope_pairs(
+            version,
+            self._candidate_source(f"{condition} f.source"),
+            condition,
             params,
         )
-        return [(str(mod_id), source) for mod_id, source in rows]
 
     def _bulk_review_candidates(
         self,

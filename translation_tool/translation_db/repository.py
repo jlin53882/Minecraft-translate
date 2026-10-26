@@ -1575,6 +1575,29 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
                 facets = self._cached_peek(key)
         return facets if facets is not None and facets["complete"] else None
 
+    def _scope_pairs(
+        self,
+        version: str | None,
+        candidate_source: str,
+        condition: str,
+        params: Sequence[Any],
+    ) -> list[tuple[str, int | None]]:
+        """符合條件的條目所涉及的（模組, 生效來源）配對，依模組、來源排序（無生效譯文者來源為 ``None``）。
+
+        供範圍下拉選單使用；以一次串流彙總取代 ``SELECT DISTINCT`` 加排序，並依資料世代快取。
+        ``candidate_source`` 必須已連接 ``condition`` 用到的資料表，且別名為 ``e``、``f``。
+        """
+        codes = list(self.effective_source_codes(version))
+        sql = option_facets.scan_sql(candidate_source, condition, codes)
+        args = [*codes, *params]
+        with self._lock:
+            facets = self._cached(
+                self._facet_key("scope-pairs", sql, args),
+                lambda: option_facets.build(self._q(sql, args), codes),
+                persist=False,
+            )
+        return option_facets.pairs(facets)
+
     def _facet_total(self, criteria: EntryFilter) -> int | None:
         """分面已算過（或由摘要即時算出）時的符合總筆數；否則 ``None``，由呼叫端另行計數。"""
         facets = self._option_facets(criteria, compute=False)

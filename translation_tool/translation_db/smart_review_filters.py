@@ -226,13 +226,12 @@ class SmartReviewCandidateSelectionMixin:
             query=None,
             require_reviewed_reference=False,
         )
-        query = (
-            selection.reference_cte + "SELECT DISTINCT e.mod_id, f.source "
-            "FROM entry e JOIN effective f ON f.entry_id=e.id "
-            + selection.reference_join
-            + f"WHERE {selection.where_sql} ORDER BY e.mod_id, f.source"
+        rows = self._scope_pairs(
+            version,
+            "FROM entry e JOIN effective f ON f.entry_id=e.id",
+            selection.where_sql,
+            selection.params,
         )
-        rows = self._q(query, selection.params)
         modules: list[str] = []
         sources_by_mod: dict[str, set[int]] = {}
         all_sources: set[int] = set()

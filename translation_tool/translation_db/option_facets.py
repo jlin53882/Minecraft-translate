@@ -127,3 +127,14 @@ def options(
         )
     )
     return mods, sources
+
+
+def pairs(facets: Facets) -> list[tuple[str, int | None]]:
+    """分面中有條目的（模組, 來源）配對，依模組與來源排序；沒有生效譯文的來源為 ``None``（排在最前）。"""
+    codes = sorted(enumerate(facets["codes"]), key=lambda item: item[1])
+    result: list[tuple[str, int | None]] = []
+    for row in sorted(facets["rows"], key=lambda item: item[0]):
+        if row[1] > row[2]:
+            result.append((row[0], None))
+        result.extend((row[0], code) for index, code in codes if row[3 + index] > 0)
+    return result
