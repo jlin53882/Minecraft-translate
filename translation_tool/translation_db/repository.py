@@ -217,6 +217,9 @@ def _like(text: str) -> str:
     return like_pattern(text)
 
 
+_REVERSIBLE_SORTS = {"default": "default_desc", "default_desc": "default"}
+
+
 class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
@@ -2315,8 +2318,33 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             if total is None:
                 cond, params = self._filter_sql(criteria)
                 total = self._cached_count(self._count_sql(criteria, cond), params)
-            rows = self._query_entry_rows(criteria, limit=limit, offset=offset)
+            rows = self._plain_page_rows(criteria, total, limit, offset)
         return [self._row(row) for row in rows], total
+
+    def _plain_page_rows(
+        self, criteria: EntryFilter, total: int, limit: int | None, offset: int
+    ) -> list[tuple]:
+        """非品質篩選的一頁資料列；``total`` 是同一條件的精確總數。
+
+        - 沒有符合的列（或位移已超過總數）時不必查頁面：頁面查詢會沿排序索引逐列檢查條件，
+          條件幾乎都不符合時等於掃完整個版本。
+        - 預設排序的後半段改從另一端反向讀取（``default`` 與 ``default_desc`` 互為反向、
+          都沿 ``idx_entry_list_order``），最後一頁不必數過前面的所有列。
+        """
+        offset = max(0, int(offset))
+        if limit is None:
+            return self._query_entry_rows(criteria, limit=limit, offset=offset)
+        size = max(0, int(limit))
+        if size == 0 or total <= offset:
+            return []
+        if criteria.sort_by in _REVERSIBLE_SORTS and offset > total // 2:
+            count = min(size, total - offset)
+            reverse = replace(criteria, sort_by=_REVERSIBLE_SORTS[criteria.sort_by])
+            rows = self._query_entry_rows(
+                reverse, limit=count, offset=total - offset - count
+            )
+            return rows[::-1]
+        return self._query_entry_rows(criteria, limit=size, offset=offset)
 
     def _database_identity(self) -> str:
         stat = self.path.stat()

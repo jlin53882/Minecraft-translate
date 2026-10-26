@@ -114,3 +114,41 @@ def test_smart_review_twin_completion_starts_from_the_page_groups(tmp_path):
     plan = [row[3] for row in d._conn.execute("EXPLAIN QUERY PLAN " + statements[0])]
     assert "json_each" in plan[0]
     d.close()
+
+
+@pytest.mark.parametrize("sort_by", ["default", "default_desc"])
+@pytest.mark.parametrize("state", ["all", "ok", "none"])
+def test_pages_from_either_end_equal_the_full_ordered_list(db, sort_by, state):
+    db.ingest(
+        VERSION, [ScanItem(KIND_LANG, "mod2", f"n.{i}", f"Text {i}") for i in range(7)]
+    )
+    criteria = EntryFilter(version=VERSION, sort_by=sort_by, state=state)
+    full, total = db.list_entries(criteria=criteria, limit=None)
+    assert total == len(full) > 0
+    for size in (1, 7, 10, 50):
+        seen = []
+        for offset in range(0, total + size, size):
+            rows, page_total = db.list_entries(
+                criteria=criteria, limit=size, offset=offset
+            )
+            assert page_total == total
+            assert len(rows) == max(0, min(size, total - offset))
+            seen.extend(rows)
+        assert [r.id for r in seen] == [r.id for r in full]
+
+
+def test_empty_totals_skip_the_page_query(db):
+    criteria = EntryFilter(version=VERSION, review_status="reviewed")
+    statements = _plans(db, "ORDER BY")
+    assert db.list_entries(criteria=criteria, limit=50) == ([], 0)
+    db._conn.set_trace_callback(None)
+    assert statements == []
+
+
+def test_last_page_reads_from_the_far_end(db):
+    criteria = EntryFilter(version=VERSION)
+    statements = _plans(db, "ORDER BY")
+    rows, total = db.list_entries(criteria=criteria, limit=10, offset=30)
+    db._conn.set_trace_callback(None)
+    assert total == 40 and len(rows) == 10
+    assert any("DESC" in sql and "LIMIT 10 OFFSET 0" in sql for sql in statements)

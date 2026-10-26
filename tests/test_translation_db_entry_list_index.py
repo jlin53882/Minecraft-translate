@@ -172,10 +172,12 @@ def test_public_default_page_uses_index_without_temporary_ordering(
     finally:
         db._conn.set_trace_callback(None)
     assert (len(rows), total) == (10, 60)
+    # 位移落在後半段時從另一端反向讀取，兩個方向都必須沿同一個索引
     page_sql = next(
         sql
         for sql in statements
         if "ORDER BY e.mod_id, e.kind, e.key, e.id LIMIT" in sql
+        or "ORDER BY e.mod_id DESC, e.kind DESC, e.key DESC, e.id DESC LIMIT" in sql
     )
     plan = db._conn.execute("EXPLAIN QUERY PLAN " + page_sql).fetchall()
     details = [row[3] for row in plan]
