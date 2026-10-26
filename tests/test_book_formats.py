@@ -89,6 +89,9 @@ def test_known_custom_formats_are_not_generic_patchouli_or_json():
     assert resolve_book_format(
         "assets/example/oracle_index/books/index.mdx",
     ).name == FORMAT_ORACLE_INDEX
+    assert resolve_book_format(
+        "assets/oracle_index/books/index.mdx",
+    ).name == FORMAT_ORACLE_INDEX
 
 
 def test_standard_patchouli_and_known_non_book_paths_keep_their_boundaries():

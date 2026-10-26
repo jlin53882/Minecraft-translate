@@ -113,14 +113,15 @@ def resolve_book_format(
         return BookFormatResolution(FORMAT_UNKNOWN, False, "resource_root_missing")
 
     lower = tuple(part.lower() for part in parts)
+    namespace = lower[1]
     content_dirs = lower[2:-1]
     if any(part in BOOK_EXCLUDED_DIRS for part in content_dirs):
         return BookFormatResolution(FORMAT_UNKNOWN, False, "known_non_book_directory")
-    if "oracle_index" in content_dirs:
+    if namespace == "oracle_index" or "oracle_index" in content_dirs:
         return BookFormatResolution(FORMAT_ORACLE_INDEX, False, "oracle_index_is_mdx_docs")
-    if "modonomicon" in content_dirs:
+    if namespace == "modonomicon" or "modonomicon" in content_dirs:
         return BookFormatResolution(FORMAT_MODONOMICON, False, "modonomicon_requires_own_schema")
-    if "eternal_starlight" in content_dirs:
+    if namespace == "eternal_starlight" or "eternal_starlight" in content_dirs:
         return BookFormatResolution(
             FORMAT_ETERNAL_STARLIGHT,
             False,
