@@ -123,7 +123,7 @@ def _strip_json_extras(text: str) -> str:
     return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
 
 
-def _loads_lang_json(content: str):
+def loads_lang_json(content: str):
     """解析 en_us.json：容許原始控制字元、註解與結尾逗號，行為與遊戲讀取器一致。"""
     try:
         return json.loads(content, strict=False)
@@ -171,7 +171,7 @@ def _iter_entries_from_lang_files(
 
             if name.endswith(".json"):
                 try:
-                    entries = _loads_lang_json(content)
+                    entries = loads_lang_json(content)
                 except json.JSONDecodeError as exc:
                     log_warning(
                         f"[IconIndex] 略過格式錯誤的 JSON lang 檔 {name}: {exc!r}"

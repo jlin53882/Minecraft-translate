@@ -6,6 +6,7 @@ import threading
 from collections import defaultdict
 from types import SimpleNamespace
 
+from app.icon_index import loads_lang_json
 from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
@@ -470,7 +471,12 @@ class IconPreviewDetailMixin:
                 modid = parts[1]
 
                 try:
-                    data = json.loads(content)
+                    text = (
+                        content.decode("utf-8-sig", errors="replace")
+                        if isinstance(content, bytes)
+                        else content
+                    )
+                    data = loads_lang_json(text)
                 except json.JSONDecodeError:
                     log_warning(
                         f"[IconPreview] JAR 解析 JSON 失敗: {jar_path.name} / {name}"

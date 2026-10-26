@@ -10,7 +10,7 @@ from PIL import Image
 
 from app import icon_render
 from app.icon_catalog import ModpackAssetCatalog
-from app.icon_index import _iter_entries_from_lang_files, _loads_lang_json
+from app.icon_index import _iter_entries_from_lang_files, loads_lang_json
 from app.icon_preview_image import describe_icon_uri, render_icon_uri
 from app.icon_reader import IconRef
 from app.icon_resolve import hit_to_uri, resolve_icon
@@ -222,7 +222,7 @@ def test_uri_meta_round_trips_and_stays_backward_compatible():
 
 def test_lang_json_with_comments_trailing_commas_and_raw_newlines(tmp_path):
     text = '﻿{"item.m.a": "x\ny", // note\n "item.m.b": "http://z", /* c */\n}'
-    assert _loads_lang_json(text.lstrip("﻿")) == {
+    assert loads_lang_json(text.lstrip("﻿")) == {
         "item.m.a": "x\ny",
         "item.m.b": "http://z",
     }
