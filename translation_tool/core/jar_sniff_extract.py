@@ -19,7 +19,7 @@ from typing import Any
 
 from translation_tool.core.jar_processor_extract import (
     _normalize_jar_base_name,
-    build_nested_output_names,
+    build_collision_safe_output_names,
     get_file_hash,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
@@ -81,7 +81,11 @@ def _output_path(
         )
     if member.startswith("assets/"):
         return safe_join(output_root, member)
-    return safe_join(output_root, f"{jar_base}_extracted", member)
+    return safe_join(
+        output_root,
+        nested_output_name or f"{jar_base}_extracted",
+        member,
+    )
 
 
 def _walk_sniffed_members(
@@ -265,7 +269,7 @@ def extract_sniffed_book_files(
     live below a common subdirectory.
     """
     langs = _wanted_langs(lang_codes, skip_zh_cn)
-    nested_output_names = build_nested_output_names(jar_paths, source_root)
+    nested_output_names = build_collision_safe_output_names(jar_paths, source_root)
     direct_asset_winners: dict[str, Path] = {}
     total_written = 0
     for jar_path in jar_paths:

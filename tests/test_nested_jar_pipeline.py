@@ -622,6 +622,58 @@ def test_cross_jar_asset_collision_uses_input_order_not_worker_order(tmp_path: P
     )
 
 
+def test_cross_jar_data_paths_are_isolated_for_colliding_normalized_names(
+    tmp_path: Path,
+):
+    """不同 loader 版本的同一 mod ID 不得覆蓋 direct data 資源。"""
+    mods = tmp_path / "mods"
+    _outer_jar(
+        mods / "client" / "guide-neoforge-1.0.jar",
+        direct={"data/shared/lang/en_us.json": '{"value":"client"}'},
+    )
+    _outer_jar(
+        mods / "server" / "guide-forge-1.0.jar",
+        direct={"data/shared/lang/en_us.json": '{"value":"server"}'},
+    )
+    output = tmp_path / "out"
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    extracted = sorted(output.glob("*_extracted/data/shared/lang/en_us.json"))
+    assert len(extracted) == 2
+    assert {
+        json.loads(path.read_text(encoding="utf-8"))["value"] for path in extracted
+    } == {"client", "server"}
+
+
+def test_direct_and_nested_data_paths_use_distinct_collision_safe_wrappers(
+    tmp_path: Path,
+):
+    """direct 與 nested 的非 assets 資源也不得共用同一 wrapper。"""
+    mods = tmp_path / "mods"
+    _outer_jar(
+        mods / "outer" / "guide-1.0.jar",
+        direct={"data/shared/lang/en_us.json": '{"value":"outer"}'},
+    )
+    _outer_jar(
+        mods / "nested" / "guide.jar",
+        nested={
+            "META-INF/jarjar/inner.jar": _zip_bytes(
+                {"data/shared/lang/en_us.json": '{"value":"nested"}'}
+            )
+        },
+    )
+    output = tmp_path / "out"
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    extracted = sorted(output.glob("*_extracted/data/shared/lang/en_us.json"))
+    assert len(extracted) == 2
+    assert {
+        json.loads(path.read_text(encoding="utf-8"))["value"] for path in extracted
+    } == {"outer", "nested"}
+
+
 def test_nested_walker_honors_cancellation_before_reading(tmp_path: Path):
     from translation_tool.utils.nested_archive import walk_nested_archives
     from translation_tool.utils.zip_safety import ZipReadBudget

@@ -90,22 +90,24 @@ def _normalize_jar_base_name(jar_filename: str) -> str:
     return base_name or base_full
 
 
-def build_nested_output_names(
+def build_collision_safe_output_names(
     jar_paths: Iterable[str | Path],
     root: str | Path | None = None,
 ) -> dict[Path, str]:
-    """為同名 outer JAR 建立穩定且可被 Stage 2 辨識的 nested 目錄名。
+    """為輸出 wrapper 可能碰撞的 outer JAR 建立穩定目錄名。
 
-    一般情況保留既有的 ``<jar-stem>_extracted`` 路徑；只有同一批來源
-    中有相同 stem 的 JAR 時，才把相對來源路徑的短雜湊插入 stem。這樣既
-    保持既有輸出相容性，也避免 ``client/example.jar`` 與
-    ``server/example.jar`` 的 nested 資源寫到同一個資料夾。命名保留
-    ``_extracted`` 尾碼，讓既有 Stage 2／指南掃描器仍能識別 wrapper。
+    一般情況保留既有的 ``<normalized-jar-name>_extracted`` 路徑；只有同一批
+    來源中有相同 normalized JAR 名稱時，才把相對來源路徑的短雜湊插入 stem。
+    這樣既保持既有輸出相容性，也避免不同 outer JAR 的 nested 或 ``data/``
+    資源寫到同一個資料夾。命名保留 ``_extracted`` 尾碼，讓既有 Stage 2／
+    指南掃描器仍能識別 wrapper。
     """
     unique_paths = list(dict.fromkeys(Path(path) for path in jar_paths))
     grouped: dict[str, list[Path]] = {}
     for path in unique_paths:
-        grouped.setdefault(path.stem.casefold(), []).append(path)
+        grouped.setdefault(_normalize_jar_base_name(path.name).casefold(), []).append(
+            path
+        )
 
     if root is not None:
         root_path = Path(root).resolve()
@@ -137,6 +139,14 @@ def build_nested_output_names(
     return output_names
 
 
+def build_nested_output_names(
+    jar_paths: Iterable[str | Path],
+    root: str | Path | None = None,
+) -> dict[Path, str]:
+    """Backward-compatible alias for collision-safe extracted wrapper names."""
+    return build_collision_safe_output_names(jar_paths, root)
+
+
 def _entry_output_path(
     output_root: str,
     jar_filename_base: str,
@@ -150,7 +160,8 @@ def _entry_output_path(
         # Nested resources must retain the complete outer JAR identity.  The
         # normalized name intentionally collapses loader/version suffixes and
         # is therefore not unique in a large modpack (for example, many mods
-        # normalize to ``ars`` or ``ftb``).
+        # normalize to ``ars`` or ``ftb``).  The same wrapper is also used for
+        # direct ``data/`` resources when the normalized names collide.
         return safe_join(
             output_root,
             nested_output_name or f"{jar_stem}_extracted",
@@ -159,7 +170,7 @@ def _entry_output_path(
     if not logical_path.startswith("assets/"):
         return safe_join(
             output_root,
-            f"{jar_filename_base}_extracted",
+            nested_output_name or f"{jar_filename_base}_extracted",
             logical_path,
         )
     return safe_join(output_root, logical_path)
@@ -399,7 +410,9 @@ def extract_from_jar_impl(
                     if normalized_path.startswith("assets/"):
                         final_output_path = safe_join(output_root, normalized_path)
                     else:
-                        final_mod_folder = f"{jar_filename_base}_extracted"
+                        final_mod_folder = (
+                            nested_output_name or f"{jar_filename_base}_extracted"
+                        )
                         final_output_path = safe_join(
                             output_root, final_mod_folder, normalized_path
                         )
@@ -642,7 +655,7 @@ def run_extraction_process_impl(
 
     eligible_jars = [jar for jar in jar_files if Path(jar) in all_scan_results]
     eligible_total = len(eligible_jars)
-    nested_output_names = build_nested_output_names(jar_files, mods_dir)
+    nested_output_names = build_collision_safe_output_names(jar_files, mods_dir)
 
     processed_count = 0
     total_extracted = 0
