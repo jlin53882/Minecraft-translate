@@ -334,7 +334,8 @@ def process_content_or_copy_file_impl(
     log_debug(f"[Patchouli DEBUG] normalized_path(裁切後) = {normalized_path}")
 
     # --- v3 新增：zh_cn skip logic (在 early return 判斷之前，先做全局開關檢查) ---
-    merger_cfg = load_config_fn().get("lang_merger", {})
+    config = load_config_fn()  # 每次呼叫都會深拷貝整份設定：一個檔案只讀一次
+    merger_cfg = config.get("lang_merger", {})
     _process_zh_cn = (
         process_zh_cn
         if process_zh_cn is not None
@@ -375,8 +376,7 @@ def process_content_or_copy_file_impl(
             return None
         p_sub = p_lower[idx + 1 :]  # 只用於找到 marker 相對位置，book_root 從原始建構
         patchouli_dirs = (
-            load_config_fn()
-            .get("lm_translator", {})
+            config.get("lm_translator", {})
             .get("patchouli", {})
             .get("dir_names", ["patchouli_books"])
         )

@@ -54,10 +54,14 @@ class FileIdentity:
 def patchouli_dir_names() -> tuple[str, ...]:
     """設定中的書籍目錄名稱（讀不到設定時用預設）。"""
     try:
-        from translation_tool.utils.config_manager import load_config
+        from translation_tool.utils.config_manager import load_config_shared
 
+        # 唯讀共用快取：每個項目都會算一次身分，load_config 每次都會深拷貝整份設定。
         names = (
-            load_config().get("lm_translator", {}).get("patchouli", {}).get("dir_names")
+            load_config_shared()
+            .get("lm_translator", {})
+            .get("patchouli", {})
+            .get("dir_names")
         )
         if names:
             return tuple(str(n) for n in names)
@@ -144,10 +148,18 @@ def classify_file(
     file: str | Path, root: str | Path, dir_names: Sequence[str] | None = None
 ) -> FileIdentity | None:
     """已提取到磁碟的檔案身分；路徑以 ``root``（輸入資料夾）為基準。"""
+    path = Path(file)
     try:
-        rel = Path(file).resolve().relative_to(Path(root).resolve())
+        # 項目的檔案路徑本來就是由 root 往下走出來的：純路徑運算即可，不必為每個項目
+        # 解析兩次實體路徑（每次都是一串 lstat 系統呼叫）。含 ".." 或不在 root 底下才解析。
+        if ".." in path.parts:
+            raise ValueError("needs resolution")
+        rel = path.relative_to(root)
     except ValueError:
-        rel = Path(file)
+        try:
+            rel = path.resolve().relative_to(Path(root).resolve())
+        except ValueError:
+            rel = path
     return classify_parts(rel.parts, dir_names)
 
 
