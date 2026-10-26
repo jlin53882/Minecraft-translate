@@ -59,6 +59,7 @@ class SmartReviewDialog:
         self.get_db = get_db
         self.on_complete = on_complete
         self.ctx = SmartReviewContext(page, get_db, on_complete)
+        self.ctx.building = True
         self.job = job_for_page(page)
         self.run_panel = SmartReviewRunPanel(
             self.ctx,
@@ -119,6 +120,7 @@ class SmartReviewDialog:
             "history": self.history.control,
         }
         self._build_dialog()
+        self.ctx.building = False
         self._show_tab("run")
 
     def _active_run_id(self) -> str | None:
@@ -491,7 +493,7 @@ class SmartReviewDialog:
             close_page_dialog(self.page, dialog)
 
     def open(self) -> None:
-        """開啟視窗，接續背景任務狀態並載入批次清單。"""
+        """開啟視窗並接續背景任務狀態；批次清單在切到「歷史批次」分頁時才載入。"""
         try:
             isolate(self.dialog)  # 視窗是更新邊界：頁面層級的更新不走訪它的內容
             present_page_dialog(self.page, self.dialog)
@@ -499,7 +501,8 @@ class SmartReviewDialog:
             show_snack(self.page, "目前畫面無法開啟智慧校對視窗。", C.GOLD)
             return
         self.run_panel.attach()
-        self.history.refresh()
+        if self.nav.value == "history":
+            self.history.refresh()  # 其他分頁開啟時不讀也不畫歷史卡片：切到歷史分頁才載入
 
     def _close(self, _e=None) -> None:
         """關閉視窗；背景校對不受影響，結果回來後會以通知告知。"""

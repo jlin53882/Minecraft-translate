@@ -46,6 +46,8 @@ class SmartReviewContext:
         self.generation = 0
         self.closed = False
         self.dialog: ft.AlertDialog | None = None  # 視窗外殼：``update()`` 只更新它
+        # 視窗還在建構、還沒有任何控制項掛上畫面時，面板初始化呼叫的 ``update()`` 沒有東西可更新
+        self.building = False
         self._request_sequences: dict[str, int] = {}
 
     def close(self) -> None:
@@ -161,6 +163,8 @@ class SmartReviewContext:
 
     def update(self) -> None:
         """在 UI 仍然有效時安全更新頁面。"""
+        if self.building:
+            return
         if self.dialog is not None:
             update_regions(self.dialog)  # 只重畫智慧校對視窗，不走訪整個頁面
             return
