@@ -1095,6 +1095,7 @@ def test_list_counts_are_cached_per_filter_and_invalidated_by_writes(db_path):
     db = TranslationDB(db_path)
     counted = []
     real_one = db._one
+    real_q = db._q
 
     def spy(sql, params=()):
         # 狀態篩選要求有生效譯文時從 effective 計數
@@ -1104,7 +1105,14 @@ def test_list_counts_are_cached_per_filter_and_invalidated_by_writes(db_path):
             counted.append(sql)
         return real_one(sql, params)
 
+    def spy_q(sql, params=()):
+        # 只涉及版本／審核狀態／沒有譯文的條件：由 stat_src 的模組分面計數
+        if sql.startswith("SELECT mod_id, SUM(cnt)"):
+            counted.append(sql)
+        return real_q(sql, params)
+
     db._one = spy
+    db._q = spy_q
     assert db.list_entries("1.21.1", state="none")[1] == 3
     db.list_entries("1.21.1", state="none", offset=1)  # 翻頁不重數
     assert len(counted) == 1

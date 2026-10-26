@@ -2,8 +2,9 @@
 
 全庫統計摘要：由觸發器在每次寫入時遞增維護的小表，讓總覽統計不必掃描全部條目。
 
-- ``stat_src``：每個 ``(版本, 生效來源, 審核狀態)`` 的條目數。沒有生效譯文的條目記為
-  來源 ``-1``、審核狀態 ``''``。審核狀態的推導與全庫重算查詢相同。
+- ``stat_src``：每個 ``(版本, 模組, 類型, 生效來源, 審核狀態)`` 的條目數。沒有生效譯文的條目記為
+  來源 ``-1``、審核狀態 ``''``。審核狀態的推導與全庫重算查詢相同。模組與類型兩欄讓
+  「依模組／來源的條目數」這類篩選選項與總數不必掃描條目。
 - ``stat_counter``：``content``（相同內容組數）、``mods``（模組數）、``no_source``
   （沒有原文的條目數）、``diff``（同內容在不同版本譯文不一致的組數）。
 
@@ -23,7 +24,7 @@ from contextlib import contextmanager
 
 from translation_tool.translation_db.sql_helpers import effective_review_sql
 
-STAT_SCHEMA_VERSION = "2"
+STAT_SCHEMA_VERSION = "3"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
 COUNTER_NAMES = ("content", "mods", "no_source", "diff")
 
@@ -35,10 +36,12 @@ _ENTRY_KEY_COLUMNS = ("mc_version", *_CONTENT_COLUMNS)
 _TABLES = """
 CREATE TABLE IF NOT EXISTS stat_src (
     mc_version TEXT NOT NULL,
+    mod_id     TEXT NOT NULL,
+    kind       TEXT NOT NULL,
     source     INTEGER NOT NULL,
     review     TEXT NOT NULL,
     cnt        INTEGER NOT NULL,
-    PRIMARY KEY (mc_version, source, review)
+    PRIMARY KEY (mc_version, mod_id, kind, source, review)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS stat_counter (
     name TEXT PRIMARY KEY,
@@ -52,11 +55,57 @@ def _review(alias: str) -> str:
     return effective_review_sql(alias, True, else_unreviewed=True)
 
 
-def _bump(version: str, source: str, review: str, guard: str = "1") -> str:
+def _entry_col(entry_id: str, column: str) -> str:
+    return f"(SELECT {column} FROM entry WHERE id={entry_id})"
+
+
+def _group(mc_version: str, mod_id: str, kind: str, source: str, review: str) -> str:
+    """``stat_src`` 一列的主鍵條件（版本、模組、類型、來源、審核狀態）。"""
     return (
-        "INSERT INTO stat_src (mc_version, source, review, cnt) "
-        f"SELECT {version}, {source}, {review}, 1 WHERE {guard} "
-        "ON CONFLICT(mc_version, source, review) DO UPDATE SET cnt = cnt + 1;"
+        f"mc_version={mc_version} AND mod_id={mod_id} AND kind={kind} "
+        f"AND source={source} AND review={review}"
+    )
+
+
+def _row_group(row: str, source: str, review: str) -> str:
+    return _group(f"{row}.mc_version", f"{row}.mod_id", f"{row}.kind", source, review)
+
+
+def _effective_group(entry_id: str, source: str, review: str) -> str:
+    return _group(
+        _entry_col(entry_id, "mc_version"),
+        _entry_col(entry_id, "mod_id"),
+        _entry_col(entry_id, "kind"),
+        source,
+        review,
+    )
+
+
+def _bump(
+    mc_version: str,
+    mod_id: str,
+    kind: str,
+    source: str,
+    review: str,
+    guard: str = "1",
+) -> str:
+    return (
+        "INSERT INTO stat_src (mc_version, mod_id, kind, source, review, cnt) "
+        f"SELECT {mc_version}, {mod_id}, {kind}, {source}, {review}, 1 WHERE {guard} "
+        "ON CONFLICT(mc_version, mod_id, kind, source, review) "
+        "DO UPDATE SET cnt = cnt + 1;"
+    )
+
+
+def _bump_effective(entry_id: str, source: str, review: str, guard: str = "1") -> str:
+    """生效列所屬條目（可能已被刪除，由 ``guard`` 處理）的桶 +1。"""
+    return _bump(
+        _entry_col(entry_id, "mc_version"),
+        _entry_col(entry_id, "mod_id"),
+        _entry_col(entry_id, "kind"),
+        source,
+        review,
+        guard,
     )
 
 
@@ -107,11 +156,13 @@ def _entry_counts(row: str, sign: str) -> str:
         f"THEN {_diff_if_added(effective % 'zh_tw', row + '.id')} ELSE 0 END"
     )
     if sign == "+":
-        bucket = _bump(f"{row}.mc_version", source, review)
+        bucket = _bump(
+            f"{row}.mc_version", f"{row}.mod_id", f"{row}.kind", source, review
+        )
     else:
         bucket = (
-            f"UPDATE stat_src SET cnt = cnt - 1 WHERE mc_version={row}.mc_version "
-            f"AND source={source} AND review={review};"
+            "UPDATE stat_src SET cnt = cnt - 1 WHERE "
+            f"{_row_group(row, source, review)};"
         )
     return f"""
         {bucket}
@@ -119,10 +170,6 @@ def _entry_counts(row: str, sign: str) -> str:
         {_counter("content", f"{sign}{_unique(row, _CONTENT_COLUMNS)}")}
         {_counter("mods", f"{sign}{_unique(row, ('mod_id',))}")}
         {_counter("no_source", f"{sign}({row}.en_us='')")}"""
-
-
-def _entry_version(entry_id: str) -> str:
-    return f"(SELECT mc_version FROM entry WHERE id={entry_id})"
 
 
 def _trigger_sql() -> dict[str, str]:
@@ -159,29 +206,28 @@ def _trigger_sql() -> dict[str, str]:
         "stat_effective_insert": f"""
             CREATE TRIGGER stat_effective_insert AFTER INSERT ON effective
             WHEN {_NOT_FROZEN} BEGIN
-                UPDATE stat_src SET cnt = cnt - 1 WHERE source={NO_SOURCE} AND review=''
-                    AND mc_version={_entry_version("NEW.entry_id")};
-                {_bump(_entry_version("NEW.entry_id"), "NEW.source", _review("NEW"), "EXISTS (SELECT 1 FROM entry WHERE id=NEW.entry_id)")}
+                UPDATE stat_src SET cnt = cnt - 1 WHERE
+                    {_effective_group("NEW.entry_id", str(NO_SOURCE), "''")};
+                {_bump_effective("NEW.entry_id", "NEW.source", _review("NEW"), "EXISTS (SELECT 1 FROM entry WHERE id=NEW.entry_id)")}
                 {_counter("diff", _diff_if_added("NEW.zh_tw", "NEW.entry_id"))}
             END""",
         # 條目本身被刪除時（串聯刪除）已由 stat_entry_delete 扣掉，這裡不重複計算
         "stat_effective_delete": f"""
             CREATE TRIGGER stat_effective_delete AFTER DELETE ON effective
             WHEN {_NOT_FROZEN} AND {entry_exists} BEGIN
-                UPDATE stat_src SET cnt = cnt - 1 WHERE source=OLD.source
-                    AND review={_review("OLD")}
-                    AND mc_version={_entry_version("OLD.entry_id")};
-                {_bump(_entry_version("OLD.entry_id"), str(NO_SOURCE), "''")}
+                UPDATE stat_src SET cnt = cnt - 1 WHERE
+                    {_effective_group("OLD.entry_id", "OLD.source", _review("OLD"))};
+                {_bump_effective("OLD.entry_id", str(NO_SOURCE), "''")}
                 {_counter("diff", "-" + _diff_if_added("OLD.zh_tw", "OLD.entry_id"))}
             END""",
         "stat_effective_update": f"""
             CREATE TRIGGER stat_effective_update
             AFTER UPDATE OF zh_tw, source, review_status ON effective
             WHEN {_NOT_FROZEN} BEGIN
-                UPDATE stat_src SET cnt = cnt - 1 WHERE source=OLD.source
-                    AND review={_review("OLD")}
-                    AND mc_version={_entry_version("OLD.entry_id")} AND {review_changed};
-                {_bump(_entry_version("NEW.entry_id"), "NEW.source", _review("NEW"), review_changed)}
+                UPDATE stat_src SET cnt = cnt - 1 WHERE
+                    {_effective_group("OLD.entry_id", "OLD.source", _review("OLD"))}
+                    AND {review_changed};
+                {_bump_effective("NEW.entry_id", "NEW.source", _review("NEW"), review_changed)}
                 {_counter("diff", _diff_if_replaced("OLD.zh_tw", "NEW.zh_tw", "NEW.entry_id"))}
             END""",
         # 程式本身不會把生效列移到別的條目；外部 SQL 這樣改時摘要無法逐項調整，
@@ -196,10 +242,10 @@ def _trigger_sql() -> dict[str, str]:
 
 
 _FULL_SOURCE_ROWS = f"""
-    SELECT e.mc_version, COALESCE(f.source, {NO_SOURCE}),
+    SELECT e.mc_version, e.mod_id, e.kind, COALESCE(f.source, {NO_SOURCE}),
            CASE WHEN f.entry_id IS NULL THEN '' ELSE {_review("f")} END, COUNT(*)
     FROM entry e LEFT JOIN effective f ON f.entry_id = e.id
-    GROUP BY 1, 2, 3
+    GROUP BY 1, 2, 3, 4, 5
 """
 _FULL_COUNTERS = {
     "content": "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)",
@@ -279,6 +325,8 @@ def install(conn: sqlite3.Connection) -> None:
 
 def rebuild(conn: sqlite3.Connection) -> None:
     """（重新）建立摘要表與觸發器、重算內容並解除暫停（在呼叫端的交易內執行）。"""
+    # 舊版摘要表的欄位不同：連同觸發器一併重建
+    conn.execute("DROP TABLE IF EXISTS stat_src")
     for statement in _TABLES.split(";"):
         if statement.strip():
             conn.execute(statement)
@@ -299,7 +347,8 @@ def reseed(conn: sqlite3.Connection) -> None:
     conn.execute("DELETE FROM stat_src")
     conn.execute("DELETE FROM stat_counter")
     conn.execute(
-        f"INSERT INTO stat_src (mc_version, source, review, cnt) {_FULL_SOURCE_ROWS}"
+        "INSERT INTO stat_src (mc_version, mod_id, kind, source, review, cnt) "
+        f"{_FULL_SOURCE_ROWS}"
     )
     conn.execute(f"INSERT INTO stat_counter (name, v) {_FULL_COUNTER_ROWS}")
     conn.execute(
@@ -332,10 +381,39 @@ def source_rows(conn: sqlite3.Connection) -> list[list]:
     return [
         list(row)
         for row in conn.execute(
-            f"SELECT mc_version, NULLIF(source, {NO_SOURCE}), NULLIF(review, ''), cnt "
-            "FROM stat_src WHERE cnt <> 0 ORDER BY mc_version, source, review"
+            f"SELECT mc_version, NULLIF(source, {NO_SOURCE}), NULLIF(review, ''), "
+            "SUM(cnt) FROM stat_src GROUP BY mc_version, source, review "
+            "HAVING SUM(cnt) <> 0 ORDER BY mc_version, source, review"
         )
     ]
+
+
+def version_totals(conn: sqlite3.Connection) -> list[tuple[str, int]]:
+    """``(版本, 條目數)``，條目多者在前、同數量依版本字串（與全庫的 ``GROUP BY`` 相同）。"""
+    totals = conn.execute(
+        "SELECT mc_version, SUM(cnt) FROM stat_src GROUP BY mc_version"
+    ).fetchall()
+    return sorted(
+        ((version, int(total)) for version, total in totals if total),
+        key=lambda row: (-row[1], row[0]),
+    )
+
+
+def source_codes(conn: sqlite3.Connection, version: str | None = None) -> list[int]:
+    """至少有一筆生效譯文的來源代碼（可限定版本），由小到大。"""
+    if version is None:
+        rows = conn.execute(
+            "SELECT source FROM stat_src WHERE source <> ? "
+            "GROUP BY source HAVING SUM(cnt) > 0",
+            (NO_SOURCE,),
+        )
+    else:
+        rows = conn.execute(
+            "SELECT source FROM stat_src WHERE mc_version = ? AND source <> ? "
+            "GROUP BY source HAVING SUM(cnt) > 0",
+            (version, NO_SOURCE),
+        )
+    return sorted(int(row[0]) for row in rows)
 
 
 def counters(conn: sqlite3.Connection) -> dict[str, int]:
@@ -346,7 +424,10 @@ def counters(conn: sqlite3.Connection) -> dict[str, int]:
 
 def verify(conn: sqlite3.Connection) -> list[tuple]:
     """比對摘要與全庫重算（約 1.4 秒／70 萬條目，只供測試與維護）；空清單表示一致。"""
-    stored = "SELECT mc_version, source, review, cnt FROM stat_src WHERE cnt <> 0"
+    stored = (
+        "SELECT mc_version, mod_id, kind, source, review, cnt "
+        "FROM stat_src WHERE cnt <> 0"
+    )
     problems = [
         ("stored", *row)
         for row in conn.execute(f"{stored} EXCEPT SELECT * FROM ({_FULL_SOURCE_ROWS})")
