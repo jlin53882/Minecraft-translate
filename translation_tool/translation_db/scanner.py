@@ -64,7 +64,7 @@ from translation_tool.translation_db.schema import (
     KIND_GUIDE,
     SRC_CUSTOM,
 )
-from translation_tool.translation_db.sniff_groups import sniffed_groups
+from translation_tool.translation_db.sniff_groups import sniffed_groups_detailed
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
@@ -120,6 +120,7 @@ class JarResult:
     nested_jars: int = 0
     skipped_nested: int = 0  # 損毀或過大而略過的內嵌 jar（不影響其餘內容）
     truncated_nested: int = 0  # 到達安全深度上限而未再走訪的內嵌 jar
+    sniff_incomplete: bool = False  # Book sniff 預算耗盡，僅完成部分候選判斷
     error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
     cancelled: bool = False
     notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
@@ -145,6 +146,7 @@ class ScanReport:
     nested_jars: int = 0
     skipped_nested: int = 0
     truncated_nested: int = 0
+    partial_jars: int = 0
     items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
     stats: IngestStats = field(default_factory=IngestStats)
     cancelled: bool = False
@@ -159,6 +161,7 @@ class ScanReport:
             "nested_jars": self.nested_jars,
             "skipped_nested": self.skipped_nested,
             "truncated_nested": self.truncated_nested,
+            "partial_jars": self.partial_jars,
             "items_found": self.items_found,
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
@@ -810,14 +813,21 @@ def _scan_archive(
         if options.include_patchouli:
             claimed = {n for members in groups.values() for n in members.values()}
             sniff_diagnostics: list[str] = []
-            for key, members in sniffed_groups(
+            sniff_result = sniffed_groups_detailed(
                 current,
                 names,
                 claimed,
                 translated=options.translated,
                 diagnostics=sniff_diagnostics,
-            ).items():
+            )
+            for key, members in sniff_result.groups.items():
                 groups.setdefault(key, members)
+            if sniff_result.budget_exhausted:
+                result.sniff_incomplete = True
+                result.notes.append(
+                    "Book sniff 讀取預算耗盡，僅保留已確認的項目："
+                    f"{sniff_result.budget_error}"
+                )
             for member in dict.fromkeys(sniff_diagnostics):
                 result.invalid_books.append(f"{current_label}:{member}")
                 result.notes.append(
@@ -947,16 +957,25 @@ def _progress(
     done: int, jars: Sequence[Path], result: JarResult, log: str, level: str = "info"
 ) -> dict[str, Any]:
     """一個 jar 處理完的進度更新；略過內嵌 jar 時附上說明並升為警告。"""
-    if (result.skipped_nested or result.truncated_nested) and not result.error:
+    if _is_partial_result(result) and not result.error:
         details = []
         if result.skipped_nested:
             details.append(f"略過 {result.skipped_nested} 個損毀或過大的內嵌 jar")
         if result.truncated_nested:
             details.append(f"截斷 {result.truncated_nested} 個超過深度上限的內嵌 jar")
+        if result.sniff_incomplete:
+            details.append("Book sniff 讀取預算耗盡，僅保留已確認的項目")
         log += "（" + "；".join(details) + "）"
         level = "warning"
         log += "".join(f"\n　⚠️ {note}" for note in result.notes)
     return {"progress": done / len(jars), "log": log, "level": level}
+
+
+def _is_partial_result(result: JarResult) -> bool:
+    """是否有任何來源內容未能完整驗證。"""
+    return bool(
+        result.skipped_nested or result.truncated_nested or result.sniff_incomplete
+    )
 
 
 def ingest_counts_text(stats: IngestStats, *, always_changed: bool = False) -> str:
@@ -1099,6 +1118,8 @@ def scan_folder_generator(
             report.nested_jars += result.nested_jars
             report.skipped_nested += result.skipped_nested
             report.truncated_nested += result.truncated_nested
+            if _is_partial_result(result):
+                report.partial_jars += 1
             if (
                 result.error
             ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
@@ -1144,9 +1165,15 @@ def scan_folder_generator(
             f"　⚠️ 失敗 {len(report.jars_failed)} 個（{'、'.join(report.jars_failed[:5])}"
             f"{'…' if len(report.jars_failed) > 5 else ''}）"
         )
+    if report.partial_jars:
+        summary += f"　⚠️ 部分掃描 {report.partial_jars} 個"
     yield {
         "progress": 1.0,
         "log": summary,
-        "level": "warning" if report.jars_failed or report.cancelled else "info",
+        "level": (
+            "warning"
+            if report.jars_failed or report.partial_jars or report.cancelled
+            else "info"
+        ),
         "report": report,
     }

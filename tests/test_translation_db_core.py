@@ -2645,6 +2645,30 @@ def test_oversized_nested_jar_is_skipped_but_counted_not_silent(tmp_path, monkey
     assert {i.mod_id for i in res.items} == {"foo"}
 
 
+def test_book_sniff_budget_exhaustion_is_reported_as_partial(tmp_path, monkeypatch):
+    from translation_tool.translation_db import sniff_groups
+
+    monkeypatch.setattr(sniff_groups, "SNIFF_MAX_MEMBERS", 2)
+    jar = make_jar(
+        tmp_path / "sniff-budget.jar",
+        {
+            "assets/demo/books/chapters/alpha.json": {
+                "pages": [{"type": "text", "summary": "Alpha text"}]
+            },
+            "assets/demo/books/chapters/beta.json": {
+                "pages": [{"type": "text", "summary": "Beta text"}]
+            },
+        },
+    )
+
+    result = scan_jar(jar, ScanOptions("1.21.1"), ())
+
+    assert result.error == ""
+    assert result.sniff_incomplete is True
+    assert result.items
+    assert any("Book sniff" in note for note in result.notes)
+
+
 def test_nested_archives_share_a_tree_wide_budget(tmp_path, monkeypatch):
     """每個內嵌 jar 的二進位資料很小（高壓縮），但解壓後加總超過整棵樹的預算 → 整包失敗。"""
     from translation_tool.translation_db import scanner

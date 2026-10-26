@@ -85,9 +85,9 @@ def _collect_sniffed_preview_matches(
     lang_regex: re.Pattern | None,
     lang_codes: list[str] | None,
     skip_zh_cn: bool,
-) -> list[tuple[str, int]]:
+) -> tuple[list[tuple[str, int]], Any]:
     if mode not in ("book", "dual"):
-        return []
+        return [], None
 
     matches: list[tuple[str, int]] = []
 
@@ -109,13 +109,13 @@ def _collect_sniffed_preview_matches(
         lang_codes or ["en_us", "zh_tw", "zh_cn"],
         skip_zh_cn,
     )
-    _walk_sniffed_members(
+    status = _walk_sniffed_members(
         jar_path,
         claimed,
         sniffed_langs,
         collect,
     )
-    return matches
+    return matches, status
 
 
 def _preview_error_result(jar_name: str, jar_size: int, details: Any) -> dict[str, Any]:
@@ -132,6 +132,7 @@ def _preview_error_result(jar_name: str, jar_size: int, details: Any) -> dict[st
         "partial": False,
         "skipped_nested": details.skipped_nested,
         "truncated_nested": details.truncated_nested,
+        "sniff_incomplete": False,
     }
 
 
@@ -143,16 +144,19 @@ def _build_preview_result(
     lang_regex: re.Pattern | None,
     entries: list[Any],
     sniffed_matches: list[tuple[str, int]],
+    sniff_status: Any,
     details: Any,
 ) -> dict[str, Any]:
     skipped_nested = details.skipped_nested
     truncated_nested = details.truncated_nested
-    partial = bool(skipped_nested or truncated_nested)
+    sniff_incomplete = bool(sniff_status and sniff_status.incomplete)
+    partial = bool(skipped_nested or truncated_nested or sniff_incomplete)
     status = {
         "error": None,
         "partial": partial,
         "skipped_nested": skipped_nested,
         "truncated_nested": truncated_nested,
+        "sniff_incomplete": sniff_incomplete,
     }
     if mode == "dual":
         lang_matched = [
@@ -238,7 +242,7 @@ def _scan_single_jar_for_preview(
         return _preview_error_result(jar_name, jar_size, details)
 
     entries = details.entries
-    sniffed_matches = _collect_sniffed_preview_matches(
+    sniffed_matches, sniff_status = _collect_sniffed_preview_matches(
         jar_path,
         mode,
         target_regex,
@@ -260,6 +264,7 @@ def _scan_single_jar_for_preview(
         lang_regex,
         entries,
         sniffed_matches,
+        sniff_status,
         details,
     )
 
@@ -463,6 +468,7 @@ def preview_extraction_generator_impl(
                     "jar": result["jar"],
                     "skipped_nested": result.get("skipped_nested", 0),
                     "truncated_nested": result.get("truncated_nested", 0),
+                    "sniff_incomplete": result.get("sniff_incomplete", False),
                 }
             )
 

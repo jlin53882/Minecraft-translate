@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import zipfile
 from collections.abc import Callable, Generator
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +22,7 @@ from translation_tool.core.jar_processor_extract import (
     get_file_hash,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
-from translation_tool.translation_db.sniff_groups import sniffed_groups
+from translation_tool.translation_db.sniff_groups import sniffed_groups_detailed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.log_unit import log_error, log_warning
 from translation_tool.utils.nested_archive import (
@@ -30,6 +31,7 @@ from translation_tool.utils.nested_archive import (
 )
 from translation_tool.utils.zip_safety import (
     MAX_FILE_BYTES,
+    ArchiveBudgetError,
     UnsafePathError,
     ZipReadBudget,
     ZipSizeError,
@@ -38,6 +40,19 @@ from translation_tool.utils.zip_safety import (
 )
 
 _BOOK_KINDS = (KIND_PATCHOULI, KIND_GUIDE)
+
+
+@dataclass
+class SniffTraversalStatus:
+    """補掃結果的完整性狀態；部分結果仍可供呼叫端使用。"""
+
+    incomplete: bool = False
+    reasons: list[str] = field(default_factory=list)
+
+    def add_reason(self, reason: str) -> None:
+        self.incomplete = True
+        if reason and reason not in self.reasons:
+            self.reasons.append(reason)
 
 
 def _wanted_langs(lang_codes: list[str], skip_zh_cn: bool) -> set[str]:
@@ -70,7 +85,7 @@ def _walk_sniffed_members(
     on_member: Callable[
         [zipfile.ZipFile, str, str, tuple[str, ...], ZipReadBudget], None
     ],
-) -> None:
+) -> SniffTraversalStatus:
     """在 outer／nested archive 中找出未被路徑規則認領的書籍／指南成員。
 
     DB scanner 與 Book extraction 必須使用同一個 ``sniffed_groups`` 判斷。
@@ -80,6 +95,7 @@ def _walk_sniffed_members(
     jar_name = os.path.basename(jar_path)
     budget = ZipReadBudget(label=jar_name)
     seen_members: set[str] = set()
+    status = SniffTraversalStatus()
 
     def visit_archive(
         current: zipfile.ZipFile,
@@ -91,7 +107,15 @@ def _walk_sniffed_members(
         names = current.namelist()
         taken = {name for name in names if claimed(name)}
         diagnostics: list[str] = []
-        groups = sniffed_groups(current, names, taken, diagnostics=diagnostics)
+        sniff_result = sniffed_groups_detailed(
+            current,
+            names,
+            taken,
+            diagnostics=diagnostics,
+        )
+        if sniff_result.budget_exhausted:
+            status.add_reason("Book sniff 讀取預算耗盡：" + sniff_result.budget_error)
+        groups = sniff_result.groups
         for member in dict.fromkeys(diagnostics):
             log_warning("[Sniff] 略過無法解析的書籍 JSON：%s（來源 %s）", member, label)
         for (kind, _mod, _key), members in groups.items():
@@ -104,18 +128,23 @@ def _walk_sniffed_members(
         return True
 
     def on_nested_error(label: str, name: str, exc: BaseException) -> None:
+        status.add_reason(f"略過內嵌 jar {label}：{exc}")
         log_warning("[Sniff] 略過內嵌 jar %s：%s", label, exc)
 
-    with zipfile.ZipFile(jar_path) as zf:
-        walk_nested_archives(
-            zf,
-            jar_name,
-            budget,
-            visit_archive,
-            budget_factory=lambda _label: budget,
-            on_nested_error=on_nested_error,
-            nested_name_predicate=is_nested_archive_name,
-        )
+    try:
+        with zipfile.ZipFile(jar_path) as zf:
+            walk_nested_archives(
+                zf,
+                jar_name,
+                budget,
+                visit_archive,
+                budget_factory=lambda _label: budget,
+                on_nested_error=on_nested_error,
+                nested_name_predicate=is_nested_archive_name,
+            )
+    except ArchiveBudgetError as exc:
+        status.add_reason(str(exc))
+    return status
 
 
 def extract_sniffed_from_jar(
@@ -125,6 +154,25 @@ def extract_sniffed_from_jar(
     langs: set[str],
 ) -> tuple[int, int]:
     """回傳 ``(寫出, 略過)``。``claimed(名稱)`` 為真的檔案已由名稱規則提取，不重複處理。"""
+    written, skipped, status = _extract_sniffed_from_jar_detailed(
+        jar_path, output_root, claimed, langs
+    )
+    if status.incomplete:
+        log_warning(
+            "[Sniff] %s 僅完成部分補掃：%s",
+            jar_path,
+            "；".join(status.reasons),
+        )
+    return written, skipped
+
+
+def _extract_sniffed_from_jar_detailed(
+    jar_path: str,
+    output_root: str,
+    claimed: Callable[[str], bool],
+    langs: set[str],
+) -> tuple[int, int, SniffTraversalStatus]:
+    """供 pipeline 使用的補掃結果，保留寫入數與完整性狀態。"""
     written = skipped = 0
     jar_base = _normalize_jar_base_name(jar_path)
 
@@ -149,6 +197,8 @@ def extract_sniffed_from_jar(
             log_error("拒絕提取不安全路徑: %s（來源 %s）", member, jar_path)
             skipped += 1
             return
+        except ArchiveBudgetError:
+            raise
         except ZipSizeError as exc:
             log_error("略過過大檔案 %s: %s", member, exc)
             skipped += 1
@@ -163,8 +213,8 @@ def extract_sniffed_from_jar(
             out.write(data)
         written += 1
 
-    _walk_sniffed_members(jar_path, claimed, langs, write_member)
-    return written, skipped
+    status = _walk_sniffed_members(jar_path, claimed, langs, write_member)
+    return written, skipped, status
 
 
 def extract_sniffed_book_files(
@@ -181,12 +231,20 @@ def extract_sniffed_book_files(
     for jar_path in jar_paths:
         raise_if_cancelled()
         try:
-            written, _skipped = extract_sniffed_from_jar(
+            written, _skipped, status = _extract_sniffed_from_jar_detailed(
                 jar_path, output_dir, claimed, langs
             )
-        except (zipfile.BadZipFile, OSError) as exc:
+        except (zipfile.BadZipFile, OSError, ArchiveBudgetError) as exc:
             log_error("[Sniff] 無法讀取 %s：%s", jar_path, exc)
             continue
+        if status.incomplete:
+            yield {
+                "log": (
+                    f"[依內容辨識] {Path(jar_path).name}：部分完成；"
+                    + "；".join(status.reasons)
+                ),
+                "level": "warning",
+            }
         if written:
             total_written += written
             yield {"log": f"[依內容辨識] {Path(jar_path).name}：提取 {written} 個檔案"}

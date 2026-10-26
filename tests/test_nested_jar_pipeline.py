@@ -227,6 +227,45 @@ def test_nested_content_sniff_keeps_first_canonical_source(tmp_path: Path):
     assert "From A" in extracted.read_text(encoding="utf-8")
 
 
+def test_sniff_budget_exhaustion_is_reported_as_partial(monkeypatch, tmp_path: Path):
+    from translation_tool.translation_db import sniff_groups
+
+    monkeypatch.setattr(sniff_groups, "SNIFF_MAX_MEMBERS", 2)
+    jar = _outer_jar(
+        tmp_path / "sniff-budget.jar",
+        direct={
+            "assets/demo/books/chapters/alpha.json": json.dumps(
+                {"pages": [{"type": "text", "summary": "Alpha text"}]}
+            ),
+            "assets/demo/books/chapters/beta.json": json.dumps(
+                {"pages": [{"type": "text", "summary": "Beta text"}]}
+            ),
+        },
+    )
+    book_regex = build_book_path_regex(codes=["en_us"])
+
+    preview = _scan_single_jar_for_preview(
+        str(jar),
+        "book",
+        book_regex,
+        book_path_regex=None,
+        lang_regex=None,
+    )
+
+    assert preview["partial"] is True
+    assert preview["sniff_incomplete"] is True
+    assert preview["count"] == 1
+
+    output = tmp_path / "book_output"
+    updates = list(
+        extract_book_files_generator(str(tmp_path), str(output), lang_codes=["en_us"])
+    )
+    assert any(
+        update.get("level") == "warning" and "部分完成" in update["log"]
+        for update in updates
+    )
+
+
 def test_nested_translation_result_reaches_stage2_staging_and_zip(tmp_path: Path):
     jar = _outer_jar(
         tmp_path / "sodium.jar",
