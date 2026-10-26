@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.log_unit import log_info, log_warning
-from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
+from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor, run_in_context
 
 # 低於此 jar 數不啟動行程池
 PROCESS_MIN_JARS = 24
@@ -141,7 +141,7 @@ def scan_executor(
             stop = threading.Event()
             if should_cancel is not None:
                 threading.Thread(
-                    target=_watch_cancel,
+                    target=run_in_context(_watch_cancel),
                     args=(should_cancel, event, stop),
                     daemon=True,
                 ).start()

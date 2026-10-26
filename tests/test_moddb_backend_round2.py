@@ -58,13 +58,19 @@ def test_same_as_source_flag_matches_sql_condition(db, monkeypatch):
     with_flags = [e.key for e in db.same_as_source_ai_entries("1.20.1")]
     count_with = db.count_same_as_source_ai("1.20.1")
     page_with = [
-        r.key for r in db.list_entries(criteria=EntryFilter(version="1.20.1", state="same"))[0]
+        r.key
+        for r in db.list_entries(criteria=EntryFilter(version="1.20.1", state="same"))[
+            0
+        ]
     ]
     _without_flags(db, monkeypatch)
     assert [e.key for e in db.same_as_source_ai_entries("1.20.1")] == with_flags
     assert db.count_same_as_source_ai("1.20.1") == count_with == 2
     page_without = [
-        r.key for r in db.list_entries(criteria=EntryFilter(version="1.20.1", state="same"))[0]
+        r.key
+        for r in db.list_entries(criteria=EntryFilter(version="1.20.1", state="same"))[
+            0
+        ]
     ]
     assert page_without == page_with
 
