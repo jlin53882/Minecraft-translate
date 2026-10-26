@@ -9,6 +9,7 @@
 import json
 import os
 import re
+from typing import Any
 
 import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List
@@ -26,7 +27,7 @@ LANG_WHITELIST = ["en_us", "zh_cn", "zh_tw"]
 LANG_PRIORITY = {lang: i for i, lang in enumerate(LANG_WHITELIST)}
 
 # 只解析語言字串 key
-LANG_KEY_SUFFIX = (".title", ".quest_desc")
+LANG_KEY_SUFFIX = (".title", ".quest_desc", ".quest_subtitle", ".chapter_subtitle")
 
 
 def is_lang_key_ref(val: str):
@@ -46,6 +47,44 @@ def is_lang_key_ref_like(val: str) -> bool:
     if not s:
         return False
     return bool(re.fullmatch(r"\{[^{}]+\}(?:\n\{[^{}]+\})*", s))
+
+
+def is_extractable_line(s: str) -> bool:
+    """清單內的一行是否要送去翻譯。
+
+    空行、語系鍵引用（``{atm9.quest.x}``）與 ``{image:...}``／``{@pagebreak}`` 這類純標記行
+    不抽取；寫回時這些行必須留在原位（見 ``merge_translated_lines``）。
+    """
+    return bool(s) and not is_lang_key_ref(s) and not is_lang_key_ref_like(s)
+
+
+def merge_translated_lines(template: list[Any], parts: list[str]) -> list[str]:
+    """把翻譯後的各行放回模板清單中「可抽取」的位置，其餘行（空行、圖片、換頁、引用）原樣保留。
+
+    ``parts`` 行數與可抽取行數相同時一對一對應；譯文行數較多時多出的行接在最後一個
+    可抽取行之後，較少時其餘可抽取行不輸出。
+    """
+    slots = [
+        i
+        for i, e in enumerate(template)
+        if isinstance(e, snbt.String) and is_extractable_line(str(e))
+    ]
+    merged: list[str] = [str(e) for e in template]
+    if not slots:
+        return merged
+    for slot, part in zip(slots, parts):
+        merged[slot] = part
+    extra = parts[len(slots) :]
+    drop = set(slots[len(parts) :])
+    last = slots[-1]
+    result: list[str] = []
+    for i, line in enumerate(merged):
+        if i in drop:
+            continue
+        result.append(line)
+        if i == last:
+            result.extend(extra)
+    return result
 
 
 TAG_CONDITION_PATTERN = re.compile(
@@ -98,7 +137,7 @@ def extract_lang_file(filename: str, root: Compound) -> dict:
                 for e in val:
                     if isinstance(e, snbt.String):
                         s = str(e)
-                        if s and not is_lang_key_ref(s) and not is_lang_key_ref_like(s):
+                        if is_extractable_line(s):
                             texts.append(s)
 
                 if texts:
@@ -134,7 +173,7 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
             for e in val:
                 if isinstance(e, snbt.String):
                     s = str(e)
-                    if s and not is_lang_key_ref(s) and not is_lang_key_ref_like(s):
+                    if is_extractable_line(s):
                         parts.append(s)
                 else:
                     # 非字串就跳過（保守）

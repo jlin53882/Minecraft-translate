@@ -53,6 +53,8 @@ flowchart TD
   K --> L
 ```
 
+FTB 注入清單欄位（`description`、`quest_desc`）時，空行、`{image:...}`、`{@pagebreak}` 與語系鍵引用這類沒送去翻譯的行（`is_extractable_line` 為假者）留在原位，譯文只放回可翻譯的行（`merge_translated_lines`）。語系檔抽取的欄位後綴為 `.title`、`.quest_desc`、`.quest_subtitle`、`.chapter_subtitle`。只勾選步驟 4 時也會正常結束並回報耗時。
+
 FTB 的翻譯結果只有在狀態為 `DONE` 時才可進入最終注入；`PARTIAL`、`FAILED`、`CANCELLED` 只保留續跑標記與部分輸出，不得把未完成資料當成已完成內容注入。
 
 ### KubeJS 流水線（`run_kubejs_pipeline`）
