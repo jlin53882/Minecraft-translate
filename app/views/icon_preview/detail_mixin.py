@@ -7,6 +7,7 @@ from collections import defaultdict
 from types import SimpleNamespace
 
 from app.icon_index import loads_lang_json
+from app.services_impl.icon_service import IconResult
 from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
@@ -77,6 +78,7 @@ class IconPreviewDetailMixin:
         self._detail_filtered_entries = None  # None = 無篩選，顯示全部
         self.back_btn.visible = True
         self.save_btn.visible = True
+        self._switch_list(detail=True, ready=False)
         self.header.value = f"📦 {modid}"
 
         # ===== Phase 2：顯示 Mod 詳情頁搜尋框 =====
@@ -84,12 +86,12 @@ class IconPreviewDetailMixin:
         self.detail_search_tf.value = ""
         self.detail_search_status.value = ""
 
-        # 更新 controls：將 detail 搜尋元件插入 list_view 前
-        self._update_detail_search_controls(visible=True)
-
         # ===== Phase 2：隱藏模組清單搜尋框，避免在 Detail View 中誤觸 =====
         self.mod_search_tf.visible = False
         self.mod_search_status.visible = False
+
+        # 更新 controls：將 detail 搜尋元件插入 list_view 前（同時送出上面的版面變更）
+        self._update_detail_search_controls(visible=True)
 
         log_info(f"[IconPreview] 開啟模組詳情: {modid}")
 
@@ -102,8 +104,6 @@ class IconPreviewDetailMixin:
             self._render_current_page()
             return
 
-        self.list_view.controls.clear()
-        self.update()
         generation = self._render_generation
 
         operation = reserve_page_operation(
@@ -175,9 +175,9 @@ class IconPreviewDetailMixin:
         self.page_info.value = ""
         self._detail_search_text = ""
         self._detail_filtered_entries = None
+        self._switch_list(detail=False)
         # 隱藏 detail 搜尋 UI
         self._update_detail_search_controls(visible=False)
-        self.list_view.controls.clear()
 
         # ===== Phase 2：恢復模組清單搜尋框 =====
         if hasattr(self, "mod_search_tf"):
@@ -217,7 +217,6 @@ class IconPreviewDetailMixin:
             clear_existing=True,
             duration=3000,
         )
-        self.update()
 
         if not self._current_zh_file:
             log_error(
@@ -550,19 +549,28 @@ class IconPreviewDetailMixin:
         return prepared
 
     def _fill_rows(self, page_entries, prepared) -> None:
-        """（event loop 上）依準備好的圖示建構列並刷新；``prepared`` 為 None 時同步計算。"""
-        self.list_view.controls.clear()
-        for index, entry in enumerate(page_entries):
-            self.list_view.controls.append(
-                LangItemRow(
-                    lang_key=entry.key,
-                    en_text=entry.en,
-                    zh_text=self._zh_data.get(entry.key, ""),
-                    assets_root=self.source_root / "assets",
-                    preview_root=_get_icon_cache_dir(),
-                    on_value_changed=self._on_value_changed,
-                    icon_path=getattr(entry, "icon_path", None),
-                    prepared_icon=None if prepared is None else prepared[index],
-                )
+        """（event loop 上）把這一頁的項目綁到可重用的列並刷新；``prepared`` 為 None 時同步計算。"""
+        pool = self._detail_row_pool
+        if prepared is None:
+            prepared = self._prepare_row_icons(
+                page_entries, (self.source_root / "assets", _get_icon_cache_dir())
             )
-        self.update()
+        while len(pool) < len(page_entries):
+            pool.append(self._new_detail_row())
+        for row, entry, icon in zip(pool, page_entries, prepared, strict=False):
+            row.bind(entry.key, entry.en, self._zh_data.get(entry.key, ""), icon)
+        self.detail_list_view.controls = pool[: len(page_entries)]
+        self.detail_list_view.visible = True
+        self._update_list_area(self.detail_list_view)
+
+    def _new_detail_row(self) -> LangItemRow:
+        """建立一列尚未綁定項目的校對列（之後以 ``bind`` 換內容）。"""
+        return LangItemRow(
+            lang_key="",
+            en_text="",
+            zh_text="",
+            assets_root=self.source_root / "assets",
+            preview_root=_get_icon_cache_dir(),
+            on_value_changed=self._on_value_changed,
+            prepared_icon=(IconResult(icon_path=None, reason="", risk=None), None),
+        )

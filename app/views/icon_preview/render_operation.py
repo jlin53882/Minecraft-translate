@@ -11,6 +11,9 @@ from app.tasks.operation_registry import (
 from app.views.icon_preview.icon_cache import _get_icon_cache_dir
 from translation_tool.utils.log_unit import log_error
 
+# 等待背景準備完成的輪詢間隔（短，換頁不必多等一個 tick）。
+_POLL_SECONDS = 0.005
+
 
 def render_current_page(view) -> None:
     """Prepare blocking row icons under an owner, then render on the UI loop."""
@@ -22,7 +25,6 @@ def render_current_page(view) -> None:
     view.total_pages = max(1, (len(entries) + view.page_size - 1) // view.page_size)
     start = view.current_page * view.page_size
     page_entries = list(entries[start : start + view.page_size])
-    view.list_view.controls.clear()
     view.page_info.value = (
         f"{view.current_modid}｜第 {view.current_page + 1} / {view.total_pages} 頁"
     )
@@ -33,7 +35,7 @@ def render_current_page(view) -> None:
         view._fill_rows(page_entries, None)
         return
 
-    view.update()
+    view._update_list_area(view.detail_list_view)
     view._render_generation += 1
     generation = view._render_generation
     icon_context = (view.source_root / "assets", _get_icon_cache_dir())
@@ -63,7 +65,7 @@ def render_current_page(view) -> None:
 
     async def prepare_and_fill():
         while not operation.done_event.is_set():
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(_POLL_SECONDS)
         if "error" in prepared_result:
             log_error(f"[IconPreview] 準備圖示失敗: {prepared_result['error']!r}")
             return
@@ -76,3 +78,19 @@ def render_current_page(view) -> None:
         run_task(prepare_and_fill)
     except Exception as ex:  # noqa: BLE001 - scheduling failure must be reported
         log_error(f"[IconPreview] 無法排程圖示準備: {ex!r}")
+        return
+    _prefetch_next_page_icons(
+        view, entries[start + view.page_size : start + 2 * view.page_size], icon_context
+    )
+
+
+def _prefetch_next_page_icons(view, next_entries, icon_context) -> None:
+    """在背景執行緒先渲染下一頁的圖示（結果進圖示渲染快取），下一頁不必再讀 JAR。"""
+    next_entries = [e for e in next_entries if getattr(e, "icon_path", None)]
+    run_task = getattr(view.page, "run_task", None)
+    if next_entries and run_task is not None:
+
+        async def _warm():
+            await asyncio.to_thread(view._prepare_row_icons, next_entries, icon_context)
+
+        run_task(_warm)

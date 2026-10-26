@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from typing import Protocol
 
 # 同時保留的已補譯文模組數：翻頁與搜尋會碰到的模組數遠小於此，超出的最久未用者釋放。
-_HYDRATED_CAPACITY = 256
+_HYDRATED_CAPACITY = 512
 
 
 class EntrySource(Protocol):

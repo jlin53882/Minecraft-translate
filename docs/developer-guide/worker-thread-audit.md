@@ -122,7 +122,8 @@ merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`Pipel
 |---|---|
 | `icon_preview_view._on_load_clicked` 內的 `_detect_source_mode`（glob／rglob）、`_try_use_cached_entries`（L2 快取 JSON）、`_begin_scan`（glob／rglob 計步） | `_load_async` 內逐步 `asyncio.to_thread`；世代守衛 |
 | 圖示預覽詳情的 `_open_mod_detail`（zh_tw.json 搜尋含 rglob fallback、讀取） | `_find_zh_file` 在 `to_thread` |
-| 圖示預覽詳情的 `_render_current_page`（每列 `resolve_icon_with_reason`、開 JAR ZIP、PIL 開圖／縮放／寫檔） | `prepare_row_icon` 在 `to_thread`；event loop 只建構 `LangItemRow(prepared_icon=...)` |
+| 圖示預覽詳情的 `_render_current_page`（每列 `resolve_icon_with_reason`、開 JAR ZIP、PIL 開圖／縮放／寫檔） | `prepare_row_icon` 在 `to_thread`；event loop 只對列池的 `LangItemRow` 呼叫 `bind(prepared_icon=...)` |
+| 圖示預覽換頁預載（模組清單前後頁的 L2 分片、詳情下一頁的圖示渲染） | `_prefetch_mod_pages`、`_prefetch_next_page_icons` 以 `run_task` 排入 `to_thread`；只暖快取，不改控制項 |
 | 圖示預覽儲存 `_save_current_zh`（寫 zh_tw.json） | `_write_zh_file` 在 `to_thread` |
 | `pipeline_extract_dialog._extract_show_preview_result` 的 `find_jar_files(mods)`（同步走訪資料夾） | 在預覽 worker 內執行 |
 | `open_output_folder`（不得以 `subprocess.run` 等待外部程式） | `Popen` 不等待；Windows `os.startfile`；失敗回傳 False 並記錄 |

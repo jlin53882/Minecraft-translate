@@ -2,6 +2,7 @@
 
 import json
 import os
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -349,17 +350,23 @@ def test_view_l2_lookup_warms_only_first_page_and_apply_does_not_read_disk(
 
     def tracking_open(path, *args, **kwargs):
         if str(path).endswith(".json"):
-            opened.append(Path(path).name)
+            opened.append((Path(path).name, threading.get_ident()))
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr("builtins.open", tracking_open)
     kind, store = view._lookup_cached_entries("jar_directory")
     assert kind == "L2"
+    assert [name for name, _ in opened].count("index.json") == 1
     assert len(opened) == 1 + view.mod_page_size  # index + 第一頁分片
     opened.clear()
 
     view._apply_cached_entries(kind, store, "jar_directory")
 
-    assert opened == []
+    import asyncio
+
+    while view.page._tasks:  # 前後頁預載（to_thread），不在 event loop 上讀檔
+        handler, args = view.page._tasks.pop(0)
+        asyncio.run(handler(*args))
+    assert all(tid != threading.get_ident() for _, tid in opened)
     assert len(view.list_view.controls) == view.mod_page_size
     assert view._source_cache is store.source

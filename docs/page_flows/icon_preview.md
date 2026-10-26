@@ -43,7 +43,7 @@ flowchart TD
   C --> D["_render_current_page（render_operation）"]
   D --> E["reserve_page_operation（owner icon-preview-cache）"]
   E --> F["_prepare_row_icons 於背景準備圖示位元組"]
-  F --> G["_fill_rows 於 UI loop 建立 LangItemRow"]
+  F --> G["_fill_rows 於 UI loop 把本頁項目 bind 到列池的 LangItemRow"]
   G --> H["使用者編輯 → _on_value_changed 更新 _zh_data"]
   H --> I["按下儲存翻譯（_save_current_zh）"]
   I --> J["reserve_page_operation（owner icon-preview-save，不可取消）"]
@@ -63,6 +63,8 @@ flowchart TD
   - 詳情與渲染也會比對 `current_modid` 與 `_render_generation`，避免換頁後覆蓋畫面。
 - 載入 owner：`_load_operation` 只允許目前世代的載入作業清除 `_loading`；舊作業即使晚到完成，也不能把新作業的忙碌狀態誤清掉。
 - 進度：`_set_progress` 只記錄最新值，並攜帶載入世代；`_refresh_progress` 以 0.2 秒節流，透過 `run_task` 在 UI loop 上套用（`progress.py`、`_apply_pending_progress`）。舊世代排入 event loop 的進度會被丟棄。
+- 刷新範圍：換頁、搜尋與改每頁筆數只刷新清單、分頁列與搜尋狀態文字（`_update_list_area`）；模組清單與詳情各有自己的 ListView（`mod_list_view`、`detail_list_view`），進出詳情只切換 `visible`。模組清單換頁會在背景預載前後頁（`_prefetch_mod_pages`），詳情換頁會預先渲染下一頁圖示。
+- 列控制項重用：模組清單與詳情頁各有一個列池（`_mod_row_pool`、`_detail_row_pool`）。換頁、搜尋、改每頁筆數只對池中的 `ModRow`／`LangItemRow` 呼叫 `bind` 更新值，Flet 只送出變動的欄位。連續快速換頁時，`_render_generation` 讓較舊的圖示準備結果被丟棄，只套用最後一次。
 - 搜尋：模組與詳情的搜尋框都使用 `app/ui/debounce.py` 的 `Debouncer`，延遲 150 毫秒後在 UI 執行緒執行 `_do_mod_search` 或 `_do_detail_search`。
 - `will_unmount` 會取消兩個 debouncer；`did_mount` 只同步載入按鈕狀態。
 

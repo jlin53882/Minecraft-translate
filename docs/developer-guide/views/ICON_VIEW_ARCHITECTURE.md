@@ -39,7 +39,7 @@ translation_tool/core/
 3. 「資料來源」卡（`kit.section_card`）：`pick_source_btn` + `source_path_input`、`pick_review_btn` + `review_path_input`、`load_btn`、`progress_bar` / `progress_text`（按鈕文字依序為「選擇模組資料夾（例：mods 資料夾）」、「選擇資源包路徑」、「載入模組清單」；路徑輸入框預設顯示「模組資料夾：尚未選擇」「資源包路徑：尚未選擇」；`progress_text` 預設「準備就緒」，`progress_bar` 掃描時才顯示）
 4. `save_btn`（僅詳情頁顯示）
 5. `page_bar`（`prev_page_btn` / `page_info` / `next_page_btn`；預設只見左右箭頭，`page_info` 為空）與 `page_size_selector`（「每頁顯示」，預設 50）
-6. `list_view`：模組清單列（`_mod_row`）或詳情頁的 `LangItemRow`
+6. `mod_list_view`（模組清單列 `ModRow`）與 `detail_list_view`（詳情頁 `LangItemRow`）：兩個 ListView 同時存在，以 `_switch_list` 切換 `visible`；`list_view` 屬性回傳目前顯示的那一個。兩種列都放在 view 的列池（`_mod_row_pool`、`_detail_row_pool`），換頁時重新 `bind`，不重建控制項
 
 進入詳情頁時，`_update_detail_search_controls` 會在 `list_view` 前插入 `detail_search_tf` / `detail_search_status`。
 
@@ -68,10 +68,10 @@ translation_tool/core/
 
 [校對] _open_mod_detail(modid) → 第二層
   ├─ 讀 zh_tw：背景執行緒 _find_zh_file（review_root/<modid>/lang/zh_tw.json，不存在則 rglob 補找），回到 event loop 後才套用（期間若返回／換頁／卸載則丟棄）
-  ├─ _render_current_page()：頁碼立即更新；每列圖示準備（prepare_row_icon：解析圖示、讀 JAR、產生預覽圖、upscale）在背景執行緒，event loop 上只建構 LangItemRow（prepared_icon），連續渲染只套用最後一次
+  ├─ _render_current_page()：頁碼立即更新；每列圖示準備（prepare_row_icon：解析圖示、讀 JAR、產生預覽圖、upscale）在背景執行緒，event loop 上 `_fill_rows` 只把這一頁的項目 `bind` 到列池的 `LangItemRow`（prepared_icon，欄位值與圖示變動才送 patch），連續渲染以 `_render_generation` 只套用最後一次
   ├─ 儲存 zh_tw.json：_save_current_zh 在背景執行緒寫檔（_write_zh_file），_finish_save 回 event loop 顯示結果
   │    ├─ 依 _detail_filtered_entries（搜尋）或 mods[current_modid] 分頁（每頁 page_size）
-  │    └─ 每筆 → LangItemRow(lang_key, en_text, zh_text, assets_root, preview_root, on_value_changed, icon_path)
+  │    └─ 每筆 → 列池的 LangItemRow.bind(lang_key, en_text, zh_text, prepared_icon)；池不夠時才以 _new_detail_row 新增
   ├─ 搜尋：_on_mod_search_change / _on_detail_search_change → Debouncer（150ms）→ _do_mod_search / _do_detail_search
   │    （詳情搜尋比對 key、英文、譯文）
   └─ _on_value_changed(key, value) → _zh_data 更新（to_halfwidth 正規化）
@@ -127,10 +127,11 @@ translation_tool/core/
 ## 維護注意
 
 1. 新增 icon 解析策略時，JAR 模式改 `app/icon_resolve.py`（挑選規則）與 `app/icon_render.py`（影像處理）；`app/views/icon_preview/icon_cache.py` 保留批次提取與穩定的 patch 入口（與 `app/icon_index.py` 共用），資料夾模式改 `translation_tool/core/icon_resolver.py`，不要塞進 view。
-2. `_render_current_page` 每次重建 LangItemRow；entry 需帶 `icon_path` 避免重複解析。
-3. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
-4. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
-5. 背景掃描不可直接改控制項；進度一律走 `IconPreviewView._set_progress`。
+2. 刷新範圍：換頁、搜尋、改每頁筆數只呼叫 `_update_list_area`（清單、`page_bar`、搜尋狀態文字各自 `update()`），不對整個 view `update()`；只有標題、按鈕或搜尋框顯示狀態改變（進出詳情）才整個送出（`_list_chrome` 比對）。模組清單換頁時 `_prefetch_mod_pages` 在背景執行緒預載前後兩頁，詳情換頁時 `_prefetch_next_page_icons` 預先渲染下一頁圖示。
+3. `_render_current_page` 重用列池中的 `LangItemRow`（`bind` 只改值）；entry 需帶 `icon_path` 避免重複解析。新增欄位時在 `LangItemRow.__init__` 建立控制項、在 `bind` 更新值，不要在換頁路徑建立新控制項。
+4. source identity 以檔案路徑／名稱、大小與 `mtime_ns` 偵測來源變更，不計算內容雜湊；若檔案內容改變但大小與時間戳都被保留，快取可能不會失效。新增、刪除或一般修改 `en_us.json`／JAR／runtime asset 會改變 identity。
+5. `to_halfwidth()` 是全形轉半形（NFKC）工具，用於翻譯值正規化。
+6. 背景掃描不可直接改控制項；進度一律走 `IconPreviewView._set_progress`。
 
 ## 分層邊界
 
@@ -145,7 +146,8 @@ translation_tool/core/
 ```
 app/views/icon_preview_view.py            ← IconPreviewView 主體：生命週期、載入流程、進度
 app/views/icon_preview/
-  ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋
+  ├─ list_mixin.py       IconPreviewListMixin    模組清單、分頁、搜尋；`_on_page_size_change` 在詳情頁改 `page_size`，在模組清單改 `mod_page_size`
+  ├─ mod_row.py          ModRow                  可重新綁定的模組清單列
   ├─ detail_mixin.py     IconPreviewDetailMixin  單一模組詳情、載入 entries、翻譯儲存
   ├─ icon_cache.py       圖示批次提取與快取輔助函式（ModpackAssetCatalog 在 `app/icon_catalog.py`）
   ├─ entries_cache.py    掃描結果（entries）的 L2 磁碟快取（index + 每模組分片，`ShardSource`）

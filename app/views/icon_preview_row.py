@@ -118,6 +118,27 @@ def _image_control(src: bytes, tooltip: str) -> ft.Image:
     )
 
 
+def _risk_text(icon_result) -> tuple[str, str | None]:
+    """找不到圖示時的原因文字與顏色；沒有原因時回傳空字串。"""
+    if not icon_result.reason:
+        return "", None
+    color_map = {
+        IconRisk.IGNORE: C.EM,
+        IconRisk.WARN: C.GOLD,
+        IconRisk.DANGER: C.RED,
+    }
+    return f"⚠ {icon_result.reason}", color_map.get(icon_result.risk, C.MUTED)
+
+
+def _icon_source(image_bytes: bytes | None, icon_result, lang_key: str):
+    """決定圖示欄要顯示的圖片與提示；內容類 key 找不到圖示用共用佔位圖，其他 key 回傳 None。"""
+    if image_bytes:
+        return image_bytes, describe_icon_uri(icon_result.icon_path)
+    if lang_key and _key_needs_icon(lang_key):
+        return _placeholder_bytes(), describe_icon_uri(None)
+    return None
+
+
 def _build_icon_widget(
     image_bytes: bytes | None, icon_result, lang_key: str = ""
 ) -> tuple[ft.Control | None, ft.Text | None]:
@@ -130,28 +151,19 @@ def _build_icon_widget(
         return _image_control(
             image_bytes, describe_icon_uri(icon_result.icon_path)
         ), None
-    risk_label = None
-    if icon_result.reason:
-        color_map = {
-            IconRisk.IGNORE: C.EM,
-            IconRisk.WARN: C.GOLD,
-            IconRisk.DANGER: C.RED,
-        }
-        risk_label = ft.Text(
-            f"⚠ {icon_result.reason}",
-            size=12,
-            color=color_map.get(icon_result.risk, C.MUTED),
-        )
-    if not (lang_key and _key_needs_icon(lang_key)):
+    text, color = _risk_text(icon_result)
+    risk_label = ft.Text(text, size=12, color=color) if text else None
+    source = _icon_source(None, icon_result, lang_key)
+    if source is None:
         return None, risk_label
-    return _image_control(_placeholder_bytes(), describe_icon_uri(None)), risk_label
+    return _image_control(*source), risk_label
 
 
 class LangItemRow(ft.Container):
-    """LangItemRow 類別。
+    """單筆語系列：圖示、繁中翻譯（可編輯）、lang key 與英文原文。
 
-    用途：封裝與 LangItemRow 相關的狀態與行為。
-    維護注意：修改公開方法前請確認外部呼叫點與相容性。
+    控制項在建構時建立一次，``bind`` 只更新值；詳情頁換頁時重用同一批列，
+    Flet 只送出變動的欄位，不必重建、序列化每頁數百個控制項。
     """
 
     def __init__(
@@ -175,10 +187,9 @@ class LangItemRow(ft.Container):
             assets_root: 資源根目錄
             preview_root: 預覽根目錄
             on_value_changed: 值變更回調函數
-            icon_path: 圖示路徑（可為 JAR 內的路徑 或已提取到磁碟的路徑）。
-                       若有值則直接使用，跳過 resolve_icon_with_reason。
+            icon_path: 圖示路徑（JAR 內的 URI 或已提取到磁碟的路徑）；有值則跳過 resolve。
             prepared_icon: ``prepare_row_icon`` 在背景執行緒算好的 ``(icon_result, image_bytes)``；
-                       提供時建構列不做任何 I/O（event loop 上使用）。未提供則同步計算（相容舊呼叫）。
+                       提供時建構列不做任何 I/O（event loop 上使用）。未提供則同步計算。
         """
         super().__init__(
             padding=ft.Padding.symmetric(vertical=12, horizontal=12),
@@ -186,81 +197,70 @@ class LangItemRow(ft.Container):
             bgcolor=C.PANEL,
             border=ft.Border.all(1, C.LINE),
         )
-
         self.lang_key = lang_key
         self.on_value_changed = on_value_changed
-
-        # =========================
-        # 🖼 Icon + 分類
-        # =========================
-        if prepared_icon is not None:
-            icon_result, image_bytes = prepared_icon
-            icon_widget, risk_label = _build_icon_widget(
-                image_bytes, icon_result, lang_key
-            )
-        else:
-            icon_result, image_bytes = prepare_row_icon(
-                lang_key, assets_root, preview_root, icon_path
-            )
-            icon_widget, risk_label = _build_icon_widget(
-                image_bytes, icon_result, lang_key
-            )
-
-        # =========================
-        # 📝 文字區
-        # =========================
-        text_col = self._build_text_column(zh_text, lang_key, en_text, risk_label)
-
-        # =========================
-        # 🔧 最外層 Row
-        # =========================
-        row_controls: list[ft.Control] = []
-        if icon_widget is not None:
-            row_controls.append(icon_widget)
-        row_controls.append(text_col)
-
+        self.icon_image = _image_control(_placeholder_bytes(), "")
+        self.risk_label = ft.Text("", size=12, visible=False)
         self.content = ft.Row(
             spacing=12,
             vertical_alignment=ft.CrossAxisAlignment.START,
-            controls=row_controls,
+            controls=[
+                self.icon_image,
+                self._build_text_column(),
+            ],
         )
+        if prepared_icon is None:
+            prepared_icon = prepare_row_icon(
+                lang_key, assets_root, preview_root, icon_path
+            )
+        self.bind(lang_key, en_text, zh_text, prepared_icon)
 
-    def _build_text_column(self, zh_text, lang_key, en_text, risk_label) -> ft.Column:
-        """翻譯、lang key、英文原文欄位組成的文字區。"""
+    def _build_text_column(self) -> ft.Column:
+        """翻譯（可編輯）、lang key、英文原文與找不到圖示的原因。"""
+        self.zh_field = kit.field(
+            value="",
+            label="繁中翻譯:",
+            multiline=True,
+            min_lines=1,
+            max_lines=4,
+            text_size=16,
+            on_change=lambda e: self.on_value_changed(
+                self.lang_key, to_halfwidth(e.control.value)
+            ),
+        )
+        self.key_field = kit.field(
+            value="",
+            label="lang key:",
+            read_only=True,
+            border=ft.NoInputBorder(),
+            text_size=12,
+        )
+        self.en_field = kit.field(
+            value="",
+            label="英文原文:",
+            read_only=True,
+            multiline=True,
+            border=ft.NoInputBorder(),
+            text_size=14,
+        )
         return ft.Column(
             spacing=6,
             expand=True,
-            controls=[
-                # 繁中翻譯（可編輯）
-                kit.field(
-                    value=to_halfwidth(zh_text or ""),
-                    label="繁中翻譯:",
-                    multiline=True,
-                    min_lines=1,
-                    max_lines=4,
-                    text_size=16,
-                    on_change=lambda e: self.on_value_changed(
-                        self.lang_key,
-                        to_halfwidth(e.control.value),
-                    ),
-                ),
-                # lang key（可選取）
-                kit.field(
-                    value=to_halfwidth(lang_key),
-                    label="lang key:",
-                    read_only=True,
-                    border=ft.NoInputBorder(),
-                    text_size=12,
-                ),
-                # 英文原文（可選取）
-                kit.field(
-                    value=to_halfwidth(en_text),
-                    label="英文原文:",
-                    read_only=True,
-                    multiline=True,
-                    border=ft.NoInputBorder(),
-                    text_size=14,
-                ),
-                risk_label if risk_label else ft.Container(),
-            ],
+            controls=[self.zh_field, self.key_field, self.en_field, self.risk_label],
         )
+
+    def bind(self, lang_key: str, en_text: str, zh_text: str, prepared_icon) -> None:
+        """把這一列顯示成指定項目；``prepared_icon`` 為 ``(icon_result, image_bytes)``。"""
+        icon_result, image_bytes = prepared_icon
+        self.lang_key = lang_key
+        self.zh_field.value = to_halfwidth(zh_text or "")
+        self.key_field.value = to_halfwidth(lang_key)
+        self.en_field.value = to_halfwidth(en_text)
+        source = _icon_source(image_bytes, icon_result, lang_key)
+        self.icon_image.visible = source is not None
+        if source is not None:
+            self.icon_image.src, self.icon_image.tooltip = source
+        text, color = _risk_text(icon_result) if not image_bytes else ("", None)
+        self.risk_label.value = text
+        self.risk_label.color = color
+        self.risk_label.visible = bool(text)

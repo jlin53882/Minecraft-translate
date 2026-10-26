@@ -1,9 +1,12 @@
 """IconPreviewView 的模組清單、分頁與搜尋（由 icon_preview_view.py 拆出，#114）。"""
 
+import asyncio
+
 import flet as ft
 
-from app.ui import design, kit
+from app.ui import kit
 from app.ui.design import C
+from app.views.icon_preview.mod_row import ModRow
 
 
 class IconPreviewListMixin:
@@ -16,7 +19,9 @@ class IconPreviewListMixin:
         self._mod_search_page = 0
         self._mod_search_total = 0
 
+        chrome_before = self._list_chrome()
         self.current_modid = None
+        self._switch_list(detail=False)
         self.back_btn.visible = False
         self.save_btn.visible = False
         self.header.value = "🧩 JAR 圖示預覽"
@@ -29,6 +34,9 @@ class IconPreviewListMixin:
             self.detail_search_tf.visible = False
             self.detail_search_status.visible = False
 
+        if self._list_chrome() != chrome_before:
+            self.update()  # 從詳情回來等版面變動；單純換頁不必比對整棵樹
+
         mod_ids = sorted(self.mods.keys())
         total = len(mod_ids)
 
@@ -40,67 +48,70 @@ class IconPreviewListMixin:
         end = start + self.mod_page_size
         visible_mods = mod_ids[start:end]
 
-        self.list_view.controls.clear()
+        self._show_mod_page(visible_mods)
+        self._prefetch_mod_pages(mod_ids, start, end)
 
-        for modid in visible_mods:
-            entries = self.mods[modid]
-            total_count = len(entries)
-            untranslated = sum(1 for e in entries if not e.zh_tw.strip())
+    @property
+    def list_view(self) -> ft.ListView:
+        """目前顯示的那一層清單（詳情頁或模組清單）。"""
+        return self.detail_list_view if self.current_modid else self.mod_list_view
 
-            self.list_view.controls.append(
-                self._mod_row(modid, total_count, untranslated)
-            )
-
-        self._update_page_bar_for_mods()
-        self.update()
-
-    def _mod_row(self, modid: str, total_count: int, untranslated: int) -> ft.Control:
-        """模組清單的一列：modid（等寬字）+ 總數 / 未翻譯晶片，點擊進入該模組。"""
-        done_ratio = 1.0 - (untranslated / total_count if total_count else 0.0)
-        return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=14, vertical=10),
-            bgcolor=C.PANEL,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=design.RADIUS_CONTROL + 2,
-            ink=True,
-            on_click=lambda e, m=modid: self._open_mod_detail(m),
-            content=ft.Row(
-                [
-                    ft.Column(
-                        [
-                            ft.Text(
-                                modid,
-                                size=14,
-                                weight=ft.FontWeight.W_600,
-                                color=C.TEXT,
-                                font_family=design.FONT_MONO,
-                            ),
-                            ft.Text(
-                                f"總數 {total_count} ｜ 未翻譯 {untranslated}",
-                                size=12,
-                                color=C.DIM,
-                            ),
-                        ],
-                        spacing=2,
-                        tight=True,
-                        expand=True,
-                    ),
-                    ft.Container(
-                        width=120,
-                        content=kit.progress_bar(
-                            done_ratio, "em" if untranslated == 0 else "gold", height=5
-                        ),
-                    ),
-                    kit.chip(
-                        "完成" if untranslated == 0 else f"未翻譯 {untranslated}",
-                        "em" if untranslated == 0 else "gold",
-                    ),
-                    ft.Icon(ft.Icons.CHEVRON_RIGHT, size=18, color=C.DIM),
-                ],
-                spacing=14,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
+    def _list_chrome(self) -> tuple:
+        """標題、按鈕與搜尋框的顯示狀態；變動時才需要整個 view 重新送出。"""
+        detail_search = getattr(self, "detail_search_tf", None)
+        return (
+            self.header.value,
+            self.back_btn.visible,
+            self.save_btn.visible,
+            self.mod_search_tf.visible,
+            self.mod_search_status.visible,
+            detail_search.visible if detail_search is not None else None,
+            self.mod_list_view.visible,
+            self.detail_list_view.visible,
         )
+
+    def _update_list_area(self, list_view) -> None:
+        """只刷新清單、分頁列與搜尋狀態文字，不重新比對整個 view 的控制項樹。"""
+        list_view.update()
+        self.page_bar.update()
+        self.mod_search_status.update()
+        detail_status = getattr(self, "detail_search_status", None)
+        if detail_status is not None and detail_status in self.controls:
+            detail_status.update()  # 只在詳情頁（已掛載）時存在於版面
+
+    def _switch_list(self, *, detail: bool, ready: bool = True) -> None:
+        """切換顯示模組清單或詳情清單；``ready=False`` 時詳情清單先隱藏，等列綁好再顯示。"""
+        self.mod_list_view.visible = not detail
+        self.detail_list_view.visible = detail and ready
+
+    def _prefetch_mod_pages(self, ordered: list[str], start: int, end: int) -> None:
+        """在背景執行緒先載入前後兩頁的模組項目，下一次換頁時列表直接用記憶體裡的資料。"""
+        warm = getattr(self.mods, "warm", None)
+        if warm is None:
+            return
+        size = end - start
+        neighbors = ordered[end : end + size] + ordered[max(0, start - size) : start]
+        run_task = getattr(self.page, "run_task", None)
+        if neighbors and run_task is not None:
+
+            async def _warm():
+                await asyncio.to_thread(warm, neighbors)
+
+            run_task(_warm)
+
+    def _show_mod_page(self, modids) -> None:
+        """把這一頁的模組綁到可重用的清單列並刷新（列控制項不重建）。"""
+        pool = self._mod_row_pool
+        while len(pool) < len(modids):
+            pool.append(ModRow(self._open_mod_detail))
+        for row, modid in zip(pool, modids, strict=False):
+            entries = self.mods[modid]
+            row.bind(
+                modid, len(entries), sum(1 for e in entries if not e.zh_tw.strip())
+            )
+        self.mod_list_view.controls = pool[: len(modids)]
+        self._update_page_bar_for_mods()
+        self._update_list_area(self.mod_list_view)
 
     def _update_page_bar_for_mods(self):
         """更新分頁資訊顯示（同時支援一般清單與搜尋結果分頁）"""
@@ -123,7 +134,14 @@ class IconPreviewListMixin:
 
     def _on_page_size_change(self, e: ft.ControlEvent):
         """處理每頁顯示數量變更（PR61 Issue 1）"""
-        self.mod_page_size = int(e.control.value)
+        size = int(e.control.value)
+        if self.current_modid:
+            # 詳情頁：改的是每頁項目數；模組清單的分頁設定不動
+            self.page_size = size
+            self.current_page = 0
+            self._render_current_page()
+            return
+        self.mod_page_size = size
         self.mod_current_page = 0  # 重設回第一頁
         self._mod_search_page = 0  # 搜尋結果也重設
         if self._mod_search_matched:
@@ -224,8 +242,9 @@ class IconPreviewListMixin:
             )
             self.mod_search_status.value = f"符合 {len(matched)} / {total} 個模組"
             self._render_mod_search_page()
+            return
 
-        self.update()
+        self._update_list_area(self.mod_list_view)
 
     def _render_mod_search_page(self):
         """渲染搜尋結果的目前頁（PR61 Issue 1）"""
@@ -235,17 +254,8 @@ class IconPreviewListMixin:
         end = start + self.mod_page_size
         visible_mods = matched[start:end]
 
-        self.list_view.controls.clear()
-        for modid in visible_mods:
-            entries = self.mods[modid]
-            total_count = len(entries)
-            untranslated = sum(1 for e in entries if not e.zh_tw.strip())
-            self.list_view.controls.append(
-                self._mod_row(modid, total_count, untranslated)
-            )
-
-        self._update_page_bar_for_mods()
-        self.update()
+        self._show_mod_page(visible_mods)
+        self._prefetch_mod_pages(matched, start, end)
 
     def _on_detail_search_change(self, e: ft.ControlEvent):
         """Mod 詳情頁搜尋 on_change（debounce 150ms）"""
@@ -294,8 +304,8 @@ class IconPreviewListMixin:
         ]
         if visible:
             idx = (
-                self.controls.index(self.list_view)
-                if self.list_view in self.controls
+                self.controls.index(self.mod_list_view)
+                if self.mod_list_view in self.controls
                 else len(self.controls)
             )
             self.controls.insert(idx, self.detail_search_tf)

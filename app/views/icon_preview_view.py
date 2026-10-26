@@ -6,6 +6,7 @@
 
 import time
 from collections import defaultdict
+from collections.abc import Mapping
 from pathlib import Path
 
 import flet as ft
@@ -107,7 +108,8 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
             self.save_btn,
             self.page_bar,
             self.page_size_selector,
-            self.list_view,
+            self.mod_list_view,
+            self.detail_list_view,
         ]
 
     def _init_icon_preview_state(self, page) -> None:
@@ -133,7 +135,9 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         # =========================
         # 狀態
         # =========================
-        self.mods: dict[str, list] = {}
+        self.mods: Mapping[str, list] = {}
+        self._mod_row_pool: list = []  # 模組清單的列控制項，換頁時重用
+        self._detail_row_pool: list = []  # 詳情頁的列控制項，換頁時重用
         self.current_modid: str | None = None
 
         # 快取（防止重複掃描 JAR）
@@ -290,7 +294,9 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
         )
         self.save_btn.visible = False
 
-        self.list_view = ft.ListView(expand=True, spacing=8)
+        # 模組清單與詳情各有自己的 ListView，切換只改 visible，兩邊的列都不必重新送出。
+        self.mod_list_view = ft.ListView(expand=True, spacing=8)
+        self.detail_list_view = ft.ListView(expand=True, spacing=8, visible=False)
 
         # 進度條
         self.progress_bar = kit.progress_bar(0, "em", height=6)
