@@ -21,6 +21,13 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
+from translation_tool.core.book_formats import (
+    FORMAT_NEUTRAL_PAGES,
+    FORMAT_STANDARD_PATCHOULI,
+    FORMAT_UNKNOWN,
+    iter_neutral_pages_values,
+    resolve_book_format,
+)
 from translation_tool.core.text_sniffer import (
     BOOK_DISPLAY_FIELDS,
     BOOK_ID_FIELDS,
@@ -293,6 +300,7 @@ class PatchouliContext:
     source_fingerprint: str = ""
     context_fingerprint: str = ""
     resolution_error: str = ""
+    book_format: str = FORMAT_STANDARD_PATCHOULI
 
     @property
     def has_template_context(self) -> bool:
@@ -307,9 +315,16 @@ def context_from_metadata(
     source_available: bool = False,
     source_fingerprint: str = "",
     resolution_error: str = "",
+    book_format: str | None = None,
 ) -> PatchouliContext:
     """建立可在測試、ZIP scanner 或檔案抽取器間共用的 context。"""
 
+    resolved_format = resolve_book_format(file_path) if book_format is None else None
+    selected_format = book_format or (
+        resolved_format.name
+        if resolved_format is not None and resolved_format.name != FORMAT_UNKNOWN
+        else FORMAT_STANDARD_PATCHOULI
+    )
     normalized = {
         str(key).lower(): tuple(sorted({str(item).lower() for item in values}))
         for key, values in (template_fields or {}).items()
@@ -320,6 +335,7 @@ def context_from_metadata(
         "source_available": source_available,
         "source_fingerprint": source_fingerprint,
         "resolution_error": resolution_error,
+        "book_format": selected_format,
     }
     return PatchouliContext(
         file_path=str(file_path),
@@ -329,6 +345,7 @@ def context_from_metadata(
         source_fingerprint=source_fingerprint,
         context_fingerprint=_canonical_hash(context_payload),
         resolution_error=resolution_error,
+        book_format=selected_format,
     )
 
 
@@ -338,6 +355,7 @@ def context_from_archive_documents(
     book_json: Mapping[str, Any] | None = None,
     templates: Mapping[str, Any] | None = None,
     resolution_error: str = "",
+    book_format: str | None = None,
 ) -> PatchouliContext:
     """由 ZIP/JAR 已讀取的 book/template 文件建立 context。
 
@@ -370,6 +388,7 @@ def context_from_archive_documents(
         source_available=bool(book_json is not None or templates),
         source_fingerprint=_canonical_hash(payload),
         resolution_error=resolution_error,
+        book_format=book_format,
     )
 
 
@@ -525,6 +544,22 @@ def context_for_path(
     """
 
     path = Path(file_path)
+    resolved = resolve_book_format(path)
+    if resolved.name == FORMAT_NEUTRAL_PAGES:
+        return context_from_metadata(
+            path,
+            source_available=True,
+            source_fingerprint="neutral-pages-path",
+            book_format=resolved.name,
+        )
+    if resolved.name != FORMAT_UNKNOWN and not resolved.is_patchouli_compatible:
+        return context_from_metadata(
+            path,
+            source_available=True,
+            source_fingerprint=resolved.name,
+            resolution_error=resolved.reason,
+            book_format=resolved.name,
+        )
     if not path.is_file():
         # In-memory document callers (including the long-standing extractor
         # unit tests) do not have a book root to resolve. Keep the legacy
@@ -548,6 +583,7 @@ def context_for_path(
         source_fingerprint=base.source_fingerprint,
         context_fingerprint=base.context_fingerprint,
         resolution_error=base.resolution_error,
+        book_format=base.book_format,
     )
 
 
@@ -956,6 +992,37 @@ def iter_patchouli_semantics(
     context = context or context_for_path(file_path)
     output: list[PatchouliSemantic] = []
     source_fingerprint = _canonical_hash(document)
+    if context.book_format == FORMAT_NEUTRAL_PAGES:
+        for path, value, verdict in iter_neutral_pages_values(document):
+            if verdict == "text":
+                output.append(
+                    _semantic(
+                        path,
+                        value,
+                        LITERAL_TEXT,
+                        "neutral_pages_display_field",
+                        context,
+                        source_fingerprint,
+                        "format:neutral_pages",
+                        f"field:{book_field(path)}",
+                    )
+                )
+            elif verdict == "lang_key":
+                output.append(
+                    _semantic(
+                        path,
+                        value,
+                        TRANSLATION_REFERENCE,
+                        "neutral_pages_translation_key",
+                        context,
+                        source_fingerprint,
+                        "format:neutral_pages",
+                        f"field:{book_field(path)}",
+                    )
+                )
+        return tuple(output)
+    if context.book_format not in {FORMAT_STANDARD_PATCHOULI}:
+        return ()
     normalized_path = str(file_path).replace("\\", "/").lower()
     file_name = PurePosixPath(normalized_path).name
     page_type = "template" if "/templates/" in f"/{normalized_path}" else ""

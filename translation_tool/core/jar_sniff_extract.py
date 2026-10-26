@@ -23,7 +23,7 @@ from translation_tool.core.jar_processor_extract import (
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
 from translation_tool.translation_db.sniff_groups import sniffed_groups
 from translation_tool.utils.cancellation import raise_if_cancelled
-from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.log_unit import log_error, log_warning
 from translation_tool.utils.zip_safety import (
     MAX_FILE_BYTES,
     UnsafePathError,
@@ -62,7 +62,10 @@ def extract_sniffed_from_jar(
     with zipfile.ZipFile(jar_path) as zf:
         names = zf.namelist()
         taken = {n for n in names if claimed(n)}
-        groups = sniffed_groups(zf, names, taken)
+        diagnostics: list[str] = []
+        groups = sniffed_groups(zf, names, taken, diagnostics=diagnostics)
+        for member in dict.fromkeys(diagnostics):
+            log_warning("[Sniff] 略過無法解析的書籍 JSON：%s（來源 %s）", member, jar_path)
         budget = ZipReadBudget(label=os.path.basename(jar_path))
         for (kind, _mod, _key), members in groups.items():
             if kind not in _BOOK_KINDS:

@@ -122,6 +122,7 @@ class JarResult:
     error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
     cancelled: bool = False
     notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
+    invalid_books: list[str] = field(default_factory=list)
     logs: list[tuple[int, str]] = field(
         default_factory=list
     )  # 行程池 worker 收集的日誌
@@ -804,11 +805,19 @@ def _scan_archive(
         groups = _group_members(names, options, dir_names)
         if options.include_patchouli:
             claimed = {n for members in groups.values() for n in members.values()}
+            sniff_diagnostics: list[str] = []
             for key, members in sniffed_groups(
-                current, names, claimed, translated=options.translated
+                current,
+                names,
+                claimed,
+                translated=options.translated,
+                diagnostics=sniff_diagnostics,
             ).items():
                 groups.setdefault(key, members)
-        patchouli_contexts = (
+            for member in dict.fromkeys(sniff_diagnostics):
+                result.invalid_books.append(f"{current_label}:{member}")
+                result.notes.append(f"略過無法解析的書籍 JSON：{current_label}:{member}")
+            patchouli_contexts = (
             _patchouli_contexts_for_archive(current, current_budget, names, dir_names)
             if any(kind == "patchouli" for kind, _mod, _file in groups)
             else {}

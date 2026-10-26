@@ -18,8 +18,13 @@ import json
 import zipfile
 from collections.abc import Sequence
 
+from translation_tool.core.book_formats import (
+    BOOK_EXCLUDED_DIRS,
+    FORMAT_NEUTRAL_PAGES,
+    FORMAT_STANDARD_PATCHOULI,
+    resolve_book_format,
+)
 from translation_tool.core.text_sniffer import (
-    VANILLA_NON_TEXT_DIRS,
     is_project_doc_name,
     looks_like_advancement,
     looks_like_book_json,
@@ -57,7 +62,7 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
         parts = name.split("/")
         if len(parts) < 4 or parts[0].lower() not in ("assets", "data"):
             continue
-        if parts[2].lower() in VANILLA_NON_TEXT_DIRS:
+        if parts[2].lower() in BOOK_EXCLUDED_DIRS:
             continue
         if low.endswith(".json") and len(parts) == 4 and parts[2] == "lang":
             continue
@@ -68,7 +73,13 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
     return found
 
 
-def _kind_of(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> str | None:
+def _kind_of(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    member: str,
+    *,
+    invalid_members: list[str] | None = None,
+) -> str | None:
     """檔案像什麼：手冊／進度（JSON）或指南（文字）；都不是回傳 None。
 
     文字檔依「這個檔案自己的語系」判斷：英文看停用字，繁中／簡中看中文字數，
@@ -85,9 +96,16 @@ def _kind_of(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> str | N
         try:
             data = json.loads(raw.decode("utf-8-sig"), strict=False)
         except (UnicodeDecodeError, ValueError):
+            if invalid_members is not None:
+                invalid_members.append(member)
             return None
         if looks_like_advancement(data):
             return KIND_ADVANCEMENT
+        format_info = resolve_book_format(member, data)
+        if format_info.name in {FORMAT_STANDARD_PATCHOULI, FORMAT_NEUTRAL_PAGES}:
+            return KIND_PATCHOULI
+        if format_info.name != "unknown":
+            return None
         if looks_like_book_json(data, member.split("/")[2:]):
             return KIND_PATCHOULI
         return None
@@ -125,6 +143,7 @@ def sniffed_groups(
     claimed: set[str],
     *,
     translated: bool = False,
+    diagnostics: list[str] | None = None,
 ) -> Groups:
     """未被資料夾設定認領的手冊／指南檔，依 ``(類型, 模組, 中性路徑)`` 分組。"""
     by_dir: dict[tuple[str, str, str], list[tuple[str, dict[str, str]]]] = {}
@@ -147,7 +166,12 @@ def sniffed_groups(
                 (
                     k
                     for _n, m in samples
-                    if (k := _kind_of(zf, budget, _primary(m, translated)))
+                    if (k := _kind_of(
+                        zf,
+                        budget,
+                        _primary(m, translated),
+                        invalid_members=diagnostics,
+                    ))
                 ),
                 None,
             )
@@ -158,7 +182,12 @@ def sniffed_groups(
                     continue
                 # 抽樣只決定這個資料夾像什麼；同資料夾的設定檔、中繼資料不能沿用結論
                 try:
-                    own = _kind_of(zf, budget, _primary(members, translated))
+                    own = _kind_of(
+                        zf,
+                        budget,
+                        _primary(members, translated),
+                        invalid_members=diagnostics,
+                    )
                 except ArchiveBudgetError:
                     break  # 預算用盡：沒驗證過的檔案不收，保留已驗證的
                 if own is None:

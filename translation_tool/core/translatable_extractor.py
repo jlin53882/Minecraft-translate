@@ -11,6 +11,12 @@ import json
 from pathlib import Path
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
+from translation_tool.core.book_formats import (
+    BOOK_EXCLUDED_DIRS,
+    FORMAT_UNKNOWN,
+    is_neutral_pages_candidate,
+    resolve_book_format,
+)
 from translation_tool.core.lm_config_rules import (
     is_value_translatable,
 )
@@ -19,7 +25,6 @@ from translation_tool.core.patchouli_semantics import (
     patchouli_translatable_items,
 )
 from translation_tool.core.text_sniffer import (
-    VANILLA_NON_TEXT_DIRS,
     advancement_texts,
     is_advancement_document,
     lang_non_text_reason,
@@ -27,6 +32,7 @@ from translation_tool.core.text_sniffer import (
     value_shape_reason,
 )
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_warning
 
 _MAX_SNIFF_BYTES = 2 * 1024 * 1024
 
@@ -78,7 +84,7 @@ def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
         parts = parts[1:]
     if len(parts) < 4 or parts[0] not in ("assets", "data"):
         return False
-    if parts[2].lower() in VANILLA_NON_TEXT_DIRS or parts[-1].lower() == "book.json":
+    if parts[2].lower() in BOOK_EXCLUDED_DIRS or parts[-1].lower() == "book.json":
         return False
     if len(parts) == 4 and parts[2] == "lang":
         return False
@@ -86,8 +92,13 @@ def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
         if path.stat().st_size > _MAX_SNIFF_BYTES:
             return False
         data = json.loads(path.read_bytes())
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
+        if is_neutral_pages_candidate("/".join(parts)):
+            log_warning("略過無法解析的自訂書籍 JSON：%s（%s）", path, exc)
         return False
+    format_info = resolve_book_format("/".join(parts), data)
+    if format_info.name != FORMAT_UNKNOWN:
+        return format_info.is_patchouli_compatible
     return looks_like_book_json(data, parts[2:])
 
 
