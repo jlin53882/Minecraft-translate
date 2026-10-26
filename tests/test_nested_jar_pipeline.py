@@ -20,6 +20,7 @@ from translation_tool.core.jar_processor_preview import _scan_single_jar_for_pre
 from translation_tool.core.jar_sniff_extract import extract_sniffed_from_jar
 from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
 from translation_tool.core.output_bundler import bundle_outputs_generator
+from translation_tool.translation_db.scanner import ScanOptions, scan_jar
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 from translation_tool.utils.jar_browser import scan_jars
 
@@ -127,6 +128,13 @@ def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path
     )
     book_regex = build_book_path_regex(codes=["en_us"])
     member = "assets/demo/books/chapters/foods.json"
+
+    db_scan = scan_jar(jar, ScanOptions("1.21.1"), dir_names=())
+    assert db_scan.nested_jars == 1
+    assert any(
+        item.kind == "patchouli" and item.key.endswith("foods.json#pages[0].summary")
+        for item in db_scan.items
+    )
 
     preview = _scan_single_jar_for_preview(
         str(jar), "book", book_regex, book_path_regex=None, lang_regex=None
