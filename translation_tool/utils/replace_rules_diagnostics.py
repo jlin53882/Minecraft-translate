@@ -13,12 +13,15 @@
   仍是「花崗岩」，可以命中）。以 t2s／tw2sp 回推簡體寫法再轉換判斷。
 
 含正則符號的原詞（``.?*[]()\\``）不做字串包含判斷，只做重複與空白檢查。
+整段完全相符規則（``^文字$``）的結果不會再被替換，不做交叉／自我引用檢查。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+
+from translation_tool.utils.replace_rules import exact_source
 
 _REGEX_CHARS = ".?*[]()\\"
 #: 短於這個長度的原詞不參與「交叉引用」，單字幾乎一定被別的譯詞包含，只會產生雜訊
@@ -119,13 +122,23 @@ def diagnose_rules(
             )
         else:
             first_seen[src] = idx
-        if _is_fixed(src) and len(src) >= MIN_CROSS_LENGTH:
+        if (
+            exact_source(src) is None
+            and _is_fixed(src)
+            and len(src) >= MIN_CROSS_LENGTH
+        ):
             by_length.setdefault(len(src), {}).setdefault(src, []).append(idx)
 
     for idx, (src, dst) in enumerate(zip(froms, tos, strict=True)):
         if not src.strip():
             continue
-        _check_rule(idx, src, dst, by_length, add)
+        whole = exact_source(src)
+        if whole is None:
+            _check_rule(idx, src, dst, by_length, add)
+        else:
+            # 整段規則的結果不會再被其他規則替換，只做空白檢查；可達性看中間的文字
+            _check_rule(idx, src, "", by_length, add)
+            src = whole
         if convert is not None and _is_fixed(src):
             converted = convert(src)
             if converted != src and not _reachable(src, convert):

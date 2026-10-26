@@ -8,12 +8,13 @@ from pathlib import Path
 import pytest
 
 from tools.audit_replace_rules import (
+    OFFICIAL_TW,
     convert_all,
     corpus_metrics,
     load_official_pairs,
     static_checks,
 )
-from translation_tool.utils.replace_rules import apply_replace_rules
+from translation_tool.utils.replace_rules import apply_replace_rules, exact_source
 from translation_tool.utils.replace_rules_diagnostics import (
     CROSS_REFERENCE,
     diagnose_rules,
@@ -32,7 +33,10 @@ def default_rules():
     ("simplified", "expected"),
     [
         ("深色橡木椅子", "黑橡木椅子"),
-        ("深色橡木", "黑橡木"),
+        (
+            "深色橡木",
+            "黑橡木塊",
+        ),  # 單獨名稱由整段規則處理（block.minecraft.dark_oak_wood）
         ("深色橡木原木", "黑橡木原木"),
         ("去皮橡木柱子", "剝皮橡木柱子"),
         ("去皮橡木原木", "剝皮橡木原木"),
@@ -66,6 +70,41 @@ def test_default_rules_are_idempotent_on_their_own_output(default_rules):
         assert apply_replace_rules(once, default_rules) == once
 
 
+def test_exact_rules_only_match_the_whole_text():
+    rules = [
+        {"from": "^紅樹木$", "to": "紅樹林木塊"},
+        {"from": "紅樹木", "to": "紅樹林木"},
+        {"from": "林木", "to": "森林"},
+    ]
+    assert (
+        apply_replace_rules("紅樹木", rules) == "紅樹林木塊"
+    )  # 結果不再被其他規則替換
+    assert apply_replace_rules("紅樹木椅子", rules) == "紅樹林木椅子"
+    assert apply_replace_rules(" 紅樹木", rules) == " 紅樹林木"
+    # 中間含正則符號的不是整段規則
+    assert exact_source("^紅.木$") is None
+    assert exact_source("^$") is None
+
+
+@pytest.mark.parametrize(
+    ("simplified", "expected"),
+    [
+        ("红树木", "紅樹林木塊"),
+        ("去皮云杉木", "剝皮杉木塊"),
+        (
+            "红砖",
+            "紅磚",
+        ),  # 簡中物品「紅磚」與繁中方塊「紅磚」同字，見 test_rules_keep_official_zh_tw_unchanged
+        ("红砖块", "紅磚"),
+        ("红砖墙", "紅磚牆"),
+        ("蜜脾", "蜂巢"),
+        ("钟", "鐘"),
+    ],
+)
+def test_official_standalone_names_use_exact_rules(default_rules, simplified, expected):
+    assert convert_text(simplified, default_rules) == expected
+
+
 def test_engine_is_longest_match_single_pass():
     rules = [
         {"from": "深色橡木", "to": "黑橡木"},
@@ -88,25 +127,24 @@ _AMBIGUOUS = (
 ALLOWED_CROSS_REFERENCES = {
     "去皮緋紅菌核": _LONGER_WINS,
     "去皮詭異菌核": _LONGER_WINS,
-    "知識就是力量": _LONGER_WINS,
     "苔石磚樓梯": _LONGER_WINS,
     "蟲蝕苔石磚": _LONGER_WINS,
-    "水肺之箭": _LONGER_WINS,
-    "水肺藥水": _LONGER_WINS,
     "皮革外套": _LONGER_WINS,
     "緋紅菌巖": _LONGER_WINS,
     "緋紅菌核": _LONGER_WINS,
     "詭異菌核": _LONGER_WINS,
     "苔石磚": _LONGER_WINS,
-    "蜜脾塊": _LONGER_WINS,
-    "蜜脾": _AMBIGUOUS,
-    "力量之箭": _PROTECTION,
-    "皮革帽子": _PROTECTION,
     "皮革褲子": _PROTECTION,
     "迅捷潛行": _PROTECTION,
-    "力量藥水": _PROTECTION,
     "迅捷藥水": _PROTECTION,
     "迅捷之箭": _PROTECTION,
+    "最大傷害吸收值": _PROTECTION,
+    "墨囊噴濺": _PROTECTION,
+    "隱身的隊友": _PROTECTION,
+    "向上飄浮": _PROTECTION,
+    "動態暫時無法使用": _PROTECTION,
+    "捕獲一條魚": _PROTECTION,
+    "配置給": _PROTECTION,
 }
 
 # 譯詞含空白：官方譯名本身有空白（含英文、數字或標點），不是多餘空白。
@@ -119,9 +157,7 @@ ALLOWED_SPACE_IN_TO = {
 }
 
 # 輸出與 to 不同：to 恰好等於另一條規則的原詞，編譯時被收斂（見 docs/developer-guide/replace-rules.md）。
-ALLOWED_OUTPUT_DRIFT = {
-    "蜜脾": "官方 item.minecraft.honeycomb 是「蜂巢」，但 蜂巢→蜂窩（block.minecraft.bee_nest）同詞異譯",
-}
+ALLOWED_OUTPUT_DRIFT = {}
 
 
 @pytest.fixture(scope="module")
@@ -169,9 +205,21 @@ def test_cross_references_are_all_decided(rule_list):
 
 
 # ---------------------------------------------------------------- 官方語料一致率
-# 固定門檻：目前結果向下取整（官方名稱類 98.44%、官方全部 57.43%）；改善規則後請調高。
-MIN_OFFICIAL_NAME_EXACT_RATE = 0.98
+# 固定門檻：目前結果向下取整（官方名稱類 99.65%、官方全部 57.99%）；改善規則後請調高。
+MIN_OFFICIAL_NAME_EXACT_RATE = 0.99
 MIN_OFFICIAL_ALL_EXACT_RATE = 0.57
+
+
+def test_rules_keep_official_zh_tw_unchanged(default_rules):
+    # 規則也會套用在模組自帶的繁中（語系合併、Mod DB 掃描），所以已經是官方繁中的文字不能被改動。
+    # 簡中與繁中同字不同義的詞（簡中物品「紅磚」＝繁中「紅磚頭」，繁中「紅磚」卻是方塊）因此不寫規則。
+    tw = json.loads(OFFICIAL_TW.read_text(encoding="utf-8"))
+    changed = {
+        key: (text, apply_replace_rules(text, default_rules))
+        for key, text in tw.items()
+        if isinstance(text, str) and apply_replace_rules(text, default_rules) != text
+    }
+    assert changed == {}
 
 
 def test_official_consistency_does_not_regress(default_rules):

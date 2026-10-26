@@ -36,6 +36,7 @@ if str(REPO) not in sys.path:
 from translation_tool.utils.replace_rules import (  # noqa: E402
     ReplaceRules,
     apply_replace_rules,
+    exact_source,
 )
 from translation_tool.utils.replace_rules_diagnostics import (  # noqa: E402
     CONVERTED_SOURCE,
@@ -237,7 +238,11 @@ def static_checks(rules: Sequence[Mapping[str, str]]) -> dict[str, list]:
                 {"index": i, "from": src, "to": dst, "s2twp": safe_convert_text(src)}
             )
         else:
-            out = apply_replace_rules("「" + src + "」", loaded)[1:-1]
+            whole = exact_source(src)
+            if whole is not None:
+                out = apply_replace_rules(whole, loaded)
+            else:
+                out = apply_replace_rules("「" + src + "」", loaded)[1:-1]
             if out != dst:
                 report["output_differs_from_to"].append(
                     {"index": i, "from": src, "to": dst, "output": out}
