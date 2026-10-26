@@ -190,6 +190,27 @@ def _source_manifest_entry(path: Path, wrapper: str) -> dict[str, Any]:
     }
 
 
+def _manifest_wrappers_for_jar(
+    jar_path: Path,
+    nested_output_name: str | None,
+) -> tuple[str, ...]:
+    """Return every generated wrapper a JAR can use in the current layout.
+
+    Non-colliding JARs intentionally keep the historical distinction between
+    direct non-``assets/`` output (normalized mod name) and nested output
+    (full JAR stem).  A collision-safe name is shared by both paths.  The
+    manifest must record both historical wrappers so stale nested output can
+    be invalidated as well as direct output.
+    """
+    if nested_output_name is not None:
+        return (nested_output_name,)
+    wrappers = {
+        f"{_normalize_jar_base_name(jar_path.name)}_extracted",
+        f"{jar_path.stem}_extracted",
+    }
+    return tuple(sorted(wrappers, key=str.casefold))
+
+
 def _load_extraction_manifest(
     path: Path,
 ) -> dict[str, set[tuple[str, int | None, int | None]]] | None:
@@ -264,16 +285,27 @@ def _reconcile_extracted_wrappers(
     current_sources: list[dict[str, Any]] = []
     current_by_wrapper: dict[str, set[tuple[str, int | None, int | None]]] = {}
     for jar_path in dict.fromkeys(Path(path) for path in jar_paths):
-        wrapper = nested_output_names.get(jar_path)
-        if wrapper is None:
-            wrapper = f"{_normalize_jar_base_name(jar_path.name)}_extracted"
-        entry = _source_manifest_entry(jar_path, wrapper)
-        current_sources.append(entry)
-        current_by_wrapper.setdefault(wrapper, set()).add(
-            (entry["path"], entry["size"], entry["mtime_ns"])
-        )
+        for wrapper in _manifest_wrappers_for_jar(
+            jar_path, nested_output_names.get(jar_path)
+        ):
+            entry = _source_manifest_entry(jar_path, wrapper)
+            current_sources.append(entry)
+            current_by_wrapper.setdefault(wrapper, set()).add(
+                (entry["path"], entry["size"], entry["mtime_ns"])
+            )
 
     previous_by_wrapper = _load_extraction_manifest(manifest_path)
+    if previous_by_wrapper is not None:
+        # Version 1 originally recorded only the normalized direct-output
+        # wrapper.  Reconstruct the historical nested wrapper from the source
+        # path so an upgrade can also remove stale versioned-JAR output.
+        for wrapper, sources in tuple(previous_by_wrapper.items()):
+            for source_path, size, mtime_ns in sources:
+                legacy_nested_wrapper = f"{Path(source_path).stem}_extracted"
+                if _is_safe_extracted_wrapper_name(legacy_nested_wrapper):
+                    previous_by_wrapper.setdefault(legacy_nested_wrapper, set()).add(
+                        (source_path, size, mtime_ns)
+                    )
     if previous_by_wrapper is None:
         wrappers_to_remove = {
             entry.name

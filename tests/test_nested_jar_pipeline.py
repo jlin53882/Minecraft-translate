@@ -704,6 +704,63 @@ def test_reextract_removes_wrappers_for_removed_sources(tmp_path: Path):
     assert json.loads(extracted[0].read_text(encoding="utf-8"))["value"] == "server"
 
 
+def test_reextract_removes_versioned_nested_wrapper_when_source_removed(
+    tmp_path: Path,
+):
+    """Manifest cleanup must track the historical non-collision nested wrapper."""
+    mods = tmp_path / "mods"
+    jar = _outer_jar(
+        mods / "guide-neoforge-1.0.jar",
+        nested={"META-INF/jarjar/inner.jar": _sodium_like_inner()},
+    )
+    output = tmp_path / "out"
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+    nested_wrapper = output / "guide-neoforge-1.0_extracted"
+    assert (nested_wrapper / "assets/sodium/lang/en_us.json").exists()
+
+    jar.unlink()
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    assert not nested_wrapper.exists()
+
+
+def test_reextract_upgrades_legacy_manifest_for_versioned_nested_wrapper(
+    tmp_path: Path,
+):
+    """An older v1 manifest must also invalidate its unrecorded nested wrapper."""
+    mods = tmp_path / "mods"
+    jar = _outer_jar(
+        mods / "guide-neoforge-1.0.jar",
+        nested={"META-INF/jarjar/inner.jar": _sodium_like_inner()},
+    )
+    output = tmp_path / "out"
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+    nested_wrapper = output / "guide-neoforge-1.0_extracted"
+    manifest = output.parent / ".out.extraction_manifest"
+    manifest.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "sources": [
+                    {
+                        "path": str(jar.resolve()),
+                        "wrapper": "guide_extracted",
+                        "size": jar.stat().st_size,
+                        "mtime_ns": jar.stat().st_mtime_ns,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    jar.unlink()
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    assert not nested_wrapper.exists()
+
+
 def test_reextract_replaces_wrapper_when_source_path_changes(tmp_path: Path):
     """同一非碰撞 wrapper 換了來源 JAR 時，不得保留舊成員檔案。"""
     mods = tmp_path / "mods"
