@@ -521,11 +521,14 @@ class SmartReviewCandidateSelectionMixin:
         )
         candidate_cte = _smart_review_candidate_cte(selection, "entry e")
         group_sql = _smart_review_group_sql("c")
-        row = self._one(
-            candidate_cte
-            + " SELECT COUNT(*) FROM (SELECT 1 FROM candidate_rows c GROUP BY "
-            + group_sql
-            + ")",
-            selection.params,
+        # 同文去重要對所有候選列分組（數十萬筆時 1 秒以上）；候選範圍只取決於條目、
+        # 生效譯文與審核狀態，所以依資料世代快取，面板每次重新整理不重算
+        return int(
+            self._cached_count(
+                candidate_cte
+                + " SELECT COUNT(*) FROM (SELECT 1 FROM candidate_rows c GROUP BY "
+                + group_sql
+                + ")",
+                list(selection.params),
+            )
         )
-        return int(row[0]) if row else 0

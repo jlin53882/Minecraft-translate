@@ -152,3 +152,15 @@ def test_last_page_reads_from_the_far_end(db):
     db._conn.set_trace_callback(None)
     assert total == 40 and len(rows) == 10
     assert any("DESC" in sql and "LIMIT 10 OFFSET 0" in sql for sql in statements)
+
+
+def test_smart_review_candidate_count_is_cached_until_data_changes(db):
+    first = db.count_smart_review_candidates(version=VERSION, effective_source=1)
+    assert first == 40
+    statements = _plans(db, "candidate_rows")
+    assert db.count_smart_review_candidates(version=VERSION, effective_source=1) == 40
+    assert statements == []
+    db.ingest(VERSION, [ScanItem(KIND_LANG, "mod", "k.new", "Fresh", "新", "", None)])
+    assert db.count_smart_review_candidates(version=VERSION, effective_source=1) == 41
+    assert statements
+    db._conn.set_trace_callback(None)

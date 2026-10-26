@@ -58,7 +58,48 @@ does not depend on the table size; record the bound in `ALLOWED_PLAN_MARKERS` or
 - `kinds()`: sorts the distinct entry kinds only.
 - The mismatch list: sorts only rows that pass the special-character prefilter.
 - `cleanup_batches()`: sorts the cleanup batches created by manual cleanup operations only.
-- Not measured: a 700k-row database. The plan checks run on a small fixture; no large database was available to compare timings.
+- Large databases: the plan checks run on a small fixture; timings on a database of 700k or more
+  entries are measured with the tools described in "Mod DB large-database measurement" below.
+
+### Mod DB large-database measurement
+
+`tools/benchmark_moddb_700k.py` measures the read operations of `TranslationDB` and of the
+Entries page's snapshot (versions, mods, kinds, source codes, filter options, one page, the first
+entry's detail, Smart Review marks) on a database of 700k or more entries; `tools/benchmark_moddb_700k_write.py`
+measures the write paths on a copy. Use a database built from real mod JARs of at least three Minecraft versions and
+make independent copies with SQLite backup or `cp`; never benchmark the shared file with the write tool.
+
+Every case runs in a fresh process and reports three numbers. **Cold** is the first call. **Hot**
+repeats the call in the same process, so the process-level read cache is warm. **Miss** repeats it with the
+process caches emptied before each call, which is what a new filter combination or the first refresh after a
+write costs (the OS file cache stays warm). Each iteration opens a new read-only connection inside a read
+transaction, like the background workers do, so SQLite's per-connection page cache is never shared. The
+interactive target is the hot value of the combined Entries snapshot; a miss may exceed it, but must scale
+with a scan of one version at most and never with the number of operations already performed on the batch.
+
+When a number looks wrong, check in this order: `EXPLAIN QUERY PLAN` of the exact statement
+(`set_trace_callback` gives the statement with its parameters expanded), whether the planner starts from a
+large table instead of the page's own rows (use `CROSS JOIN` to fix the order), whether a cached value is
+invalidated by an unrelated write, and whether Python does per-row work that SQL can aggregate.
+
+### Mod DB module × source facets
+
+`translation_tool/translation_db/option_facets.py` computes, once per filter (with the module and source
+selection removed), the number of matching entries for every module and every effective source. The same
+facet answers the module and source dropdown options, the total count for any module or source selection, and
+the scope dropdowns of bulk review and Smart Review. Facets are cached per data generation through
+`TranslationDB._cached`, so paging and changing the module or source never rescans.
+
+Filters that only involve the version, the entry kind, the review status or "no translation" read the facet from
+`stat_src` (version, module, kind, source, review), which `stat_summary.py` keeps exact with triggers; all other
+filters use one streaming `GROUP BY e.mod_id` scan along `idx_entry_list_order`. `verify()` of `stat_summary` compares
+the table with a full recompute, and the facet tests compare every facet result with the row queries after each write
+path. A list total is taken from a cached facet when it exists and is otherwise counted separately, so a module-only
+service query never scans the whole version.
+
+Pages: when the total is known and zero, or the offset is past it, the page query is skipped (it would otherwise walk
+the whole version looking for rows that do not exist); for the default sort the second half of the list is read from the
+other end through the reversed index and flipped.
 
 ### Mod DB 已審核 lang 術語候選
 
@@ -183,6 +224,16 @@ after JSON confirmation; this does not add a full candidate scan to the normal
 retention path. `tests/test_smart_review_manual_edit.py` asserts the plan has no
 `SCAN` or `TEMP B-TREE`, and the recovery regression covers five later history
 writes for the same entry.
+
+## Mod DB scan throughput
+
+Scanning is bounded by two serial stages. JAR parsing is pure Python and runs in threads, so it uses about one core
+regardless of the worker count (more workers add GIL contention instead of speed); ingest runs in the single writer
+and is dominated by the triggers that keep derived data exact. Measure both with
+`tools/benchmark_moddb_700k_write.py --jar-folder` (ingest of an existing and of a new version) and compare the
+process CPU time with the wall time to see how many cores are used; profile the writer with `cProfile` on
+`TranslationDB.ingest` and attribute trigger cost by dropping trigger groups (`stat_`, `effcol_`, `qflags_`, `chg_`,
+`activity_`) on a scratch copy.
 
 ## Worker 數量
 

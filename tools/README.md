@@ -11,6 +11,8 @@
 | `__code_scan.py` | 程式碼結構掃描 |
 | `verify_patchouli_final.py` | Patchouli 翻譯驗證 |
 | `build_icon_index.py` | 為指定的 mods 資料夾預建 Mod 資料庫 icon 索引；JAR 檔案變更後重新執行，例如 `python tools/build_icon_index.py "C:/path/to/mods"` |
+| `benchmark_moddb_700k.py` | 70 萬筆以上 Mod 資料庫的讀取基準：每個案例在全新行程量測冷／熱／快取清空後的時間，含條目頁完整快照；方法見 `docs/developer-guide/performance.md` |
+| `benchmark_moddb_700k_write.py` | 同一資料庫複本上的寫入路徑基準（手動儲存、批次取代與還原、批量審核、write_back、掃描匯入、衍生資料重建與驗證）；會修改傳入的資料庫 |
 | `smart_review_strategy_probe.py` | 讀取既有 Smart Review JSON，離線比較驗證、重試與批次策略；可選擇性執行不寫入資料庫的 live A/B。 |
 | `report_standalone_term_candidates.py` | 以 fixture 或 Mod DB 產生 standalone term 候選報告。 |
 | `test_main.py` / `test_all_features.py` | 手動執行的整合檢查（不在 pytest 的 `testpaths` 內） |
