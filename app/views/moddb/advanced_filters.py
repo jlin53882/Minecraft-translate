@@ -225,7 +225,7 @@ class AdvancedFilters:
 
     def _toggle(self, _e=None) -> None:
         self.panel.visible = not self.panel.visible
-        self.toggle_button.text = "收合進階篩選" if self.panel.visible else "進階篩選"
+        self.set_summary()
 
     def _pick_date(self, field: ft.TextField, label: str) -> None:
         """用日曆選日期；選完填入欄位並立即套用篩選。"""
@@ -487,9 +487,11 @@ class AdvancedFilters:
             count += 1
         if self.sort_by != "default":
             count += 1
-        self.toggle_button.text = (
-            f"進階篩選（{count}）" if not self.panel.visible else "收合進階篩選"
-        )
+        # Flet 的 Button 標籤放在 content，沒有 text 屬性
+        if self.panel.visible:
+            self.toggle_button.content = "收合進階篩選"
+        else:
+            self.toggle_button.content = f"進階篩選（{count}）" if count else "進階篩選"
         self.active_text.value = f"已套用 {count} 項進階條件" if count else ""
         self.clear_button.visible = bool(count)
         return count

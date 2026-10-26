@@ -176,7 +176,8 @@ def s_advanced(ctx: Ctx) -> None:
     _to_entries(ctx)
 
     def toggle():
-        x, y, *_ = ctx.find("進階篩選")
+        # 標籤會隨狀態變成「進階篩選（N）」或「收合進階篩選」
+        x, y, *_ = ctx.find("進階篩選", mode="contain")
         ctx.click_at(x, y)
 
     def ensure(open_):
