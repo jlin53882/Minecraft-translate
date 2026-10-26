@@ -221,6 +221,9 @@ class SmartReviewDialog:
         self._review_summary_loading = True
         self._review_summary_run_id = None
         self._review_summary_loader.invalidate()
+        # 摘要讀取期間兩個面板都還沒拿到批次；先顯示讀取中，不要停在「尚未載入批次」
+        self.reviewer.show_run_loading()
+        self.batch_reviewer.show_run_loading()
 
         def done(result, error: str | None) -> None:
             """把同一份批次摘要交給兩種審查模式。"""

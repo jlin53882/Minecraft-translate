@@ -660,6 +660,42 @@ def test_dialog_review_tab_loads_missing_run_in_background(db):
     assert background_names == ["載入智慧校對審查摘要"]
 
 
+def test_open_review_shows_loading_while_summary_is_read(db):
+    """從歷史批次開始審查時，摘要讀取期間兩個審查面板都顯示讀取中，而不是「尚未載入批次」。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    pending = []
+    dialog.ctx.run_background = lambda work, done, **_kwargs: (
+        pending.append(done) or True
+    )
+
+    def texts(panel):
+        found = []
+
+        def walk(control):
+            value = getattr(control, "value", None)
+            if isinstance(value, str):
+                found.append(value)
+            for attr in ("controls", "content"):
+                child = getattr(control, attr, None)
+                for item in child if isinstance(child, list) else [child]:
+                    if item is not None and hasattr(item, "__dict__"):
+                        walk(item)
+
+        for control in panel.body.controls:
+            walk(control)
+        return " ".join(found)
+
+    assert "尚未載入批次" in texts(dialog.reviewer)
+    dialog.open_review("run-1")
+
+    assert pending, "摘要應在背景讀取"
+    assert "正在載入批次" in texts(dialog.reviewer)
+    assert "尚未載入批次" not in texts(dialog.reviewer)
+    assert "正在載入批次" in texts(dialog.batch_reviewer)
+
+
 def test_review_modes_share_counts_when_opened_from_running_history(db, monkeypatch):
     """執行中的批次從歷史開啟後，逐筆與批量使用同一份狀態摘要。"""
     from app.views.moddb.smart_review_dialog import SmartReviewDialog

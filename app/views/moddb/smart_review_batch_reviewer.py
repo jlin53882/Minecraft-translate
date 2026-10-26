@@ -598,6 +598,11 @@ class SmartReviewBatchReviewer:
             border_radius=design.RADIUS_CONTROL,
         )
 
+    def show_run_loading(self) -> None:
+        """對話框正在讀取共用批次摘要：先顯示讀取中，並讓先前批次晚到的結果作廢。"""
+        self._request_seq += 1
+        self._show_loading("正在載入批次…")
+
     def _show_loading(self, text: str) -> None:
         """顯示讀取中狀態並暫停批量動作。"""
         self.body.controls = [kit.loading_state(text)]
