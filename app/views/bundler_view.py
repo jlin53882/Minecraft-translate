@@ -436,6 +436,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             ),
             name="資源包打包",
             owner="bundler",
+            view_key="bundler",
             cancellation=CancellationPolicy.NON_CANCELLABLE,
             commit=CommitPolicy.PARTIAL_ALLOWED,
             durability=DurabilityPolicy.USER_ACTION,

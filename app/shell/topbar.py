@@ -61,11 +61,21 @@ def summarize_keys(snapshot: Sequence[KeyHealth]) -> KeySummary:
 
 
 class TaskPill(ft.Container):
-    """任務膠囊：有任務時顯示「名稱 · 進度條 · 百分比」，沒有任務時整個隱藏。"""
+    """任務膠囊：有任務時顯示「名稱 · 進度條 · 百分比」，沒有任務時整個隱藏。
 
-    def __init__(self, on_click: Callable[[str | None], None] | None = None) -> None:
+    同時有多個任務時名稱後加「＋N」，點擊改開任務清單（``on_list_click``）；
+    只有一個任務時點擊回到該頁。還沒回報進度時顯示「準備中」與不定進度條。
+    """
+
+    def __init__(
+        self,
+        on_click: Callable[[str | None], None] | None = None,
+        on_list_click: Callable[[], None] | None = None,
+    ) -> None:
         self._on_pill_click = on_click
+        self._on_list_click = on_list_click
         self.view_key: str | None = None
+        self.others = 0
         self.spinner = ft.ProgressRing(
             width=14, height=14, stroke_width=2, color=C.GOLD
         )
@@ -96,21 +106,31 @@ class TaskPill(ft.Container):
         )
 
     def _click(self, _e=None) -> None:
-        if self._on_pill_click is not None:
+        if self.others and self._on_list_click is not None:
+            self._on_list_click()
+        elif self._on_pill_click is not None:
             self._on_pill_click(self.view_key)
 
-    def set_task(self, task: TaskInfo | None) -> None:
-        """``None`` 隱藏膠囊。"""
+    def set_task(self, task: TaskInfo | None, others: int = 0) -> None:
+        """``None`` 隱藏膠囊；``others`` 是同時進行中的其他任務數。"""
         if task is None:
             self.visible = False
             self.view_key = None
+            self.others = 0
             return
         tone = get_tone("red" if task.status == STATUS_ERROR else "gold")
         self.visible = True
         self.view_key = task.view_key
-        self.name.value = task.name
+        self.others = max(0, others)
+        self.name.value = f"{task.name}　＋{self.others}" if self.others else task.name
+        self.tooltip = (
+            f"另有 {self.others} 個任務進行中（點擊查看全部任務）"
+            if self.others
+            else "執行中的任務（點擊回到該頁）"
+        )
         self.name.color = tone.fg
-        self.percent.value = f"{task.percent}%"
+        # 還沒回報進度：不定進度條配「準備中」，不顯示與動畫矛盾的 0%
+        self.percent.value = f"{task.percent}%" if task.progress > 0 else "準備中"
         self.percent.color = tone.fg
         self.bar.value = task.progress if task.progress > 0 else None
         self.bar.color = tone.fg
@@ -189,14 +209,16 @@ class TopBar(ft.Container):
         on_task_click: Callable[[str | None], None] | None = None,
         on_api_click: Callable[[], None] | None = None,
         on_recent_click: Callable[[str | None], None] | None = None,
+        on_task_list_click: Callable[[], None] | None = None,
     ) -> None:
         self._on_recent_click = on_recent_click
+        self._on_task_list_click = on_task_list_click
         self.group_text = ft.Text("", size=13, color=C.DIM)
         self.page_text = ft.Text(
             "", size=13.5, weight=ft.FontWeight.W_600, color=C.TEXT
         )
         self.separator = ft.Icon(ft.Icons.CHEVRON_RIGHT, size=16, color=C.DIM)
-        self.task_pill = TaskPill(on_task_click)
+        self.task_pill = TaskPill(on_task_click, on_task_list_click)
         self.api_pill = ApiStatusPill(on_api_click)
         self.bell_dot = ft.Container(
             width=8,
@@ -246,8 +268,8 @@ class TopBar(ft.Container):
         self.group_text.visible = bool(group_label)
         self.page_text.value = page_label
 
-    def set_task(self, task: TaskInfo | None) -> None:
-        self.task_pill.set_task(task)
+    def set_task(self, task: TaskInfo | None, others: int = 0) -> None:
+        self.task_pill.set_task(task, others)
 
     def set_keys(self, snapshot: Sequence[KeyHealth]) -> None:
         self.api_pill.set_keys(snapshot)
@@ -265,6 +287,19 @@ class TopBar(ft.Container):
             ]
         else:
             self.bell_menu.items = [self._recent_item(t) for t in tasks]
+        if self._on_task_list_click is not None:
+            self.bell_menu.items.append(
+                ft.PopupMenuItem(
+                    content=ft.Row(
+                        [
+                            ft.Icon(ft.Icons.LIST_ALT, size=16, color=C.MUTED),
+                            ft.Text("查看本次全部任務", size=13),
+                        ],
+                        spacing=8,
+                    ),
+                    on_click=lambda _e: self._on_task_list_click(),
+                )
+            )
         self.bell_dot.visible = unread
 
     def _recent_item(self, task: TaskInfo) -> ft.PopupMenuItem:

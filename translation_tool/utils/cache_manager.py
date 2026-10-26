@@ -606,7 +606,7 @@ def get_cache_overview() -> dict[str, Any]:
     initialize_translation_cache()
     state = _state()
     with state.cache_lock:
-        return build_cache_overview(
+        overview = build_cache_overview(
             cache_types=CACHE_TYPES,
             translation_cache=state.translation_cache,
             is_dirty=state.is_dirty,
@@ -619,6 +619,9 @@ def get_cache_overview() -> dict[str, Any]:
             cache_dir_name=_CACHE_DIR_NAME,
             resolve_project_path=resolve_project_path,
         )
+        # 初始化失敗（冷卻中）時記憶體是空的：筆數 0 不代表沒有快取
+        overview["initialized"] = bool(state.initialized)
+        return overview
 
 
 def force_rotate_shard(cache_type: str) -> bool:

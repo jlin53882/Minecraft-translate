@@ -204,6 +204,7 @@ class DashboardView(ft.Column):
         self._rules_count_loader = rules_count_loader
         self._key_snapshot_loader = key_snapshot_loader
         self._navigate: Callable[[str], None] | None = None
+        self._open_tasks: Callable[[], None] | None = None
         self._tasks: TaskManager | None = None
         self._unsubscribe: Callable[[], None] | None = None
         self._unsubscribe_rules: Callable[[], None] | None = None
@@ -230,6 +231,10 @@ class DashboardView(ft.Column):
         self.stat_tasks = kit.stat_card(
             "本次任務", "0", icon=ft.Icons.TASK_ALT, tone="em", expand=1
         )
+        # 點開列出本次執行的全部任務（頂列膠囊只顯示最近開始的一個）
+        self.stat_tasks.ink = True
+        self.stat_tasks.tooltip = "查看本次全部任務"
+        self.stat_tasks.on_click = lambda _e: self._open_task_list()
         self.steps_row = ft.Row(spacing=12)
         self.step_badge = ft.Container()
         self.cache_column = ft.Column(spacing=12)
@@ -351,6 +356,7 @@ class DashboardView(ft.Column):
     def set_shell(self, shell) -> None:
         """外殼建立頁面後呼叫：提供導覽，並訂閱任務事件（任務一變就更新流程進度與活動）。"""
         self._navigate = shell.navigate
+        self._open_tasks = getattr(shell, "open_task_list", None)
         self._subscribe_rules()
         self.set_task_manager(shell.tasks)
 
@@ -364,6 +370,10 @@ class DashboardView(ft.Column):
             }
         self._unsubscribe = tasks.subscribe(self._on_tasks_changed)
         self.refresh_view(self._collect())
+
+    def _open_task_list(self) -> None:
+        if self._open_tasks is not None:
+            self._open_tasks()
 
     def _go(self, view_key: str) -> None:
         if self._navigate is not None:
@@ -431,7 +441,8 @@ class DashboardView(ft.Column):
             key_snapshot=keys,
             model_quota=exhausted_models,
             active=tasks.active() if tasks else [],
-            recent=tasks.recent(20) if tasks else [],
+            recent=tasks.history() if tasks else [],
+            finished_counts=tasks.finished_counts() if tasks else None,
         )
 
     def reload(self, *, sync: bool = False, include_rules: bool = True) -> None:
@@ -548,11 +559,22 @@ class DashboardView(ft.Column):
         self.data = data
         self._render_moddb()
         self.title_text.value = f"{greeting()}，歡迎回來"
+        if not self._cache_overview:
+            cache_value, cache_delta, cache_tone = None, "讀取中…", "em"
+        elif not data.cache_ready:
+            cache_value, cache_delta, cache_tone = (
+                None,
+                "快取未載入，詳見後台記錄",
+                "red",
+            )
+        else:
+            cache_value, cache_delta, cache_tone = (
+                data.total_entries,
+                "翻譯快取總筆數",
+                "em",
+            )
         self.stat_cache.set_value(
-            format_count(data.total_entries if self._cache_overview else None)
-        )
-        self.stat_cache.set_value(
-            delta="翻譯快取總筆數" if self._cache_overview else "讀取中…"
+            format_count(cache_value), delta=cache_delta, delta_tone=cache_tone
         )
         self.stat_rules.set_value(
             format_count(data.rules_count),
@@ -576,7 +598,7 @@ class DashboardView(ft.Column):
         self.steps_row.controls = [
             self._step_tile(i, s) for i, s in enumerate(data.steps, 1)
         ]
-        done = sum(1 for s in data.steps if s.status == STEP_DONE)
+        done = data.steps_done
         self.step_badge.content = kit.chip(
             f"本次完成 {done} / {len(data.steps)}", "em" if done else "neutral"
         )
@@ -610,7 +632,10 @@ class DashboardView(ft.Column):
 
     def _step_tile(self, number: int, step: StepStatus) -> ft.Control:
         text, tone_name = STEP_STATUS_STYLE[step.status]
-        active = step.status in (STEP_RUNNING, STEP_DONE)
+        if step.status == STEP_PENDING and step.runs_done:
+            # 單步驟結束後回到可再執行；本次完成過就標出次數，與「本次完成 x / 5」一致
+            text, tone_name = f"本次完成 {step.runs_done} 次", "em"
+        active = step.status in (STEP_RUNNING, STEP_DONE) or step.runs_done > 0
         chip_text = (
             f"{text}　{step.detail}"
             if step.detail and step.status == STEP_RUNNING
