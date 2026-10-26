@@ -629,95 +629,133 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
 
         ``convert`` 把簡中轉成繁中（沒有繁中、只有簡中時用）；None 表示不轉換。
         """
-        stats = IngestStats()
+        return self.ingest_many(version, [items], convert)[0]
+
+    def ingest_many(
+        self,
+        version: str,
+        batches: Sequence[Iterable[ScanItem]],
+        convert: Callable[[str], str] | None = None,
+    ) -> list[IngestStats]:
+        """在單一交易內寫入多份掃描結果（例如多個 jar），回傳每一份各自的統計。
+
+        一個交易只提交一次（每次提交的 WAL 寫入與檢查點是掃描的固定成本）。結果與逐份呼叫 :meth:`ingest` 相同；任何一份失敗整個交易回復。
+        """
+        grouped = [self._group_scan_items(items) for items in batches]
+        touched: list[int] = []
+        with self._tx() as conn:
+            results = [
+                self._ingest_groups(conn, version, groups, convert, touched)
+                for groups in grouped
+            ]
+            self._refresh(conn, touched)
+        return results
+
+    @staticmethod
+    def _group_scan_items(
+        items: Iterable[ScanItem],
+    ) -> dict[tuple[str, str], list[ScanItem]]:
         groups: dict[tuple[str, str], list[ScanItem]] = {}
         for item in items:
             groups.setdefault((item.kind, item.mod_id), []).append(item)
+        return groups
 
-        touched: list[int] = []
-        with self._tx() as conn:
-            for (kind, mod_id), group in groups.items():
-                known = {
-                    key: (eid, en)
-                    for eid, key, en in conn.execute(
-                        "SELECT id, key, en_us FROM entry "
-                        "WHERE mc_version=? AND kind=? AND mod_id=?",
-                        (version, kind, mod_id),
+    def _ingest_groups(
+        self,
+        conn: sqlite3.Connection,
+        version: str,
+        groups: dict[tuple[str, str], list[ScanItem]],
+        convert: Callable[[str], str] | None,
+        touched: list[int],
+    ) -> IngestStats:
+        stats = IngestStats()
+        for (kind, mod_id), group in groups.items():
+            known = {
+                key: (eid, en)
+                for eid, key, en in conn.execute(
+                    "SELECT id, key, en_us FROM entry "
+                    "WHERE mc_version=? AND kind=? AND mod_id=?",
+                    (version, kind, mod_id),
+                )
+            }
+            have = {
+                (eid, src)
+                for eid, src in conn.execute(
+                    "SELECT t.entry_id, t.source FROM translation t "
+                    "JOIN entry e ON e.id = t.entry_id "
+                    "WHERE e.mc_version=? AND e.kind=? AND e.mod_id=?",
+                    (version, kind, mod_id),
+                )
+            }
+            for item in group:
+                cur = known.get(item.key)
+                is_new = cur is None
+                if cur is None:
+                    eid = conn.execute(
+                        "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
+                        "VALUES (?,?,?,?,?)",
+                        (kind, version, mod_id, item.key, item.en_us),
+                    ).lastrowid
+                    known[item.key] = (eid, item.en_us)
+                    stats.new_entries += 1
+                elif cur[1] != item.en_us and item.en_us and cur[1]:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO src_change "
+                        "(kind, mc_version, mod_id, key, old_en, new_en) "
+                        "VALUES (?,?,?,?,?,?)",
+                        (kind, version, mod_id, item.key, cur[1], item.en_us),
                     )
-                }
-                have = {
-                    (eid, src)
-                    for eid, src in conn.execute(
-                        "SELECT t.entry_id, t.source FROM translation t "
-                        "JOIN entry e ON e.id = t.entry_id "
-                        "WHERE e.mc_version=? AND e.kind=? AND e.mod_id=?",
-                        (version, kind, mod_id),
-                    )
-                }
-                for item in group:
-                    cur = known.get(item.key)
-                    is_new = cur is None
-                    if cur is None:
-                        eid = conn.execute(
-                            "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
-                            "VALUES (?,?,?,?,?)",
-                            (kind, version, mod_id, item.key, item.en_us),
-                        ).lastrowid
+                    stats.en_changed += 1
+                    continue
+                else:
+                    eid = cur[0]
+                    if cur[1] != item.en_us and item.en_us:
+                        # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
+                        conn.execute(
+                            "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
+                        )
                         known[item.key] = (eid, item.en_us)
-                        stats.new_entries += 1
-                    elif cur[1] != item.en_us and item.en_us and cur[1]:
-                        conn.execute(
-                            "INSERT OR IGNORE INTO src_change "
-                            "(kind, mc_version, mod_id, key, old_en, new_en) "
-                            "VALUES (?,?,?,?,?,?)",
-                            (kind, version, mod_id, item.key, cur[1], item.en_us),
-                        )
-                        stats.en_changed += 1
-                        continue
-                    else:
-                        eid = cur[0]
-                        if cur[1] != item.en_us and item.en_us:
-                            # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
-                            conn.execute(
-                                "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
-                            )
-                            known[item.key] = (eid, item.en_us)
-                            stats.adopted += 1
-                        # 這次沒有原文（item.en_us 為空）時，沿用既有原文，只補譯文
+                        stats.adopted += 1
+                    # 這次沒有原文（item.en_us 為空）時，沿用既有原文，只補譯文
 
-                    adds: list[tuple[int, str, str]] = []
-                    if item.zh_tw.strip():
-                        src_tw = SRC_JAR_TW if item.source is None else item.source
-                        adds.append((src_tw, item.zh_tw, item.zh_cn))
-                    elif item.zh_cn.strip() and convert is not None:
-                        converted = convert(item.zh_cn)
-                        if (
-                            converted.strip()
-                        ):  # 空白判斷用 strip，但存原樣（前後空白在遊戲內可能有意義）
-                            # 翻譯 ZIP 指定了來源（提供者）時，轉繁後仍歸在該來源
-                            src_cn = SRC_JAR_CN if item.source is None else item.source
-                            adds.append((src_cn, converted, item.zh_cn))
-                    added = False
-                    for src, tw, cn in adds:
-                        if (eid, src) in have:
-                            continue
-                        review_status = "unreviewed" if src == SRC_MANUAL else None
-                        conn.execute(
-                            "INSERT INTO translation "
-                            "(entry_id, source, zh_tw, zh_cn, review_status) "
-                            "VALUES (?,?,?,?,?)",
-                            (eid, src, tw, cn, review_status),
-                        )
-                        have.add((eid, src))
-                        touched.append(eid)
-                        added = True
-                    if not is_new:
-                        if added:
-                            stats.added_translations += 1
-                        else:
-                            stats.existing += 1
-            self._refresh(conn, touched)
+                adds = self._scan_translations(item, convert)
+                added = False
+                for src, tw, cn in adds:
+                    if (eid, src) in have:
+                        continue
+                    review_status = "unreviewed" if src == SRC_MANUAL else None
+                    conn.execute(
+                        "INSERT INTO translation "
+                        "(entry_id, source, zh_tw, zh_cn, review_status) "
+                        "VALUES (?,?,?,?,?)",
+                        (eid, src, tw, cn, review_status),
+                    )
+                    have.add((eid, src))
+                    touched.append(eid)
+                    added = True
+                if not is_new:
+                    if added:
+                        stats.added_translations += 1
+                    else:
+                        stats.existing += 1
         return stats
+
+    @staticmethod
+    def _scan_translations(
+        item: ScanItem, convert: Callable[[str], str] | None
+    ) -> list[tuple[int, str, str]]:
+        """掃描項目要寫入的譯文：``(來源, 繁中, 簡中)``；繁中優先，只有簡中時轉繁。"""
+        if item.zh_tw.strip():
+            src_tw = SRC_JAR_TW if item.source is None else item.source
+            return [(src_tw, item.zh_tw, item.zh_cn)]
+        if item.zh_cn.strip() and convert is not None:
+            converted = convert(item.zh_cn)
+            # 空白判斷用 strip，但存原樣（前後空白在遊戲內可能有意義）
+            if converted.strip():
+                # 翻譯 ZIP 指定了來源（提供者）時，轉繁後仍歸在該來源
+                src_cn = SRC_JAR_CN if item.source is None else item.source
+                return [(src_cn, converted, item.zh_cn)]
+        return []
 
     def record_scan(self, version: str, folder: str, stats: dict) -> None:
         """記錄一次掃描（總覽頁的「最近掃描」）。"""

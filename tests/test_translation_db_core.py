@@ -2740,7 +2740,7 @@ def test_ingest_failure_names_the_jar_version_and_database(db, tmp_path, monkeyp
     def boom(*_a, **_k):
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(db, "ingest", boom)
+    monkeypatch.setattr(db, "ingest_many", boom)
     with pytest.raises(RuntimeError) as err:
         list(scan_folder_generator(db, tmp_path / "m", ScanOptions("1.21.1")))
     msg = str(err.value)

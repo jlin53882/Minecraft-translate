@@ -6,7 +6,8 @@
 - 內嵌 jar（``META-INF/jarjar``、``META-INF/jars``）會遞迴掃描，最多 3 層。
 - 只處理 JSON 格式（1.13 以後）；``.lang`` 舊格式不處理。
 - 沒有繁中、只有簡中時，以 OpenCC（s2twp）轉換後標記為「簡中轉繁」。
-- 多個 jar 並行讀取，寫入資料庫在呼叫端執行緒進行（SQLite 單一寫入者）。
+- 大量 jar 以行程池並行讀取（見 ``scan_pool``），寫入資料庫在呼叫端執行緒進行（SQLite 單一寫入者），
+  每累積一批才提交一次交易。
 """
 
 from __future__ import annotations
@@ -54,6 +55,7 @@ from translation_tool.translation_db.identity import (
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
+from translation_tool.translation_db.scan_pool import replay_logs, scan_executor
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
     KIND_GUIDE,
@@ -69,7 +71,6 @@ from translation_tool.utils.text_processor import (
     load_replace_rules,
     recursive_translate_dict,
 )
-from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.zip_safety import (
     MAX_FILE_BYTES,
     ArchiveBudgetError,
@@ -114,6 +115,9 @@ class JarResult:
     error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
     cancelled: bool = False
     notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
+    logs: list[tuple[int, str]] = field(
+        default_factory=list
+    )  # 行程池 worker 收集的日誌
 
     @property
     def has_lang(self) -> bool:
@@ -901,6 +905,68 @@ def find_jars(folder: str | Path, *, translated: bool = False) -> list[Path]:
     return sorted(found, key=lambda x: x.as_posix().lower())
 
 
+def _progress(
+    done: int, jars: Sequence[Path], result: JarResult, log: str, level: str = "info"
+) -> dict[str, Any]:
+    """一個 jar 處理完的進度更新；略過內嵌 jar 時附上說明並升為警告。"""
+    if result.skipped_nested and not result.error:
+        log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
+        level = "warning"
+        log += "".join(f"\n　⚠️ {note}" for note in result.notes)
+    return {"progress": done / len(jars), "log": log, "level": level}
+
+
+def _ingest_log(result: JarResult, stats: IngestStats) -> str:
+    return (
+        f"{result.name}　新增 {stats.new_entries}"
+        f"　補入 {stats.added_translations}　略過 {stats.existing}"
+        + (f"　補上原文 {stats.adopted}" if stats.adopted else "")
+        + (f"　原文已變動 {stats.en_changed}" if stats.en_changed else "")
+    )
+
+
+class _IngestBuffer:
+    """累積讀好的 jar，滿一批才以單一交易寫入資料庫（每次提交的固定成本不隨 jar 數成長）。"""
+
+    MAX_JARS = 32
+    MAX_ITEMS = 15_000
+
+    def __init__(self, db, version: str, convert) -> None:
+        self.db, self.version, self.convert = db, version, convert
+        self.pending: list[tuple[int, JarResult]] = []
+        self.items = 0
+
+    def add(self, done: int, result: JarResult) -> bool:
+        """加入一個 jar；回傳是否該寫入了。"""
+        self.pending.append((done, result))
+        self.items += len(result.items)
+        return len(self.pending) >= self.MAX_JARS or self.items >= self.MAX_ITEMS
+
+    def flush(self) -> list[tuple[int, JarResult, IngestStats]]:
+        pending, self.pending, self.items = self.pending, [], 0
+        if not pending:
+            return []
+        try:
+            stats = self.db.ingest_many(
+                self.version, [r.items for _, r in pending], self.convert
+            )
+        except sqlite3.Error as exc:
+            names = "、".join(r.name for _, r in pending[:3])
+            raise RuntimeError(
+                f"寫入資料庫失敗（{names}{'…' if len(pending) > 3 else ''}，"
+                f"版本 {self.version}，資料庫 {self.db.path}）：{exc}"
+            ) from exc
+        return [(d, r, st) for (d, r), st in zip(pending, stats, strict=True)]
+
+
+def _flush(
+    buffer: _IngestBuffer, report: ScanReport, jars: Sequence[Path]
+) -> Generator[dict[str, Any], None, None]:
+    for done, result, stats in buffer.flush():
+        report.stats.add(stats)
+        yield _progress(done, jars, result, _ingest_log(result, stats))
+
+
 def scan_folder_generator(
     db: TranslationDB | None,
     folder: str | Path,
@@ -941,16 +1007,20 @@ def scan_folder_generator(
     }
 
     done = 0
-
-    def submit_scan(pool, jar_path):
-        return pool.submit(scan_jar, jar_path, options, dirs, should_cancel)
+    buffer = _IngestBuffer(db, options.version, convert)
 
     with (
-        ContextThreadPoolExecutor(max_workers=max(1, workers)) as pool,
+        scan_executor(
+            options,
+            dirs,
+            workers=workers,
+            jar_count=len(jars),
+            should_cancel=should_cancel,
+        ) as (pool, submit),
         bounded_as_completed(
             pool,
             jars,
-            submit_scan,
+            submit,
             max_in_flight=max(1, workers) * 2,
         ) as completed,
     ):
@@ -959,51 +1029,37 @@ def scan_folder_generator(
                 report.cancelled = True
                 break
             result: JarResult = fut.result()
+            replay_logs(result.logs)
             if result.cancelled:
                 report.cancelled = True
                 break
             done += 1
-            level = "info"
             report.nested_jars += result.nested_jars
             report.skipped_nested += result.skipped_nested
             if (
                 result.error
             ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
                 report.jars_failed.append(result.name)
-                log = f"❌ {result.name}　未寫入：{result.error}"
-                level = "error"
+                yield _progress(
+                    done,
+                    jars,
+                    result,
+                    f"❌ {result.name}　未寫入：{result.error}",
+                    "error",
+                )
             elif not result.has_lang:
                 report.jars_without_lang += 1
-                log = f"{result.name}　沒有語言檔"
+                yield _progress(done, jars, result, f"{result.name}　沒有語言檔")
             else:
                 report.jars_with_lang += 1
                 report.items_found += len(result.items)
                 if options.dry_run or db is None:
                     log = f"{result.name}　可匯入 {len(result.items)} 項"
-                else:
-                    try:
-                        stats = db.ingest(options.version, result.items, convert)
-                    except sqlite3.Error as exc:
-                        raise RuntimeError(
-                            f"寫入資料庫失敗（{result.name}，版本 {options.version}，"
-                            f"資料庫 {db.path}）：{exc}"
-                        ) from exc
-                    report.stats.add(stats)
-                    log = (
-                        f"{result.name}　新增 {stats.new_entries}"
-                        f"　補入 {stats.added_translations}　略過 {stats.existing}"
-                        + (f"　補上原文 {stats.adopted}" if stats.adopted else "")
-                        + (
-                            f"　原文已變動 {stats.en_changed}"
-                            if stats.en_changed
-                            else ""
-                        )
-                    )
-            if result.skipped_nested and not result.error:
-                log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
-                level = "warning"
-                log += "".join(f"\n　⚠️ {note}" for note in result.notes)
-            yield {"progress": done / len(jars), "log": log, "level": level}
+                    yield _progress(done, jars, result, log)
+                elif buffer.add(done, result):
+                    yield from _flush(buffer, report, jars)
+        # 取消或結束時，已讀取的 jar 也要寫入
+        yield from _flush(buffer, report, jars)
 
     state = "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
     if options.dry_run or db is None:
