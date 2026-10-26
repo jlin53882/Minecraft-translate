@@ -674,6 +674,59 @@ def test_direct_and_nested_data_paths_use_distinct_collision_safe_wrappers(
     } == {"outer", "nested"}
 
 
+def test_reextract_removes_wrappers_for_removed_sources(tmp_path: Path):
+    """移除碰撞來源後，Stage 1 不得再看到舊 wrapper 的資料。"""
+    mods = tmp_path / "mods"
+    client = mods / "client" / "guide-neoforge-1.0.jar"
+    server = mods / "server" / "guide-forge-1.0.jar"
+    _outer_jar(
+        client,
+        direct={"data/shared/lang/en_us.json": '{"value":"client"}'},
+    )
+    _outer_jar(
+        server,
+        direct={"data/shared/lang/en_us.json": '{"value":"server"}'},
+    )
+    output = tmp_path / "out"
+    legacy = output / "guide-forge-1.0_legacy_extracted" / "data/shared/lang"
+    legacy.mkdir(parents=True)
+    (legacy / "en_us.json").write_text('{"value":"legacy"}', encoding="utf-8")
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+    assert not (output / "guide-forge-1.0_legacy_extracted").exists()
+    assert len(list(output.glob("*_extracted/data/shared/lang/en_us.json"))) == 2
+
+    client.unlink()
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    extracted = sorted(output.glob("*_extracted/data/shared/lang/en_us.json"))
+    assert len(extracted) == 1
+    assert json.loads(extracted[0].read_text(encoding="utf-8"))["value"] == "server"
+
+
+def test_reextract_replaces_wrapper_when_source_path_changes(tmp_path: Path):
+    """同一非碰撞 wrapper 換了來源 JAR 時，不得保留舊成員檔案。"""
+    mods = tmp_path / "mods"
+    old = mods / "old" / "guide.jar"
+    new = mods / "new" / "guide.jar"
+    _outer_jar(
+        old,
+        direct={"data/shared/lang/en_us.json": '{"value":"old"}'},
+    )
+    output = tmp_path / "out"
+
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+    old.unlink()
+    _outer_jar(
+        new,
+        direct={"data/shared/lang/en_us.json": '{"value":"new"}'},
+    )
+    list(extract_lang_files_generator(str(mods), str(output), lang_codes=["en_us"]))
+
+    extracted = output / "guide_extracted/data/shared/lang/en_us.json"
+    assert json.loads(extracted.read_text(encoding="utf-8"))["value"] == "new"
+
+
 def test_nested_walker_honors_cancellation_before_reading(tmp_path: Path):
     from translation_tool.utils.nested_archive import walk_nested_archives
     from translation_tool.utils.zip_safety import ZipReadBudget

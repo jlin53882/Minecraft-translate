@@ -11,9 +11,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
+import shutil
 import zipfile
 from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
@@ -54,6 +56,8 @@ VERSION_REGEX = re.compile(
     r"[-_](?:[a-zA-Z]+-)?\d+(?:\.\d+)+(?:[-_.][a-zA-Z0-9]+)*$",
     re.IGNORECASE,
 )
+_EXTRACTED_WRAPPER_RE = re.compile(r"^.+_extracted(?:_\w+)?$", re.IGNORECASE)
+_EXTRACTION_MANIFEST_NAME = "extraction_manifest"
 
 
 def get_file_hash(data: bytes) -> str:
@@ -145,6 +149,150 @@ def build_nested_output_names(
 ) -> dict[Path, str]:
     """Backward-compatible alias for collision-safe extracted wrapper names."""
     return build_collision_safe_output_names(jar_paths, root)
+
+
+def _source_manifest_entry(path: Path, wrapper: str) -> dict[str, Any]:
+    """Return the durable source identity used to own one extracted wrapper."""
+    resolved = path.resolve()
+    try:
+        stat = resolved.stat()
+    except OSError:
+        # The extraction phase will report a missing JAR as an error.  Keep a
+        # path-only identity here so cleanup remains conservative and does not
+        # confuse a disappeared source with an unchanged source.
+        size: int | None = None
+        mtime_ns: int | None = None
+    else:
+        size = stat.st_size
+        mtime_ns = stat.st_mtime_ns
+    return {
+        "path": str(resolved),
+        "wrapper": wrapper,
+        "size": size,
+        "mtime_ns": mtime_ns,
+    }
+
+
+def _load_extraction_manifest(
+    path: Path,
+) -> dict[str, set[tuple[str, int | None, int | None]]] | None:
+    """Load a validated wrapper ownership manifest, or ``None`` for legacy output."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("version") != 1:
+        return None
+    sources = payload.get("sources")
+    if not isinstance(sources, list):
+        return None
+
+    result: dict[str, set[tuple[str, int | None, int | None]]] = {}
+    for item in sources:
+        if not isinstance(item, dict):
+            return None
+        source_path = item.get("path")
+        wrapper = item.get("wrapper")
+        size = item.get("size")
+        mtime_ns = item.get("mtime_ns")
+        if (
+            not isinstance(source_path, str)
+            or not isinstance(wrapper, str)
+            or not _EXTRACTED_WRAPPER_RE.fullmatch(wrapper)
+            or (size is not None and not isinstance(size, int))
+            or (mtime_ns is not None and not isinstance(mtime_ns, int))
+        ):
+            return None
+        result.setdefault(wrapper, set()).add((source_path, size, mtime_ns))
+    return result
+
+
+def _write_extraction_manifest(path: Path, sources: list[dict[str, Any]]) -> None:
+    """Publish the current wrapper ownership atomically before extraction starts."""
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        json.dumps(
+            {"version": 1, "sources": sources},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _reconcile_extracted_wrappers(
+    output_dir: str,
+    jar_paths: Iterable[str | Path],
+    nested_output_names: dict[Path, str],
+) -> None:
+    """Remove wrappers that no longer belong to the current extraction snapshot.
+
+    Extraction output is an intermediate, generated tree.  A manifest lets us
+    invalidate only wrappers whose source set or source stat changed, while a
+    missing/invalid manifest gets a one-time legacy cleanup of top-level
+    ``*_extracted`` directories.  This prevents a later Stage 1/Stage 2 pass
+    from treating a removed JAR's old collision wrapper as a live source.
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    # Keep metadata beside the generated tree.  FolderReader intentionally
+    # enumerates every file under ``output_dir``; placing the manifest inside
+    # it would make it look like a translatable ``other_output`` source.
+    manifest_path = (
+        output_path.parent / f".{output_path.name}.{_EXTRACTION_MANIFEST_NAME}"
+    )
+    current_sources: list[dict[str, Any]] = []
+    current_by_wrapper: dict[str, set[tuple[str, int | None, int | None]]] = {}
+    for jar_path in dict.fromkeys(Path(path) for path in jar_paths):
+        wrapper = nested_output_names.get(jar_path)
+        if wrapper is None:
+            wrapper = f"{_normalize_jar_base_name(jar_path.name)}_extracted"
+        entry = _source_manifest_entry(jar_path, wrapper)
+        current_sources.append(entry)
+        current_by_wrapper.setdefault(wrapper, set()).add(
+            (entry["path"], entry["size"], entry["mtime_ns"])
+        )
+
+    previous_by_wrapper = _load_extraction_manifest(manifest_path)
+    if previous_by_wrapper is None:
+        wrappers_to_remove = {
+            entry.name
+            for entry in output_path.iterdir()
+            if entry.is_dir() and _EXTRACTED_WRAPPER_RE.fullmatch(entry.name)
+        }
+        if manifest_path.exists():
+            log.warning(
+                "[extract] 無法讀取 %s，將清理舊版 *_extracted 暫存 wrapper",
+                manifest_path,
+            )
+    else:
+        wrappers_to_remove = {
+            wrapper
+            for wrapper, sources in previous_by_wrapper.items()
+            if current_by_wrapper.get(wrapper) != sources
+        }
+        # A wrapper created outside the manifest is not safe to merge into the
+        # current snapshot.  It is generated staging data, so reset it before
+        # allowing the current extraction to repopulate it.
+        wrappers_to_remove.update(
+            wrapper
+            for wrapper in current_by_wrapper
+            if wrapper not in previous_by_wrapper
+        )
+
+    for wrapper in sorted(wrappers_to_remove, key=str.casefold):
+        target = output_path / wrapper
+        if not target.exists():
+            continue
+        if target.is_symlink() or not target.is_dir():
+            raise OSError(f"拒絕清理非目錄 extracted wrapper: {target}")
+        shutil.rmtree(target)
+        log.info("[extract] 清理失效 extracted wrapper: %s", target)
+
+    _write_extraction_manifest(manifest_path, current_sources)
 
 
 def _entry_output_path(
@@ -518,6 +666,12 @@ def run_extraction_process_impl(
     os.makedirs(output_dir, exist_ok=True)
     jar_files = find_jar_files_fn(mods_dir)
     total_jars = len(jar_files)
+    nested_output_names = build_collision_safe_output_names(jar_files, mods_dir)
+    _reconcile_extracted_wrappers(
+        output_dir,
+        jar_files,
+        nested_output_names,
+    )
 
     if total_jars == 0:
         log.info("在 '%s' 中未找到任何 .jar 檔案。", mods_dir)
@@ -655,8 +809,6 @@ def run_extraction_process_impl(
 
     eligible_jars = [jar for jar in jar_files if Path(jar) in all_scan_results]
     eligible_total = len(eligible_jars)
-    nested_output_names = build_collision_safe_output_names(jar_files, mods_dir)
-
     processed_count = 0
     total_extracted = 0
     skipped_scan_jars = {
