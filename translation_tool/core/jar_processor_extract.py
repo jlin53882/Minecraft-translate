@@ -120,6 +120,7 @@ def _extract_scanned_entries(
     entries: list[Any],
     budget: ZipReadBudget,
     get_file_hash_fn: Callable[[bytes], str],
+    asset_winners: dict[str, Path] | None = None,
 ) -> dict[str, Any]:
     """寫出預掃描保留的 direct/nested entries，避免再掃一次 archive tree。"""
     extracted_count = 0
@@ -127,6 +128,17 @@ def _extract_scanned_entries(
     for entry in entries:
         raise_if_cancelled()
         normalized_path = entry.logical_path
+        if (
+            asset_winners
+            and not entry.is_nested
+            and normalized_path.startswith("assets/")
+            and asset_winners.get(normalized_path) not in (None, jar_path)
+        ):
+            # A shared assets path has one deterministic owner.  Count this
+            # source as skipped instead of letting worker completion order pick
+            # the final bytes.
+            skipped_count += 1
+            continue
         try:
             final_output_path = _entry_output_path(
                 output_root,
@@ -180,6 +192,85 @@ def _extract_scanned_entries(
     }
 
 
+def _ensure_scan_results(
+    scan_results: dict[Path, dict[str, str | None]] | None,
+    jar_path: Path,
+    target_regex: re.Pattern,
+    budget: ZipReadBudget,
+):
+    """建立直接抽取所需的 canonical nested scan，保留既有預掃描結果。"""
+    if scan_results is not None:
+        return scan_results
+
+    # Keep direct callers on the same bounded scanner as the normal pipeline.
+    from translation_tool.utils.jar_browser import scan_jars
+
+    return scan_jars(
+        jar_path.parent,
+        [target_regex],
+        max_workers=1,
+        jar_files=[jar_path],
+        budget_factory=lambda _path: budget,
+    )
+
+
+def _extract_cached_entries_or_status(
+    jar_path: Path,
+    output_root: str,
+    jar_filename_base: str,
+    budget: ZipReadBudget,
+    get_file_hash_fn: Callable[[bytes], str],
+    scan_results,
+) -> dict[str, Any] | None:
+    """處理 scan cache 命中、失敗與無目標三種 terminal 狀態。"""
+    scanned_entries = getattr(scan_results, "entries", {}).get(jar_path)
+    if scanned_entries:
+        return _extract_scanned_entries(
+            jar_path,
+            output_root,
+            jar_filename_base,
+            scanned_entries,
+            budget,
+            get_file_hash_fn,
+            getattr(scan_results, "asset_winners", None),
+        )
+    if jar_path in getattr(scan_results, "failed_jars", set()):
+        return {"status": "error", "extracted": 0, "skipped": 0}
+    if jar_path not in scan_results:
+        return {"status": "success", "extracted": 0, "skipped": 0}
+    return None
+
+
+def _load_legacy_jar_results(
+    jar_path: str,
+    target_regex: re.Pattern,
+    budget: ZipReadBudget,
+    scan_results,
+) -> dict[str, str | None]:
+    """載入舊式 direct-entry 結果，供沒有 detailed scan entry 的 caller 相容使用。"""
+    jar_path_obj = Path(jar_path)
+    if scan_results is not None and jar_path_obj in scan_results:
+        return scan_results[jar_path_obj]
+
+    jar_results: dict[str, str | None] = {}
+    with zipfile.ZipFile(jar_path, "r") as zf:
+        for name in zf.namelist():
+            raise_if_cancelled()
+            if not target_regex.search(name):
+                continue
+            try:
+                jar_results[name] = read_limited(
+                    zf, name, MAX_TEXT_BYTES, budget=budget
+                ).decode("utf-8")
+            except UnicodeDecodeError:
+                jar_results[name] = None
+            except ArchiveBudgetError:
+                raise  # 整包累計超限：交給外層中止這個 JAR（不是單一檔案過大）
+            except ZipSizeError as size_err:
+                log_error("略過過大檔案 %s: %s", name, size_err)
+    return jar_results
+
+
 def extract_from_jar_impl(
     jar_path: str,
     output_root: str,
@@ -217,35 +308,23 @@ def extract_from_jar_impl(
         return {"status": "error", "extracted": 0, "skipped": 0}
 
     try:
-        scanned_entries = getattr(scan_results, "entries", {}).get(jar_path_obj)
-        if scanned_entries:
-            return _extract_scanned_entries(
-                jar_path_obj,
-                output_root,
-                jar_filename_base,
-                scanned_entries,
-                budget,
-                get_file_hash_fn,
-            )
+        scan_results = _ensure_scan_results(
+            scan_results, jar_path_obj, target_regex, budget
+        )
+        cached_result = _extract_cached_entries_or_status(
+            jar_path_obj,
+            output_root,
+            jar_filename_base,
+            budget,
+            get_file_hash_fn,
+            scan_results,
+        )
+        if cached_result is not None:
+            return cached_result
 
-        jar_results: dict[str, str | None] = {}
-        if scan_results is not None and jar_path_obj in scan_results:
-            jar_results = scan_results[jar_path_obj]
-        else:
-            with zipfile.ZipFile(jar_path, "r") as zf:
-                for name in zf.namelist():
-                    raise_if_cancelled()
-                    if target_regex.search(name):
-                        try:
-                            jar_results[name] = read_limited(
-                                zf, name, MAX_TEXT_BYTES, budget=budget
-                            ).decode("utf-8")
-                        except UnicodeDecodeError:
-                            jar_results[name] = None
-                        except ArchiveBudgetError:
-                            raise  # 整包累計超限：交給外層中止這個 JAR（不是單一檔案過大）
-                        except ZipSizeError as size_err:
-                            log_error("略過過大檔案 %s: %s", name, size_err)
+        jar_results = _load_legacy_jar_results(
+            jar_path, target_regex, budget, scan_results
+        )
 
         with zipfile.ZipFile(jar_path, "r") as zf:
             for member in zf.infolist():
@@ -514,6 +593,25 @@ def run_extraction_process_impl(
     failed_jars: list[str] = [
         path.name for path in getattr(all_scan_results, "failed_jars", set())
     ]
+    partial_scan_jars = sorted(
+        getattr(all_scan_results, "partial_jars", set()), key=lambda path: path.name
+    )
+    for partial_jar in partial_scan_jars:
+        skipped_nested = getattr(all_scan_results, "skipped_nested", {}).get(
+            partial_jar, 0
+        )
+        truncated_nested = getattr(all_scan_results, "truncated_nested", {}).get(
+            partial_jar, 0
+        )
+        yield {
+            "progress": extraction_progress_start,
+            "current": 0,
+            "total": eligible_total,
+            "log": (
+                f"[WARNING] 部分掃描 {partial_jar.name}："
+                f"略過 nested={skipped_nested}，深度截斷={truncated_nested}"
+            ),
+        }
     for failed_jar in failed_jars:
         yield {
             "progress": extraction_progress_start,
@@ -617,6 +715,8 @@ def run_extraction_process_impl(
     if failed_jars:
         summary += f"\n  - 無法提取的 JAR: {len(failed_jars)} 個（{', '.join(failed_jars[:10])}"
         summary += "…）" if len(failed_jars) > 10 else "）"
+    if partial_scan_jars:
+        summary += f"\n  - 部分掃描的 JAR: {len(partial_scan_jars)} 個"
     log.info(summary)
     final = {
         "progress": progress_end,
@@ -630,6 +730,7 @@ def run_extraction_process_impl(
             "total_files": total_extracted,
             "scanned_jars": total_jars,
             "eligible_jars": eligible_total,
+            "partial_jars": len(partial_scan_jars),
         },
     }
     yield final

@@ -67,7 +67,13 @@ class ScanResults(dict):
         self.entries: dict[Path, list[ScannedEntry]] = {}
         self.nested_jars: dict[Path, int] = {}
         self.skipped_nested: dict[Path, int] = {}
+        self.truncated_nested: dict[Path, int] = {}
+        self.partial_jars: set[Path] = set()
         self.collision_notes: dict[Path, list[str]] = {}
+        # Direct assets are merged into one shared output tree.  Freeze the
+        # first source in the caller-provided JAR order so extraction workers
+        # cannot make the result depend on completion order.
+        self.asset_winners: dict[str, Path] = {}
 
 
 @dataclass(frozen=True)
@@ -91,13 +97,14 @@ class _JarScanDetails:
     entries: list[ScannedEntry]
     nested_jars: int = 0
     skipped_nested: int = 0
+    truncated_nested: int = 0
     collision_notes: list[str] | None = None
     error: str | None = None
 
 
 def _scan_single_jar(
     jar_path: Path,
-    patterns: list[str],
+    patterns: list[str | re.Pattern[str]],
     budget: ZipReadBudget | None = None,
     failure_callback: Callable[[Path], None] | None = None,
     skipped_callback: Callable[[Path], None] | None = None,
@@ -132,7 +139,7 @@ def _scan_single_jar(
 
 def _scan_single_jar_detailed(
     jar_path: Path,
-    patterns: list[str],
+    patterns: list[str | re.Pattern[str]],
     budget: ZipReadBudget | None = None,
     failure_callback: Callable[[Path], None] | None = None,
     skipped_callback: Callable[[Path], None] | None = None,
@@ -144,6 +151,7 @@ def _scan_single_jar_detailed(
     collisions: list[str] = []
     nested_jars = 0
     skipped_nested = 0
+    truncated_nested = 0
     if budget is None:
         budget = ZipReadBudget(label=jar_path.name)
 
@@ -204,6 +212,15 @@ def _scan_single_jar_detailed(
         skipped_nested += 1
         log_warning("[jar_browser] 略過內嵌 jar %s：%s", label, exc)
 
+    def on_nested_truncated(label: str, depth: int) -> None:
+        nonlocal truncated_nested
+        truncated_nested += 1
+        log_warning(
+            "[jar_browser] nested archive depth limit reached at %s (depth=%s)",
+            label,
+            depth,
+        )
+
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
             walk_nested_archives(
@@ -213,6 +230,7 @@ def _scan_single_jar_detailed(
                 visit_archive,
                 budget_factory=lambda _label: budget,
                 on_nested_error=on_nested_error,
+                on_nested_truncated=on_nested_truncated,
                 scan_nested=scan_nested,
             )
     except zipfile.BadZipFile:
@@ -241,17 +259,19 @@ def _scan_single_jar_detailed(
         entries,
         nested_jars=nested_jars,
         skipped_nested=skipped_nested,
+        truncated_nested=truncated_nested,
         collision_notes=collisions,
     )
 
 
 def scan_jars(
     jar_dir: Path,
-    patterns: list[str],
+    patterns: list[str | re.Pattern[str]],
     max_workers: int | None = None,
     processed_callback: Callable[[int, int], None] | None = None,
     jar_files: Iterable[Path | str] | None = None,
     scan_nested: bool = True,
+    budget_factory: Callable[[Path], ZipReadBudget] | None = None,
 ) -> dict[Path, dict[str, str | None]]:
     """平行讀取多個 JAR 內符合 pattern 的檔案內容。
 
@@ -311,7 +331,11 @@ def scan_jars(
     # 每個 JAR 一份預算，由「掃描 → 後續提取」共用（見 ScanResults）；
     # JAR 之間不共用，worker 各自只處理自己的 JAR。
     for jar_path in jar_files:
-        results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
+        results.budgets[jar_path] = (
+            budget_factory(jar_path)
+            if budget_factory is not None
+            else ZipReadBudget(label=jar_path.name)
+        )
 
     def submit_scan(executor, jar_path: Path):
         return executor.submit(
@@ -342,10 +366,22 @@ def scan_jars(
                     results.entries[jar_path] = details.entries
                 results.nested_jars[jar_path] = details.nested_jars
                 results.skipped_nested[jar_path] = details.skipped_nested
+                results.truncated_nested[jar_path] = details.truncated_nested
+                if details.skipped_nested or details.truncated_nested:
+                    results.partial_jars.add(jar_path)
                 if details.collision_notes:
                     results.collision_notes[jar_path] = details.collision_notes
                 processed += 1
                 if processed_callback:
                     processed_callback(processed, total)
+
+    # Resolve direct assets in stable input order after all workers finish.
+    # Nested entries are written below an outer-JAR-specific directory and do
+    # not collide with this shared assets tree.
+    for jar_path in jar_files:
+        for entry in results.entries.get(jar_path, ()):
+            if entry.is_nested or not entry.logical_path.startswith("assets/"):
+                continue
+            results.asset_winners.setdefault(entry.logical_path, jar_path)
 
     return results

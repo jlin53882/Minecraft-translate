@@ -119,6 +119,7 @@ class JarResult:
     items: list[ScanItem] = field(default_factory=list)
     nested_jars: int = 0
     skipped_nested: int = 0  # 損毀或過大而略過的內嵌 jar（不影響其餘內容）
+    truncated_nested: int = 0  # 到達安全深度上限而未再走訪的內嵌 jar
     error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
     cancelled: bool = False
     notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
@@ -143,6 +144,7 @@ class ScanReport:
     jars_failed: list[str] = field(default_factory=list)
     nested_jars: int = 0
     skipped_nested: int = 0
+    truncated_nested: int = 0
     items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
     stats: IngestStats = field(default_factory=IngestStats)
     cancelled: bool = False
@@ -156,6 +158,7 @@ class ScanReport:
             "jars_failed": len(self.jars_failed),
             "nested_jars": self.nested_jars,
             "skipped_nested": self.skipped_nested,
+            "truncated_nested": self.truncated_nested,
             "items_found": self.items_found,
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
@@ -817,7 +820,9 @@ def _scan_archive(
                 groups.setdefault(key, members)
             for member in dict.fromkeys(sniff_diagnostics):
                 result.invalid_books.append(f"{current_label}:{member}")
-                result.notes.append(f"略過無法解析的書籍 JSON：{current_label}:{member}")
+                result.notes.append(
+                    f"略過無法解析的書籍 JSON：{current_label}:{member}"
+                )
             patchouli_contexts = (
                 _patchouli_contexts_for_archive(
                     current, current_budget, names, dir_names
@@ -850,6 +855,10 @@ def _scan_archive(
         result.skipped_nested += 1
         result.notes.append(f"略過內嵌 jar {child_label}：{_reason(exc)}")
 
+    def on_nested_truncated(child_label: str, depth: int) -> None:
+        result.truncated_nested += 1
+        result.notes.append(f"內嵌 jar 深度超過上限（depth={depth}）：{child_label}")
+
     root_budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
     try:
         walk_nested_archives(
@@ -861,6 +870,7 @@ def _scan_archive(
             should_cancel=should_cancel,
             max_depth=MAX_NESTED_DEPTH,
             on_nested_error=on_nested_error,
+            on_nested_truncated=on_nested_truncated,
             archive_max_bytes=MAX_FILE_BYTES,
             scan_nested=options.scan_nested,
             nested_name_predicate=(
@@ -937,8 +947,13 @@ def _progress(
     done: int, jars: Sequence[Path], result: JarResult, log: str, level: str = "info"
 ) -> dict[str, Any]:
     """一個 jar 處理完的進度更新；略過內嵌 jar 時附上說明並升為警告。"""
-    if result.skipped_nested and not result.error:
-        log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
+    if (result.skipped_nested or result.truncated_nested) and not result.error:
+        details = []
+        if result.skipped_nested:
+            details.append(f"略過 {result.skipped_nested} 個損毀或過大的內嵌 jar")
+        if result.truncated_nested:
+            details.append(f"截斷 {result.truncated_nested} 個超過深度上限的內嵌 jar")
+        log += "（" + "；".join(details) + "）"
         level = "warning"
         log += "".join(f"\n　⚠️ {note}" for note in result.notes)
     return {"progress": done / len(jars), "log": log, "level": level}
@@ -1083,6 +1098,7 @@ def scan_folder_generator(
             done += 1
             report.nested_jars += result.nested_jars
             report.skipped_nested += result.skipped_nested
+            report.truncated_nested += result.truncated_nested
             if (
                 result.error
             ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）

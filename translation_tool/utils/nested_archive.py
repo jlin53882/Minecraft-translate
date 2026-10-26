@@ -31,6 +31,33 @@ ArchiveVisit = Callable[
 ]
 NestedErrorHandler = Callable[[str, str, BaseException], None]
 NestedNamePredicate = Callable[[str], bool]
+NestedTruncationHandler = Callable[[str, int], None]
+
+
+def _is_allowed_nested_member(
+    info: zipfile.ZipInfo, nested_name_predicate: NestedNamePredicate | None
+) -> bool:
+    if info.is_dir():
+        return False
+    if nested_name_predicate is not None:
+        return nested_name_predicate(info.filename)
+    return is_nested_archive_name(info.filename)
+
+
+def _report_nested_truncation(
+    current: zipfile.ZipFile,
+    current_label: str,
+    depth: int,
+    nested_name_predicate: NestedNamePredicate | None,
+    on_nested_truncated: NestedTruncationHandler | None,
+) -> None:
+    if on_nested_truncated is None:
+        return
+    if any(
+        _is_allowed_nested_member(info, nested_name_predicate)
+        for info in current.infolist()
+    ):
+        on_nested_truncated(current_label, depth)
 
 
 def is_nested_archive_name(name: str) -> bool:
@@ -51,6 +78,7 @@ def walk_nested_archives(
     should_cancel: Callable[[], bool] | None = None,
     max_depth: int = MAX_NESTED_ARCHIVE_DEPTH,
     on_nested_error: NestedErrorHandler | None = None,
+    on_nested_truncated: NestedTruncationHandler | None = None,
     archive_max_bytes: int | None = None,
     nested_name_predicate: NestedNamePredicate | None = None,
     scan_nested: bool = True,
@@ -86,13 +114,16 @@ def walk_nested_archives(
         current_budget: ArchiveBudget,
     ) -> None:
         if depth >= max_depth:
+            _report_nested_truncation(
+                current,
+                current_label,
+                depth,
+                nested_name_predicate,
+                on_nested_truncated,
+            )
             return
         for info in current.infolist():
-            if info.is_dir() or not (
-                nested_name_predicate(info.filename)
-                if nested_name_predicate is not None
-                else is_nested_archive_name(info.filename)
-            ):
+            if not _is_allowed_nested_member(info, nested_name_predicate):
                 continue
             if should_cancel is not None and should_cancel():
                 raise_if_cancelled()

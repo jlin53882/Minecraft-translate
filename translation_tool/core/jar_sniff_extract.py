@@ -67,7 +67,9 @@ def _walk_sniffed_members(
     jar_path: str,
     claimed: Callable[[str], bool],
     langs: set[str],
-    on_member: Callable[[zipfile.ZipFile, str, str, tuple[str, ...], ZipReadBudget], None],
+    on_member: Callable[
+        [zipfile.ZipFile, str, str, tuple[str, ...], ZipReadBudget], None
+    ],
 ) -> None:
     """在 outer／nested archive 中找出未被路徑規則認領的書籍／指南成員。
 

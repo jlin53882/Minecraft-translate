@@ -121,6 +121,21 @@ def test_nested_scan_preview_and_canonical_extraction(tmp_path: Path):
     )
 
 
+def test_direct_extraction_without_pre_scan_includes_nested_entries(tmp_path: Path):
+    """公開的直接抽取入口也必須使用 bounded nested walker。"""
+    jar = _outer_jar(
+        tmp_path / "direct-nested.jar",
+        nested={"META-INF/jarjar/inner.jar": _sodium_like_inner()},
+    )
+    regex = re.compile(_LANG_PATTERN)
+    output = tmp_path / "out"
+
+    result = _extract_from_jar(str(jar), str(output), regex)
+
+    assert result == {"status": "success", "extracted": 1, "skipped": 0}
+    assert (output / "direct-nested_extracted/assets/sodium/lang/en_us.json").is_file()
+
+
 def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path):
     jar = _outer_jar(
         tmp_path / "nested-sniff.jar",
@@ -158,6 +173,33 @@ def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path
         )
     )
     assert (pipeline_output / "nested-sniff_extracted" / member).is_file()
+
+
+def test_nested_content_sniff_preview_reports_partial_nested_archive(
+    tmp_path: Path,
+):
+    inner = _zip_bytes(
+        {
+            "assets/demo/books/chapters/foods.json": json.dumps(
+                {"title": "demo.book.title", "pages": [{"summary": "Book"}]}
+            ),
+            "META-INF/jarjar/broken.jar": b"not a zip",
+        }
+    )
+    jar = _outer_jar(
+        tmp_path / "nested-sniff-partial.jar",
+        nested={"META-INF/jarjar/books.jar": inner},
+    )
+    book_regex = build_book_path_regex(codes=["en_us"])
+
+    preview = _scan_single_jar_for_preview(
+        str(jar), "book", book_regex, book_path_regex=None, lang_regex=None
+    )
+
+    assert preview["error"] is None
+    assert preview["matched_files"] == ["assets/demo/books/chapters/foods.json"]
+    assert preview["partial"] is True
+    assert preview["skipped_nested"] == 1
 
 
 def test_nested_content_sniff_keeps_first_canonical_source(tmp_path: Path):
@@ -252,6 +294,13 @@ def test_nested_corrupt_archive_is_skipped_without_hiding_good_resource(tmp_path
     assert "assets/sodium/lang/en_us.json" in result[jar]
     assert result.nested_jars[jar] == 1
     assert result.skipped_nested[jar] == 1
+    assert result.partial_jars == {jar}
+
+    preview = _scan_single_jar_for_preview(
+        str(jar), "lang", re.compile(_LANG_PATTERN), None, None
+    )
+    assert preview["partial"] is True
+    assert preview["skipped_nested"] == 1
 
 
 def test_nested_archive_size_limit_is_applied(monkeypatch, tmp_path: Path):
@@ -286,6 +335,25 @@ def test_nested_archive_depth_limit_is_deterministic(tmp_path: Path):
     # only depths 1..3.
     assert jar not in result
     assert result.nested_jars[jar] == 3
+    assert result.truncated_nested[jar] == 1
+    assert result.partial_jars == {jar}
+
+
+def test_database_scan_reports_nested_depth_truncation(tmp_path: Path):
+    payload = _zip_bytes(
+        {"assets/deep/lang/en_us.json": json.dumps({"deep.key": "deep"})}
+    )
+    for index in range(4):
+        payload = _zip_bytes({f"META-INF/jarjar/level-{index}.jar": payload})
+    jar = _outer_jar(
+        tmp_path / "deep-db.jar", direct={"META-INF/jarjar/root.jar": payload}
+    )
+
+    result = scan_jar(jar, ScanOptions("1.21.1"), dir_names=())
+
+    assert result.error == ""
+    assert result.truncated_nested == 1
+    assert any("深度超過上限" in note for note in result.notes)
 
 
 def test_nested_canonical_collision_keeps_first_source_and_logs(tmp_path: Path):
@@ -346,6 +414,37 @@ def test_direct_outer_jar_path_is_unchanged(tmp_path: Path):
 
     assert (output / "assets/direct/lang/en_us.json").is_file()
     assert not list(output.glob("*_extracted/assets/direct/lang/en_us.json"))
+
+
+def test_cross_jar_asset_collision_uses_input_order_not_worker_order(tmp_path: Path):
+    first = _outer_jar(
+        tmp_path / "first.jar",
+        direct={"assets/shared/lang/en_us.json": '{"value":"first"}'},
+    )
+    second = _outer_jar(
+        tmp_path / "second.jar",
+        direct={"assets/shared/lang/en_us.json": '{"value":"second"}'},
+    )
+    regex = re.compile(_LANG_PATTERN)
+    scanned = scan_jars(
+        tmp_path,
+        [regex.pattern],
+        max_workers=2,
+        jar_files=[first, second],
+    )
+    output = tmp_path / "out"
+
+    # Deliberately extract in the opposite completion order.  The canonical
+    # plan must still keep the first input JAR as the direct-assets owner.
+    _extract_from_jar(str(second), str(output), regex, scanned)
+    _extract_from_jar(str(first), str(output), regex, scanned)
+
+    assert (
+        json.loads(
+            (output / "assets/shared/lang/en_us.json").read_text(encoding="utf-8")
+        )["value"]
+        == "first"
+    )
 
 
 def test_nested_walker_honors_cancellation_before_reading(tmp_path: Path):
