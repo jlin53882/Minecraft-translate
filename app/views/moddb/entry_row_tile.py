@@ -24,6 +24,10 @@ from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import STATE_TONES, shorten
 from app.views.moddb.smart_review_marks import MARK_STYLES
 
+# 內容有變的列超過這個數量時改更新整個清單：每列各送一次 patch 的固定成本（序列化、送出）
+# 在大約十列之後就超過一次清單 diff（走訪 50 列約 15～25 毫秒）。
+MAX_ROW_UPDATES = 8
+
 _QUALITY_WARNING_STATES = frozenset(
     {"mismatch", "whitespace", "unknown_source", "missing_translation"}
 )
@@ -161,32 +165,52 @@ class EntryTilePool:
         marks: dict | None,
         catalog,
         empty: ft.Control | None = None,
-    ) -> None:
-        """把 ``rows`` 填進前 N 列、隱藏其餘；沒有資料時顯示 ``empty``。"""
+    ) -> list[ft.Control] | None:
+        """把 ``rows`` 填進前 N 列、隱藏其餘；沒有資料時顯示 ``empty``。
+
+        回傳內容有變的列（呼叫端逐列 update；整個清單的 diff 要走訪全部 50 列，即使只有一列改變）；
+        清單的控制項組成改變（顯示或離開空狀態），或有變的列超過 ``MAX_ROW_UPDATES`` 時回傳
+        ``None``，呼叫端要更新整個清單。
+        """
         marks = marks or {}
         self._by_id = {}
         if not rows and empty is not None:
             self.list_view.controls = [empty]
             self._showing_empty = True
-            return
+            return None
+        changed: list[ft.Control] | None = []
         if self._showing_empty:
             self.list_view.controls = [tile.box for tile in self._tiles]
             self._showing_empty = False
+            changed = None
         for tile, row in zip(self._tiles, rows, strict=False):
-            self._fill(tile, row, selected_id, marks.get(row.id), catalog)
+            if self._fill(tile, row, selected_id, marks.get(row.id), catalog) and (
+                changed is not None
+            ):
+                changed.append(tile.box)
             self._by_id[row.id] = tile
         for tile in self._tiles[len(rows) :]:
             if tile.box.visible:
                 tile.box.visible = False
                 tile.entry_id = None
                 tile.shown = None
+                if changed is not None:
+                    changed.append(tile.box)
+        if changed is not None and len(changed) > MAX_ROW_UPDATES:
+            return None
+        return changed
 
-    def _fill(self, tile: _Tile, row, selected_id, mark, catalog) -> None:
+    def _fill(self, tile: _Tile, row, selected_id, mark, catalog) -> bool:
+        """填一列；回傳這列有沒有任何顯示內容改變。"""
+        changed = not tile.box.visible
         tile.box.visible = True
         if tile.entry_id != row.id:
             tile.box.data = row.id
             tile.entry_id = row.id
+            changed = True
         selected = row.id == selected_id
+        if tile.selected != selected:
+            changed = True
         self._paint_selected(tile, selected)
         shown = (
             row.en_us,
@@ -203,7 +227,7 @@ class EntryTilePool:
             getattr(mark, "validation_error", None),
         )
         if tile.shown == shown:
-            return
+            return changed
         tile.shown = shown
         tile.dot.bgcolor = design.tone(STATE_TONES[row.state]).fg
         tile.title.value = shorten(row.en_us, 48) if row.en_us else "（原文未知）"
@@ -211,6 +235,7 @@ class EntryTilePool:
         tile.zh.value = shorten(row.zh_tw, 48) if row.zh_tw else "（未翻譯）"
         tile.key_text.value = shorten(row.key, 46)
         self._fill_chips(tile, row, mark, catalog)
+        return True
 
     @staticmethod
     def _fill_chips(tile: _Tile, row, mark, catalog) -> None:
@@ -265,6 +290,10 @@ class EntryTilePool:
                 self._paint_selected(tile, wanted)
                 changed.append(tile.box)
         return changed
+
+    def boxes(self) -> list[ft.Control]:
+        """所有列的容器（依序）。"""
+        return [tile.box for tile in self._tiles]
 
     def tile_for(self, entry_id: int | None) -> ft.Control | None:
         tile = self._by_id.get(entry_id) if entry_id is not None else None

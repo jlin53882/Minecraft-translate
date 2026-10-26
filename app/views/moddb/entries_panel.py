@@ -38,6 +38,7 @@ from app.views.moddb.editor_save_state import shadowed_versions, shadowing_sourc
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
+    FilterFlush,
     apply_filter_options,
     build_filter_controls,
     database_identity,
@@ -146,7 +147,9 @@ class EntriesPanel(ft.Column):
         self._post_refresh_message: str | None = None
         self._edit_debounce = Debouncer(lambda: self._page, EDIT_DEBOUNCE_SECONDS)
         self._loading_id: int | None = None
-        self._options_dirty = False
+        self.filter_flush = FilterFlush()
+        # None：整個清單要更新（初次或控制項組成改變）；清單：只有這些列有變
+        self._list_regions_dirty: list[ft.Control] | None = None
         self.refresh_indicator = ft.Text(
             "背景更新條目資料中…", size=12, color=C.MUTED, visible=False
         )
@@ -453,8 +456,8 @@ class EntriesPanel(ft.Column):
         self.list_shell.opacity = 1.0
         filter_only = snapshot.get("filter_only", False)
         options_ready = not filter_only or snapshot.get("filter_options_ready")
-        if options_ready and apply_filter_options(self, snapshot):
-            self._options_dirty = True
+        if options_ready:
+            apply_filter_options(self, snapshot)
 
         self._editor_drafts.remember(self.selected, self.tw_field.value)
         previous_selected_id = self.selected.id if self.selected else None
@@ -644,13 +647,20 @@ class EntriesPanel(ft.Column):
             empty.key = "entry-empty"
         if self._render_source_catalog is None and self.rows:
             self._render_source_catalog = source_catalog_for(self.db())
-        self.tiles.set_rows(
+        changed_tiles = self.tiles.set_rows(
             self.rows,
             selected_id=self._highlight_id(),
             marks=self.smart_review_marks,
             catalog=self._render_source_catalog,
             empty=empty,
         )
+        # 還沒送出的變更（沒有 flush 就又重畫一次）要合併；整個清單待更新時維持 None
+        if changed_tiles is None:
+            self._list_regions_dirty = None
+        elif self._list_regions_dirty is not None:
+            self._list_regions_dirty = list(
+                dict.fromkeys([*self._list_regions_dirty, *changed_tiles])
+            )
         self._scroll_list_to(self._scroll_offset if keep_scroll else 0.0)
 
     def _highlight_id(self) -> int | None:
@@ -1098,28 +1108,31 @@ class EntriesPanel(ft.Column):
 
     def apply_options_snapshot(self, snapshot: dict) -> bool:
         """套用第二階段載入的篩選選項；回傳篩選列是否有顯示內容改變（沒變就不必重畫）。"""
-        if apply_filter_options(self, snapshot):
-            self._options_dirty = True
-            return True
-        return False
+        return apply_filter_options(self, snapshot)
 
     def flush_filter_options(self) -> None:
-        """只重畫篩選列（第二階段選項套用後）。"""
-        if self._options_dirty:
-            self._options_dirty = False
-            update_regions(self.filter_card)
+        """第二階段選項套用後：只重畫有變的篩選控制項。"""
+        update_regions(*self.filter_flush.take(self))
+
+    def _take_list_regions(self) -> list[ft.Control]:
+        """清單這次要更新的控制項：列的內容與順序沒變時只更新有變的列，否則整個清單。"""
+        changed = self._list_regions_dirty
+        self._list_regions_dirty = []
+        return [self.list_view] if changed is None else changed
 
     def flush(self) -> None:
         """把整個頁籤的變更送到畫面。
 
         篩選列、清單、編輯區與記錄是各自的更新邊界（頁面層級的 update 不會走進去）；
-        篩選選項沒變（例如只翻頁）時不更新篩選列。
+        篩選選項沒變（例如只翻頁）時不更新篩選下拉選單，清單只更新內容有變的列。
         """
-        regions = [self, self.list_view, self.editor_card, self.history_card]
-        if self._options_dirty:
-            regions.append(self.filter_card)
-            self._options_dirty = False
-        update_regions(*regions)
+        update_regions(
+            self,
+            *self._take_list_regions(),
+            self.editor_card,
+            self.history_card,
+        )
+        self.flush_filter_options()  # 下拉選單內容在清單、編輯區之後送出
 
     def show_loading(self) -> None:
         """背景載入中：提示文字已設好，清單變暗表示目前內容即將被取代。"""
@@ -1131,12 +1144,13 @@ class EntriesPanel(ft.Column):
 
     def flush_all(self) -> None:
         """每個區塊都更新（來源不明的變更）。"""
-        self._options_dirty = True
+        self.filter_flush.mark_all()
+        self._list_regions_dirty = None
         self.flush()
 
     def _flush_list(self) -> None:
         """清單列、頁碼與筆數徽章。"""
-        update_regions(self.list_view, self.pager, self.count_badge)
+        update_regions(*self._take_list_regions(), self.pager, self.count_badge)
 
     def _flush_editor(self) -> None:
         """編輯區與記錄欄。"""

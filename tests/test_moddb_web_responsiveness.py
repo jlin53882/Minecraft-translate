@@ -47,6 +47,24 @@ def db_path(tmp_path, monkeypatch):
     return path
 
 
+def _row(entry_id: int, **overrides):
+    """清單列測試用的條目（只含 ``EntryTilePool`` 讀到的欄位）。"""
+    values = {
+        "id": entry_id,
+        "en_us": f"Text {entry_id}",
+        "zh_tw": f"文字 {entry_id}",
+        "key": f"item.foo.{entry_id:03d}",
+        "state": "ok",
+        "source": None,
+        "review_status": None,
+        "quality_state": "consistent",
+        "quality_issues": (),
+        "whitespace_note": None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
 def _scheduled_page():
     page = mock_page()
     page.operation_registry = OperationRegistry()
@@ -341,6 +359,131 @@ def test_save_redraws_the_entries_panel_once_after_the_worker_snapshot(
     assert entries.saved_text.value
 
 
+def _prepare_edit(view, text):
+    entries = view.entries
+    entries._edit_debounce = SimpleNamespace(
+        call=lambda fn, *args: fn(*args), cancel=lambda: None
+    )
+    entries.tw_field.value = text
+    entries._on_text_change()
+    _settle(view._page)
+    return entries
+
+
+def test_save_updates_only_the_changed_row_not_the_whole_list(view, monkeypatch):
+    entries = _prepare_edit(view, "只改這一列")
+    saved_id = entries.selected.id
+    regions = _record_regions(monkeypatch)
+
+    entries._save()
+    _settle(view._page)
+
+    saved_box = entries.tiles.tile_for(saved_id)
+    assert saved_box in regions
+    # 整個清單的 diff 要走訪全部 50 列；儲存只改了一列，其餘列不重畫
+    assert entries.list_view not in regions
+    assert regions.count(saved_box) == 1
+    assert not any(
+        box in regions for box in entries.tiles.boxes() if box is not saved_box
+    )
+
+
+def test_save_does_not_recompute_what_the_snapshot_redraws(view, monkeypatch):
+    """背景快照會重畫編輯區與影響預覽，儲存結果不再另外算一次影響預覽、重畫編輯區。"""
+    entries = _prepare_edit(view, "不重複計算")
+    previews = _record_threads(monkeypatch, "preview_manual")
+    previews.clear()
+    editor_flushes: list[int] = []
+    original = entries._flush_editor
+    monkeypatch.setattr(
+        entries, "_flush_editor", lambda: (editor_flushes.append(1), original())
+    )
+
+    entries._save()
+    _settle(view._page)
+
+    assert entries.selected.zh_tw == "不重複計算"
+    assert previews == []
+    assert editor_flushes == []
+
+
+def test_write_results_request_the_reload_before_showing_the_snack(view, monkeypatch):
+    """提示的畫面差異計算與資料庫重載可以重疊：先交出背景重載請求，再顯示提示。"""
+    from app.views.moddb import entry_save_result
+
+    entries = _prepare_edit(view, "先重載再提示")
+    events: list[str] = []
+    original_request = view._request_panel_refresh
+    monkeypatch.setattr(
+        view,
+        "_request_panel_refresh",
+        lambda *a, **k: (events.append("reload"), original_request(*a, **k))[1],
+    )
+    monkeypatch.setattr(
+        entry_save_result, "show_snack", lambda *a, **k: events.append("snack")
+    )
+
+    entries._save()
+    _settle(view._page)
+
+    assert events.index("reload") < events.index("snack")
+
+
+def test_tile_pool_reports_only_the_rows_that_changed():
+    pool = EntryTilePool(4, lambda _id: None)
+    rows = [_row(i) for i in range(1, 4)]
+
+    first = pool.set_rows(rows, selected_id=None, marks=None, catalog=None)
+    assert [b.data for b in first] == [1, 2, 3]  # 第一次：每一列都是新內容
+
+    same = pool.set_rows(rows, selected_id=None, marks=None, catalog=None)
+    assert same == []  # 完全相同：沒有任何一列要更新
+
+    rows[1] = _row(2, zh_tw="改過的譯文")
+    one = pool.set_rows(rows, selected_id=None, marks=None, catalog=None)
+    assert [b.data for b in one] == [2]
+
+    selected = pool.set_rows(rows, selected_id=3, marks=None, catalog=None)
+    assert [b.data for b in selected] == [3]  # 只有選取底色變的那一列
+
+    shorter = pool.set_rows(rows[:2], selected_id=3, marks=None, catalog=None)
+    assert len(shorter) == 1  # 第 3 列被隱藏
+    assert shorter[0].visible is False
+
+
+def test_tile_pool_updates_the_whole_list_when_most_rows_changed():
+    from app.views.moddb.entry_row_tile import MAX_ROW_UPDATES
+
+    pool = EntryTilePool(50, lambda _id: None)
+    rows = [_row(i) for i in range(1, 51)]
+    pool.set_rows(rows, selected_id=None, marks=None, catalog=None)
+
+    # 換頁、換篩選：幾乎每一列都變，一次清單 diff 比 50 次逐列 patch 便宜
+    new_page = [_row(i + 100) for i in range(1, 51)]
+    assert pool.set_rows(new_page, selected_id=None, marks=None, catalog=None) is None
+
+    few = [
+        *new_page[:-MAX_ROW_UPDATES],
+        *[_row(i + 200) for i in range(MAX_ROW_UPDATES)],
+    ]
+    changed = pool.set_rows(few, selected_id=None, marks=None, catalog=None)
+    assert changed is not None and len(changed) == MAX_ROW_UPDATES
+
+
+def test_tile_pool_asks_for_the_whole_list_when_the_empty_state_changes():
+    pool = EntryTilePool(2, lambda _id: None)
+    empty = object()
+    rows = [_row(1)]
+
+    assert (
+        pool.set_rows([], selected_id=None, marks=None, catalog=None, empty=empty)
+        is None
+    )
+    # 離開空狀態：清單的控制項組成改變，不能只更新幾列
+    assert pool.set_rows(rows, selected_id=None, marks=None, catalog=None) is None
+    assert pool.set_rows(rows, selected_id=None, marks=None, catalog=None) == []
+
+
 def test_save_failure_still_recomputes_the_impact_in_the_background(view, monkeypatch):
     threads = _record_threads(monkeypatch, "preview_manual")
     entries = view.entries
@@ -473,21 +616,50 @@ def _record_regions(monkeypatch) -> list:
 
 def test_reloading_unchanged_options_does_not_redraw_the_filter_card(view, monkeypatch):
     regions = _record_regions(monkeypatch)
+    entries = view.entries
 
-    view._request_panel_refresh("entries")  # 完整快照，選項與選值都沒變
+    view._request_panel_refresh("entries")  # 完整快照，選項、選值與每一列都沒變
     _settle(view._page)
 
-    assert view.entries.filter_card not in regions
-    assert view.entries.list_view in regions
+    filter_controls = (
+        entries.filter_card,
+        entries.mod_dd,
+        entries.kind_dd,
+        entries.version_dd,
+        entries.source_filter.dropdown,
+    )
+    assert not any(control in regions for control in filter_controls)
+    assert entries.list_view not in regions  # 沒有任何一列有變：清單不必 diff 50 列
+    assert not any(box in regions for box in entries.tiles.boxes())
 
 
-def test_changed_options_redraw_the_filter_card(view, monkeypatch):
+def test_changed_options_redraw_only_the_changed_dropdowns(view, monkeypatch):
+    regions = _record_regions(monkeypatch)
+    entries = view.entries
+
+    entries._on_state("none")  # 沒有未翻譯條目：模組與來源選項縮減
+    _settle(view._page)
+
+    assert entries.mod_dd in regions
+    assert entries.filter_card not in regions  # 只更新有變的下拉選單，不重畫整張篩選列
+    assert entries.kind_dd not in regions
+    assert entries.version_dd not in regions
+
+
+def test_advanced_summary_is_flushed_even_when_the_options_do_not_change(
+    view, monkeypatch
+):
+    """品質／排序這類條件只改摘要文字：選項沒變時摘要也要送到畫面（不能等下一次選項更新）。"""
+    entries = view.entries
     regions = _record_regions(monkeypatch)
 
-    view.entries._on_state("none")  # 沒有未翻譯條目：模組選項縮減
+    entries.advanced_filters.sort.value = "entry_newest"
+    entries.advanced_filters._selection_changed()
     _settle(view._page)
 
-    assert view.entries.filter_card in regions
+    assert entries.advanced_filters.active_text.value == "已套用 1 項進階條件"
+    assert entries.filter_actions_row in regions
+    assert entries.filter_card not in regions
 
 
 # ------------------------------------------------------------------ 搜尋：清單先、選項後

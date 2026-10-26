@@ -186,12 +186,12 @@ def revert_history(panel, history_id: int) -> None:
                 return
             raise error
         log_info(f"Mod 資料庫還原：history_id={history_id}，還原 {count} 筆")
+        after_data_change(panel)  # 先交出背景重載請求，再顯示提示
         show_snack(
             panel._page,
             f"已還原 {count} 筆" if count else "沒有可還原的內容（之後已被再次修改）",
             C.EM if count else C.GOLD,
         )
-        after_data_change(panel)
 
     run_write(
         panel._page,

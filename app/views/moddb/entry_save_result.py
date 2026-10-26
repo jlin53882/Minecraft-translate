@@ -45,9 +45,15 @@ def apply_save_result(
         )
     shadow, held_back = source_info
     message = _build_success_message(entry, done, shadow, held_back)
-    _show_success_snack(panel, message, shadow, held_back)
+    redrawn_by_snapshot = False
     if panel.db() is db:
-        _apply_current_panel_result(panel, entry, text, message, shadow, flagged_batch)
+        # 先交出背景重載請求，再顯示提示：讀取（worker）與提示的畫面差異計算可以重疊
+        redrawn_by_snapshot = _apply_current_panel_result(
+            panel, entry, text, message, shadow, flagged_batch
+        )
+    _show_success_snack(panel, message, shadow, held_back)
+    if redrawn_by_snapshot:
+        return  # 編輯區與影響預覽由背景快照套用時重畫；這裡再算一次只是白做工
     panel._update_impact()
     panel._flush_editor()
 

@@ -339,8 +339,9 @@ class ReviewScopeController:
                 log_info(
                     f"Mod 資料庫解除人工審核：{entry.mc_version} {entry.mod_id} {entry.key}"
                 )
-                show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
+                # 先交出背景重載請求再顯示提示：讀取與提示的畫面差異計算可以重疊
                 entry_writes.after_data_change(panel, message)
+                show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
             elif isinstance(error, ValueError):
                 self._reject_clear(entry, error)
             elif isinstance(error, sqlite3.Error):
@@ -767,8 +768,8 @@ class ReviewScopeController:
                 if others
                 else "已標記為人工已審核（來源不變）"
             )
-            show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
             entry_writes.after_data_change(panel, message)
+            show_snack(panel._page, message, C.EM, text_color=C.ON_EM)
 
         launched = entry_writes.run_write(
             panel._page,
