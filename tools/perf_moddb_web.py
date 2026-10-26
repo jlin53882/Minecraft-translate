@@ -437,8 +437,15 @@ class Driver:
         with urllib.request.urlopen(self.probe_url + "prof/stop") as resp:
             return json.loads(resp.read())["text"]
 
-    def measure(self, name: str, action, *, label: str = "") -> dict:
-        """執行 ``action()``（會觸發一次前端操作），回傳 server/e2e 延遲。"""
+    def measure(
+        self, name: str, action, *, label: str = "", quiet_ms: int | None = None
+    ) -> dict:
+        """執行 ``action()``（會觸發一次前端操作），回傳 server/e2e 延遲。
+
+        ``quiet_ms`` 暫時覆寫「patch 靜默多久算完成」：背景工作很久才回報結果的操作
+        （例如數十萬筆的預覽）要設得比工作時間長，否則會在結果到達前就判定結束。
+        """
+        quiet = quiet_ms if quiet_ms is not None else self.quiet_ms
         self.drain()
         self.page.evaluate(
             "() => { if (window.__perf) { window.__perf.last = 0; window.__perf.t0 = 0; window.__perf.times = []; } }"
@@ -457,7 +464,7 @@ class Driver:
                 if any(e["kind"] in ("send", "recv") for e in new):
                     last_activity = time.perf_counter()
             # 背景工作完成後的更新也要算：靜默 quiet_ms 才算結束
-            if (time.perf_counter() - last_activity) * 1000 >= self.quiet_ms and any(
+            if (time.perf_counter() - last_activity) * 1000 >= quiet and any(
                 e["kind"] == "recv" for e in events
             ):
                 break

@@ -404,10 +404,26 @@ def s_bulk_review(ctx: Ctx) -> None:
     _to_entries(ctx)
     _open_dialog_op(ctx, "bulk_review_open", "批量審核", ("取消", "關閉"))
     ctx.op(
-        "bulk_review_preview", lambda i: _click_dialog_button(ctx, "產生預覽"), hot=2
+        "bulk_review_preview",
+        lambda i: _click_dialog_button(ctx, "產生預覽"),
+        hot=2,
+        quiet_ms=5000,  # 全版本預覽在背景要數秒，期間沒有 patch
     )
     ctx.settle(500)
     ctx.snap("bulk_preview")
+    # 全版本預覽納入數十萬筆；執行與還原改在單一模組（數百筆）上量，才是互動可用的規模
+    dropdowns = ctx.find_all(None, "button", region=[480, 230, 700, 290])
+    if not dropdowns:
+        raise ScenarioError("找不到批量審核的模組下拉選單")
+    ctx.click_at(*ctx.pick_option(dropdowns[0], 1))
+    ctx.settle(700)
+    ctx.op(
+        "bulk_review_preview_module",
+        lambda i: _click_dialog_button(ctx, "產生預覽"),
+        hot=1,
+    )
+    ctx.settle(500)
+    ctx.snap("bulk_selected")
     ctx.op(
         "bulk_review_execute",
         lambda i: _click_dialog_button(ctx, "確認審核", "contain"),

@@ -182,14 +182,26 @@ class Ctx:
         return items[-1]
 
     # -- 量測 ---------------------------------------------------------------
-    def op(self, name, action, *, before=None, after=None, hot=None, label=""):
+    def op(
+        self,
+        name,
+        action,
+        *,
+        before=None,
+        after=None,
+        hot=None,
+        label="",
+        quiet_ms=None,
+    ):
         """冷 1 次 + 熱 N 次。``before(i)`` 為不計時的準備；``action(i)`` 只做原始輸入。"""
         n = 1 + (self.hot if hot is None else hot)
         for i in range(n):
             if before:
                 before(i)
             self.settle()
-            self.drv.measure(name, lambda i=i: action(i), label=f"{label}#{i}")
+            self.drv.measure(
+                name, lambda i=i: action(i), label=f"{label}#{i}", quiet_ms=quiet_ms
+            )
             if after:
                 after(i)
         if getattr(self.args, "profile", False):
