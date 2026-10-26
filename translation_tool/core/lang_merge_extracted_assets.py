@@ -124,7 +124,7 @@ def _scan_extracted_lang_files(
     for scan_root in scan_roots:
         if not scan_root.exists():
             continue
-        for entry in scan_root.iterdir():
+        for entry in sorted(scan_root.iterdir(), key=lambda path: path.name.casefold()):
             if not entry.is_dir():
                 continue
             # 跳過 assets/ (目標資料夾)與 待翻譯整理/待翻譯 (待翻譯 已在 scan_root handle)
@@ -134,7 +134,11 @@ def _scan_extracted_lang_files(
             if not _EXTRACTED_NAME_RE.match(entry.name):
                 continue
 
-            file_count = sum(1 for _ in entry.rglob(_LANG_FILE_GLOB) if _.is_file())
+            lang_files = sorted(
+                (path for path in entry.rglob(_LANG_FILE_GLOB) if path.is_file()),
+                key=lambda path: path.as_posix().casefold(),
+            )
+            file_count = len(lang_files)
             if file_count == 0:
                 # 2026-08-02:log 哪些 _extracted 沒找到 lang 檔案(為什麼沒處理)
                 log_warning(
@@ -144,9 +148,7 @@ def _scan_extracted_lang_files(
                 continue
 
             scanned_dirs.append(entry.name)
-            for lang_file in entry.rglob(_LANG_FILE_GLOB):
-                if not lang_file.is_file():
-                    continue
+            for lang_file in lang_files:
                 modid = _infer_modid_from_lang_file(lang_file)
                 if not modid:
                     log_warning(f"[MergeExt→Assets] 推不出 modid: {lang_file}, 跳過")

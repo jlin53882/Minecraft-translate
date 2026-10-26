@@ -18,12 +18,14 @@ from __future__ import annotations
 import re
 import zipfile
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.nested_archive import walk_nested_archives
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.worker_count import resolve_worker_count
 from translation_tool.utils.zip_safety import (
@@ -62,6 +64,35 @@ class ScanResults(dict):
         self.budgets: dict[Path, ZipReadBudget] = {}
         self.failed_jars: set[Path] = set()
         self.skipped_jars: set[Path] = set()
+        self.entries: dict[Path, list[ScannedEntry]] = {}
+        self.nested_jars: dict[Path, int] = {}
+        self.skipped_nested: dict[Path, int] = {}
+        self.collision_notes: dict[Path, list[str]] = {}
+
+
+@dataclass(frozen=True)
+class ScannedEntry:
+    """預掃描找到的資源及其在 outer JAR 內的來源鏈。"""
+
+    logical_path: str
+    member_chain: tuple[str, ...]
+    content: str | None
+    size: int
+    raw_data: bytes | None = None
+
+    @property
+    def is_nested(self) -> bool:
+        return len(self.member_chain) > 1
+
+
+@dataclass
+class _JarScanDetails:
+    content: dict[str, str | None]
+    entries: list[ScannedEntry]
+    nested_jars: int = 0
+    skipped_nested: int = 0
+    collision_notes: list[str] | None = None
+    error: str | None = None
 
 
 def _scan_single_jar(
@@ -70,6 +101,7 @@ def _scan_single_jar(
     budget: ZipReadBudget | None = None,
     failure_callback: Callable[[Path], None] | None = None,
     skipped_callback: Callable[[Path], None] | None = None,
+    scan_nested: bool = True,
 ) -> tuple[Path, dict[str, str | None]]:
     """掃描單一 JAR，符合 pattern 的檔案內容讀取出來。
 
@@ -87,48 +119,130 @@ def _scan_single_jar(
           - 文字檔：UTF-8 解碼後的字串
           - binary 檔案（UTF-8 decode 失敗）：None（由 caller 自行處理）
     """
+    details = _scan_single_jar_detailed(
+        jar_path,
+        patterns,
+        budget=budget,
+        failure_callback=failure_callback,
+        skipped_callback=skipped_callback,
+        scan_nested=scan_nested,
+    )
+    return jar_path, details.content
+
+
+def _scan_single_jar_detailed(
+    jar_path: Path,
+    patterns: list[str],
+    budget: ZipReadBudget | None = None,
+    failure_callback: Callable[[Path], None] | None = None,
+    skipped_callback: Callable[[Path], None] | None = None,
+    scan_nested: bool = True,
+) -> _JarScanDetails:
+    """掃描單一 outer JAR，並保留巢狀資源的來源鏈供抽取階段使用。"""
     result: dict[str, str | None] = {}
+    entries: list[ScannedEntry] = []
+    collisions: list[str] = []
+    nested_jars = 0
+    skipped_nested = 0
     if budget is None:
         budget = ZipReadBudget(label=jar_path.name)
+
+    def visit_archive(
+        zf: zipfile.ZipFile,
+        label: str,
+        depth: int,
+        archive_chain: tuple[str, ...],
+        archive_budget: ZipReadBudget,
+    ) -> bool:
+        nonlocal nested_jars
+        if depth:
+            nested_jars += 1
+        for info in zf.infolist():
+            raise_if_cancelled()
+            if info.is_dir():
+                continue
+            name = info.filename.replace("\\", "/")
+            if not any(re.search(pattern, name) for pattern in patterns):
+                continue
+            try:
+                data = read_limited(zf, info, budget=archive_budget)
+            except ArchiveBudgetError:
+                raise
+            except ZipSizeError as size_err:
+                if skipped_callback:
+                    skipped_callback(jar_path)
+                log_warning(f"[jar_browser] 略過過大檔案 {label}!{name}: {size_err!r}")
+                continue
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = None
+
+            if name in result:
+                collisions.append(
+                    f"{label}!{name} 與既有來源的 canonical 路徑衝突，保留先出現的來源"
+                )
+                log_warning("[jar_browser] %s", collisions[-1])
+                continue
+            result[name] = text
+            entries.append(
+                ScannedEntry(
+                    logical_path=name,
+                    member_chain=archive_chain + (name,),
+                    content=text,
+                    size=info.file_size,
+                    # Nested binary resources are already bounded and cached so
+                    # extraction does not have to recharge the outer archive
+                    # budget merely to reopen the same inner JAR.
+                    raw_data=data if archive_chain and text is None else None,
+                )
+            )
+        return True
+
+    def on_nested_error(label: str, name: str, exc: BaseException) -> None:
+        nonlocal skipped_nested
+        skipped_nested += 1
+        log_warning("[jar_browser] 略過內嵌 jar %s：%s", label, exc)
+
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
-            for name in zf.namelist():
-                raise_if_cancelled()
-                for pattern in patterns:
-                    if re.search(pattern, name):
-                        try:
-                            result[name] = read_limited(zf, name, budget=budget).decode(
-                                "utf-8"
-                            )
-                        except ArchiveBudgetError as budget_err:
-                            # 整包累計超限：捨棄這個 JAR 的結果（只讀到一部分會讓後續處理
-                            # 誤以為內容完整），由呼叫端視為「沒有內容」。
-                            log_error(
-                                f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
-                                f"{jar_path.name} - {budget_err!r}"
-                            )
-                            if failure_callback:
-                                failure_callback(jar_path)
-                            return jar_path, {}
-                        except ZipSizeError as size_err:
-                            if skipped_callback:
-                                skipped_callback(jar_path)
-                            log_warning(
-                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err!r}"
-                            )
-                        except UnicodeDecodeError:
-                            # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
-                            result[name] = None
-                        break  # 一個檔案只讀一次
+            walk_nested_archives(
+                zf,
+                jar_path.name,
+                budget,
+                visit_archive,
+                budget_factory=lambda _label: budget,
+                on_nested_error=on_nested_error,
+                scan_nested=scan_nested,
+            )
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
         if failure_callback:
             failure_callback(jar_path)
+        return _JarScanDetails({}, [], collision_notes=collisions, error="BadZipFile")
+    except ArchiveBudgetError as budget_err:
+        # 整包累計超限：捨棄部分結果，避免後續把不完整的 JAR 當成成功。
+        log_error(
+            f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
+            f"{jar_path.name} - {budget_err!r}"
+        )
+        if failure_callback:
+            failure_callback(jar_path)
+        return _JarScanDetails(
+            {}, [], collision_notes=collisions, error=str(budget_err)
+        )
     except Exception as ex:  # noqa: BLE001
         log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex!r}")
         if failure_callback:
             failure_callback(jar_path)
-    return jar_path, result
+        return _JarScanDetails({}, [], collision_notes=collisions, error=str(ex))
+    return _JarScanDetails(
+        result,
+        entries,
+        nested_jars=nested_jars,
+        skipped_nested=skipped_nested,
+        collision_notes=collisions,
+    )
 
 
 def scan_jars(
@@ -137,6 +251,7 @@ def scan_jars(
     max_workers: int | None = None,
     processed_callback: Callable[[int, int], None] | None = None,
     jar_files: Iterable[Path | str] | None = None,
+    scan_nested: bool = True,
 ) -> dict[Path, dict[str, str | None]]:
     """平行讀取多個 JAR 內符合 pattern 的檔案內容。
 
@@ -157,6 +272,7 @@ def scan_jars(
             None（預設）維持舊行為：只掃 ``jar_dir`` 頂層的 ``*.jar``。
             提取流程會傳入與 ``find_jar_files`` 相同的清單，讓預掃描與實際處理的
             JAR 一致（issue #111）；此時 ``jar_dir`` 僅作為相容參數，不再用於找檔。
+        scan_nested: 是否遞迴掃描 ``META-INF/jarjar``／``META-INF/jars`` 內嵌 JAR。
 
     回傳：
         dict[Path, dict[str, str | None]]
@@ -199,12 +315,13 @@ def scan_jars(
 
     def submit_scan(executor, jar_path: Path):
         return executor.submit(
-            _scan_single_jar,
+            _scan_single_jar_detailed,
             jar_path,
             patterns,
             results.budgets[jar_path],
             results.failed_jars.add,
             results.skipped_jars.add,
+            scan_nested,
         )
 
     with ContextThreadPoolExecutor(max_workers=workers) as executor:
@@ -216,11 +333,17 @@ def scan_jars(
             max_in_flight=max(1, workers * 2),
         ) as completed:
             for future, jar_path in completed:
-                jar_path, content = future.result()
+                details = future.result()
+                content = details.content
                 # 跳過沒有匹配檔案且可能為 bad zip 的 JAR（bad zip 會 log warning 並回傳 {}）
                 # 若 JAR 有内容則一定會有至少一筆記錄（即使是 None 的 binary 檔）
                 if content:  # 空 dict 表示沒有任何匹配，或 bad zip 被跳過
                     results[jar_path] = content
+                    results.entries[jar_path] = details.entries
+                results.nested_jars[jar_path] = details.nested_jars
+                results.skipped_nested[jar_path] = details.skipped_nested
+                if details.collision_notes:
+                    results.collision_notes[jar_path] = details.collision_notes
                 processed += 1
                 if processed_callback:
                     processed_callback(processed, total)

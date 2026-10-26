@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import io
 import json
 import re
 import sqlite3
@@ -69,6 +68,10 @@ from translation_tool.translation_db.sniff_groups import sniffed_groups
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.nested_archive import (
+    is_nested_archive_name,
+    walk_nested_archives,
+)
 from translation_tool.utils.text_processor import (
     ReplaceRules,
     apply_replace_rules,
@@ -787,66 +790,75 @@ def _scan_archive(
     should_cancel: Callable[[], bool] | None,
 ) -> None:
     """讀取一個 archive（含內嵌 jar）。安全上限（單一成員、archive、整棵樹）超過時設定 ``result.error``。"""
-    budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
-    names = zf.namelist()
-    groups = _group_members(names, options, dir_names)
-    if options.include_patchouli:
-        claimed = {n for members in groups.values() for n in members.values()}
-        for key, members in sniffed_groups(
-            zf, names, claimed, translated=options.translated
-        ).items():
-            groups.setdefault(key, members)
-    patchouli_contexts = (
-        _patchouli_contexts_for_archive(zf, budget, names, dir_names)
-        if any(kind == "patchouli" for kind, _mod, _file in groups)
-        else {}
-    )
-    for ident_key, members in groups.items():
-        try:
-            result.items.extend(
-                _items_for_group(
-                    zf,
-                    budget,
-                    ident_key,
-                    members,
-                    options,
-                    patchouli_contexts,
-                    dir_names,
+
+    def visit_archive(
+        current: zipfile.ZipFile,
+        current_label: str,
+        current_depth: int,
+        _archive_chain: tuple[str, ...],
+        current_budget: _DualBudget,
+    ) -> bool:
+        if current_depth:
+            result.nested_jars += 1
+        names = current.namelist()
+        groups = _group_members(names, options, dir_names)
+        if options.include_patchouli:
+            claimed = {n for members in groups.values() for n in members.values()}
+            for key, members in sniffed_groups(
+                current, names, claimed, translated=options.translated
+            ).items():
+                groups.setdefault(key, members)
+        patchouli_contexts = (
+            _patchouli_contexts_for_archive(current, current_budget, names, dir_names)
+            if any(kind == "patchouli" for kind, _mod, _file in groups)
+            else {}
+        )
+        for ident_key, members in groups.items():
+            try:
+                result.items.extend(
+                    _items_for_group(
+                        current,
+                        current_budget,
+                        ident_key,
+                        members,
+                        options,
+                        patchouli_contexts,
+                        dir_names,
+                    )
                 )
-            )
-        except ZipSizeError as exc:
-            result.error = str(exc)
-            return
-    if not options.scan_nested or depth >= MAX_NESTED_DEPTH:
-        return
-    for name in names:
-        if name.endswith("/") or not name.lower().endswith(".jar"):
-            continue
-        # 翻譯 ZIP 內任何位置的 jar 都掃；一般 jar 只看 jarjar／jars 內嵌目錄
-        if not (options.translated or name.startswith(NESTED_DIRS)):
-            continue
-        try:
-            data = read_limited(zf, name, MAX_FILE_BYTES, budget=budget)
-            with zipfile.ZipFile(io.BytesIO(data)) as nested:
-                result.nested_jars += 1
-                _scan_archive(
-                    nested,
-                    f"{label}!{name}",
-                    options,
-                    dir_names,
-                    result,
-                    depth + 1,
-                    tree,
-                    should_cancel,
-                )
-        except ArchiveBudgetError as exc:
-            result.error = str(exc)  # 累計上限：整包視為失敗，不再讀其餘內嵌 jar
-            return
-        except (zipfile.BadZipFile, ZipSizeError, OSError) as exc:
-            result.skipped_nested += 1  # 單一內嵌 jar 損毀或過大：略過它，記錄在結果中
-            result.notes.append(f"略過內嵌 jar {label}!{name}：{_reason(exc)}")
-        if result.error:  # 內層已回報安全上限
-            return
+            except ZipSizeError as exc:
+                result.error = str(exc)
+                return False
+        return not result.error
+
+    def make_child_budget(child_label: str) -> _DualBudget:
+        return _DualBudget(_new_budget(options, child_label), tree, should_cancel)
+
+    def on_nested_error(child_label: str, name: str, exc: BaseException) -> None:
+        result.skipped_nested += 1
+        result.notes.append(f"略過內嵌 jar {child_label}：{_reason(exc)}")
+
+    root_budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
+    try:
+        walk_nested_archives(
+            zf,
+            label,
+            root_budget,
+            visit_archive,
+            budget_factory=make_child_budget,
+            should_cancel=should_cancel,
+            max_depth=MAX_NESTED_DEPTH,
+            on_nested_error=on_nested_error,
+            archive_max_bytes=MAX_FILE_BYTES,
+            scan_nested=options.scan_nested,
+            nested_name_predicate=(
+                (lambda name: name.lower().endswith(".jar"))
+                if options.translated
+                else is_nested_archive_name
+            ),
+        )
+    except ArchiveBudgetError as exc:
+        result.error = str(exc)
 
 
 def scan_jar(

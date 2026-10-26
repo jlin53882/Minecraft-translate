@@ -1,0 +1,284 @@
+"""巢狀 JAR 一般翻譯流程的回歸測試。"""
+
+from __future__ import annotations
+
+import io
+import json
+import re
+import shutil
+import zipfile
+from pathlib import Path
+
+from app.services_impl.pipelines.bundle_service import build_bundle_staging
+from translation_tool.core.jar_processor import _extract_from_jar, build_lang_file_regex
+from translation_tool.core.jar_processor_preview import _scan_single_jar_for_preview
+from translation_tool.core.lang_merge_extracted_assets import merge_extracted_to_assets
+from translation_tool.core.output_bundler import bundle_outputs_generator
+from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+from translation_tool.utils.jar_browser import scan_jars
+
+_LANG_PATTERN = r"assets/[^/]+/lang/en_us\.json$"
+
+
+def _zip_bytes(entries: dict[str, bytes | str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, value in entries.items():
+            archive.writestr(
+                name, value.encode("utf-8") if isinstance(value, str) else value
+            )
+    return buffer.getvalue()
+
+
+def _outer_jar(
+    path: Path,
+    *,
+    nested: dict[str, bytes] | None = None,
+    direct: dict[str, bytes | str] | None = None,
+) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, value in (direct or {}).items():
+            archive.writestr(
+                name, value.encode("utf-8") if isinstance(value, str) else value
+            )
+        for name, value in (nested or {}).items():
+            archive.writestr(name, value)
+    return path
+
+
+def _sodium_like_inner(value: str = "General") -> bytes:
+    return _zip_bytes(
+        {
+            "assets/sodium/lang/en_us.json": json.dumps(
+                {
+                    "sodium.options.pages.general": value,
+                    "sodium.options.pages.video": "Video",
+                }
+            )
+        }
+    )
+
+
+def test_nested_scan_preview_and_canonical_extraction(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "sodium-neoforge-0.8.13+mc1.21.1.jar",
+        nested={"META-INF/jarjar/sodium-mod.jar": _sodium_like_inner()},
+    )
+    regex = build_lang_file_regex(codes=["en_us"])
+
+    scanned = scan_jars(tmp_path, [regex.pattern], max_workers=1, jar_files=[jar])
+
+    assert scanned[jar]["assets/sodium/lang/en_us.json"] is not None
+    assert scanned.nested_jars[jar] == 1
+    assert scanned.skipped_nested[jar] == 0
+    assert scanned.entries[jar][0].member_chain == (
+        "META-INF/jarjar/sodium-mod.jar",
+        "assets/sodium/lang/en_us.json",
+    )
+
+    preview = _scan_single_jar_for_preview(str(jar), "lang", regex, None, None)
+    assert preview["error"] is None
+    assert preview["matched_files"] == ["assets/sodium/lang/en_us.json"]
+
+    output = tmp_path / "lang_output"
+    result = _extract_from_jar(str(jar), str(output), regex, scanned)
+    assert result == {"status": "success", "extracted": 1, "skipped": 0}
+    extracted = output / (
+        "sodium-neoforge-0.8.13+mc1.21.1_extracted/assets/sodium/lang/en_us.json"
+    )
+    assert extracted.is_file()
+    assert (
+        json.loads(extracted.read_text(encoding="utf-8"))[
+            "sodium.options.pages.general"
+        ]
+        == "General"
+    )
+
+
+def test_nested_translation_result_reaches_stage2_staging_and_zip(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "sodium.jar",
+        nested={"META-INF/jars/sodium-inner.jar": _sodium_like_inner()},
+    )
+    regex = re.compile(_LANG_PATTERN)
+    output = tmp_path / "lang_output"
+    scanned = scan_jars(tmp_path, [regex.pattern], max_workers=1, jar_files=[jar])
+    _extract_from_jar(str(jar), str(output), regex, scanned)
+
+    extracted = next(output.glob("*_extracted/assets/sodium/lang/en_us.json"))
+    extracted.with_name("zh_tw.json").write_text(
+        json.dumps(
+            {
+                "sodium.options.pages.general": "一般",
+                "sodium.options.pages.video": "影片",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    merge_updates = list(merge_extracted_to_assets(output, use_translation_db=False))
+    assert merge_updates[-1]["error"] is False
+    translated = output / "assets/sodium/lang/zh_tw.json"
+    assert (
+        json.loads(translated.read_text(encoding="utf-8"))["sodium.options.pages.video"]
+        == "影片"
+    )
+
+    staging = tmp_path / "staging"
+    stats = build_bundle_staging([str(output)], str(staging))
+    assert stats["written"] == 1
+    staged = staging / "assets/sodium/lang/zh_tw.json"
+    assert (
+        json.loads(staged.read_text(encoding="utf-8"))["sodium.options.pages.general"]
+        == "一般"
+    )
+
+    bundle_input = tmp_path / "bundle_input" / "root"
+    shutil.copytree(staging, bundle_input, dirs_exist_ok=True)
+    zip_path = tmp_path / "translated.zip"
+    updates = list(
+        bundle_outputs_generator(
+            str(bundle_input.parent), str(zip_path), force_rebuild=True
+        )
+    )
+    assert not any(update.get("error") for update in updates)
+    with zipfile.ZipFile(zip_path) as archive:
+        names = archive.namelist()
+        assert "assets/sodium/lang/zh_tw.json" in names
+        assert not any(name.startswith("META-INF/jarjar/") for name in names)
+
+
+def test_nested_corrupt_archive_is_skipped_without_hiding_good_resource(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "mixed.jar",
+        nested={
+            "META-INF/jarjar/good.jar": _sodium_like_inner(),
+            "META-INF/jarjar/broken.jar": b"not a zip",
+        },
+    )
+    result = scan_jars(tmp_path, [_LANG_PATTERN], max_workers=1, jar_files=[jar])
+
+    assert "assets/sodium/lang/en_us.json" in result[jar]
+    assert result.nested_jars[jar] == 1
+    assert result.skipped_nested[jar] == 1
+
+
+def test_nested_archive_size_limit_is_applied(monkeypatch, tmp_path: Path):
+    from translation_tool.utils import nested_archive
+
+    monkeypatch.setattr(nested_archive, "MAX_FILE_BYTES", 16)
+    jar = _outer_jar(
+        tmp_path / "oversized.jar",
+        nested={"META-INF/jarjar/large.jar": _sodium_like_inner()},
+    )
+
+    result = scan_jars(tmp_path, [_LANG_PATTERN], max_workers=1, jar_files=[jar])
+
+    assert jar not in result
+    assert result.nested_jars[jar] == 0
+    assert result.skipped_nested[jar] == 1
+
+
+def test_nested_archive_depth_limit_is_deterministic(tmp_path: Path):
+    payload = _zip_bytes(
+        {"assets/deep/lang/en_us.json": json.dumps({"deep.key": "deep"})}
+    )
+    for index in range(4):
+        payload = _zip_bytes({f"META-INF/jarjar/level-{index}.jar": payload})
+    jar = _outer_jar(
+        tmp_path / "deep.jar", direct={"META-INF/jarjar/root.jar": payload}
+    )
+
+    result = scan_jars(tmp_path, [_LANG_PATTERN], max_workers=1, jar_files=[jar])
+
+    # Four nested containers exist, but the shared walker intentionally visits
+    # only depths 1..3.
+    assert jar not in result
+    assert result.nested_jars[jar] == 3
+
+
+def test_nested_canonical_collision_keeps_first_source_and_logs(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "collision.jar",
+        nested={
+            "META-INF/jarjar/a.jar": _sodium_like_inner("From A"),
+            "META-INF/jarjar/b.jar": _sodium_like_inner("From B"),
+        },
+    )
+    regex = re.compile(_LANG_PATTERN)
+    result = scan_jars(tmp_path, [regex.pattern], max_workers=1, jar_files=[jar])
+
+    assert len(result.entries[jar]) == 1
+    assert result.collision_notes[jar]
+    assert result[jar]["assets/sodium/lang/en_us.json"]
+    assert "From A" in result[jar]["assets/sodium/lang/en_us.json"]
+
+    output = tmp_path / "out"
+    _extract_from_jar(str(jar), str(output), regex, result)
+    extracted = next(output.glob("*_extracted/assets/sodium/lang/en_us.json"))
+    assert "From A" in extracted.read_text(encoding="utf-8")
+
+
+def test_stage2_collision_source_order_is_deterministic(tmp_path: Path):
+    output = tmp_path / "lang_output"
+    for folder, value in (
+        ("z-outer_extracted", "乙"),
+        ("a-outer_extracted", "甲"),
+    ):
+        lang_dir = output / folder / "assets" / "shared" / "lang"
+        lang_dir.mkdir(parents=True)
+        (lang_dir / "en_us.json").write_text(
+            json.dumps({"shared.key": "Shared"}), encoding="utf-8"
+        )
+        (lang_dir / "zh_tw.json").write_text(
+            json.dumps({"shared.key": value}, ensure_ascii=False), encoding="utf-8"
+        )
+
+    updates = list(merge_extracted_to_assets(output, use_translation_db=False))
+
+    assert updates[-1]["error"] is False
+    translated = json.loads(
+        (output / "assets/shared/lang/zh_tw.json").read_text(encoding="utf-8")
+    )
+    assert translated["shared.key"] == "甲"
+
+
+def test_direct_outer_jar_path_is_unchanged(tmp_path: Path):
+    jar = _outer_jar(
+        tmp_path / "direct.jar",
+        direct={"assets/direct/lang/en_us.json": '{"direct.key":"Direct"}'},
+    )
+    regex = re.compile(_LANG_PATTERN)
+    result = scan_jars(tmp_path, [regex.pattern], max_workers=1, jar_files=[jar])
+    output = tmp_path / "out"
+    _extract_from_jar(str(jar), str(output), regex, result)
+
+    assert (output / "assets/direct/lang/en_us.json").is_file()
+    assert not list(output.glob("*_extracted/assets/direct/lang/en_us.json"))
+
+
+def test_nested_walker_honors_cancellation_before_reading(tmp_path: Path):
+    from translation_tool.utils.nested_archive import walk_nested_archives
+    from translation_tool.utils.zip_safety import ZipReadBudget
+
+    jar = _outer_jar(
+        tmp_path / "cancel.jar",
+        nested={"META-INF/jarjar/inner.jar": _sodium_like_inner()},
+    )
+    visited: list[int] = []
+
+    with cancel_scope(lambda: True), zipfile.ZipFile(jar) as archive:
+        try:
+            walk_nested_archives(
+                archive,
+                jar.name,
+                ZipReadBudget(label=jar.name),
+                lambda *_args: visited.append(1),
+                should_cancel=lambda: True,
+            )
+        except TaskCancelled:
+            pass
+
+    assert visited == []

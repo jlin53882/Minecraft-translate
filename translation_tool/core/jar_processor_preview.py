@@ -21,7 +21,6 @@ import logging
 import os
 import re
 import threading
-import zipfile
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,10 @@ from typing import Any
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.jar_browser import _scan_single_jar_detailed
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.worker_count import resolve_worker_count
+from translation_tool.utils.zip_safety import ZipReadBudget
 
 log = logging.getLogger(__name__)
 
@@ -71,55 +72,18 @@ def _scan_single_jar_for_preview(
     raise_if_cancelled()
     jar_size = os.path.getsize(jar_path)
 
-    matched_bytes = 0
-    try:
-        with zipfile.ZipFile(jar_path, "r") as zf:
-            if mode == "dual":
-                lang_matched = []
-                book_matched = []
-                for member in zf.infolist():
-                    raise_if_cancelled()
-                    if member.is_dir():
-                        continue
-                    normalized_path = member.filename.replace("\\", "/")
-                    matched_lang = lang_regex.search(normalized_path)
-                    matched_book = book_path_regex.search(normalized_path)
-                    if matched_lang:
-                        lang_matched.append(normalized_path)
-                        matched_bytes += member.file_size
-                    if matched_book:
-                        book_matched.append(normalized_path)
-                        matched_bytes += member.file_size
-                return {
-                    "jar": jar_name,
-                    "lang_matched": lang_matched,
-                    "book_matched": book_matched,
-                    "lang_count": len(lang_matched),
-                    "book_count": len(book_matched),
-                    "size_mb": matched_bytes / (1024**2),
-                    "jar_size_mb": jar_size / (1024**2),
-                    "error": None,
-                }
-            else:
-                matched_files = []
-                for member in zf.infolist():
-                    raise_if_cancelled()
-                    if member.is_dir():
-                        continue
-                    normalized_path = member.filename.replace("\\", "/")
-                    if target_regex.search(normalized_path):
-                        matched_files.append(normalized_path)
-                        matched_bytes += member.file_size
-                return {
-                    "jar": jar_name,
-                    "matched_files": matched_files,
-                    "count": len(matched_files),
-                    "size_mb": matched_bytes / (1024**2),
-                    "jar_size_mb": jar_size / (1024**2),
-                    "error": None,
-                }
-    except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
-        log.warning("預覽 %s 時發生錯誤: %s", jar_name, e)
+    patterns = (
+        [lang_regex.pattern, book_path_regex.pattern]
+        if mode == "dual"
+        else [target_regex.pattern]
+    )
+    details = _scan_single_jar_detailed(
+        Path(jar_path),
+        patterns,
+        budget=ZipReadBudget(label=jar_name),
+    )
+    if details.error:
+        log.warning("預覽 %s 時發生錯誤: %s", jar_name, details.error)
         return {
             "jar": jar_name,
             "matched_files": [],
@@ -129,8 +93,48 @@ def _scan_single_jar_for_preview(
             "lang_count": 0,
             "book_count": 0,
             "size_mb": jar_size / (1024**2),
-            "error": str(e),
+            "error": details.error,
         }
+
+    entries = details.entries
+    if mode == "dual":
+        lang_matched = [
+            entry.logical_path
+            for entry in entries
+            if lang_regex.search(entry.logical_path)
+        ]
+        book_matched = [
+            entry.logical_path
+            for entry in entries
+            if book_path_regex.search(entry.logical_path)
+        ]
+        matched_bytes = sum(
+            entry.size
+            for entry in entries
+            if lang_regex.search(entry.logical_path)
+            or book_path_regex.search(entry.logical_path)
+        )
+        return {
+            "jar": jar_name,
+            "lang_matched": lang_matched,
+            "book_matched": book_matched,
+            "lang_count": len(lang_matched),
+            "book_count": len(book_matched),
+            "size_mb": matched_bytes / (1024**2),
+            "jar_size_mb": jar_size / (1024**2),
+            "error": None,
+        }
+
+    matched_files = [entry.logical_path for entry in entries]
+    matched_bytes = sum(entry.size for entry in entries)
+    return {
+        "jar": jar_name,
+        "matched_files": matched_files,
+        "count": len(matched_files),
+        "size_mb": matched_bytes / (1024**2),
+        "jar_size_mb": jar_size / (1024**2),
+        "error": None,
+    }
 
 
 class ExtractionSummary:

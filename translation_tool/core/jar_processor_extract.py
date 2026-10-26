@@ -33,6 +33,7 @@ from translation_tool.utils.worker_count import (
 
 from ..utils.config_manager import load_config
 from ..utils.log_unit import log_error
+from ..utils.nested_archive import read_archive_member_chain
 from ..utils.zip_safety import (
     MAX_FILE_BYTES,
     MAX_TEXT_BYTES,
@@ -89,6 +90,96 @@ def _normalize_jar_base_name(jar_filename: str) -> str:
     return base_name or base_full
 
 
+def _entry_output_path(
+    output_root: str,
+    jar_filename_base: str,
+    jar_stem: str,
+    logical_path: str,
+    is_nested: bool,
+) -> str:
+    """把 direct/nested archive member 映射成翻譯流程的 canonical 路徑。"""
+    if is_nested:
+        # Nested resources must retain the complete outer JAR identity.  The
+        # normalized name intentionally collapses loader/version suffixes and
+        # is therefore not unique in a large modpack (for example, many mods
+        # normalize to ``ars`` or ``ftb``).
+        return safe_join(output_root, f"{jar_stem}_extracted", logical_path)
+    if not logical_path.startswith("assets/"):
+        return safe_join(
+            output_root,
+            f"{jar_filename_base}_extracted",
+            logical_path,
+        )
+    return safe_join(output_root, logical_path)
+
+
+def _extract_scanned_entries(
+    jar_path: Path,
+    output_root: str,
+    jar_filename_base: str,
+    entries: list[Any],
+    budget: ZipReadBudget,
+    get_file_hash_fn: Callable[[bytes], str],
+) -> dict[str, Any]:
+    """寫出預掃描保留的 direct/nested entries，避免再掃一次 archive tree。"""
+    extracted_count = 0
+    skipped_count = 0
+    for entry in entries:
+        raise_if_cancelled()
+        normalized_path = entry.logical_path
+        try:
+            final_output_path = _entry_output_path(
+                output_root,
+                jar_filename_base,
+                jar_path.stem,
+                normalized_path,
+                entry.is_nested,
+            )
+        except UnsafePathError:
+            log_error("拒絕提取不安全路徑: %s（來源 %s）", normalized_path, jar_path)
+            skipped_count += 1
+            continue
+
+        try:
+            if entry.content is not None:
+                source_data = entry.content.encode("utf-8")
+            elif entry.raw_data is not None:
+                source_data = entry.raw_data
+            else:
+                source_data = read_archive_member_chain(
+                    jar_path,
+                    entry.member_chain,
+                    budget,
+                    max_bytes=MAX_FILE_BYTES,
+                )
+        except ArchiveBudgetError:
+            raise
+        except ZipSizeError as size_err:
+            log_error("略過過大檔案 %s: %s", normalized_path, size_err)
+            skipped_count += 1
+            continue
+
+        source_hash = get_file_hash_fn(source_data)
+        raise_if_cancelled()
+        if os.path.exists(final_output_path):
+            with open(final_output_path, "rb") as existing_file:
+                existing_hash = get_file_hash_fn(existing_file.read())
+            if source_hash == existing_hash:
+                skipped_count += 1
+                continue
+
+        os.makedirs(os.path.dirname(final_output_path), exist_ok=True)
+        with open(final_output_path, "wb") as target:
+            target.write(source_data)
+        extracted_count += 1
+
+    return {
+        "status": "success",
+        "extracted": extracted_count,
+        "skipped": skipped_count,
+    }
+
+
 def extract_from_jar_impl(
     jar_path: str,
     output_root: str,
@@ -126,6 +217,17 @@ def extract_from_jar_impl(
         return {"status": "error", "extracted": 0, "skipped": 0}
 
     try:
+        scanned_entries = getattr(scan_results, "entries", {}).get(jar_path_obj)
+        if scanned_entries:
+            return _extract_scanned_entries(
+                jar_path_obj,
+                output_root,
+                jar_filename_base,
+                scanned_entries,
+                budget,
+                get_file_hash_fn,
+            )
+
         jar_results: dict[str, str | None] = {}
         if scan_results is not None and jar_path_obj in scan_results:
             jar_results = scan_results[jar_path_obj]
