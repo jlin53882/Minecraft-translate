@@ -93,6 +93,9 @@ class TranslatePanel(ft.Column):
         self.session: TaskSession | None = None
         self._running = False
         self._poller = PollerHandle()
+        # 範圍快照套用後要更新的下拉選單；``_refresh_full`` 表示其他區塊也有變、要更新整個面板
+        self._refresh_dropdowns: list[ft.Control] = []
+        self._refresh_full = False
         self.refresh_indicator = ft.Text(
             "背景更新機翻範圍中…", size=12, color=C.MUTED, visible=False
         )
@@ -429,19 +432,32 @@ class TranslatePanel(ft.Column):
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
         """Apply worker-loaded scope and counts without blocking the page thread."""
         identity = snapshot.get("identity")
+        self._refresh_full = False
         if (
             self._repair_preview is not None
             and self._repair_preview_db_identity != identity
         ):
             self._clear_repair_preview()
+            self._refresh_full = True  # 修復預覽區也被清掉：整個面板要更新
         versions = snapshot.get("versions", [])
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
+        values_before = (self.version_dd.value, self.mod_dd.value)
+        changed_dropdowns: list[ft.Control] = []
+        if kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions]):
+            changed_dropdowns.append(self.version_dd)
         self.version_dd.value = snapshot.get("version")
         mods = snapshot.get("mods", [])
-        kit.set_dropdown_options(
+        if kit.set_dropdown_options(
             self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
-        )
+        ):
+            changed_dropdowns.append(self.mod_dd)
         self.mod_dd.value = snapshot.get("mod", ALL_MODS)
+        if values_before != (self.version_dd.value, self.mod_dd.value):
+            changed_dropdowns.extend(
+                dd
+                for dd in (self.version_dd, self.mod_dd)
+                if dd not in changed_dropdowns
+            )
+        self._refresh_dropdowns = changed_dropdowns
         if snapshot.get("error"):
             self.count_text.value = f"資料載入失敗：{snapshot['error']}"
         elif not versions:
@@ -512,6 +528,13 @@ class TranslatePanel(ft.Column):
         )
         self._set_count_text(missing, reusable)
 
+    def _refresh_counts_after_run(self) -> None:
+        """工作結束後更新範圍筆數：有背景快照時交給它（畫面執行緒不查資料庫），否則就地查詢。"""
+        if self._scope_refresh_in_background():
+            self._request_scope_refresh()
+        else:
+            self._refresh_counts()
+
     def _set_count_text(
         self,
         missing: int,
@@ -547,10 +570,14 @@ class TranslatePanel(ft.Column):
         self.count_text.value = text
 
     def _on_limit_changed(self) -> None:
+        had_preview = self._repair_preview is not None or self._repair_preview_running
         self._clear_repair_preview()
         if self._scope_refresh_in_background():
             self.count_text.value = "正在計算此範圍的筆數…"
-            self._safe_update()
+            if had_preview:
+                self._safe_update()  # 修復預覽區也被清掉：更新整個面板
+            else:
+                update_regions(self.count_text)  # 逐字輸入：只有一行提示文字有變
             self._request_scope_refresh()
             return
         self._refresh_counts()
@@ -599,7 +626,7 @@ class TranslatePanel(ft.Column):
         self._set_running(True)
         self.progress_bar.value = 0
         self.live_text.value = ""
-        self.log_view.clear()
+        self.log_view.clear(update=False)  # 下一行的 _safe_update 會更新整個面板
         self.log_view.height = 0
         self.log_view.visible = False
         self._reset_stats(mode="normal")
@@ -669,7 +696,7 @@ class TranslatePanel(ft.Column):
         self._set_running(True)
         self.progress_bar.value = 0
         self.live_text.value = ""
-        self.log_view.clear()
+        self.log_view.clear(update=False)  # 下一行的 _safe_update 會更新整個面板
         self.log_view.height = 0
         self.log_view.visible = False
         self.repair_summary_text.value = (
@@ -824,7 +851,7 @@ class TranslatePanel(ft.Column):
             self._set_running(False)
             if self._on_finished and not summary.get("dry_run"):
                 self._on_finished()
-            self._refresh_counts()
+            self._refresh_counts_after_run()
         self._safe_update()
 
     def _apply_summary(self, s: dict, *, final: bool = True) -> None:
@@ -1100,7 +1127,21 @@ class TranslatePanel(ft.Column):
 
     def flush(self) -> None:
         """把這個頁籤的變更送到畫面；頁籤是更新邊界，頁面層級的 update 不會更新它。"""
+        self._refresh_full = False
+        self._refresh_dropdowns = []
         update_regions(self)
+
+    def flush_loading(self) -> None:
+        """背景載入範圍資料時：只更新載入提示與筆數文字。"""
+        update_regions(self.refresh_indicator, self.count_text)
+
+    def flush_refresh(self) -> None:
+        """範圍快照套用後：只更新筆數文字、載入提示與內容有變的下拉選單。"""
+        if self._refresh_full:
+            self.flush()
+            return
+        dropdowns, self._refresh_dropdowns = self._refresh_dropdowns, []
+        update_regions(self.refresh_indicator, self.count_text, *dropdowns)
 
     def _safe_update(self) -> None:
         self.flush()

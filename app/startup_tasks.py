@@ -55,6 +55,18 @@ def warm_view_imports() -> None:
             logger.debug("預先匯入 %s 失敗", spec.module, exc_info=True)
 
 
+def warm_token_encoder() -> None:
+    """在背景預先載入批次規劃用的 tokenizer（第一次載入會讓事件迴圈停住 0.1～0.5 秒）。"""
+    try:
+        from translation_tool.core.lm_batch_budget import (
+            warm_token_encoder as load_encoder,
+        )
+
+        load_encoder()
+    except Exception:  # 預熱只是優化；不可用時批次規劃會回到字元估算
+        logger.debug("預先載入 tokenizer 失敗", exc_info=True)
+
+
 def start_background_startup_tasks(
     operation_registry: OperationRegistry | None = None,
     *,
@@ -65,6 +77,7 @@ def start_background_startup_tasks(
 
         def rebuild() -> None:
             warm_view_imports()
+            warm_token_encoder()
             if not rebuild_index_on_startup():
                 raise RuntimeError("啟動時全域搜尋索引重建失敗")
 
@@ -82,6 +95,7 @@ def start_background_startup_tasks(
 
     def run() -> None:
         warm_view_imports()
+        warm_token_encoder()
         rebuild_index_on_startup()
 
     thread = threading.Thread(target=run, daemon=True)

@@ -167,6 +167,7 @@ class ModDbView(ft.Column):
             for key, panel in self._panels.items()
         }
         self._mounted_tabs = {"overview"}
+        self._shown_tab: str | None = None  # 分頁堆疊上次更新時顯示的頁籤
         self._tab_stack = ft.Stack(
             controls=[self._panel_hosts["overview"]],
             expand=True,
@@ -498,7 +499,7 @@ class ModDbView(ft.Column):
             if message is not None and key == "entries":
                 panel.show_loading()
             else:
-                self._safe_update()
+                self._flush_loading(key)
 
     def _launch_panel_refresh(
         self, key, panel, request, settings, signature, data_revision, generation
@@ -922,6 +923,7 @@ class ModDbView(ft.Column):
     def _safe_update(self) -> None:
         """更新分頁堆疊（頁籤顯示／隱藏）與目前的頁籤內容；其他頁籤與頁面外殼不受影響。"""
         update_regions(self._tab_stack)
+        self._shown_tab = self.tab
         self._flush_panel(self.tab)
 
     def _flush_panel(self, key: str) -> None:
@@ -933,9 +935,27 @@ class ModDbView(ft.Column):
         else:
             update_regions(panel)
 
+    def _flush_loading(self, key: str) -> None:
+        """開始背景載入：頁籤已在畫面上、而且有提供只更新載入提示的方法（``flush_loading``）時只更新提示。
+
+        剛切換過來的頁籤（分頁堆疊的顯示狀態還沒送出）一律更新整個頁籤。
+        """
+        flush_loading = getattr(self._panels[key], "flush_loading", None)
+        if callable(flush_loading) and self._shown_tab == key:
+            flush_loading()
+        else:
+            self._safe_update()
+
     def _update_panel(self, key: str) -> None:
-        """Apply one panel snapshot without diffing every mounted sibling tab."""
-        self._flush_panel(key)
+        """Apply one panel snapshot without diffing every mounted sibling tab.
+
+        頁籤有提供 ``flush_refresh`` 時，只更新快照實際改變的區塊。
+        """
+        flush_refresh = getattr(self._panels[key], "flush_refresh", None)
+        if callable(flush_refresh):
+            flush_refresh()
+        else:
+            self._flush_panel(key)
 
     @property
     def page(self):
