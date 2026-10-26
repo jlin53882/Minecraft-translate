@@ -230,6 +230,61 @@ def test_app_services_use_the_shared_invoke(monkeypatch):
         assert module.invoke_translation_batch is shared_loop.invoke_translation_batch
 
 
+def test_directory_wrapper_forwards_provider_event_callback(monkeypatch):
+    """一般目錄 wrapper 應把 shared loop 的 provider callback 傳到底層入口。"""
+    from types import SimpleNamespace
+
+    from translation_tool.core import lm_translator
+
+    callback = lambda _event: None
+    received = {}
+
+    def fake_translate_batch(batch, *, total=None, event_callback=None):
+        received.update(batch=batch, total=total, event_callback=event_callback)
+        return [{**batch[0], "text": "Translated"}], "AUTO"
+
+    def capture_skeleton(_items, *, translate_batch_smart, **_kwargs):
+        received["wrapper"] = translate_batch_smart
+        return SimpleNamespace(status="DONE", processed=1)
+
+    monkeypatch.setattr(lm_translator, "translate_batch_smart", fake_translate_batch)
+    monkeypatch.setattr(lm_translator, "run_translator_skeleton", capture_skeleton)
+    monkeypatch.setattr(
+        lm_translator, "_note_directory_checkpoint", lambda *a, **k: None
+    )
+    monkeypatch.setattr(lm_translator, "_plan_directory_batches", lambda _items: 1)
+    monkeypatch.setattr(lm_translator, "load_config", lambda: {"lm_translator": {}})
+    monkeypatch.setattr(lm_translator, "flush_write_back", lambda *_a, **_k: None)
+    monkeypatch.setattr(lm_translator, "clear_checkpoint", lambda: None)
+
+    item = {
+        "path": "demo.key",
+        "text": "Original",
+        "source_text": "Original",
+        "cache_type": "lang",
+    }
+    lm_translator._run_directory_translation(
+        remaining=[item],
+        file_cache={},
+        root=lm_translator.Path("."),
+        out_root=lm_translator.Path("."),
+        export_lang=False,
+        should_cancel=None,
+        write_new_cache=False,
+        input_dir=".",
+        items_to_translate=[item],
+        cache_hit_count=0,
+        checkpoint_fingerprint="fingerprint",
+        total=1,
+    )
+
+    received["wrapper"]([item], 1, event_callback=callback)
+
+    assert received["batch"] == [item]
+    assert received["total"] == 1
+    assert received["event_callback"] is callback
+
+
 # ---------------------------------------------------------------------------
 # L5：建立 run record 的耗時不算成「寫入 JSON」
 # ---------------------------------------------------------------------------

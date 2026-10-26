@@ -52,6 +52,7 @@ from translation_tool.core.lm_translator_shared import (
     CacheRule,
     TranslatorHooks,
     _is_valid_hit,
+    invoke_translation_batch,
     prepare_translator_items,
     run_translator_skeleton,
     safe_output_text,
@@ -622,10 +623,20 @@ def _run_directory_translation(
         absolute_progress = min(0.2 + 0.8 * progress, 1.0)
         pending_events.append({"progress": absolute_progress, "log": message})
 
-    def translate_batch(batch: list[dict[str, Any]], batch_total: int | None):
+    def translate_batch(
+        batch: list[dict[str, Any]],
+        batch_total: int | None,
+        *,
+        event_callback=None,
+    ):
         if (should_cancel is not None and should_cancel()) or is_cancelled():
             raise TaskCancelled()
-        translated, status = translate_batch_smart(batch, total=batch_total)
+        translated, status = invoke_translation_batch(
+            translate_batch_smart,
+            batch,
+            batch_total,
+            event_callback,
+        )
         for item in translated or []:
             finish_guide_item(item)  # 指南段落：還原行內保護、檢查標籤與連結
         return translated, status
