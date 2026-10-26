@@ -5,6 +5,7 @@ import json
 import threading
 import zipfile
 
+from app import icon_index
 from app.icon_catalog import ModpackAssetCatalog
 from app.icon_resolve import hit_to_uri, resolve_icon
 from app.views.icon_preview import scan_operation
@@ -126,9 +127,19 @@ def test_scanned_source_snapshot_is_not_affected_by_later_adds(tmp_path):
 
 
 def test_prebuilt_index_overrides_icons_without_resolution(tmp_path, monkeypatch):
+    from app.icon_index import IconIndex
+
     mods = pack(tmp_path)
     monkeypatch.setattr(
-        scan_operation, "_load_prebuilt_index", lambda _root: {"item.alpha.sword": "X"}
+        scan_operation,
+        "_load_prebuilt_index",
+        lambda _root: IconIndex(
+            {"item.alpha.sword": "X"},
+            by_jar={
+                "alpha-1.0.jar": {"item.alpha.sword": "X"},
+                "beta-2.0.jar": {},
+            },
+        ),
     )
     calls = []
     monkeypatch.setattr(
@@ -141,6 +152,61 @@ def test_prebuilt_index_overrides_icons_without_resolution(tmp_path, monkeypatch
     icons_found = {e.key: getattr(e, "icon_path", None) for e in entries_of(store)}
     assert icons_found["item.alpha.sword"] == "X"
     assert icons_found["block.alpha.stone"] is None
+
+
+def test_prebuilt_index_keeps_same_key_icons_separate_per_jar(tmp_path, monkeypatch):
+    from tests.test_icon_jar_scan import PNG, make_jar
+
+    mods = tmp_path / "mods"
+    shared_lang = json.dumps({"item.shared.sword": "Sword"})
+    for jar_name, texture_name in (("a.jar", "sword_a"), ("b.jar", "sword_b")):
+        make_jar(
+            mods / jar_name,
+            {
+                "assets/shared/lang/en_us.json": shared_lang,
+                "assets/shared/models/item/sword.json": json.dumps(
+                    {
+                        "parent": "item/generated",
+                        "textures": {"layer0": f"shared:item/{texture_name}"},
+                    }
+                ),
+                f"assets/shared/textures/item/{texture_name}.png": PNG,
+            },
+        )
+
+    monkeypatch.setattr(icon_index, "get_data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(
+        icon_index,
+        "load_config",
+        lambda: {"translator": {"parallel_execution_workers": 1}},
+    )
+    monkeypatch.setattr(
+        scan_operation,
+        "load_config",
+        lambda: {"translator": {"parallel_execution_workers": 1}},
+    )
+
+    built = icon_index.build_and_save_icon_index(mods)
+    assert set(built.by_jar) == {"a.jar", "b.jar"}
+
+    prebuilt_store = scan_jar_directory(make_view(mods), 0)
+    prebuilt_icons = {
+        (entry.source_jar, entry.key): entry.icon_path
+        for entry in entries_of(prebuilt_store)
+    }
+
+    monkeypatch.setattr(scan_operation, "_load_prebuilt_index", lambda _root: None)
+    direct_store = scan_jar_directory(make_view(mods), 0)
+    direct_icons = {
+        (entry.source_jar, entry.key): entry.icon_path
+        for entry in entries_of(direct_store)
+    }
+
+    assert prebuilt_icons == direct_icons
+    assert (
+        prebuilt_icons[("a.jar", "item.shared.sword")]
+        != prebuilt_icons[("b.jar", "item.shared.sword")]
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,11 @@ def _load_prebuilt_index(source_root) -> dict | None:
     from app import icon_index
 
     try:
-        return icon_index.load_icon_index(source_root)
+        loaded = icon_index.load_icon_index(source_root)
+        if loaded is not None and getattr(loaded, "by_jar", None) is None:
+            log_warning("[IconPreview] 預建圖示索引缺少 JAR 歸屬，改為逐 JAR 解析")
+            return None
+        return loaded
     except Exception as exc:  # noqa: BLE001 - 預建索引載入失敗時改為逐 JAR 解析，但要留下紀錄
         log_warning(f"[IconPreview] 載入預建圖示索引失敗，改為逐 JAR 解析：{exc!r}")
         return None
@@ -46,6 +50,13 @@ def scan_jar_directory(view, generation: int | None = None) -> ModEntryStore:
     identity = _compute_source_identity(root, "jar_directory")
     jars = sorted(root.glob("*.jar"), key=lambda path: path.name.casefold())
     icon_index = _load_prebuilt_index(root)
+    index_by_jar = getattr(icon_index, "by_jar", None)
+    use_prebuilt_index = (
+        icon_index is not None
+        and isinstance(index_by_jar, dict)
+        and set(index_by_jar) == {jar.name for jar in jars}
+        and callable(getattr(icon_index, "for_jar", None))
+    )
     progress = _make_progress_callback(
         view, "掃描模組與圖示", len(jars), generation=generation
     )
@@ -59,11 +70,11 @@ def scan_jar_directory(view, generation: int | None = None) -> ModEntryStore:
             jars,
             workers=resolve_worker_count("icon_cache", load_config()),
             should_cancel=is_cancelled,
-            with_icons=icon_index is None,
+            with_icons=not use_prebuilt_index,
         ),
         start=1,
     ):
-        builder.add(scan, icon_index)
+        builder.add(scan, icon_index if use_prebuilt_index else None)
         progress(done, len(jars))
         if time.monotonic() - last_publish >= PARTIAL_INTERVAL_SEC:
             last_publish = time.monotonic()

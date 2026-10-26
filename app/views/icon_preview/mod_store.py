@@ -60,11 +60,16 @@ class ScannedSource:
         self.modids: list[str] = []
         self.entry_count = 0
 
-    def add(self, scan, icon_index: Mapping[str, str] | None = None) -> None:
-        """加入一個 JAR 的掃描結果（``JarScan``）；``icon_index`` 提供時以它覆蓋圖示。"""
+    def add(self, scan, icon_index=None) -> None:
+        """加入一個 JAR 的掃描結果；預建索引必須按來源 JAR 提供圖示。"""
         for modid, rows in scan.mods.items():
+            jar_index = None
             if icon_index is not None:
-                rows = [(k, en, icon_index.get(k)) for k, en, _icon in rows]
+                for_jar = getattr(icon_index, "for_jar", None)
+                if callable(for_jar):
+                    jar_index = for_jar(scan.jar_name)
+            if jar_index is not None:
+                rows = [(k, en, jar_index.get(k)) for k, en, _icon in rows]
             self._chunks.setdefault(modid, []).append((scan.jar_name, rows))
             self.entry_count += len(rows)
 

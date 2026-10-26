@@ -24,6 +24,7 @@ from app.ui.safe_file_picker import SafeFilePicker
 from app.ui.snack import show_snack
 from app.views.icon_preview.detail_mixin import IconPreviewDetailMixin
 from app.views.icon_preview.entries_cache import (
+    ShardLoadError,
     _compute_source_identity,
     _source_entry_data,
     open_entries_cache_l2,
@@ -662,8 +663,18 @@ class IconPreviewView(IconPreviewDetailMixin, IconPreviewListMixin, ft.Column):
             kind = "L2"
         if source is None:
             return None
-        store = ModEntryStore(source, self._build_zh_tw_lookup(set(source.modids)))
-        store.warm(source.modids[: self.mod_page_size])
+        try:
+            store = ModEntryStore(source, self._build_zh_tw_lookup(set(source.modids)))
+            store.warm(source.modids[: self.mod_page_size])
+        except ShardLoadError as exc:
+            invalidate = getattr(source, "invalidate", None)
+            if callable(invalidate):
+                invalidate()
+            if kind == "L1" and self._source_cache is source:
+                self._source_cache = None
+                self._cache_meta = {}
+            log_warning(f"[IconPreview] 分片快取已失效，將重新掃描來源：{exc!r}")
+            return None
         return kind, store
 
     def _apply_cached_entries(self, kind: str, store, mode: str) -> None:

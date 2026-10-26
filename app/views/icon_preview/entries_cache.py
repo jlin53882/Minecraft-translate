@@ -22,6 +22,16 @@ _CACHE_VERSION = 6
 _INDEX_NAME = "index.json"
 
 
+class ShardLoadError(RuntimeError):
+    """A cache shard could not be read or did not match its encoded schema."""
+
+    def __init__(self, modid: str, path: Path, cause: BaseException):
+        self.modid = modid
+        self.path = path
+        super().__init__(f"failed to load icon-entry shard for {modid}: {path}")
+        self.__cause__ = cause
+
+
 def _source_entry_data(entry) -> dict:
     """Return only data derived from the selected source files.
 
@@ -128,21 +138,34 @@ class ShardSource:
         self.identity = identity
         self._dir = cache_dir
         self._files = {modid: name for modid, _count, name in mods}
+        self._counts = {modid: count for modid, count, _name in mods}
         self.modids = [modid for modid, _count, _name in mods]
         self.entry_count = sum(count for _modid, count, _name in mods)
 
     def load(self, modid: str) -> list[dict]:
-        """讀取單一模組的分片並還原成來源項目 dict；分片遺失或損壞時回傳空清單。"""
+        """讀取單一模組的分片；分片失敗不可被當成正常空結果。"""
         name = self._files.get(modid)
         if name is None:
             return []
+        path = self._dir / name
         try:
-            with open(self._dir / name, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 shard = json.load(f)
-            return _decode_shard(modid, shard)
-        except (OSError, ValueError, KeyError, TypeError) as exc:
+            rows = _decode_shard(modid, shard)
+            expected_count = self._counts[modid]
+            if len(rows) != expected_count:
+                raise ValueError(
+                    f"shard row count {len(rows)} does not match index count "
+                    f"{expected_count}"
+                )
+            return rows
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
             log_warning(f"[IconPreview] 快取分片讀取失敗 {modid}: {exc!r}")
-            return []
+            raise ShardLoadError(modid, path, exc) from exc
+
+    def invalidate(self) -> None:
+        """Invalidate this source cache so the caller can rebuild it from the JARs."""
+        shutil.rmtree(self._dir, ignore_errors=True)
 
 
 def _encode_shard(rows: list[dict]) -> dict:
@@ -169,11 +192,24 @@ def _encode_shard(rows: list[dict]) -> dict:
 
 
 def _decode_shard(modid: str, shard: dict) -> list[dict]:
+    if not isinstance(shard, dict):
+        raise TypeError("shard must be an object")
     jars = shard["jars"]
-    rows = []
-    for key, en, jar_id, icon in zip(
-        shard["key"], shard["en"], shard["jar"], shard["icon"], strict=True
+    keys = shard["key"]
+    translations = shard["en"]
+    jar_ids = shard["jar"]
+    icons = shard["icon"]
+    if not all(
+        isinstance(column, list)
+        for column in (jars, keys, translations, jar_ids, icons)
     ):
+        raise TypeError("shard columns must be arrays")
+    rows = []
+    for key, en, jar_id, icon in zip(keys, translations, jar_ids, icons, strict=True):
+        if not isinstance(jar_id, int) or isinstance(jar_id, bool):
+            raise TypeError("shard jar id must be an integer")
+        if jar_id < -1 or jar_id >= len(jars):
+            raise ValueError("shard jar id is out of range")
         row = {"modid": modid, "key": key, "en": en}
         if jar_id >= 0:
             row["source_jar"] = jars[jar_id]
@@ -204,7 +240,16 @@ def open_entries_cache_l2(
     if data.get("source_identity") != identity:
         return None
     mods = data.get("mods")
-    if not isinstance(mods, list):
+    if not isinstance(mods, list) or not all(
+        isinstance(item, list)
+        and len(item) == 3
+        and isinstance(item[0], str)
+        and isinstance(item[1], int)
+        and not isinstance(item[1], bool)
+        and item[1] >= 0
+        and isinstance(item[2], str)
+        for item in mods
+    ):
         return None
     return ShardSource(cache_dir, identity, mods)
 

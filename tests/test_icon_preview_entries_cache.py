@@ -6,6 +6,8 @@ import threading
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from app.views.icon_preview.entries_cache import (
     _compute_source_identity,
     _save_entries_cache_l2,
@@ -256,6 +258,52 @@ def test_l2_cache_misses_when_jar_set_changes(tmp_path, monkeypatch):
     _save_entries_cache_l2(deleted_source_root, [_source_entry()])
     second_jar.unlink()
     assert _load_entries_cache_l2(deleted_source_root) is None
+
+
+@pytest.mark.parametrize("failure", ["deleted", "corrupt", "length_mismatch"])
+def test_l2_shard_failure_invalidates_cache_and_rebuild_recovers(
+    tmp_path, monkeypatch, failure
+):
+    from app.views.icon_preview import entries_cache
+
+    source_root = tmp_path / "mods"
+    source_root.mkdir()
+    (source_root / "mod.jar").write_bytes(b"jar")
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(entries_cache, "_get_cache_dir", lambda: cache_root)
+    _save_entries_cache_l2(source_root, [_source_entry()])
+
+    cache_dir = next(path for path in cache_root.iterdir() if path.is_dir())
+    index = json.loads((cache_dir / "index.json").read_text(encoding="utf-8"))
+    shard_path = cache_dir / index["mods"][0][2]
+    if failure == "deleted":
+        shard_path.unlink()
+    elif failure == "corrupt":
+        shard_path.write_text("{", encoding="utf-8")
+    else:
+        shard_path.write_text(
+            json.dumps(
+                {
+                    "key": ["key"],
+                    "en": [],
+                    "jars": ["mod.jar"],
+                    "jar": [0],
+                    "icon": ["cached-icon.png"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    view = _make_view(source_root, review_root=None)
+    assert view._lookup_cached_entries("jar_directory") is None
+    assert not cache_dir.exists()
+
+    # The normal scan path can rebuild the exact same source identity after the
+    # invalid cache has been removed, and the next lookup must use the rebuilt data.
+    _save_entries_cache_l2(source_root, [_source_entry()])
+    recovered = view._lookup_cached_entries("jar_directory")
+    assert recovered[0] == "L2"
+    assert recovered[1]["mod"][0].key == "key"
 
 
 def test_l2_cache_rejects_previous_schema_versions(tmp_path, monkeypatch):

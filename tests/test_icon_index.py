@@ -1,5 +1,6 @@
 """Regression tests for the persistent prebuilt icon-index workflow."""
 
+import json
 import os
 import threading
 import zipfile
@@ -71,7 +72,14 @@ def test_build_and_save_icon_index_creates_loadable_index(tmp_path, monkeypatch)
 
     assert list(result) == ["item.my_mod.apple"]
     assert "item.my_mod.german" not in result
-    assert icon_index.load_icon_index(mods_dir) == result
+    loaded = icon_index.load_icon_index(mods_dir)
+    assert loaded == result
+    assert loaded.by_jar == {
+        "broken-1.0.jar": {},
+        "my-mod-1.0.jar": {"item.my_mod.apple": result["item.my_mod.apple"]},
+    }
+    saved = json.loads(icon_index.get_index_path(mods_dir).read_text(encoding="utf-8"))
+    assert saved["version"] == 6
 
 
 def test_build_and_save_indexes_every_namespace_in_one_jar(tmp_path, monkeypatch):
@@ -113,6 +121,23 @@ def test_json_lang_parser_skips_malformed_file_and_reads_later_valid_file(tmp_pa
         assert list(icon_index._iter_entries_from_lang_files(archive)) == [
             ("good", "item.good.apple", "Apple")
         ]
+
+
+def test_json_lang_parser_preserves_string_punctuation_with_comments_and_trailing_commas():
+    escaped_value = 'Escaped " quote, comma ,} and slash \\'
+    content = (
+        "{\n"
+        '  "item.demo": "Use ,} symbol", // line comment\n'
+        '  /* block comment */ "item.other": "A,]B",\n'
+        f'  "item.escaped": {json.dumps(escaped_value)},\n'
+        "}\n"
+    )
+
+    assert icon_index.loads_lang_json(content) == {
+        "item.demo": "Use ,} symbol",
+        "item.other": "A,]B",
+        "item.escaped": escaped_value,
+    }
 
 
 def test_index_save_is_atomic_and_preserves_previous_file_on_replace_failure(

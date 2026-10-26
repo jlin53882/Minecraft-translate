@@ -9,10 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 import uuid
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 from app.icon_runtime import get_runtime_asset_paths
@@ -32,6 +31,29 @@ from translation_tool.utils.zip_safety import (
 # ==================================================
 # 核心資料結構
 # ==================================================
+
+
+class IconIndex(dict[str, str]):
+    """Icon URI 索引，並保留每個來源 JAR 的獨立 mapping。"""
+
+    def __init__(
+        self,
+        values: Mapping[str, str] | None = None,
+        *,
+        by_jar: Mapping[str, Mapping[str, str]] | None = None,
+    ) -> None:
+        super().__init__(values or {})
+        self.by_jar = (
+            {jar_name: dict(jar_index) for jar_name, jar_index in by_jar.items()}
+            if by_jar is not None
+            else None
+        )
+
+    def for_jar(self, jar_name: str) -> Mapping[str, str]:
+        """Return the index belonging to one source JAR."""
+        if self.by_jar is None:
+            return {}
+        return self.by_jar.get(jar_name, {})
 
 
 def _jar_manifest(mods_dir: Path) -> list[dict[str, int | str]]:
@@ -120,7 +142,36 @@ def _strip_json_extras(text: str) -> str:
         else:
             out.append(ch)
         i += 1
-    return re.sub(r",(\s*[}\]])", r"\1", "".join(out))
+    # 只能在 JSON 字串之外檢查結尾逗號；直接對整份文字套 regex 會改掉
+    # ``"Use ,} symbol"`` 這類合法語言值。
+    cleaned = "".join(out)
+    result: list[str] = []
+    i, n = 0, len(cleaned)
+    in_string = False
+    while i < n:
+        ch = cleaned[i]
+        if in_string:
+            result.append(ch)
+            if ch == "\\" and i + 1 < n:
+                result.append(cleaned[i + 1])
+                i += 1
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+            result.append(ch)
+        elif ch == ",":
+            next_index = i + 1
+            while next_index < n and cleaned[next_index].isspace():
+                next_index += 1
+            if next_index < n and cleaned[next_index] in "}]":
+                i += 1
+                continue
+            result.append(ch)
+        else:
+            result.append(ch)
+        i += 1
+    return "".join(result)
 
 
 def loads_lang_json(content: str):
@@ -248,7 +299,7 @@ def _process_single_jar(jar_path: Path, asset_catalog) -> dict[str, str]:
 # ==================================================
 
 
-def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
+def build_icon_index(mods_dir: Path, progress_cb=None) -> IconIndex:
     """使用 ThreadPoolExecutor 建立 icon 索引（Phase 2 主體）。
 
     流程：
@@ -266,6 +317,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
     log_info(f"[IconIndex] 開始建立索引：{total} 個 JAR，使用 8 threads")
 
     index: dict[str, str] = {}
+    index_by_jar: dict[str, dict[str, str]] = {}
     owners: dict[str, str] = {}
     done = 0
 
@@ -293,6 +345,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
                 done += 1
                 try:
                     jar_results = future.result()
+                    index_by_jar[jar.name] = dict(jar_results)
                     jar_order = jar.name.casefold()
                     for key, uri in jar_results.items():
                         raise_if_cancelled()
@@ -314,7 +367,7 @@ def build_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
         asset_catalog.close()
 
     log_info(f"[IconIndex] 索引建立完成：{len(index)} 個 icon 進入索引")
-    return index
+    return IconIndex(index, by_jar=index_by_jar)
 
 
 def build_and_save_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str]:
@@ -330,24 +383,28 @@ def build_and_save_icon_index(mods_dir: Path, progress_cb=None) -> dict[str, str
     return index
 
 
-def save_icon_index(mods_dir: Path, index: dict[str, str]) -> Path:
+def save_icon_index(mods_dir: Path, index: Mapping[str, str]) -> Path:
     """將 icon 索引寫入磁碟（JSON 格式）。"""
     return _save_icon_index_for_manifest(mods_dir, index, _jar_manifest(mods_dir))
 
 
 def _save_icon_index_for_manifest(
     mods_dir: Path,
-    index: dict[str, str],
+    index: Mapping[str, str],
     manifest: list[dict[str, int | str]],
 ) -> Path:
+    source_aware_index = index if isinstance(index, IconIndex) else IconIndex(index)
+    version = 6 if source_aware_index.by_jar is not None else 5
     idx_path = _index_path_for_manifest(mods_dir, manifest)
     data = {
-        "version": 5,
+        "version": version,
         "modpack": str(mods_dir.resolve()),
         "jars": manifest,
-        "count": len(index),
-        "index": index,
+        "count": len(source_aware_index),
+        "index": dict(source_aware_index),
     }
+    if source_aware_index.by_jar is not None:
+        data["index_by_jar"] = source_aware_index.by_jar
     temp_path = idx_path.with_name(f"{idx_path.stem}.{uuid.uuid4().hex}.tmp")
     try:
         temp_path.write_text(
@@ -360,7 +417,7 @@ def _save_icon_index_for_manifest(
     return idx_path
 
 
-def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
+def load_icon_index(mods_dir: Path) -> IconIndex | None:
     """快速載入已建立的 icon 索引。找不到或格式不符回 None。"""
     manifest = _jar_manifest(mods_dir)
     idx_path = _index_path_for_manifest(mods_dir, manifest)
@@ -368,15 +425,40 @@ def load_icon_index(mods_dir: Path) -> dict[str, str] | None:
         return None
     try:
         data = json.loads(idx_path.read_text(encoding="utf-8"))
-        if data.get("version") != 5 or data.get("jars") != manifest:
+        version = data.get("version")
+        if version not in {5, 6} or data.get("jars") != manifest:
             return None
         if data.get("modpack") != str(mods_dir.resolve()):
             # modpack 路徑改了
             return None
+        raw_index = data["index"]
+        if not isinstance(raw_index, dict) or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in raw_index.items()
+        ):
+            return None
+        if version == 5:
+            loaded = IconIndex(raw_index)
+        else:
+            raw_by_jar = data["index_by_jar"]
+            expected_jars = {path.name for path in mods_dir.glob("*.jar")}
+            if not isinstance(raw_by_jar, dict) or set(raw_by_jar) != expected_jars:
+                return None
+            if not all(
+                isinstance(jar_name, str)
+                and isinstance(jar_index, dict)
+                and all(
+                    isinstance(key, str) and isinstance(value, str)
+                    for key, value in jar_index.items()
+                )
+                for jar_name, jar_index in raw_by_jar.items()
+            ):
+                return None
+            loaded = IconIndex(raw_index, by_jar=raw_by_jar)
         log_info(
             f"[IconIndex] 已載入索引：{data.get('count')} 個 icon（來源：{idx_path.name}）"
         )
-        return data["index"]
+        return loaded
     except Exception as ex:  # noqa: BLE001
         log_warning(f"[IconIndex] 索引載入失敗：{ex!r}")
         return None
