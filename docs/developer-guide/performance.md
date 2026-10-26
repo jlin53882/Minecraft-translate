@@ -192,6 +192,43 @@ cached per data generation (`TranslationDB._cached`); inside a write transaction
 `time_data_range` for the manual-activity basis starts from `history` (small) and finds entries by primary key; the
 reverse order probes the history index once per entry of the version.
 
+### Mod DB web interaction measurement
+
+`tools/perf_moddb_web.py` drives the real Flet web app through Playwright and records, for every operation, one cold
+and `--hot` warm runs. Every sample carries four server-side numbers; read them together:
+
+- `server_ms`: from the received browser event to the last patch of the main content (list, editor, history, dialog).
+  The shell's 250 ms coalesced refresh and the key poll are never counted.
+- `settled_ms`: the same, but including patches that are deliberately sent after the main content: the filter
+  dropdown options (`EntriesPanel.flush_filter_options`, which waits `FilterOptionsLoader`'s 0.25 s settle time) and the
+  Smart Review estimate text (`_update_estimate_region`). The caller names are listed in `DEFERRED_CALLERS`.
+- `wall_ms`: `server_ms` before subtracting a deliberate wait. Typing operations pass `debounce_ms` (the editor's 0.15 s
+  stop-typing delay) and `after_last_key` (start at the last key event, because the gap between the characters of a
+  multi-character input is the browser's key-event pacing). `first_patch_ms` is the immediate response to the key.
+- `list_patch_ms`: until the last `ListView` patch.
+
+Per-sample timelines (`patch` entries with the calling `app/` frames, DB calls with their thread, patch sizes) and
+`--profile` (cProfile of the event-loop thread) show where a number comes from. Compare runs on the same copy of the
+database, and expect other processes on the machine to move a single sample by tens of milliseconds; use medians.
+
+What the numbers are made of (700k entries, one version = 284k):
+
+- Most of a write's (save, revert, review, clear) interactive time is Flet: a patch costs time proportional to the
+  number of controls it has to diff, not to what changed. The page therefore updates only what changed:
+  `EntryTilePool.set_rows` reports the rows whose content changed and the panel updates those rows instead of the
+  50-row `ListView` (more than `MAX_ROW_UPDATES` changed rows update the whole list, because one patch per row has a
+  fixed cost); `FilterFlush` updates only the dropdowns whose options or value changed. Large dropdowns (1,400 module
+  options) cost about 25 ms to diff when their options change.
+- The write path requests the background reload before it shows the snack bar, and does not recompute the impact
+  preview or redraw the editor that the reload redraws anyway.
+- A quality or search filter that is new for the current data generation scans one version's flags in the worker
+  (about 60-250 ms for 284k entries, depending on the status). The result is cached per data generation, so selecting
+  it again is a cache hit. State filters (`none` / `all`) are answered by `stat_src` and never scan.
+- The first batch-translation preview of a process used to stop the event loop for several hundred milliseconds:
+  loading the `tiktoken` vocabulary holds the GIL. `app/startup_tasks.py` loads it in the startup worker
+  (`warm_token_encoder`). The preview itself is worker-side work (one sorted read of the version's untranslated
+  entries plus batch planning); it is reported as an interaction time but is not event-loop time.
+
 ### Other metrics
 
 - AppShell mount time and browser-ready time from the real Flet smoke report

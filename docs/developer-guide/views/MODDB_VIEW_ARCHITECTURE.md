@@ -45,7 +45,20 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
   由快照重畫。`ModDbView._request_panel_refresh` 先把讀取交給 worker，再重畫載入中提示。
   載入期間 `EntriesPanel.set_data_loading(True)` 停用批次取代、批量審核與 Smart Review 等依賴
   範圍資料的入口，快照套用後才恢復。
-- `apply_filter_options` 回傳選項或選值是否改變，只有改變才重畫 `filter_card`。
+- `apply_filter_options` 回傳選項或選值是否改變，並把有變的下拉選單登記到 `FilterFlush`；
+  `EntriesPanel.flush_filter_options` 只更新這幾個下拉選單（大模組選單的選項 diff 約 25 毫秒，
+  整張 `filter_card` 更貴），進階條件摘要、錯誤文字與四個資料操作按鈕（載入中停用）的狀態與上次送出的不同時
+  只更新 `filter_actions_row`／錯誤文字；只有 `flush_all`（來源不明的變更）才重畫整張 `filter_card`。
+  `flush` 在清單、編輯區與記錄之後才呼叫 `flush_filter_options`。
+- 清單：`EntryTilePool.set_rows` 回傳內容有變的列，`EntriesPanel` 只更新這些列（儲存／審核／還原／解除審核
+  通常只有一列）；有變的列超過 `MAX_ROW_UPDATES`、或清單進出空狀態時回傳 `None`，改更新整個 `list_view`。
+- 寫入完成（`entry_writes.after_data_change`、`entry_save_result.apply_save_result`）先交出背景重載請求，再顯示提示；
+  重載會重畫編輯區與影響預覽，所以儲存結果不另外重算影響預覽、也不先重畫編輯區。
+- `TranslatePanel` 的範圍變更：`flush_loading` 只更新載入提示與筆數文字、`flush_refresh` 只更新筆數文字與
+  有變的下拉選單（`ModDbView._flush_loading`／`_update_panel` 在頁籤已顯示時才走這兩條）；上限欄位逐字輸入只更新
+  `count_text`。工作結束後的範圍筆數交給 `_request_scope_refresh`（背景快照），畫面執行緒不查資料庫。
+- `SmartReviewDialog` 建構期間 `SmartReviewContext.building` 為真，面板初始化的 `update()` 不做事；「歷史批次」
+  分頁切到時才讀取與繪製（開啟視窗不讀歷史），因為歷史卡片很多時整個視窗的 patch 可達 100 KB。
 - 沒有畫面變更的事件處理函式（全域按鍵 `KeyboardShortcutHandler.handle_keyboard`、
   `EntriesPanel._on_search_input`）呼叫 `suppress_auto_update`，避免 Flet 在事件後補一次自動更新。
 - 畫面執行緒連線上的 `TranslationDB._persist_stat_cache` 以 `busy_timeout = 0` 寫入：其他連線持有
@@ -100,7 +113,7 @@ EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftSto
 
 頁籤背景快照（`panel_refresh.py` 的 `load_panel_snapshot`、`load_entries_filter_snapshot`）透過 service 的 `moddb_read_snapshot` 取得 worker 專用唯讀連線與單一讀取交易，離開時一律 rollback 並關閉；資料世代由 `database_data_generation` 讀取，內容包含 `data_gen` 與外部 SQLite 寫入序號，view 不碰連線內部，也不可直接呼叫 `_data_gen()`。因此另一個連線完成寫入時，篩選結果與清單快照會被判定為過期並重新載入。批次取代對話框、規則頁與圖示預覽頁各自維護的分頁（前後頁、跳頁輸入）與 `kit.Pager` 的頁碼按鈕語意不同，維持各自實作並由行為測試固定。
 
-`EntriesPanel` 的換頁與篩選透過 `ModDbView._on_entries_filter_changed` 發出背景快照：只換頁時 `page_only` 為真，worker 走 `load_entries_filter_snapshot` 且不重算下拉選項；篩選條件改變時才重算選項（`filter_options_ready`）。`apply_filter_options` 回傳選項或選值是否改變，沒有改變就不標記 `_options_dirty`，篩選列因此不會因存檔、還原或翻頁而重畫。
+`EntriesPanel` 的換頁與篩選透過 `ModDbView._on_entries_filter_changed` 發出背景快照：只換頁時 `page_only` 為真，worker 走 `load_entries_filter_snapshot` 且不重算下拉選項；篩選條件改變時才重算選項（`filter_options_ready`）。`apply_filter_options` 回傳選項或選值是否改變，沒有改變就不登記到 `FilterFlush`，篩選列因此不會因存檔、還原或翻頁而重畫。
 
 只有篩選條件改變（搜尋、狀態、來源、審核狀態、智慧校對狀態、進階條件）時，`refresh_entry_filter(defer_options=True)` 讓 worker 只讀清單與總筆數（第一段，`options_deferred`）；`ModDbView._continue_filter_options` 在清單套用後把第二段交給 `FilterOptionsLoader`（`app/views/moddb/filter_options_loader.py`），它在 worker 呼叫 `panel_refresh.load_entries_options_snapshot`，結果回到畫面執行緒後由 `ModDbView._apply_entries_options` 檢查資料世代與目前條件，才經 `EntriesPanel.apply_options_snapshot` 套用並以 `flush_filter_options` 只重畫篩選列。解析後的版本／模組／類型／來源和請求不同（`scope_changed`）時改走完整重載。載入器同一時間只跑一個查詢、只保留最新 payload，並先等條件穩定（`SETTLE_SECONDS`，等待期間被新請求取代就不查）。
 
