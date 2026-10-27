@@ -303,6 +303,72 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
             )
 
 
+def _prune_empty_extracted_parents(lang_output_dir: Path, start: Path) -> None:
+    """只向上移除空目錄，且不能越過本次合併輸出根目錄。"""
+    root = lang_output_dir.absolute()
+    current = start.absolute()
+    try:
+        current.relative_to(root)
+    except ValueError:
+        return
+    while current != root and current.exists():
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        current = current.parent
+
+
+def _remove_extracted_language_source(
+    lang_output_dir: Path, modid: str, source_path: Path
+) -> bool:
+    """刪除一個已成功合併的語言檔，保留其餘同來源資產。"""
+    if not source_path.is_file():
+        return False
+    try:
+        source_path.unlink()
+        _prune_empty_extracted_parents(lang_output_dir, source_path.parent)
+        return True
+    except OSError as exc:
+        log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc!r}")
+        return False
+
+
+def _iter_extracted_language_sources(
+    lang_output_dir: Path, modid: str
+) -> Generator[Path, None, None]:
+    """找出舊版呼叫者指定 mod 的語言來源檔。"""
+    if not lang_output_dir.is_dir():
+        return
+    for entry in lang_output_dir.iterdir():
+        if not entry.is_dir() or not _EXTRACTED_NAME_RE.match(entry.name):
+            continue
+        mod_dir = entry / modid
+        if not mod_dir.is_dir():
+            continue
+        yield from sorted(
+            path
+            for path in mod_dir.rglob("*")
+            if path.is_file()
+            and path.parent.name.casefold() == "lang"
+            and path.suffix.casefold() in _LANG_FILE_SUFFIXES
+            and path.stem.casefold() in {"zh_cn", "zh_tw", "en_us"}
+        )
+
+
+def _cleanup_extracted_language_sources(
+    lang_output_dir: Path, modid: str, source_paths: Iterable[Path]
+) -> bool:
+    """清理一批已成功合併的語言來源，回傳是否至少清理一個檔案。"""
+    cleaned = False
+    for source_path in source_paths:
+        cleaned = (
+            _remove_extracted_language_source(lang_output_dir, modid, Path(source_path))
+            or cleaned
+        )
+    return cleaned
+
+
 def _cleanup_single_mod_extracted(
     lang_output_dir: Path,
     modid: str,
@@ -316,64 +382,17 @@ def _cleanup_single_mod_extracted(
     ``rmtree``，否則會把後續輸出仍需要的非語言資產一起刪掉。
     """
     lang_output_dir = Path(lang_output_dir)
-
-    def _prune_empty_parents(start: Path) -> None:
-        """只向上移除空目錄，且不能越過本次合併輸出根目錄。"""
-        root = lang_output_dir.absolute()
-        current = start.absolute()
-        try:
-            current.relative_to(root)
-        except ValueError:
-            return
-        while current != root and current.exists():
-            try:
-                current.rmdir()
-            except OSError:
-                break
-            current = current.parent
-
-    def _remove_language_source(source_path: Path) -> bool:
-        if not source_path.is_file():
-            return False
-        try:
-            source_path.unlink()
-            _prune_empty_parents(source_path.parent)
-            return True
-        except OSError as exc:
-            log_warning(f"[MergeExt→Assets] cleanup 失敗 ({modid}): {exc!r}")
-            return False
-
-    # Prefer the exact files discovered by the scanner.  Extracted JAR layouts
-    # are not necessarily ``*_extracted/<modid>/...``; they can contain
-    # wrapper directories such as ``packs/foo/assets/<modid>/...``.
     if source_paths is not None:
-        cleaned = False
-        for source_path in source_paths:
-            cleaned = _remove_language_source(Path(source_path)) or cleaned
-        return cleaned
+        # Prefer exact files discovered by the scanner; deep JAR wrappers are
+        # not necessarily ``*_extracted/<modid>/...``.
+        return _cleanup_extracted_language_sources(lang_output_dir, modid, source_paths)
 
     # Backward-compatible fallback for callers/tests that only provide modid.
-    for entry in lang_output_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        if not _EXTRACTED_NAME_RE.match(entry.name):
-            continue
-        mod_dir = entry / modid
-        if mod_dir.exists() and mod_dir.is_dir():
-            language_sources = sorted(
-                path
-                for path in mod_dir.rglob("*")
-                if path.is_file()
-                and path.parent.name.casefold() == "lang"
-                and path.suffix.casefold() in {".json", ".lang"}
-                and path.stem.casefold() in {"zh_cn", "zh_tw", "en_us"}
-            )
-            cleaned = False
-            for path in language_sources:
-                cleaned = _remove_language_source(path) or cleaned
-            if cleaned:
-                return True
-    return False
+    return _cleanup_extracted_language_sources(
+        lang_output_dir,
+        modid,
+        _iter_extracted_language_sources(lang_output_dir, modid),
+    )
 
 
 def _safe_session_log(session, message: str) -> None:
