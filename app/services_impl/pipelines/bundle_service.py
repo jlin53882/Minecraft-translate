@@ -844,6 +844,9 @@ def build_bundle_staging(
     copied, merged, written, unchanged, expected = _materialize_bundle_plan(
         plan, staging_dir
     )
+    # 先刪掉上一輪不再屬於本輪 plan 的檔案，再解析指南引用。否則舊的
+    # _zh_tw 支援鏡像會被當成現有輸出，遮住來源更新或在來源刪除後被重新鏡像。
+    removed = _prune_staging(staging_dir, expected)
     (
         guide_support_mirrored,
         guide_support_unchanged,
@@ -859,7 +862,7 @@ def build_bundle_staging(
         content_manifest_path,
         guide_support_manifest_records,
     )
-    removed = _prune_staging(staging_dir, expected)
+    removed += _prune_staging(staging_dir, expected)
     return {
         "copied": copied,
         "merged": merged,

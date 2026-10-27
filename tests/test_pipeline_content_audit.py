@@ -158,6 +158,73 @@ def test_bundle_mirrors_guide_support_for_localized_relative_references(tmp_path
     )
 
 
+def test_incremental_guide_support_matches_clean_rebuild_after_change_and_delete(
+    tmp_path: Path,
+):
+    """Repeated staging must not retain stale localized support files."""
+    source = tmp_path / "source"
+    translated = tmp_path / "translated"
+    guide = source / "assets/demo/guides/demo/guide/chapter/page.md"
+    guide.parent.mkdir(parents=True)
+    guide.write_text(
+        '<ImportStructure src="../assets/blocks/machine.snbt" />\n',
+        encoding="utf-8",
+    )
+    support = source / "assets/demo/guides/demo/guide/assets/blocks/machine.snbt"
+    support.parent.mkdir(parents=True)
+    support.write_bytes(b"A")
+    localized = translated / "assets/demo/guides/demo/guide/_zh_tw/chapter/page.md"
+    localized.parent.mkdir(parents=True)
+    localized.write_text(
+        '<ImportStructure src="../assets/blocks/machine.snbt" />\n',
+        encoding="utf-8",
+    )
+
+    incremental = tmp_path / "incremental"
+    build_bundle_staging([str(source), str(translated)], str(incremental))
+    mirrored = (
+        incremental / "assets/demo/guides/demo/guide/_zh_tw/assets/blocks/machine.snbt"
+    )
+    assert mirrored.read_bytes() == b"A"
+
+    support.write_bytes(b"B")
+    changed_stats = build_bundle_staging(
+        [str(source), str(translated)], str(incremental)
+    )
+    assert mirrored.read_bytes() == b"B"
+    assert changed_stats["guide_support_missing"] == 0
+
+    support.unlink()
+    deleted_stats = build_bundle_staging(
+        [str(source), str(translated)], str(incremental)
+    )
+    assert deleted_stats["guide_support_missing"] == 1
+    assert not mirrored.exists()
+    assert not any(
+        record["reason"] == "localized_guide_support"
+        for record in json.loads(
+            (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
+        )["records"]
+    )
+
+    clean = tmp_path / "clean"
+    clean_stats = build_bundle_staging([str(source), str(translated)], str(clean))
+    assert (
+        clean_stats["guide_support_missing"] == deleted_stats["guide_support_missing"]
+    )
+    incremental_files = {
+        path.relative_to(incremental).as_posix(): path.read_bytes()
+        for path in incremental.rglob("*")
+        if path.is_file()
+    }
+    clean_files = {
+        path.relative_to(clean).as_posix(): path.read_bytes()
+        for path in clean.rglob("*")
+        if path.is_file()
+    }
+    assert incremental_files == clean_files
+
+
 def test_bundle_mirrors_support_for_default_guideme_root(tmp_path: Path):
     """Default GuideME roots keep support files beside the localized root."""
 
