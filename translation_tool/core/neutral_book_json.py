@@ -44,28 +44,25 @@ def load_neutral_book_json(text: str, path: str) -> NeutralBookLoad:
 
     try:
         parsed = json.loads(text)
-    except json.JSONDecodeError as strict_error:
+    except json.JSONDecodeError:
         if not is_neutral_pages_candidate(path):
             raise
 
         decoder = json.JSONDecoder()
         leading = text.lstrip()
-        try:
-            parsed, end = decoder.raw_decode(leading)
-        except json.JSONDecodeError:
-            raise strict_error
+        parsed, end = decoder.raw_decode(leading)
 
         trailing = leading[end:].strip()
         if trailing != "]}":
-            raise strict_error
+            raise
         if not isinstance(parsed, dict):
-            raise strict_error
+            raise
         if resolve_book_format(path, parsed).name != FORMAT_NEUTRAL_PAGES:
-            raise strict_error
+            raise
         return NeutralBookLoad(data=parsed, repaired_tail=trailing)
 
     if not isinstance(parsed, dict):
-        raise ValueError("中性自訂書本 JSON 根節點必須是 object")
+        raise TypeError("中性自訂書本 JSON 根節點必須是 object")
     return NeutralBookLoad(data=parsed)
 
 
