@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from collections.abc import Callable, Iterable
@@ -34,6 +35,60 @@ from translation_tool.utils.zip_safety import (
     ZipSizeError,
     read_limited,
 )
+
+_LANG_RESOURCE_RE = re.compile(
+    r"^(?:assets|data)/[^/]+/lang/[^/]+\.(?:json|lang)$",
+    re.IGNORECASE,
+)
+
+
+def _merge_language_sources(
+    logical_path: str,
+    first: str | None,
+    later: str | None,
+) -> tuple[str | None, bool]:
+    """Union colliding language files without changing first-source precedence.
+
+    An outer JAR and one of its nested JARs can legitimately publish the same
+    canonical ``assets/<modid>/lang/<locale>`` file.  The scan result keeps one
+    canonical entry, so treating the collision as a complete file collision
+    loses every key that exists only in the later source.  Language files are
+    key/value maps and can be safely unioned; other resources must continue to
+    use the existing first-source collision rule.
+
+    ``False`` means the inputs were not safely mergeable (for example invalid
+    JSON or a binary member).  The caller then keeps the historical first
+    source rather than manufacturing a partially parsed language file.
+    """
+    if not _LANG_RESOURCE_RE.fullmatch(logical_path):
+        return first, False
+    if first is None or later is None:
+        return first, False
+
+    if logical_path.casefold().endswith(".json"):
+        try:
+            first_data = json.loads(first)
+            later_data = json.loads(later)
+        except (TypeError, ValueError):
+            return first, False
+        if not isinstance(first_data, dict) or not isinstance(later_data, dict):
+            return first, False
+        merged = dict(first_data)
+        for key, value in later_data.items():
+            merged.setdefault(key, value)
+        return json.dumps(merged, ensure_ascii=False, indent=2), True
+
+    # Legacy .lang is deliberately parsed as key/value text rather than
+    # concatenated: duplicate keys must follow the same first-source rule as
+    # JSON, and continuation/comment handling belongs to the shared codec.
+    from translation_tool.core.lang_codec import dump_lang_text, parse_lang_text
+
+    first_data = parse_lang_text(first)
+    later_data = parse_lang_text(later)
+    merged = dict(first_data)
+    for key, value in later_data.items():
+        merged.setdefault(key, value)
+    return dump_lang_text(merged), True
 
 
 def _get_default_workers() -> int:
@@ -148,6 +203,7 @@ def _scan_single_jar_detailed(
     """掃描單一 outer JAR，並保留巢狀資源的來源鏈供抽取階段使用。"""
     result: dict[str, str | None] = {}
     entries: list[ScannedEntry] = []
+    entry_indexes: dict[str, int] = {}
     collisions: list[str] = []
     nested_jars = 0
     skipped_nested = 0
@@ -187,12 +243,33 @@ def _scan_single_jar_detailed(
                 text = None
 
             if name in result:
-                collisions.append(
-                    f"{label}!{name} 與既有來源的 canonical 路徑衝突，保留先出現的來源"
+                merged, merged_ok = _merge_language_sources(
+                    name,
+                    result[name],
+                    text,
                 )
-                log_warning("[jar_browser] %s", collisions[-1])
+                if merged_ok:
+                    result[name] = merged
+                    first_index = entry_indexes[name]
+                    first_entry = entries[first_index]
+                    entries[first_index] = ScannedEntry(
+                        logical_path=first_entry.logical_path,
+                        member_chain=first_entry.member_chain,
+                        content=merged,
+                        size=first_entry.size + info.file_size,
+                    )
+                    collisions.append(
+                        f"{label}!{name} 與既有語言來源合併，重複 key 保留先出現的來源"
+                    )
+                    log_warning("[jar_browser] %s", collisions[-1])
+                else:
+                    collisions.append(
+                        f"{label}!{name} 與既有來源的 canonical 路徑衝突，保留先出現的來源"
+                    )
+                    log_warning("[jar_browser] %s", collisions[-1])
                 continue
             result[name] = text
+            entry_indexes[name] = len(entries)
             entries.append(
                 ScannedEntry(
                     logical_path=name,

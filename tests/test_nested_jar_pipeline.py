@@ -585,6 +585,55 @@ def test_nested_canonical_collision_keeps_first_source_and_logs(tmp_path: Path):
     assert "From A" in extracted.read_text(encoding="utf-8")
 
 
+def test_outer_and_nested_language_sources_union_keys_without_overwriting(
+    tmp_path: Path,
+):
+    """外層 lang 與內嵌 lang 的額外 key 不得因 canonical 路徑碰撞遺失。"""
+    nested = _zip_bytes(
+        {
+            "assets/enderio/lang/en_us.json": json.dumps(
+                {
+                    "conduit.enderio.dense_me": "Dense ME Conduit",
+                    "shared.key": "nested value",
+                }
+            )
+        }
+    )
+    jar = _outer_jar(
+        tmp_path / "enderio.jar",
+        direct={
+            "assets/enderio/lang/en_us.json": json.dumps(
+                {
+                    "item.enderio.outer": "Outer item",
+                    "shared.key": "outer value",
+                }
+            )
+        },
+        nested={"META-INF/jarjar/conduits.jar": nested},
+    )
+    regex = build_lang_file_regex(codes=["en_us"])
+
+    scanned = scan_jars(tmp_path, [regex.pattern], max_workers=1, jar_files=[jar])
+    scanned_data = json.loads(scanned[jar]["assets/enderio/lang/en_us.json"])
+    assert scanned_data == {
+        "item.enderio.outer": "Outer item",
+        "shared.key": "outer value",
+        "conduit.enderio.dense_me": "Dense ME Conduit",
+    }
+    assert len(scanned.entries[jar]) == 1
+    assert scanned.collision_notes[jar]
+
+    db_result = scan_jar(jar, ScanOptions("1.21.1"), dir_names=())
+    db_keys = {item.key for item in db_result.items if item.kind == "lang"}
+    assert {"item.enderio.outer", "conduit.enderio.dense_me"} <= db_keys
+
+    output = tmp_path / "lang_output"
+    result = _extract_from_jar(str(jar), str(output), regex, scanned)
+    assert result == {"status": "success", "extracted": 1, "skipped": 0}
+    extracted = output / "assets/enderio/lang/en_us.json"
+    assert json.loads(extracted.read_text(encoding="utf-8")) == scanned_data
+
+
 def test_stage2_collision_source_order_is_deterministic(tmp_path: Path):
     output = tmp_path / "lang_output"
     for folder, value in (
