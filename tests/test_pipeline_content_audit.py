@@ -33,6 +33,28 @@ def test_other_output_text_is_emitted_or_queued_without_silent_drop(tmp_path: Pa
     )
 
 
+def test_mixed_guide_text_is_queued_instead_of_marked_emitted(tmp_path: Path):
+    merge_output = tmp_path / "merge"
+    other_assets = merge_output / "other_output" / "assets" / "demo"
+    other_assets.mkdir(parents=True)
+    localized = other_assets / "localized.md"
+    localized.write_text("# 中文標題\n\n這是中文內容。", encoding="utf-8")
+    mixed = other_assets / "mixed.mdx"
+    mixed.write_text(
+        "# 中文標題\n\nThis paragraph still needs translation.",
+        encoding="utf-8",
+    )
+
+    records = classify_other_output_assets(merge_output)
+
+    by_name = {Path(record["source"]).name: record for record in records}
+    assert by_name["localized.md"]["status"] == "emitted"
+    assert by_name["mixed.mdx"]["status"] == "pending"
+    assert (
+        merge_output / "patchouli_output/待翻譯/assets/demo/_en_us/mixed.mdx"
+    ).is_file()
+
+
 def test_bundle_manifest_records_emitted_pending_and_excluded(tmp_path: Path):
     merge_output = tmp_path / "merge"
     (merge_output / "assets/demo/lang").mkdir(parents=True)

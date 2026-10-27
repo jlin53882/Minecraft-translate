@@ -11,14 +11,20 @@ format profile instead of silently dropping them.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.guide_blocks import (
+    extract_guide_blocks,
+    has_translatable_text,
+)
 from translation_tool.core.lang_merge_dict import contains_cjk
 
-_TEXT_SUFFIXES = frozenset({".md", ".txt"})
+_TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt"})
 _LOCALE_DIRS = frozenset({"en_us", "_en_us", "zh_tw", "_zh_tw"})
+_LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
 
 
 def _load_existing_content_records(report_path: Path) -> list[dict[str, Any]]:
@@ -83,6 +89,20 @@ def _write_content_manifest(report_path: Path, records: list[dict[str, Any]]) ->
         + "\n",
         encoding="utf-8",
     )
+
+
+def _needs_guide_translation(text: str, name: str) -> bool:
+    """保守判斷指南是否仍含英文或中英混合的可翻譯區塊。
+
+    文件內只要有一個可翻譯的純英文區塊，或可翻譯區塊同時含中文與
+    拉丁字詞，就不能宣稱整份文件已完成；應交給指南翻譯流程逐區塊處理。
+    """
+    for block in extract_guide_blocks(text, name):
+        if not has_translatable_text(block.text):
+            continue
+        if not contains_cjk(block.text) or _LATIN_WORD.search(block.text):
+            return True
+    return False
 
 
 def _pending_guide_rel(relative: Path) -> Path:
@@ -152,7 +172,7 @@ def classify_other_output_assets(
 
         try:
             text = source.read_text(encoding="utf-8-sig")
-            if contains_cjk(text):
+            if contains_cjk(text) and not _needs_guide_translation(text, source.name):
                 destination = canonical_root / relative
                 _copy_if_needed(source, destination)
                 source.unlink()
