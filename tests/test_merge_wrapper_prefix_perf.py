@@ -272,3 +272,27 @@ def test_guide_support_copy_stays_in_resource_pack_assets(tmp_path):
     assert result.get("success")
     assert (output / "assets/demo/ae2guide/assets/blocks/export_bus.snbt").is_file()
     assert not (output / "other_output").exists()
+
+
+def test_guidebook_support_copy_stays_in_resource_pack_assets(tmp_path):
+    """Guidebook variants such as MI's ``mi_guidebook`` use the same rule."""
+    from translation_tool.core.lang_merge_content import _process_content_or_copy_file
+    from translation_tool.core.lang_merge_io import FolderReader
+
+    source = tmp_path / "in"
+    support = source / "assets/demo/mi_guidebook/assets/coke_oven.png"
+    support.parent.mkdir(parents=True)
+    support.write_bytes(b"image")
+    output = tmp_path / "out"
+
+    result = _process_content_or_copy_file(
+        FolderReader(str(source)),
+        "assets/demo/mi_guidebook/assets/coke_oven.png",
+        [],
+        str(output),
+        other_output_dir=str(output / "other_output"),
+    )
+
+    assert result.get("success")
+    assert (output / "assets/demo/mi_guidebook/assets/coke_oven.png").is_file()
+    assert not (output / "other_output").exists()

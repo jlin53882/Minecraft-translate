@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import posixpath
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -59,9 +60,19 @@ GUIDE_SUPPORT_SUFFIXES = frozenset(
         ".webp",
     }
 )
+GUIDE_TEXT_SUFFIXES = frozenset({".json", ".lang", ".md", ".mdx", ".txt"})
 GUIDE_MARKER = "__guide__"
 _LOCALE_DIR = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
 _MAX_GUIDE_BYTES = 1024 * 1024
+_IMPORT_STRUCTURE_RE = re.compile(
+    r"<ImportStructure\b[^>]*\bsrc\s*=\s*(['\"])(.*?)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+_SRC_ATTRIBUTE_RE = re.compile(
+    r"<[^>]+\bsrc\s*=\s*(['\"])(.*?)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
 GUIDE_DIR_NAMES = frozenset(
     {
         "ae2guide",
@@ -80,6 +91,57 @@ class GuidePath(type(Path())):
     """指南檔路徑；``guide_root`` 是掃描時的根目錄（算模組與輸出位置用）。"""
 
     guide_root: Path
+
+
+def guide_support_references(text: str) -> set[str]:
+    """Return relative binary/structure references used by a guide document.
+
+    Guide prose is translated separately.  Only explicitly referenced
+    non-text assets are copied here; copying every file under a guide folder
+    would bypass the normal extraction and could emit English content as if it
+    were translated.
+    """
+
+    references: set[str] = set()
+    candidates: list[tuple[str, bool]] = [
+        (match.group(2), True) for match in _IMPORT_STRUCTURE_RE.finditer(text)
+    ]
+    candidates.extend(
+        (match.group(2), False) for match in _SRC_ATTRIBUTE_RE.finditer(text)
+    )
+    candidates.extend(
+        (match.group(1), False) for match in _MARKDOWN_IMAGE_RE.finditer(text)
+    )
+
+    for raw, structure_reference in candidates:
+        reference = raw.strip().split("#", 1)[0].split("?", 1)[0]
+        if not reference or reference.startswith(("/", "#")):
+            continue
+        lowered = reference.casefold()
+        if lowered.startswith(("http:", "https:", "data:", "minecraft:")):
+            continue
+        suffix = posixpath.splitext(reference)[1].casefold()
+        if suffix in GUIDE_SUPPORT_SUFFIXES or (
+            structure_reference and suffix not in GUIDE_TEXT_SUFFIXES
+        ):
+            references.add(reference)
+    return references
+
+
+def resolve_guide_support_reference(member: str, reference: str) -> str | None:
+    """Resolve a guide-relative support member without leaving its archive."""
+
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(member), reference))
+    if target in (".", "..") or target.startswith(("../", "/")):
+        return None
+    return target
+
+
+def is_guide_directory_segment(segment: str) -> bool:
+    """Return whether a path segment denotes a guide/documentation tree."""
+
+    lowered = segment.casefold()
+    return lowered in GUIDE_DIR_NAMES or lowered.endswith(("guide", "guidebook"))
 
 
 def is_guide_document(data: Any) -> bool:
@@ -246,7 +308,7 @@ def guide_locale_rel(rel: Path, root: Path, locale: str) -> Path:
     # use the same deterministic anchor.
     for index in range(offset + 2, len(parts) - 1):
         segment = parts[index].casefold()
-        if segment in GUIDE_DIR_NAMES or segment.endswith("guide"):
+        if is_guide_directory_segment(segment):
             return Path(*parts[: index + 1], locale, *parts[index + 1 :])
 
     # Custom guide layouts may use a project-specific directory name.  If the

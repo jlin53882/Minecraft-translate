@@ -18,6 +18,11 @@ from pathlib import Path
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.book_formats import is_neutral_pages_candidate
+from translation_tool.core.guide_translation import (
+    GUIDE_SUFFIXES,
+    guide_support_references,
+    resolve_guide_support_reference,
+)
 from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
@@ -617,6 +622,132 @@ def _materialize_bundle_plan(
     return copied, merged, written, unchanged, expected
 
 
+def _mirror_localized_guide_support(
+    staging_dir: str, expected: set[str]
+) -> tuple[int, int, int, list[str]]:
+    """Mirror explicitly referenced guide assets below each locale root.
+
+    Guide translation changes the path from a neutral or ``en_us`` directory
+    to ``_zh_tw``/``zh_tw`` while deliberately preserving relative references
+    in the document.  A support file such as ``../assets/foo.snbt`` therefore
+    has to exist below the translated locale root as well.  Only files named by
+    a guide are mirrored; this keeps English guide prose out of the resource
+    pack and avoids copying an entire source tree.
+    """
+
+    staging_root = Path(staging_dir).resolve()
+    content_root = staging_root / _STAGING_CONTENT_ROOT
+    if not content_root.is_dir():
+        return 0, 0, 0, []
+
+    mirrored = unchanged = missing = 0
+    warnings: list[str] = []
+    warning_keys: set[str] = set()
+
+    def safe_path(rel: str) -> Path | None:
+        candidate = (staging_root / Path(rel)).resolve()
+        try:
+            candidate.relative_to(staging_root)
+        except ValueError:
+            return None
+        return candidate
+
+    def expected_key(path: Path) -> None:
+        expected.add(os.path.normcase(os.path.relpath(path, staging_root)))
+
+    localized_guides = [
+        path
+        for path in content_root.rglob("*")
+        if path.is_file()
+        and path.suffix.casefold() in GUIDE_SUFFIXES
+        and any(part.casefold() == "_zh_tw" or part.casefold() == "zh_tw"
+                for part in path.relative_to(staging_root).parts)
+    ]
+
+    for guide_path in sorted(localized_guides):
+        guide_rel = guide_path.relative_to(staging_root)
+        guide_parts = list(guide_rel.parts)
+        locale_index = next(
+            index
+            for index, part in enumerate(guide_parts)
+            if part.casefold() in {"_zh_tw", "zh_tw"}
+        )
+        neutral_rel = Path(
+            *guide_parts[:locale_index], *guide_parts[locale_index + 1 :]
+        )
+        source_rels = [neutral_rel]
+        for source_locale in ("_en_us", "en_us", "_zh_cn", "zh_cn"):
+            source_rel = Path(*guide_parts)
+            source_parts = list(source_rel.parts)
+            source_parts[locale_index] = source_locale
+            candidate = Path(*source_parts)
+            if candidate not in source_rels:
+                source_rels.append(candidate)
+
+        try:
+            text = guide_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError):
+            continue
+
+        for reference in guide_support_references(text):
+            target_rel = resolve_guide_support_reference(
+                guide_rel.as_posix(), reference
+            )
+            if target_rel is None:
+                continue
+            target_path = safe_path(target_rel)
+            if target_path is None:
+                continue
+
+            source_path: Path | None = None
+            for source_rel in source_rels:
+                source_target_rel = resolve_guide_support_reference(
+                    source_rel.as_posix(), reference
+                )
+                if source_target_rel is None:
+                    continue
+                candidate = safe_path(source_target_rel)
+                if candidate is not None and candidate.is_file():
+                    source_path = candidate
+                    break
+
+            if source_path is None:
+                if target_path.is_file():
+                    expected_key(target_path)
+                    continue
+                missing += 1
+                warning_key = f"{guide_rel.as_posix()}|{reference}"
+                if warning_key not in warning_keys:
+                    warning_keys.add(warning_key)
+                    warnings.append(
+                        "找不到指南引用的支援檔："
+                        f"{guide_rel.as_posix()} -> {reference}"
+                    )
+                continue
+
+            expected_key(target_path)
+            if target_path == source_path:
+                unchanged += 1
+                continue
+            if target_path.is_file():
+                if _same_file_content(str(source_path), str(target_path)):
+                    unchanged += 1
+                else:
+                    warning_key = f"collision:{target_rel}"
+                    if warning_key not in warning_keys:
+                        warning_keys.add(warning_key)
+                        warnings.append(
+                            "指南支援檔路徑衝突，保留既有輸出："
+                            f"{target_rel}"
+                        )
+                continue
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_path, target_path)
+            mirrored += 1
+
+    return mirrored, unchanged, missing, warnings
+
+
 def build_bundle_staging(
     sources: list[str],
     staging_dir: str,
@@ -658,6 +789,13 @@ def build_bundle_staging(
     copied, merged, written, unchanged, expected = _materialize_bundle_plan(
         plan, staging_dir
     )
+    (
+        guide_support_mirrored,
+        guide_support_unchanged,
+        guide_support_missing,
+        guide_support_warnings,
+    ) = _mirror_localized_guide_support(staging_dir, expected)
+    warnings.extend(guide_support_warnings)
     removed = _prune_staging(staging_dir, expected)
     return {
         "copied": copied,
@@ -667,6 +805,9 @@ def build_bundle_staging(
         "removed": removed,
         "excluded": excluded,
         "warnings": warnings,
+        "guide_support_mirrored": guide_support_mirrored,
+        "guide_support_unchanged": guide_support_unchanged,
+        "guide_support_missing": guide_support_missing,
         "manifest_path": manifest_path,
     }
 

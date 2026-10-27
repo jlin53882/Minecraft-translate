@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from app.services_impl.pipelines.bundle_service import build_bundle_staging
+from translation_tool.core.guide_translation import guide_output_rel
 from translation_tool.core.pipeline_content_audit import (
     _pending_guide_rel,
     classify_other_output_assets,
@@ -42,6 +43,128 @@ def test_pending_guide_uses_one_locale_root_for_relative_links():
     assert _pending_guide_rel(relative) == Path(
         "assets/demo/ae2guide/_en_us/ae2-mechanics/page.md"
     )
+
+
+def test_mi_guidebook_uses_one_locale_root_for_relative_links(tmp_path: Path):
+    relative = Path("assets/demo/mi_guidebook/io_guide/page.md")
+
+    assert guide_output_rel(relative, tmp_path) == Path(
+        "assets/demo/mi_guidebook/_zh_tw/io_guide/page.md"
+    )
+
+
+def test_bundle_mirrors_guide_support_for_localized_relative_references(tmp_path: Path):
+    """Locale relocation must not break ImportStructure/image references."""
+    source = tmp_path / "source"
+    translated = tmp_path / "translated"
+
+    neutral_guide = source / "assets/demo/ae2guide/ae2-mechanics/page.md"
+    neutral_guide.parent.mkdir(parents=True)
+    neutral_guide.write_text(
+        '<ImportStructure src="../assets/blocks/export_bus.snbt" />\n'
+        "![diagram](../assets/images/network.png)\n",
+        encoding="utf-8",
+    )
+    (source / "assets/demo/ae2guide/assets/blocks/export_bus.snbt").parent.mkdir(
+        parents=True
+    )
+    (source / "assets/demo/ae2guide/assets/blocks/export_bus.snbt").write_bytes(
+        b"structure"
+    )
+    image = source / "assets/demo/ae2guide/assets/images/network.png"
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"image")
+
+    translated_guide = (
+        translated / "assets/demo/ae2guide/_zh_tw/ae2-mechanics/page.md"
+    )
+    translated_guide.parent.mkdir(parents=True)
+    translated_guide.write_text(
+        '<ImportStructure src="../assets/blocks/export_bus.snbt" />\n'
+        "![diagram](../assets/images/network.png)\n",
+        encoding="utf-8",
+    )
+
+    staging = tmp_path / "staging"
+    stats = build_bundle_staging(
+        [str(source), str(translated)],
+        str(staging),
+    )
+
+    mirrored_root = staging / "assets/demo/ae2guide/_zh_tw/assets"
+    assert (mirrored_root / "blocks/export_bus.snbt").read_bytes() == b"structure"
+    assert (mirrored_root / "images/network.png").read_bytes() == b"image"
+    assert stats["guide_support_mirrored"] == 2
+    assert stats["guide_support_missing"] == 0
+
+
+def test_bundle_mirrors_explicit_patchouli_locale_support(tmp_path: Path):
+    """Explicit ``en_us``/``zh_tw`` books use the same support-file contract."""
+    source = tmp_path / "source"
+    translated = tmp_path / "translated"
+
+    source_guide = source / "assets/demo/patchouli_books/book/en_us/chapters/page.md"
+    source_guide.parent.mkdir(parents=True)
+    source_guide.write_text(
+        '<ImportStructure src="../assets/assembly.snbt" />\n',
+        encoding="utf-8",
+    )
+    support = source / "assets/demo/patchouli_books/book/en_us/assets/assembly.snbt"
+    support.parent.mkdir(parents=True)
+    support.write_bytes(b"assembly")
+
+    translated_guide = (
+        translated / "assets/demo/patchouli_books/book/zh_tw/chapters/page.md"
+    )
+    translated_guide.parent.mkdir(parents=True)
+    translated_guide.write_text(
+        '<ImportStructure src="../assets/assembly.snbt" />\n',
+        encoding="utf-8",
+    )
+
+    staging = tmp_path / "staging"
+    stats = build_bundle_staging(
+        [str(source), str(translated)],
+        str(staging),
+    )
+
+    assert (
+        staging / "assets/demo/patchouli_books/book/zh_tw/assets/assembly.snbt"
+    ).read_bytes() == b"assembly"
+    assert stats["guide_support_mirrored"] == 1
+    assert stats["guide_support_missing"] == 0
+
+
+def test_bundle_mirrors_zh_cn_guide_support_for_zh_tw_output(tmp_path: Path):
+    """A zh_cn-only source still supplies shared binary guide assets."""
+    source = tmp_path / "source"
+    translated = tmp_path / "translated"
+
+    source_guide = source / "assets/demo/guides/_zh_cn/chapter/page.md"
+    source_guide.parent.mkdir(parents=True)
+    source_guide.write_text(
+        '<ImportStructure src="../assets/assembly.snbt" />\n',
+        encoding="utf-8",
+    )
+    support = source / "assets/demo/guides/_zh_cn/assets/assembly.snbt"
+    support.parent.mkdir(parents=True)
+    support.write_bytes(b"assembly-zh-cn")
+
+    translated_guide = translated / "assets/demo/guides/_zh_tw/chapter/page.md"
+    translated_guide.parent.mkdir(parents=True)
+    translated_guide.write_text(
+        '<ImportStructure src="../assets/assembly.snbt" />\n',
+        encoding="utf-8",
+    )
+
+    staging = tmp_path / "staging"
+    stats = build_bundle_staging([str(source), str(translated)], str(staging))
+
+    assert (
+        staging / "assets/demo/guides/_zh_tw/assets/assembly.snbt"
+    ).read_bytes() == b"assembly-zh-cn"
+    assert stats["guide_support_mirrored"] == 1
+    assert stats["guide_support_missing"] == 0
 
 
 def test_mixed_guide_text_is_queued_instead_of_marked_emitted(tmp_path: Path):

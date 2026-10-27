@@ -11,8 +11,6 @@
 from __future__ import annotations
 
 import os
-import posixpath
-import re
 import zipfile
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
@@ -20,7 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.guide_translation import (
-    GUIDE_SUPPORT_SUFFIXES,
+    guide_support_references as _guide_support_references,
+)
+from translation_tool.core.guide_translation import (
+    resolve_guide_support_reference as _resolve_archive_reference,
 )
 from translation_tool.core.jar_processor_extract import (
     _normalize_jar_base_name,
@@ -46,58 +47,6 @@ from translation_tool.utils.zip_safety import (
 )
 
 _BOOK_KINDS = (KIND_PATCHOULI, KIND_GUIDE)
-_GUIDE_TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt", ".json", ".lang"})
-_IMPORT_STRUCTURE_RE = re.compile(
-    r"<ImportStructure\b[^>]*\bsrc\s*=\s*(['\"])(.*?)\1",
-    re.IGNORECASE | re.DOTALL,
-)
-_SRC_ATTRIBUTE_RE = re.compile(
-    r"<[^>]+\bsrc\s*=\s*(['\"])(.*?)\1",
-    re.IGNORECASE | re.DOTALL,
-)
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
-
-
-def _guide_support_references(text: str) -> set[str]:
-    """Return relative binary/structure references used by a guide document.
-
-    Guide prose is translated separately.  Only explicitly referenced
-    non-text assets are copied here; copying every file under ``ae2guide``
-    would bypass the normal JSON/Markdown extraction and could emit English
-    content as if it were translated.
-    """
-
-    references: set[str] = set()
-    candidates: list[tuple[str, bool]] = [
-        (match.group(2), True) for match in _IMPORT_STRUCTURE_RE.finditer(text)
-    ]
-    candidates.extend(
-        (match.group(2), False) for match in _SRC_ATTRIBUTE_RE.finditer(text)
-    )
-    candidates.extend((match.group(1), False) for match in _MARKDOWN_IMAGE_RE.finditer(text))
-
-    for raw, structure_reference in candidates:
-        reference = raw.strip().split("#", 1)[0].split("?", 1)[0]
-        if not reference or reference.startswith(("/", "#")):
-            continue
-        lowered = reference.casefold()
-        if lowered.startswith(("http:", "https:", "data:", "minecraft:")):
-            continue
-        suffix = posixpath.splitext(reference)[1].casefold()
-        if suffix in GUIDE_SUPPORT_SUFFIXES or (
-            structure_reference and suffix not in _GUIDE_TEXT_SUFFIXES
-        ):
-            references.add(reference)
-    return references
-
-
-def _resolve_archive_reference(member: str, reference: str) -> str | None:
-    """Resolve one guide-relative archive member without leaving the archive."""
-
-    target = posixpath.normpath(posixpath.join(posixpath.dirname(member), reference))
-    if target in (".", "..") or target.startswith(("../", "/")):
-        return None
-    return target
 
 
 @dataclass

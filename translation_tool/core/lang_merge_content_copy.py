@@ -24,7 +24,10 @@ from .book_formats import (
     map_neutral_pages_values,
     resolve_book_format,
 )
-from .guide_translation import GUIDE_DIR_NAMES, GUIDE_SUPPORT_SUFFIXES
+from .guide_translation import (
+    GUIDE_SUPPORT_SUFFIXES,
+    is_guide_directory_segment,
+)
 from .neutral_book_json import load_neutral_book_json
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
@@ -51,7 +54,7 @@ def _is_guide_support_path(normalized_path: str) -> bool:
     if suffix not in GUIDE_SUPPORT_SUFFIXES:
         return False
     return any(
-        part.casefold() in GUIDE_DIR_NAMES or part.casefold().endswith("guide")
+        is_guide_directory_segment(part)
         for part in parts[assets_index + 2 : -1]
     )
 
