@@ -64,3 +64,23 @@ def test_bundle_manifest_records_emitted_pending_and_excluded(tmp_path: Path):
     assert manifest["status_counts"]["pending"] == 1
     assert manifest["status_counts"]["excluded"] == 1
     assert not (staging / "data").exists()
+
+
+def test_bundle_manifest_keeps_reclassified_assets_emitted(tmp_path: Path):
+    merge_output = tmp_path / "merge"
+    source = merge_output / "other_output/assets/demo/guide/localized.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# 中文指南", encoding="utf-8")
+
+    records = classify_other_output_assets(merge_output)
+    assert records[0]["status"] == "emitted"
+
+    build_bundle_staging([str(merge_output)], str(tmp_path / "staging"))
+
+    manifest = json.loads(
+        (tmp_path / "translation_output_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["status_counts"]["emitted"] == 1
+    assert manifest["status_counts"].get("excluded", 0) == 0

@@ -285,6 +285,8 @@ def _write_output_manifest(
     emitted_sources: set[str] = set()
     for rel_path, source_paths in plan.values():
         if rel_path.replace(os.sep, "/") in classified_outputs:
+            for source_path in source_paths:
+                emitted_sources.add(os.path.normcase(os.path.abspath(source_path)))
             continue
         for source_path in source_paths:
             normalized = os.path.normcase(os.path.abspath(source_path))
