@@ -202,7 +202,13 @@ def _merge_stage2_sources(
     """Union all sources while keeping the deterministic first conflict winner."""
 
     merged: dict[str, Any] = {}
+    first_sources: dict[str, Path] = {}
     ordered_paths = sorted(source_paths, key=lambda path: path.as_posix().casefold())
+    if len(ordered_paths) > 1:
+        log_warning(
+            f"[MergeExt→Assets] {modid}/{lang_code}: 多個來源 {len(ordered_paths)} 個,"
+            f" 採第一個 ({ordered_paths[0].name})"
+        )
     for source_path in ordered_paths:
         data = _load_stage2_lang_source(source_path)
         for key, value in data.items():
@@ -210,9 +216,10 @@ def _merge_stage2_sources(
                 if merged[key] != value:
                     log_warning(
                         f"[MergeExt→Assets] {modid}/{lang_code}: key {key!r} "
-                        f"衝突，保留先出現來源 {ordered_paths[0].name}"
+                        f"衝突，保留先出現來源 {first_sources[key].name}"
                     )
                 continue
+            first_sources[key] = source_path
             merged[key] = value
     return merged
 
