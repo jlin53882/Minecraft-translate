@@ -8,6 +8,18 @@ import pytest
 from translation_tool.core import kubejs_translator_state
 
 
+def test_new_run_ids_are_short_but_legacy_uuid_ids_remain_readable() -> None:
+    """新快照避免 Windows 深層路徑超長，既有 32 碼快照仍可載入。"""
+    generated = {kubejs_translator_state.new_run_id() for _ in range(32)}
+
+    assert generated
+    assert all(len(run_id) == 20 for run_id in generated)
+    assert all(
+        kubejs_translator_state._RUN_ID_RE.fullmatch(run_id) for run_id in generated
+    )
+    assert kubejs_translator_state._RUN_ID_RE.fullmatch("a" * 32)
+
+
 def test_commit_staging_run_copies_when_windows_blocks_directory_rename(
     tmp_path: Path, monkeypatch
 ) -> None:
