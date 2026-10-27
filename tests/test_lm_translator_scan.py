@@ -72,6 +72,21 @@ class TestScanTranslatableFiles:
         # 驗證有找到 lang 檔案（數量可能因 find_lang_json 實作而異）
         assert isinstance(lang_files, list)
 
+    def test_extract_items_parallel_reads_legacy_lang(self, tmp_path):
+        from translation_tool.core.lm_translator_scan import extract_items_parallel
+
+        path = tmp_path / "assets" / "demo" / "lang" / "en_us.lang"
+        path.parent.mkdir(parents=True)
+        path.write_text("demo.title=Hello", encoding="utf-8")
+
+        batches = list(
+            extract_items_parallel(
+                files=[path], export_lang=False, work_thread=1
+            )
+        )
+
+        assert batches[-1][0][str(path)]["demo.title"] == "Hello"
+
     def test_scan_translatable_files_with_patchouli(self, tmp_path):
         """測試含 Patchouli 檔案的掃描。"""
         from translation_tool.core.lm_translator_scan import scan_translatable_files

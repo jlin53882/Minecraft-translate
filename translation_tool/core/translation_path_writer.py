@@ -36,8 +36,10 @@ def map_lang_output_path(src: Path) -> Path:
     src = _strip_extraction_wrapper(src)
     if is_advancement_file(src):
         return src
-    if src.name.lower() == "en_us.json" and "lang" in src.parts:
+    if src.suffix.lower() in {".json", ".lang"} and "lang" in src.parts:
         parts = list(src.parts)
+        if src.stem.lower() not in {"en_us", "zh_cn", "zh_tw"}:
+            return src
         # data/<namespace>/lang is a valid scan source in mod JARs, but it is
         # not the final Resource Pack language location. Advancement files
         # returned above before this branch and therefore keep their data/
@@ -46,11 +48,6 @@ def map_lang_output_path(src: Path) -> Path:
             parts[0] = "assets"
             return Path(*parts[:-1], "zh_tw.json")
         return src.with_name("zh_tw.json")
-    if src.name.lower() == "zh_tw.json" and "lang" in src.parts:
-        parts = list(src.parts)
-        if parts and parts[0].lower() in {"data", "resources"}:
-            parts[0] = "assets"
-            return Path(*parts)
     parts = list(src.parts)
     if "patchouli_books" in parts:
         locale_index = parts.index("patchouli_books") + 2  # 其後依序是書名、語系資料夾

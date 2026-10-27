@@ -94,6 +94,15 @@ class TestFindLangJson:
 
         assert find_lang_json(tmp_path) == [path]
 
+    def test_find_lang_json_includes_legacy_lang_sources(self, tmp_path):
+        from translation_tool.core.translatable_extractor import find_lang_json
+
+        path = tmp_path / "assets" / "legacy" / "lang" / "en_us.lang"
+        path.parent.mkdir(parents=True)
+        path.write_text("legacy.key=Legacy", encoding="utf-8")
+
+        assert find_lang_json(tmp_path) == [path]
+
 
 class TestFindPatchouliJson:
     """測試 find_patchouli_json 函式"""

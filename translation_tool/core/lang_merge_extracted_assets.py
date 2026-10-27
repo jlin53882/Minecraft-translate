@@ -63,7 +63,7 @@ from translation_tool.utils.text_processor import (
 #   random
 #   extracted (沒前綴)
 _EXTRACTED_NAME_RE = re.compile(r".*_extracted(_\w+)?$")
-_LANG_FILE_GLOB = "**/lang/*.json"
+_LANG_FILE_SUFFIXES = frozenset({".json", ".lang"})
 _LANG_CODE_STEM = re.compile(r"^[A-Za-z_]+$")  # en_us, zh_cn, zh_tw, ru_ru ...
 
 
@@ -135,14 +135,20 @@ def _scan_extracted_lang_files(
                 continue
 
             lang_files = sorted(
-                (path for path in entry.rglob(_LANG_FILE_GLOB) if path.is_file()),
+                (
+                    path
+                    for path in entry.rglob("*")
+                    if path.is_file()
+                    and path.parent.name.lower() == "lang"
+                    and path.suffix.lower() in _LANG_FILE_SUFFIXES
+                ),
                 key=lambda path: path.as_posix().casefold(),
             )
             file_count = len(lang_files)
             if file_count == 0:
                 # 2026-08-02:log 哪些 _extracted 沒找到 lang 檔案(為什麼沒處理)
                 log_warning(
-                    f"[MergeExt→Assets] {entry.name}/* 內找不到 lang/*.json, 跳過"
+                    f"[MergeExt→Assets] {entry.name}/* 內找不到 lang/*.json 或 lang/*.lang, 跳過"
                 )
                 skipped_dirs.append(entry.name)
                 continue
@@ -169,11 +175,46 @@ def _scan_extracted_lang_files(
         )
     if skipped_dirs:
         log_info(
-            f"[MergeExt→Assets] 跳過 (沒找到 lang/*.json): {len(skipped_dirs)} 個"
+            f"[MergeExt→Assets] 跳過 (沒找到 lang/*.json 或 lang/*.lang): {len(skipped_dirs)} 個"
             f" ({', '.join(skipped_dirs)})"
         )
 
     return dict(result)
+
+
+def _load_stage2_lang_source(path: Path) -> dict[str, Any]:
+    """Read one extracted language source in JSON or legacy ``.lang`` form."""
+
+    if path.suffix.lower() == ".lang":
+        data = parse_lang_text(path.read_text(encoding="utf-8-sig"))
+    else:
+        data = load_json_auto_encoding(path)
+    if not isinstance(data, dict):
+        raise TypeError("語言來源無法讀取或不是 dict 格式")
+    return data
+
+
+def _merge_stage2_sources(
+    modid: str,
+    lang_code: str,
+    source_paths: Iterable[Path],
+) -> dict[str, Any]:
+    """Union all sources while keeping the deterministic first conflict winner."""
+
+    merged: dict[str, Any] = {}
+    ordered_paths = sorted(source_paths, key=lambda path: path.as_posix().casefold())
+    for source_path in ordered_paths:
+        data = _load_stage2_lang_source(source_path)
+        for key, value in data.items():
+            if key in merged:
+                if merged[key] != value:
+                    log_warning(
+                        f"[MergeExt→Assets] {modid}/{lang_code}: key {key!r} "
+                        f"衝突，保留先出現來源 {ordered_paths[0].name}"
+                    )
+                continue
+            merged[key] = value
+    return merged
 
 
 class _LazyExistingAssets:
@@ -560,23 +601,14 @@ def _merge_extracted_to_assets(
             en_data: dict = {}
             mod_error = None
 
-            # 多 source 時,以第一個 source 為主(同 Stage 1 _process_single_mod 行為)
+            # 多 source 時保留所有不重複 key；同 key 衝突時採穩定排序後的第一個。
             for lang_code, source_paths in lang_files.items():
-                # 取第一個 source (Stage 1 _process_single_mod 也只看 1 個 lang per file)
                 if not source_paths:
                     continue
-                source_path = source_paths[0]
-                if len(source_paths) > 1:
-                    log_warning(
-                        f"[MergeExt→Assets] {modid}/{lang_code}: 多個來源 {len(source_paths)} 個,"
-                        f" 採第一個 ({source_path.name})"
-                    )
                 try:
-                    data = load_json_auto_encoding(source_path)
-                    if data is None or not isinstance(data, dict):
-                        raise ValueError("來源 JSON 無法讀取或不是 dict 格式")
+                    data = _merge_stage2_sources(modid, lang_code, source_paths)
                 except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
-                    mod_error = f"{modid}: read failed ({source_path}): {exc}"
+                    mod_error = f"{modid}/{lang_code}: read failed ({len(source_paths)} sources): {exc}"
                     log_warning(f"[MergeExt→Assets] {mod_error}")
                     total_warnings += 1
                     break
@@ -646,9 +678,10 @@ def _merge_extracted_to_assets(
                     # deep wrapper layouts are cleaned as well.
                     try:
                         scanned_sources = [
-                            paths[0]
+                            source_path
                             for paths in lang_files.values()
-                            if paths and "待翻譯" not in paths[0].parts
+                            for source_path in paths
+                            if "待翻譯" not in source_path.parts
                         ]
                         _cleanup_single_mod_extracted(
                             lang_output_dir, modid, scanned_sources

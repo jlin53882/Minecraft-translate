@@ -581,6 +581,32 @@ def test_stage2_collision_source_order_is_deterministic(tmp_path: Path):
     assert translated["shared.key"] == "甲"
 
 
+def test_stage2_unions_all_json_and_lang_sources_without_losing_keys(tmp_path: Path):
+    output = tmp_path / "lang_output"
+    first = output / "a-outer_extracted" / "assets" / "shared" / "lang"
+    second = output / "z-outer_extracted" / "assets" / "shared" / "lang"
+    first.mkdir(parents=True)
+    second.mkdir(parents=True)
+    (first / "zh_tw.json").write_text(
+        json.dumps({"first.key": "甲", "shared.key": "先"}), encoding="utf-8"
+    )
+    (second / "zh_tw.lang").write_text(
+        "second.key=乙\nshared.key=後\n", encoding="utf-8"
+    )
+
+    updates = list(merge_extracted_to_assets(output, use_translation_db=False))
+
+    assert updates[-1]["error"] is False
+    translated = json.loads(
+        (output / "assets/shared/lang/zh_tw.json").read_text(encoding="utf-8")
+    )
+    assert translated == {
+        "first.key": "甲",
+        "second.key": "乙",
+        "shared.key": "先",
+    }
+
+
 def test_direct_outer_jar_path_is_unchanged(tmp_path: Path):
     jar = _outer_jar(
         tmp_path / "direct.jar",

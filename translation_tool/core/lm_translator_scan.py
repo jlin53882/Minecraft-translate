@@ -17,6 +17,7 @@ from translation_tool.core.guide_translation import (
     find_guide_files,
     load_guide,
 )
+from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_advancement_json,
@@ -91,7 +92,10 @@ def extract_items_parallel(
             if isinstance(f, GuidePath):
                 doc, guide_items = load_guide(f)
                 return {"file_path": str(f), "data": doc, "items": guide_items}
-            data = json.loads(f.read_bytes())
+            if f.suffix.lower() == ".lang":
+                data = parse_lang_text(f.read_text(encoding="utf-8-sig"))
+            else:
+                data = json.loads(f.read_bytes())
             raise_if_cancelled()
 
             # Advancement 必須優先於 Lang。路徑內即使出現名為 ``lang`` 的

@@ -20,6 +20,14 @@ class TestMapLangOutputPath:
 
         assert result.name == "zh_tw.json"
 
+    @pytest.mark.parametrize("filename", ["en_us.lang", "zh_cn.lang", "zh_tw.lang"])
+    def test_legacy_lang_is_normalized_to_resource_pack_json(self, filename):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        assert map_lang_output_path(Path(f"assets/modid/lang/{filename}")) == Path(
+            "assets/modid/lang/zh_tw.json"
+        )
+
     def test_map_non_en_us_file(self):
         """測試非 en_us.json 檔案不變"""
         from translation_tool.core.translation_path_writer import map_lang_output_path
