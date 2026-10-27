@@ -144,6 +144,29 @@ def is_guide_directory_segment(segment: str) -> bool:
     return lowered in GUIDE_DIR_NAMES or lowered.endswith(("guide", "guidebook"))
 
 
+def _guide_index_insert_at(parts: list[str], root: Path, offset: int) -> int | None:
+    """Return the shared GuideME content-root boundary when it is observable.
+
+    GuideME's default builder folder is ``guides/<namespace>/<guide-id>``.
+    That is different from a guide which explicitly calls ``folder("mi_guidebook")``.
+    Both layouts contain the builder's default ``index.md`` at the content-root
+    boundary, so prefer that concrete marker over guessing from directory names.
+    """
+
+    if not root:
+        return None
+    for depth in range(offset + 3, len(parts)):
+        directory = root.joinpath(*parts[:depth])
+        try:
+            if any(
+                (directory / f"index{suffix}").is_file() for suffix in GUIDE_SUFFIXES
+            ):
+                return depth
+        except OSError:
+            continue
+    return None
+
+
 def is_guide_document(data: Any) -> bool:
     """``file_cache`` 裡的內容是不是指南文件（而不是 JSON 資料）。"""
     return isinstance(data, dict) and data.get(GUIDE_MARKER) is True
@@ -297,6 +320,17 @@ def guide_locale_rel(rel: Path, root: Path, locale: str) -> Path:
         if segment in ("en_us", "_en_us"):
             parts[index] = locale if segment.startswith("_") else locale.lstrip("_")
             return Path(*parts)
+
+    # GuideME puts the locale immediately below the registered content root.
+    # For a default GuideBuilder this root is not just ``guides``: the builder
+    # expands it to ``guides/<namespace>/<guide-id>``.  Use the actual index
+    # page to find that boundary before falling back to the explicit-folder
+    # convention.  Without this, Extended Industrialization's translation is
+    # emitted at ``guides/_zh_tw/...`` while GuideME looks at
+    # ``guides/extended_industrialization/guide/_zh_tw/...``.
+    index_insert_at = _guide_index_insert_at(parts, root, offset)
+    if index_insert_at is not None:
+        return Path(*parts[:index_insert_at], locale, *parts[index_insert_at:])
 
     # GuideME/AE2 guides put the locale beside the guide's first-level
     # directories, rather than below each chapter directory.  The old

@@ -106,7 +106,7 @@ def _needs_guide_translation(text: str, name: str) -> bool:
     return False
 
 
-def _pending_guide_rel(relative: Path) -> Path:
+def _pending_guide_rel(relative: Path, root: Path | None = None) -> Path:
     """Add a synthetic English locale only when the source has no locale slot."""
 
     parts = list(relative.parts)
@@ -120,7 +120,7 @@ def _pending_guide_rel(relative: Path) -> Path:
     # locale below ``chapter``.  The latter makes every relative link resolve
     # against a different tree and was the source of the in-game "Page does
     # not exist" errors.
-    return guide_locale_rel(relative, Path(), "_en_us")
+    return guide_locale_rel(relative, root or Path(), "_en_us")
 
 
 def _copy_if_needed(source: Path, destination: Path) -> bool:
@@ -190,7 +190,7 @@ def classify_other_output_assets(
                 )
             else:
                 destination = pending_root / _pending_guide_rel(
-                    Path("assets", relative)
+                    Path("assets", relative), source_root.parent
                 )
                 _copy_if_needed(source, destination)
                 source.unlink()

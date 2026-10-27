@@ -53,6 +53,48 @@ def test_mi_guidebook_uses_one_locale_root_for_relative_links(tmp_path: Path):
     )
 
 
+def test_default_guideme_root_uses_registered_guide_folder(tmp_path: Path):
+    """GuideME's default ``guides/<namespace>/<id>`` root owns the locale."""
+
+    source_root = tmp_path / "source"
+    index = source_root / (
+        "assets/extended_industrialization/guides/"
+        "extended_industrialization/guide/index.md"
+    )
+    index.parent.mkdir(parents=True)
+    index.write_text("# Guide", encoding="utf-8")
+
+    relative = Path(
+        "assets/extended_industrialization/guides/"
+        "extended_industrialization/guide/machines/batching_multiblocks.md"
+    )
+    assert guide_output_rel(relative, source_root) == Path(
+        "assets/extended_industrialization/guides/"
+        "extended_industrialization/guide/_zh_tw/machines/batching_multiblocks.md"
+    )
+
+
+def test_pending_default_guideme_root_keeps_relative_links(tmp_path: Path):
+    """Pending extraction uses the same default GuideME content-root contract."""
+
+    other_root = tmp_path / "other_output"
+    index = other_root / (
+        "assets/extended_industrialization/guides/"
+        "extended_industrialization/guide/index.md"
+    )
+    index.parent.mkdir(parents=True)
+    index.write_text("# Guide", encoding="utf-8")
+
+    relative = Path(
+        "assets/extended_industrialization/guides/"
+        "extended_industrialization/guide/machines/batching_multiblocks.md"
+    )
+    assert _pending_guide_rel(relative, other_root) == Path(
+        "assets/extended_industrialization/guides/"
+        "extended_industrialization/guide/_en_us/machines/batching_multiblocks.md"
+    )
+
+
 def test_bundle_mirrors_guide_support_for_localized_relative_references(tmp_path: Path):
     """Locale relocation must not break ImportStructure/image references."""
     source = tmp_path / "source"
@@ -93,6 +135,38 @@ def test_bundle_mirrors_guide_support_for_localized_relative_references(tmp_path
     assert (mirrored_root / "blocks/export_bus.snbt").read_bytes() == b"structure"
     assert (mirrored_root / "images/network.png").read_bytes() == b"image"
     assert stats["guide_support_mirrored"] == 2
+    assert stats["guide_support_missing"] == 0
+
+
+def test_bundle_mirrors_support_for_default_guideme_root(tmp_path: Path):
+    """Default GuideME roots keep support files beside the localized root."""
+
+    source = tmp_path / "source"
+    root = source / "assets/demo/guides/demo/guide"
+    (root / "machines").mkdir(parents=True)
+    (root / "index.md").write_text("# Guide", encoding="utf-8")
+    (root / "machines/page.md").write_text(
+        '<ImportStructure src="../assets/blocks/machine.snbt" />\n',
+        encoding="utf-8",
+    )
+    (root / "assets/blocks/machine.snbt").parent.mkdir(parents=True)
+    (root / "assets/blocks/machine.snbt").write_bytes(b"machine")
+
+    translated = tmp_path / "translated"
+    localized = translated / "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+    localized.parent.mkdir(parents=True)
+    localized.write_text(
+        '<ImportStructure src="../assets/blocks/machine.snbt" />\n',
+        encoding="utf-8",
+    )
+
+    staging = tmp_path / "staging"
+    stats = build_bundle_staging([str(source), str(translated)], str(staging))
+
+    assert (
+        staging / "assets/demo/guides/demo/guide/_zh_tw/assets/blocks/machine.snbt"
+    ).read_bytes() == b"machine"
+    assert stats["guide_support_mirrored"] == 1
     assert stats["guide_support_missing"] == 0
 
 
