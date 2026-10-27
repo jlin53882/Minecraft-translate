@@ -125,6 +125,9 @@ def test_start_merge_runs_with_only_a_typed_zip_path(view, monkeypatch):
     view.selected_zips = []
     view.zip_path_field.value = "C:/mods/a.zip"
     view.output_dir_field.value = "C:/out"
+    # 這個測試只驗證 Web 手動 ZIP 路徑，不測試 Mod DB 補譯；明確關閉
+    # DB 選項，避免全域設定的未指定版本阻擋進入背景工作流程。
+    view.db_options.switch.value = False
 
     view.start_merge(None)
 

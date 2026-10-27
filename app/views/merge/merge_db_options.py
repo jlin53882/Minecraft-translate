@@ -68,7 +68,7 @@ class MergeDbOptions:
         self._refresh_database_state(settings)
         row = kit.SwitchRow(
             "使用 Mod 資料庫補譯",
-            "純英文條目先向資料庫找相同（模組、鍵值、原文）的譯文；只補沒有譯文的條目",
+            "純英文條目先向資料庫找相同（模組、鍵值、原文）且有實際變化的譯文；只補沒有有效譯文的條目",
             settings.merge_enabled,
             divider=False,
         )

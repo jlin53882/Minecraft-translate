@@ -4,8 +4,9 @@
 
 ``merge_lang_dicts`` 對每個條目先到資料庫找同（模組、鍵值、原文）的既有譯文：
 命中就直接放進 ``zh_tw``，優先於 jar 自帶繁中與簡中轉繁；輸出資料夾既有（含人工）
-的譯文不被資料庫覆蓋。英文原文不同（mod 改過原文）不算命中。資料庫未啟用、沒指定版本
-或不存在時等同不存在，合併流程不變。
+的譯文不被資料庫覆蓋。英文原文不同（mod 改過原文）或資料庫值與英文原文完全相同
+（沒有產生翻譯變化）都不算資源包合併命中。資料庫未啟用、沒指定版本或不存在時等同不存在，
+合併流程不變。
 """
 
 from __future__ import annotations
@@ -42,6 +43,7 @@ class MergeDbFill:
         )
         self._lock = threading.Lock()
         self.filled = 0
+        self.skipped_same_as_source = 0
 
     def fill(
         self,
@@ -71,8 +73,10 @@ class MergeDbFill:
         mod_id: str | None,
         source_provenance_by_key: dict[str, dict[str, Any]] | None = None,
     ) -> Callable[[str, Any], str | None]:
-        """回傳 ``lookup(key, en_us) -> 譯文 | None``：英文原文相同且譯文已翻完才命中。
+        """回傳 ``lookup(key, en_us) -> 譯文 | None``：英文原文相同、譯文已翻完且有變化才命中。
 
+        資料庫可能保留專有名詞等「刻意維持原文」的結果，但資源包合併不能把這種
+        no-op 值當成已套用的翻譯；它會回傳 ``None``，讓上層把條目留在待翻譯輸出。
         命中時把來源標記寫進 ``source_provenance_by_key``；沒有 ``mod_id`` 永遠不命中。
         """
 
@@ -81,6 +85,10 @@ class MergeDbFill:
                 return None
             hit = self.resolver.lookup(KIND_LANG, mod_id, key, en)
             if not (hit and hit.zh_tw and value_fully_translated(hit.zh_tw)):
+                return None
+            if hit.zh_tw == en:
+                with self._lock:
+                    self.skipped_same_as_source += 1
                 return None
             if source_provenance_by_key is not None:
                 source_provenance_by_key[key] = {
@@ -153,6 +161,7 @@ def merge_db_fill(
             stats = fill.resolver.stats
             log_info(
                 f"📚 語系合併由資料庫補上 {fill.filled} 筆譯文"
-                f"（目標版本 {stats.hit_target}　跨版本沿用 {stats.hit_cross}）"
+                f"（目標版本 {stats.hit_target}　跨版本沿用 {stats.hit_cross}"
+                f"　原文相同略過 {fill.skipped_same_as_source}）"
             )
             fill.close()
