@@ -8,6 +8,11 @@ from translation_tool.utils.config_manager import (
     load_config,
 )
 
+RESOURCE_PACK_INSTALL_HINT = (
+    "完成後請將 ZIP 放入實際啟動 instance 的 resourcepacks，並在遊戲內啟用；"
+    "流水線不會自動套用。"
+)
+
 
 def _has_files(path: str) -> bool:
     """資料夾存在且至少含有一個檔案。"""

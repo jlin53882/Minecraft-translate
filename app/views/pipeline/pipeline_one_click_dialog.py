@@ -28,7 +28,11 @@ from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.views.merge.merge_db_options import MergeDbOptions
 from app.views.moddb.lm_db_options import LmDbOptions
-from app.views.pipeline.pipeline_config import PipelineConfig, normalize_extract_mode
+from app.views.pipeline.pipeline_config import (
+    RESOURCE_PACK_INSTALL_HINT,
+    PipelineConfig,
+    normalize_extract_mode,
+)
 from app.views.pipeline.pipeline_forms import (
     BundleFormState,
     ExtractFormState,
@@ -388,6 +392,7 @@ def _one_click__build_step4(ctx):
             ],
             ft.Text("輸出 ZIP 檔案", weight="bold", size=13),
             ft.Row([widgets.zip_output_field], wrap=True),
+            ft.Text(RESOURCE_PACK_INSTALL_HINT, size=10, color=C.MUTED),
         ],
         spacing=6,
     )
@@ -644,6 +649,16 @@ def _one_click__do_execute(ctx, expected_step=4):
         ctx.page.update()
         return
     config = _one_click__build_execute_config(ctx, lang_codes)
+    merge_snapshot = config.get("merge_db_snapshot")
+    if merge_snapshot is not None and merge_snapshot.blocking_warning:
+        ctx.feedback.value = (
+            "⚠️ "
+            + merge_snapshot.blocking_warning
+            + "；請回到步驟 2 選擇有效版本，或關閉 Mod 資料庫補譯。"
+        )
+        ctx.feedback.visible = True
+        ctx.page.update()
+        return
     result = ctx.on_execute(config)
     if result is False:
         ctx.feedback.value = "設定驗證未通過；請修正必要欄位後再執行。"

@@ -31,6 +31,25 @@ class MergeDbRunSnapshot:
     warning: str = ""
     database_settings: DbSettings | None = None
 
+    @property
+    def blocking_warning(self) -> str:
+        """Return a message when the requested DB lookup cannot be honored.
+
+        ``use_db=True`` is a user request, not proof that a lookup will happen.
+        An empty or invalid target used to pass through to the worker, where
+        ``open_merge_db_fill`` quietly skipped the database.  Keep the snapshot
+        shape backward compatible, but give every UI entry point one shared
+        admission check so it cannot produce a successful-looking run without
+        the requested database merge.
+        """
+        if not self.use_db:
+            return ""
+        if self.warning:
+            return self.warning
+        if not self.version.strip():
+            return "未指定 Mod 資料庫目標版本，本次不會執行資料庫補譯"
+        return ""
+
 
 class MergeDbOptions:
     """Merge-specific DB switch and version override, separate from shared pickers."""

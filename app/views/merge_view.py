@@ -374,6 +374,14 @@ class MergeView(MergeWidgetsMixin, ft.Column):
 
         # 解析與驗證在 UI 執行緒完成；worker 後續只使用此不可變快照。
         db_options_snapshot = self.db_options.snapshot_for_run()
+        if db_options_snapshot.blocking_warning:
+            show_snack(
+                self.page,
+                "⚠️ "
+                + db_options_snapshot.blocking_warning
+                + "；請選擇有效版本，或關閉 Mod 資料庫補譯。",
+            )
+            return
 
         self.start_button.disabled = True
         self.cancel_button.visible = True
