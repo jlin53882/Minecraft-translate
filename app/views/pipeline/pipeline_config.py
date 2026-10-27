@@ -104,8 +104,9 @@ class PipelineConfig:
 
     @property
     def bundle_sources(self):
-        """打包來源（優先序由低到高）：合併後的既有譯文 → LLM 新譯文。"""
+        """打包來源（優先序由低到高）：合併資源 → 既有譯文 → LLM 新譯文。"""
         return [
+            self.merge_output_dir,
             os.path.join(self.merge_output_dir, "lang_output"),
             os.path.join(self.merge_output_dir, "patchouli_output"),
             self.translate_output_dir,

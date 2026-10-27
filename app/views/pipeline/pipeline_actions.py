@@ -303,6 +303,10 @@ class PipelineActions:
                 f"合併 {stats.get('merged', 0)} 個檔案" + _staging_reuse_note(stats)
             )
             session.add_log(message)
+            if stats.get("manifest_path"):
+                session.add_log(
+                    f"[系統] 輸出完整性 manifest：{stats['manifest_path']}"
+                )
             for warning in stats.get("warnings", []):
                 session.add_log(f"⚠️ {warning}", level="warning")
             if not stats.get("copied", 0) and not stats.get("merged", 0):

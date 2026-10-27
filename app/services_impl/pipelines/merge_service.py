@@ -23,6 +23,7 @@ from translation_tool.core.lang_merger import (
     merge_zhcn_to_zhtw_from_folder,
     merge_zhcn_to_zhtw_from_zip,
 )
+from translation_tool.core.pipeline_content_audit import classify_other_output_assets
 from translation_tool.translation_db import DbSettings
 from translation_tool.utils.cancellation import TaskCancelled, raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
@@ -530,6 +531,26 @@ def _run_folder_stages(
             if k in options
         },
     )
+
+    if not folder_errors:
+        try:
+            content_records = classify_other_output_assets(
+                output_dir,
+                pending_folder_name=load_config()
+                .get("lang_merger", {})
+                .get("pending_folder_name", "待翻譯"),
+            )
+            emitted = sum(item["status"] == "emitted" for item in content_records)
+            pending = sum(item["status"] == "pending" for item in content_records)
+            if emitted or pending:
+                _session_log(
+                    session,
+                    f"[內容分類] 已輸出 {emitted} 個已本地化檔案，"
+                    f"{pending} 個檔案列入待處理",
+                )
+        except OSError as exc:
+            folder_errors.append(f"內容分類失敗: {exc!r}")
+            _session_log(session, f"[內容分類錯誤] {exc!r}", "error")
 
 
 def run_merge_folder_batch_service(

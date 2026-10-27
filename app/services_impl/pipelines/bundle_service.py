@@ -11,6 +11,8 @@ import logging
 import os
 import shutil
 import traceback
+from collections import Counter
+from pathlib import Path
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.output_bundler import (
@@ -140,10 +142,19 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
     """盤點不屬於 Resource Pack staging 的輸出，並產生可顯示的原因。"""
     grouped: dict[tuple[str, str], int] = {}
     excluded = 0
+    nested_sources = {
+        os.path.normcase(os.path.abspath(source)) for source in sources
+    }
     for source in sources:
         if not os.path.isdir(source):
             continue
         for root, dirs, files in os.walk(source):
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if os.path.normcase(os.path.abspath(os.path.join(root, directory)))
+                not in nested_sources
+            ]
             rel_root = os.path.relpath(root, source)
             if rel_root == ".":
                 top = "<root>"
@@ -156,7 +167,9 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
             for name in files:
                 excluded += 1
                 rel = os.path.join(rel_root, name)
-                if top_lower == "data":
+                if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+                    category = "pending"
+                elif top_lower == "data":
                     parts = rel.split(os.sep)
                     category = (
                         "data/advancement"
@@ -168,6 +181,8 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
                     )
                 elif top_lower == "other_output":
                     category = "other_output"
+                elif top_lower in {"待翻譯", "待翻譯整理需翻譯"}:
+                    category = "pending"
                 else:
                     category = f"非 assets/{top}"
                 grouped[(source, category)] = grouped.get((source, category), 0) + 1
@@ -187,13 +202,173 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
             )
         elif category == "other_output":
             warnings.append(
-                f"略過 {count} 個 {source}/other_output/ 檔案；不會將 other_output/ 整包塞入 ZIP。"
+                f"略過 {count} 個 {source}/other_output/ 未分類檔案；"
+                "不會將 other_output/ 整包塞入 ZIP，請查看輸出 manifest。"
+            )
+        elif category == "pending":
+            warnings.append(
+                f"保留 {count} 個 {source}/待翻譯內容；等待翻譯完成後才會進入 Resource Pack。"
             )
         else:
             warnings.append(
                 f"略過 {count} 個 {source}/{category} 輸出；Resource Pack staging 只收 assets/。"
             )
     return excluded, warnings
+
+
+def _manifest_status_for_non_asset(top_lower: str, rel: str) -> tuple[str, str]:
+    """Classify one output that is outside the accepted assets staging root."""
+
+    if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        return "pending", "translation_pending"
+    if top_lower == "errordata_output":
+        return "parse_failed", "quarantined_after_parse_failure"
+    if top_lower == "other_output":
+        return "pending", "other_output_requires_format_classification"
+    if top_lower == "data":
+        if any(
+            part.lower() in {"advancement", "advancements"}
+            for part in rel.split(os.sep)
+        ):
+            return "excluded", "resource_pack_excludes_advancement_data"
+        return "excluded", "resource_pack_excludes_data_root"
+    return "excluded", "resource_pack_accepts_assets_only"
+
+
+def _write_output_manifest(
+    sources: list[str],
+    plan: dict[str, tuple[str, list[str]]],
+    staging_dir: str,
+) -> str:
+    """Write a file-level disposition report outside the Resource Pack ZIP."""
+
+    records: list[dict[str, str]] = []
+    classified_sources: set[str] = set()
+    classified_outputs: set[str] = set()
+    classification_path = (
+        Path(staging_dir).parent / "translation_content_manifest.json"
+    )
+    if classification_path.is_file():
+        try:
+            classification = json.loads(
+                classification_path.read_text(encoding="utf-8")
+            )
+            for record in classification.get("records", []):
+                if not isinstance(record, dict) or not record.get("source"):
+                    continue
+                normalized = os.path.normcase(
+                    os.path.abspath(str(record["source"]))
+                )
+                classified_sources.add(normalized)
+                output = str(record.get("output", "")).replace("\\", "/")
+                if output:
+                    classified_outputs.add(output)
+                records.append(
+                    {
+                        "source": str(record["source"]),
+                        "output": output,
+                        "status": str(record.get("status", "pending")),
+                        "reason": str(
+                            record.get("reason", "classified_content")
+                        ),
+                    }
+                )
+        except (OSError, TypeError, ValueError) as exc:
+            records.append(
+                {
+                    "source": classification_path.as_posix(),
+                    "output": "",
+                    "status": "parse_failed",
+                    "reason": f"content_manifest_read_failed:{type(exc).__name__}",
+                }
+            )
+    emitted_sources: set[str] = set()
+    for rel_path, source_paths in plan.values():
+        if rel_path.replace(os.sep, "/") in classified_outputs:
+            continue
+        for source_path in source_paths:
+            normalized = os.path.normcase(os.path.abspath(source_path))
+            emitted_sources.add(normalized)
+            records.append(
+                {
+                    "source": source_path,
+                    "output": rel_path.replace(os.sep, "/"),
+                    "status": "emitted",
+                    "reason": "resource_pack_asset",
+                }
+            )
+
+    source_roots = {
+        os.path.normcase(os.path.abspath(source)) for source in sources
+    }
+    for source in sources:
+        if not os.path.isdir(source):
+            continue
+        for root, dirs, files in os.walk(source):
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if os.path.normcase(os.path.abspath(os.path.join(root, directory)))
+                not in source_roots
+            ]
+            rel_root = os.path.relpath(root, source)
+            top = "<root>" if rel_root == "." else rel_root.split(os.sep, 1)[0]
+            top_lower = top.lower()
+            if top_lower == _STAGING_CONTENT_ROOT:
+                for name in files:
+                    source_path = os.path.join(root, name)
+                    normalized = os.path.normcase(os.path.abspath(source_path))
+                    if normalized in emitted_sources or normalized in classified_sources:
+                        continue
+                    rel = os.path.join(rel_root, name)
+                    if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+                        status, reason = "pending", "translation_pending"
+                    else:
+                        status, reason = "excluded", "not_in_bundle_plan"
+                    records.append(
+                        {
+                            "source": source_path,
+                            "output": rel.replace(os.sep, "/"),
+                            "status": status,
+                            "reason": reason,
+                        }
+                    )
+                continue
+            for name in files:
+                source_path = os.path.join(root, name)
+                normalized = os.path.normcase(os.path.abspath(source_path))
+                if normalized in emitted_sources or normalized in classified_sources:
+                    continue
+                rel = os.path.join(rel_root, name)
+                status, reason = _manifest_status_for_non_asset(top_lower, rel)
+                records.append(
+                    {
+                        "source": source_path,
+                        "output": "",
+                        "status": status,
+                        "reason": reason,
+                    }
+                )
+
+    records.sort(key=lambda item: (item["status"], item["source"].casefold()))
+    counts = Counter(record["status"] for record in records)
+    manifest_path = Path(staging_dir).parent / "translation_output_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "resource_pack_boundary": "assets_only",
+                "status_counts": dict(sorted(counts.items())),
+                "records": records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return str(manifest_path)
 
 
 def _normalize_staging_case(staging_dir: str, canon: dict[str, str]) -> None:
@@ -262,6 +437,7 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
 
     plan, canon = _collect_bundle_sources(sources)
     excluded, warnings = _collect_excluded_outputs(sources)
+    manifest_path = _write_output_manifest(sources, plan, staging_dir)
     _normalize_staging_case(staging_dir, canon)
 
     copied = merged = written = unchanged = 0
@@ -317,6 +493,7 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
         "removed": removed,
         "excluded": excluded,
         "warnings": warnings,
+        "manifest_path": manifest_path,
     }
 
 
