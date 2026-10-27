@@ -53,7 +53,7 @@ def load_neutral_book_json(text: str, path: str) -> NeutralBookLoad:
         parsed, end = decoder.raw_decode(leading)
 
         trailing = leading[end:].strip()
-        if trailing != "]}":
+        if "".join(trailing.split()) != "]}":
             raise
         if not isinstance(parsed, dict):
             raise

@@ -81,6 +81,17 @@ def test_neutral_book_recovery_rejects_unrelated_trailing_json():
         load_neutral_book_json(malformed, path)
 
 
+def test_neutral_book_recovery_allows_whitespace_between_repair_tokens():
+    path = "assets/herbsandharvest/books/chapters/herbs.json"
+    malformed = json.dumps(_neutral_document()) + "\n]\r\n}\n"
+
+    loaded = load_neutral_book_json(malformed, path)
+
+    assert loaded.repaired
+    assert loaded.repaired_tail == "]\r\n}"
+    assert loaded.data == _neutral_document()
+
+
 def test_neutral_pages_identity_matches_existing_database_contract(tmp_path: Path):
     jar = tmp_path / "herbs.jar"
     with zipfile.ZipFile(jar, "w") as archive:
