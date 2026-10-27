@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.book_dirs import find_book_dir_index
+from translation_tool.core.book_formats import is_neutral_pages_candidate
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     has_translatable_text,
@@ -29,6 +30,7 @@ from translation_tool.core.guide_blocks import (
 from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
@@ -325,6 +327,13 @@ def _read_json_member(
     raw = read_limited(zf, member, budget=budget)
     if member.lower().endswith(".lang"):
         return _load_legacy_lang(raw)
+    if is_neutral_pages_candidate(member):
+        try:
+            return load_neutral_book_json(
+                raw.decode("utf-8-sig"), member
+            ).data
+        except (UnicodeDecodeError, ValueError, TypeError):
+            return None
     return _load_json(raw)
 
 

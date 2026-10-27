@@ -213,6 +213,23 @@ def test_invalid_custom_book_is_skipped_and_reported(tmp_path: Path):
     )
 
 
+def test_recoverable_neutral_book_is_detected_by_archive_sniffer(tmp_path: Path):
+    jar = tmp_path / "recoverable.jar"
+    malformed = json.dumps(_neutral_document(), ensure_ascii=False) + "\n]}"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr(
+            "assets/herbsandharvest/books/chapters/grapes.json", malformed
+        )
+
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+
+    assert result.error == ""
+    assert result.invalid_books == []
+    assert any(
+        item.key.endswith("grapes.json#pages[0].summary") for item in result.items
+    )
+
+
 def _merge_config() -> dict:
     return {
         "replace_rules_path": "replace_rules.json",

@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import json
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -26,6 +25,7 @@ from translation_tool.core.book_formats import (
     UNSUPPORTED_BOOK_FORMATS,
     resolve_book_format,
 )
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.text_sniffer import (
     is_project_doc_name,
     looks_like_advancement,
@@ -112,7 +112,9 @@ def _kind_of(
         return None
     if member.lower().endswith(".json"):
         try:
-            data = json.loads(raw.decode("utf-8-sig"), strict=False)
+            data = load_neutral_book_json(
+                raw.decode("utf-8-sig"), member
+            ).data
         except (UnicodeDecodeError, ValueError):
             if invalid_members is not None and path_format.name != "unknown":
                 invalid_members.append(member)
