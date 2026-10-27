@@ -16,6 +16,7 @@
 - 新增書本格式 profile 與安全 JSON 處理：標準 Patchouli 只在明確存在語系資料夾時轉換 `en_us` → `zh_tw`，中性 custom book 保留原路徑；非法或無法分類內容改以 `parse_failed`／`pending`／`excluded` 留存來源與原因，不靜默丟棄。
 - 收斂掃描匯入與一鍵流水線的內容分類、provenance、manifest 與 Resource Pack staging；ZIP 只輸出合法 `assets/` 與根目錄 `pack.mcmeta`，不把 `data/`、未翻譯內容、未知格式或抽取包裝資料夾誤當成資源包內容。
 - `TranslationDB` schema 升至 v12，新增內容問題快照與安全的重複翻譯鍵清理：只合併同版本／模組／語意 key、原文一致且譯文無衝突的指南／Patchouli 條目；衝突項目只預覽不自動刪除，所有合併可在 survivor 未被後續修改時完整還原。
+- 重複鍵清理視窗的非同步預覽固定資料庫身分；預覽完成或確認套用前若使用者切換資料庫，計畫會失效並要求重新預覽，避免把同內容資料庫的計畫誤套到另一份資料庫。
 - 新增跨入口維護契約，固定同一組 JAR、書本／Markdown／TXT 與輸出 fixture 在 DB、預覽、提取、LM 及獨立／流水線打包流程中的來源、文字區塊與 ZIP 邊界一致。
 - 以五個實際模組包、隔離 SQLite、ZIP 結構檢查、跨入口回歸與重複鍵合併／還原測試驗證；正式資料庫只讀，未被測試寫入。
 - 更新鎖定的 `msgpack` 至 1.2.4，修復 pip-audit 發現的 CVE-2026-114613（修正版門檻為 1.2.3）。

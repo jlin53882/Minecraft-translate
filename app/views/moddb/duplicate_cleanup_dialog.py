@@ -129,6 +129,7 @@ class DuplicateCleanupDialog:
         db = self.get_db()
         if db is None or self._busy:
             return
+        previewed_db = db
         generation = self._generation
         self._plan = None
         self._set_busy(True, "掃描重複鍵並建立預覽…")
@@ -142,20 +143,27 @@ class DuplicateCleanupDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports UI error
                 error = exc
                 log_exception(f"重複鍵清理預覽失敗：{self.version}")
-            self._post(self._after_preview, plan, error, generation)
+            self._post(self._after_preview, plan, error, generation, previewed_db)
 
         self._launch(work, "Mod 資料庫重複鍵預覽", CommitPolicy.PARTIAL_ALLOWED)
 
-    def _after_preview(self, plan, error, generation) -> None:
+    def _after_preview(self, plan, error, generation, previewed_db) -> None:
         if not self._current(generation):
             return
         self._set_busy(False)
+        if self.get_db() is not previewed_db:
+            self._plan = None
+            self.summary.value = "資料庫已變動，請重新預覽。"
+            self.summary.color = C.GOLD
+            show_snack(self.page, "資料庫已變動，請重新預覽。", C.GOLD)
+            self._safe_update()
+            return
         if error is not None:
             self.summary.value = f"預覽失敗：{error}"
             self.summary.color = C.RED
             self._safe_update()
             return
-        self._plan = (plan, self.get_db())
+        self._plan = (plan, previewed_db)
         self.summary.value = self._summary(plan)
         self.summary.color = C.TEXT if plan.group_count else C.GOLD
         self.details.controls = self._group_lines(plan)
