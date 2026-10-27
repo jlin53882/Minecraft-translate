@@ -110,9 +110,7 @@ def test_stage1_fills_pending_from_database(tmp_path, monkeypatch, db_path):
     assert "item.foo.a" in manifest["outputs"]["assets/foo/lang/zh_tw.json"]["entries"]
 
 
-def test_stage1_does_not_apply_database_value_equal_to_english(
-    tmp_path, monkeypatch
-):
+def test_stage1_does_not_apply_database_value_equal_to_english(tmp_path, monkeypatch):
     """資料庫的 no-op 值不能被資源包當成已完成翻譯。"""
     db_path = tmp_path / "same-as-source.db"
     db = TranslationDB(db_path)
@@ -178,9 +176,7 @@ def test_stage1_does_not_apply_database_value_equal_to_english(
         assert provenance == {}
 
 
-def test_stage2_keeps_database_noop_in_pending_instead_of_assets(
-    tmp_path, monkeypatch
-):
+def test_stage2_keeps_database_noop_in_pending_instead_of_assets(tmp_path, monkeypatch):
     """Stage 2 也必須把資料庫 no-op 留在待翻譯，不得寫入資源包 assets。"""
     db_path = tmp_path / "stage2-same-as-source.db"
     db = TranslationDB(db_path)
