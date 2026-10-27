@@ -257,7 +257,7 @@ def _load_content_manifest(
             classified_sources.add(normalized)
             output = str(record.get("output", "")).replace("\\", "/")
             if output:
-                classified_outputs.add(output)
+                classified_outputs.add(os.path.normcase(output.replace("/", os.sep)))
             records.append(
                 _manifest_record(
                     str(record["source"]),
@@ -286,7 +286,7 @@ def _append_plan_manifest_records(
     """記錄會進入 staging 的 plan，並回傳已計入的來源檔。"""
     emitted_sources: set[str] = set()
     for rel_path, source_paths in plan.values():
-        if rel_path.replace(os.sep, "/") in classified_outputs:
+        if os.path.normcase(rel_path) in classified_outputs:
             emitted_sources.update(
                 os.path.normcase(os.path.abspath(source_path))
                 for source_path in source_paths
@@ -339,6 +339,7 @@ def _append_unplanned_source_records(
     sources: list[str],
     emitted_sources: set[str],
     classified_sources: set[str],
+    classified_outputs: set[str],
     records: list[dict[str, str]],
 ) -> None:
     """記錄所有來源中未進入 Resource Pack plan 的檔案。"""
@@ -372,6 +373,8 @@ def _append_unplanned_source_records(
                 if normalized in emitted_sources or normalized in classified_sources:
                     continue
                 rel = os.path.join(rel_root, name)
+                if os.path.normcase(rel) in classified_outputs:
+                    continue
                 status, reason = _manifest_status_for_non_asset(top_lower, rel)
                 records.append(_manifest_record(source_path, "", status, reason))
 
@@ -394,7 +397,7 @@ def _write_output_manifest(
     )
     emitted_sources = _append_plan_manifest_records(plan, classified_outputs, records)
     _append_unplanned_source_records(
-        sources, emitted_sources, classified_sources, records
+        sources, emitted_sources, classified_sources, classified_outputs, records
     )
 
     records.sort(key=lambda item: (item["status"], item["source"].casefold()))
