@@ -77,3 +77,36 @@ def test_bundle_manifest_keeps_reclassified_assets_emitted(tmp_path: Path):
     )
     assert manifest["status_counts"]["emitted"] == 1
     assert manifest["status_counts"].get("excluded", 0) == 0
+
+
+def test_pipeline_manifest_path_is_shared_by_merge_and_bundle(tmp_path: Path):
+    """正式輸出層級不同時，打包仍要讀到合併階段的 provenance manifest。"""
+    output_root = tmp_path / "output"
+    merge_output = output_root / "locale_sort" / "_整理輸出"
+    source = merge_output / "other_output" / "assets" / "demo" / "guide.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# English guide", encoding="utf-8")
+    content_manifest = output_root / "translation_content_manifest.json"
+
+    records = classify_other_output_assets(
+        merge_output,
+        content_manifest_path=content_manifest,
+    )
+    assert records[0]["status"] == "pending"
+    assert content_manifest.is_file()
+
+    staging = output_root / "_打包暫存"
+    build_bundle_staging(
+        [str(merge_output)],
+        str(staging),
+        content_manifest_path=content_manifest,
+    )
+
+    manifest = json.loads(
+        (output_root / "translation_output_manifest.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        record["status"] == "pending"
+        and record["reason"] == "english_text_queued_for_guide_translation"
+        for record in manifest["records"]
+    )

@@ -601,10 +601,15 @@ def test_one_click_all_modes_reach_both_extractors_and_both_merge_sources(tmp_pa
     assert normalize_extract_mode(None) == "lang"
 
     calls = []
+    merge_kwargs = []
     services = PipelineServices(
         extract_lang=lambda *a, **k: calls.append("lang"),
         extract_book=lambda *a, **k: calls.append("book"),
-        merge_folder=lambda **k: calls.append(("merge", k["input_dir"])) or iter([]),
+        merge_folder=lambda **k: (
+            merge_kwargs.append(k)
+            or calls.append(("merge", k["input_dir"]))
+            or iter([])
+        ),
         translate=lambda **k: None,
         build_staging=lambda *a, **k: {"copied": 0, "merged": 0},
     )
@@ -630,6 +635,10 @@ def test_one_click_all_modes_reach_both_extractors_and_both_merge_sources(tmp_pa
         cfg.extract_lang_output_dir,
         cfg.extract_book_output_dir,
     ]
+    assert all(
+        item["content_manifest_path"] == cfg.content_manifest_path
+        for item in merge_kwargs
+    )
 
 
 # --------------------------------------------------------------- 契約：bundle 的 TaskSession 生命週期
@@ -703,9 +712,15 @@ def test_one_click_bundle_step_manages_the_session_lifecycle(tmp_path):
     (tmp_path / "mods").mkdir()
     (tmp_path / "out").mkdir()
     cfg = PipelineConfig(str(tmp_path / "mods"), str(tmp_path / "out"))
+    staging_calls = []
+
+    def build_staging(*args, **kwargs):
+        staging_calls.append((args, kwargs))
+        return {"copied": 1, "merged": 0}
+
     actions = PipelineActions(
         PipelineServices(
-            build_staging=lambda *a, **k: {"copied": 1, "merged": 0},
+            build_staging=build_staging,
             bundle=lambda **k: iter([{"progress": 1.0}]),
         )
     )
@@ -717,6 +732,7 @@ def test_one_click_bundle_step_manages_the_session_lifecycle(tmp_path):
     assert any(
         "打包暫存完成" in e.text for e in snap["logs"]
     )  # 暫存日誌沒被 start() 清掉
+    assert staging_calls[0][1]["content_manifest_path"] == cfg.content_manifest_path
 
     empty = PipelineActions(
         PipelineServices(build_staging=lambda *a, **k: {"copied": 0, "merged": 0})

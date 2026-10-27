@@ -138,6 +138,46 @@ def _collect_bundle_sources(
     return plan, canon
 
 
+def _excluded_category(top: str, rel: str) -> str:
+    """分類一個不在 Resource Pack assets 根目錄下的檔案。"""
+    top_lower = top.lower()
+    if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        return "pending"
+    if top_lower == "data":
+        parts = rel.split(os.sep)
+        if any(part.lower() in {"advancement", "advancements"} for part in parts):
+            return "data/advancement"
+        return "data"
+    if top_lower == "other_output":
+        return "other_output"
+    if top_lower in {"待翻譯", "待翻譯整理需翻譯"}:
+        return "pending"
+    return f"非 assets/{top}"
+
+
+def _excluded_warning(source: str, category: str, count: int) -> str:
+    """將排除分類轉成 UI 可直接顯示的警告。"""
+    if category == "data/advancement":
+        return (
+            f"略過 {count} 個 {source}/data/**/advancement(s) 檔案；"
+            "Advancement 不屬於 Resource Pack，literal 文字無法透過目前資源包直接套用，"
+            "如需生效必須另建 Data Pack。"
+        )
+    if category == "data":
+        return (
+            f"略過 {count} 個 {source}/data/ 檔案；Resource Pack staging 不收 data/，"
+            "需要 Data Pack 輸出契約才能套用。"
+        )
+    if category == "other_output":
+        return (
+            f"略過 {count} 個 {source}/other_output/ 未分類檔案；"
+            "不會將 other_output/ 整包塞入 ZIP，請查看輸出 manifest。"
+        )
+    if category == "pending":
+        return f"保留 {count} 個 {source}/待翻譯內容；等待翻譯完成後才會進入 Resource Pack。"
+    return f"略過 {count} 個 {source}/{category} 輸出；Resource Pack staging 只收 assets/。"
+
+
 def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
     """盤點不屬於 Resource Pack staging 的輸出，並產生可顯示的原因。"""
     grouped: dict[tuple[str, str], int] = {}
@@ -154,10 +194,7 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
                 not in nested_sources
             ]
             rel_root = os.path.relpath(root, source)
-            if rel_root == ".":
-                top = "<root>"
-            else:
-                top = rel_root.split(os.sep, 1)[0]
+            top = "<root>" if rel_root == "." else rel_root.split(os.sep, 1)[0]
             top_lower = top.lower()
             if top_lower == _STAGING_CONTENT_ROOT:
                 dirs[:] = []
@@ -165,52 +202,13 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
             for name in files:
                 excluded += 1
                 rel = os.path.join(rel_root, name)
-                if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
-                    category = "pending"
-                elif top_lower == "data":
-                    parts = rel.split(os.sep)
-                    category = (
-                        "data/advancement"
-                        if any(
-                            part.lower() in {"advancement", "advancements"}
-                            for part in parts
-                        )
-                        else "data"
-                    )
-                elif top_lower == "other_output":
-                    category = "other_output"
-                elif top_lower in {"待翻譯", "待翻譯整理需翻譯"}:
-                    category = "pending"
-                else:
-                    category = f"非 assets/{top}"
-                grouped[(source, category)] = grouped.get((source, category), 0) + 1
-
-    warnings: list[str] = []
-    for (source, category), count in grouped.items():
-        if category == "data/advancement":
-            warnings.append(
-                f"略過 {count} 個 {source}/data/**/advancement(s) 檔案；"
-                "Advancement 不屬於 Resource Pack，literal 文字無法透過目前資源包直接套用，"
-                "如需生效必須另建 Data Pack。"
-            )
-        elif category == "data":
-            warnings.append(
-                f"略過 {count} 個 {source}/data/ 檔案；Resource Pack staging 不收 data/，"
-                "需要 Data Pack 輸出契約才能套用。"
-            )
-        elif category == "other_output":
-            warnings.append(
-                f"略過 {count} 個 {source}/other_output/ 未分類檔案；"
-                "不會將 other_output/ 整包塞入 ZIP，請查看輸出 manifest。"
-            )
-        elif category == "pending":
-            warnings.append(
-                f"保留 {count} 個 {source}/待翻譯內容；等待翻譯完成後才會進入 Resource Pack。"
-            )
-        else:
-            warnings.append(
-                f"略過 {count} 個 {source}/{category} 輸出；Resource Pack staging 只收 assets/。"
-            )
+                category = _excluded_category(top, rel)
+                key = (source, category)
+                grouped[key] = grouped.get(key, 0) + 1
+    warnings = [
+        _excluded_warning(source, category, count)
+        for (source, category), count in grouped.items()
+    ]
     return excluded, warnings
 
 
@@ -233,63 +231,117 @@ def _manifest_status_for_non_asset(top_lower: str, rel: str) -> tuple[str, str]:
     return "excluded", "resource_pack_accepts_assets_only"
 
 
-def _write_output_manifest(
-    sources: list[str],
-    plan: dict[str, tuple[str, list[str]]],
-    staging_dir: str,
-) -> str:
-    """Write a file-level disposition report outside the Resource Pack ZIP."""
+def _manifest_record(
+    source: str, output: str, status: str, reason: str
+) -> dict[str, str]:
+    return {"source": source, "output": output, "status": status, "reason": reason}
 
+
+def _load_content_manifest(
+    classification_path: Path,
+) -> tuple[list[dict[str, str]], set[str], set[str]]:
+    """讀取合併階段的內容分類，並保留來源與輸出索引。"""
     records: list[dict[str, str]] = []
     classified_sources: set[str] = set()
     classified_outputs: set[str] = set()
-    classification_path = Path(staging_dir).parent / "translation_content_manifest.json"
-    if classification_path.is_file():
-        try:
-            classification = json.loads(classification_path.read_text(encoding="utf-8"))
-            for record in classification.get("records", []):
-                if not isinstance(record, dict) or not record.get("source"):
-                    continue
-                normalized = os.path.normcase(os.path.abspath(str(record["source"])))
-                classified_sources.add(normalized)
-                output = str(record.get("output", "")).replace("\\", "/")
-                if output:
-                    classified_outputs.add(output)
-                records.append(
-                    {
-                        "source": str(record["source"]),
-                        "output": output,
-                        "status": str(record.get("status", "pending")),
-                        "reason": str(record.get("reason", "classified_content")),
-                    }
-                )
-        except (OSError, TypeError, ValueError) as exc:
+    if not classification_path.is_file():
+        return records, classified_sources, classified_outputs
+    try:
+        classification = json.loads(classification_path.read_text(encoding="utf-8"))
+        if not isinstance(classification, dict):
+            raise TypeError("content manifest root must be an object")
+        for record in classification.get("records", []):
+            if not isinstance(record, dict) or not record.get("source"):
+                continue
+            normalized = os.path.normcase(os.path.abspath(str(record["source"])))
+            classified_sources.add(normalized)
+            output = str(record.get("output", "")).replace("\\", "/")
+            if output:
+                classified_outputs.add(output)
             records.append(
-                {
-                    "source": classification_path.as_posix(),
-                    "output": "",
-                    "status": "parse_failed",
-                    "reason": f"content_manifest_read_failed:{type(exc).__name__}",
-                }
+                _manifest_record(
+                    str(record["source"]),
+                    output,
+                    str(record.get("status", "pending")),
+                    str(record.get("reason", "classified_content")),
+                )
             )
+    except (OSError, TypeError, ValueError) as exc:
+        records.append(
+            _manifest_record(
+                classification_path.as_posix(),
+                "",
+                "parse_failed",
+                f"content_manifest_read_failed:{type(exc).__name__}",
+            )
+        )
+    return records, classified_sources, classified_outputs
+
+
+def _append_plan_manifest_records(
+    plan: dict[str, tuple[str, list[str]]],
+    classified_outputs: set[str],
+    records: list[dict[str, str]],
+) -> set[str]:
+    """記錄會進入 staging 的 plan，並回傳已計入的來源檔。"""
     emitted_sources: set[str] = set()
     for rel_path, source_paths in plan.values():
         if rel_path.replace(os.sep, "/") in classified_outputs:
-            for source_path in source_paths:
-                emitted_sources.add(os.path.normcase(os.path.abspath(source_path)))
+            emitted_sources.update(
+                os.path.normcase(os.path.abspath(source_path))
+                for source_path in source_paths
+            )
             continue
         for source_path in source_paths:
-            normalized = os.path.normcase(os.path.abspath(source_path))
-            emitted_sources.add(normalized)
+            emitted_sources.add(os.path.normcase(os.path.abspath(source_path)))
             records.append(
-                {
-                    "source": source_path,
-                    "output": rel_path.replace(os.sep, "/"),
-                    "status": "emitted",
-                    "reason": "resource_pack_asset",
-                }
+                _manifest_record(
+                    source_path,
+                    rel_path.replace(os.sep, "/"),
+                    "emitted",
+                    "resource_pack_asset",
+                )
             )
+    return emitted_sources
 
+
+def _append_unplanned_asset_records(
+    source_root: str,
+    rel_root: str,
+    files: list[str],
+    emitted_sources: set[str],
+    classified_sources: set[str],
+    records: list[dict[str, str]],
+) -> None:
+    """記錄 assets/ 底下未進入 plan 的檔案。"""
+    for name in files:
+        source_path = os.path.join(source_root, name)
+        normalized = os.path.normcase(os.path.abspath(source_path))
+        if normalized in emitted_sources or normalized in classified_sources:
+            continue
+        rel = os.path.join(rel_root, name)
+        status = (
+            "pending"
+            if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts)
+            else "excluded"
+        )
+        records.append(
+            _manifest_record(
+                source_path,
+                rel.replace(os.sep, "/"),
+                status,
+                "translation_pending" if status == "pending" else "not_in_bundle_plan",
+            )
+        )
+
+
+def _append_unplanned_source_records(
+    sources: list[str],
+    emitted_sources: set[str],
+    classified_sources: set[str],
+    records: list[dict[str, str]],
+) -> None:
+    """記錄所有來源中未進入 Resource Pack plan 的檔案。"""
     source_roots = {os.path.normcase(os.path.abspath(source)) for source in sources}
     for source in sources:
         if not os.path.isdir(source):
@@ -305,27 +357,14 @@ def _write_output_manifest(
             top = "<root>" if rel_root == "." else rel_root.split(os.sep, 1)[0]
             top_lower = top.lower()
             if top_lower == _STAGING_CONTENT_ROOT:
-                for name in files:
-                    source_path = os.path.join(root, name)
-                    normalized = os.path.normcase(os.path.abspath(source_path))
-                    if (
-                        normalized in emitted_sources
-                        or normalized in classified_sources
-                    ):
-                        continue
-                    rel = os.path.join(rel_root, name)
-                    if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
-                        status, reason = "pending", "translation_pending"
-                    else:
-                        status, reason = "excluded", "not_in_bundle_plan"
-                    records.append(
-                        {
-                            "source": source_path,
-                            "output": rel.replace(os.sep, "/"),
-                            "status": status,
-                            "reason": reason,
-                        }
-                    )
+                _append_unplanned_asset_records(
+                    root,
+                    rel_root,
+                    files,
+                    emitted_sources,
+                    classified_sources,
+                    records,
+                )
                 continue
             for name in files:
                 source_path = os.path.join(root, name)
@@ -334,14 +373,29 @@ def _write_output_manifest(
                     continue
                 rel = os.path.join(rel_root, name)
                 status, reason = _manifest_status_for_non_asset(top_lower, rel)
-                records.append(
-                    {
-                        "source": source_path,
-                        "output": "",
-                        "status": status,
-                        "reason": reason,
-                    }
-                )
+                records.append(_manifest_record(source_path, "", status, reason))
+
+
+def _write_output_manifest(
+    sources: list[str],
+    plan: dict[str, tuple[str, list[str]]],
+    staging_dir: str,
+    content_manifest_path: str | None = None,
+) -> str:
+    """Write a file-level disposition report outside the Resource Pack ZIP."""
+
+    classification_path = (
+        Path(content_manifest_path)
+        if content_manifest_path is not None
+        else Path(staging_dir).parent / "translation_content_manifest.json"
+    )
+    records, classified_sources, classified_outputs = _load_content_manifest(
+        classification_path
+    )
+    emitted_sources = _append_plan_manifest_records(plan, classified_outputs, records)
+    _append_unplanned_source_records(
+        sources, emitted_sources, classified_sources, records
+    )
 
     records.sort(key=lambda item: (item["status"], item["source"].casefold()))
     counts = Counter(record["status"] for record in records)
@@ -402,37 +456,10 @@ def _prune_staging(staging_dir: str, expected: set[str]) -> int:
     return removed
 
 
-def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
-    """把多個輸出根目錄的 assets/ 依序疊加到 staging_dir，供打包使用。
-
-    後面的來源優先：同路徑的 JSON 物件逐 key 合併（後者覆蓋前者），
-    其他檔案直接覆蓋。只處理各來源底下的 assets/，並略過待翻譯資料夾。
-
-    staging 是增量更新的：不再整個刪除重建，而是先算出每個輸出檔「應有的內容」，
-    與現有 staging 內容相同就不寫入，最後刪掉不在預期集合內的殘留檔案。結果與完整
-    重建一致；沒有 manifest 或版本標記，每次都由來源重新推導，因此不會有過期狀態，
-    中斷後下一次執行也會收斂到同一結果。內容是否相同只看位元組（不依 mtime）；大小寫不敏感的
-    檔案系統上，僅大小寫不同的既有資料夾與檔案會先改名成來源的拼法。
-
-    Args:
-        sources: 依優先序由低到高排列的來源根目錄（不存在者略過）。
-        staging_dir: 暫存目錄；不存在會建立，內容會被更新成與來源一致。
-
-    Returns:
-        {"copied": int, "merged": int, "written": int, "unchanged": int, "removed": int,
-        "excluded": int, "warnings": list[str]}
-        ``copied`` / ``merged`` 是處理的來源檔案數（與是否需要寫入無關，呼叫端用來判斷
-        是否有可打包內容）；``written`` / ``unchanged`` 是實際寫入與沿用的輸出檔數；
-        ``removed`` 是刪除的殘留檔案數；``excluded`` / ``warnings`` 說明未進入 Resource
-        Pack staging 的其他輸出，特別是不能由資源包直接套用的 Advancement。
-    """
-    os.makedirs(staging_dir, exist_ok=True)
-
-    plan, canon = _collect_bundle_sources(sources)
-    excluded, warnings = _collect_excluded_outputs(sources)
-    manifest_path = _write_output_manifest(sources, plan, staging_dir)
-    _normalize_staging_case(staging_dir, canon)
-
+def _materialize_bundle_plan(
+    plan: dict[str, tuple[str, list[str]]], staging_dir: str
+) -> tuple[int, int, int, int, set[str]]:
+    """將已解析的輸出 plan 寫入 staging，回傳計數與預期檔案集合。"""
     copied = merged = written = unchanged = 0
     expected: set[str] = set()
     for key, (rel_path, srcs) in plan.items():
@@ -476,7 +503,50 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
             unchanged += 1
         else:
             written += 1
+    return copied, merged, written, unchanged, expected
 
+
+def build_bundle_staging(
+    sources: list[str],
+    staging_dir: str,
+    *,
+    content_manifest_path: str | None = None,
+) -> dict:
+    """把多個輸出根目錄的 assets/ 依序疊加到 staging_dir，供打包使用。
+
+    後面的來源優先：同路徑的 JSON 物件逐 key 合併（後者覆蓋前者），
+    其他檔案直接覆蓋。只處理各來源底下的 assets/，並略過待翻譯資料夾。
+
+    staging 是增量更新的：不再整個刪除重建，而是先算出每個輸出檔「應有的內容」，
+    與現有 staging 內容相同就不寫入，最後刪掉不在預期集合內的殘留檔案。結果與完整
+    重建一致；沒有 manifest 或版本標記，每次都由來源重新推導，因此不會有過期狀態，
+    中斷後下一次執行也會收斂到同一結果。內容是否相同只看位元組（不依 mtime）；大小寫不敏感的
+    檔案系統上，僅大小寫不同的既有資料夾與檔案會先改名成來源的拼法。
+
+    Args:
+        sources: 依優先序由低到高排列的來源根目錄（不存在者略過）。
+        staging_dir: 暫存目錄；不存在會建立，內容會被更新成與來源一致。
+
+    Returns:
+        {"copied": int, "merged": int, "written": int, "unchanged": int, "removed": int,
+        "excluded": int, "warnings": list[str]}
+        ``copied`` / ``merged`` 是處理的來源檔案數（與是否需要寫入無關，呼叫端用來判斷
+        是否有可打包內容）；``written`` / ``unchanged`` 是實際寫入與沿用的輸出檔數；
+        ``removed`` 是刪除的殘留檔案數；``excluded`` / ``warnings`` 說明未進入 Resource
+        Pack staging 的其他輸出，特別是不能由資源包直接套用的 Advancement。
+    """
+    os.makedirs(staging_dir, exist_ok=True)
+
+    plan, canon = _collect_bundle_sources(sources)
+    excluded, warnings = _collect_excluded_outputs(sources)
+    manifest_path = _write_output_manifest(
+        sources, plan, staging_dir, content_manifest_path
+    )
+    _normalize_staging_case(staging_dir, canon)
+
+    copied, merged, written, unchanged, expected = _materialize_bundle_plan(
+        plan, staging_dir
+    )
     removed = _prune_staging(staging_dir, expected)
     return {
         "copied": copied,

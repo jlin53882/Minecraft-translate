@@ -296,7 +296,9 @@ class PipelineActions:
         session.start()
         try:
             stats = self.services.build_staging(
-                cfg.bundle_sources, cfg.bundle_staging_dir
+                cfg.bundle_sources,
+                cfg.bundle_staging_dir,
+                content_manifest_path=cfg.content_manifest_path,
             )
             message = (
                 f"[系統] 打包暫存完成：複製 {stats.get('copied', 0)} 個、"

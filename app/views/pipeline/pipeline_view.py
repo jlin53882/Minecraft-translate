@@ -361,6 +361,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             "translation_db_settings_snapshot": (
                 merge_snapshot.database_settings if merge_snapshot is not None else None
             ),
+            "content_manifest_path": cfg.content_manifest_path,
         }
         return cfg, mode, lang_codes, merge_options
 

@@ -18,6 +18,7 @@
 - 標準 Patchouli 的 `assets/<namespace>/patchouli_books/<book>/en_us/...` 會輸出到 `zh_tw/`；沒有明確語系資料夾的自訂書本（例如 Herbs and Harvest 的 `assets/herbsandharvest/books/...`）保留原相對路徑。
 - Advancement 的 `data/<namespace>/advancement(s)/...` 不會進入 Resource Pack。使用 translate key 的文字應透過 `assets/<namespace>/lang/zh_tw.json` 生效；literal 文字會列為「目前資源包無法直接套用」，需要另建 Data Pack 才能套用。
 - `extra_folders` 只接受其中的 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。
+- 一鍵流水線會把內容分類的 `translation_content_manifest.json` 寫在整個輸出根目錄；合併階段與打包階段透過同一個明確路徑讀寫，讓 `other_output` 的 emitted／pending／parse_failed provenance 能接到最後的 `translation_output_manifest.json`。手動單獨呼叫服務時若未提供路徑，才使用各自輸出根的相容預設位置。
 
 打包本身由 `translation_tool/core/output_bundler.py` 的 `bundle_outputs_generator` 完成。`BundlerView` 直接呼叫它（經由 `app/services_impl/pipelines/bundle_service.py` 的 re-export），沒有使用 `run_bundling_service`，因此這一頁不經過 `GLOBAL_LOG_LIMITER` 節流。
 

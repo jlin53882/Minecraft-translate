@@ -103,6 +103,11 @@ class PipelineConfig:
         return os.path.join(self.output_dir, "_打包暫存")
 
     @property
+    def content_manifest_path(self):
+        """內容分類與 Resource Pack 打包共用的輸出 provenance manifest。"""
+        return os.path.join(self.output_dir, "translation_content_manifest.json")
+
+    @property
     def bundle_sources(self):
         """打包來源（優先序由低到高）：合併資源 → 既有譯文 → LLM 新譯文。"""
         return [

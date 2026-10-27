@@ -50,6 +50,7 @@ def classify_other_output_assets(
     merge_output_dir: str | Path,
     *,
     pending_folder_name: str = "待翻譯",
+    content_manifest_path: str | Path | None = None,
 ) -> list[dict[str, Any]]:
     """Move known content to an explicit emitted or pending pipeline path.
 
@@ -116,7 +117,12 @@ def classify_other_output_assets(
             )
         records.append(record)
 
-    report_path = root.parent / "translation_content_manifest.json"
+    report_path = (
+        Path(content_manifest_path)
+        if content_manifest_path is not None
+        else root.parent / "translation_content_manifest.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(
             {
