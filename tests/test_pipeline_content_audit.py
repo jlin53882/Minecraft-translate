@@ -110,3 +110,30 @@ def test_pipeline_manifest_path_is_shared_by_merge_and_bundle(tmp_path: Path):
         and record["reason"] == "english_text_queued_for_guide_translation"
         for record in manifest["records"]
     )
+
+
+def test_content_manifest_accumulates_across_merge_stages(tmp_path: Path):
+    """Dual mode 的多個 merge 階段不得互相覆蓋 provenance。"""
+    merge_output = tmp_path / "merge"
+    content_manifest = tmp_path / "translation_content_manifest.json"
+
+    first = merge_output / "other_output/assets/demo/first.md"
+    first.parent.mkdir(parents=True)
+    first.write_text("# 中文指南", encoding="utf-8")
+    first_records = classify_other_output_assets(
+        merge_output,
+        content_manifest_path=content_manifest,
+    )
+    assert first_records[0]["reason"] == "localized_text_preserved"
+
+    second = merge_output / "other_output/assets/demo/second.md"
+    second.write_text("# English guide", encoding="utf-8")
+    classify_other_output_assets(
+        merge_output,
+        content_manifest_path=content_manifest,
+    )
+
+    manifest = json.loads(content_manifest.read_text(encoding="utf-8"))
+    reasons = {record["reason"] for record in manifest["records"]}
+    assert "localized_text_preserved" in reasons
+    assert "english_text_queued_for_guide_translation" in reasons

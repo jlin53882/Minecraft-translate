@@ -21,6 +21,70 @@ _TEXT_SUFFIXES = frozenset({".md", ".txt"})
 _LOCALE_DIRS = frozenset({"en_us", "_en_us", "zh_tw", "_zh_tw"})
 
 
+def _load_existing_content_records(report_path: Path) -> list[dict[str, Any]]:
+    """讀取同一個 pipeline run 先前已分類的 provenance。"""
+    if not report_path.is_file():
+        return []
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return []
+    if not isinstance(payload, dict) or not isinstance(payload.get("records"), list):
+        return []
+    return [
+        record
+        for record in payload["records"]
+        if isinstance(record, dict) and record.get("source")
+    ]
+
+
+def _is_live_content_record(root: Path, record: dict[str, Any]) -> bool:
+    """保留仍有來源或 canonical/pending 輸出的舊紀錄，淘汰過期紀錄。"""
+    source = Path(str(record["source"]))
+    if source.is_file():
+        return True
+    output = str(record.get("output", ""))
+    if not output:
+        return False
+    candidate = root / Path(output)
+    try:
+        return (
+            candidate.resolve().is_relative_to(root.resolve()) and candidate.is_file()
+        )
+    except OSError:
+        return False
+
+
+def _merge_content_records(
+    root: Path, report_path: Path, current: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """合併同一輸出目錄多個 merge 階段的紀錄，避免後一階段覆蓋前一階段。"""
+    merged: dict[str, dict[str, Any]] = {}
+    for record in _load_existing_content_records(report_path):
+        if _is_live_content_record(root, record):
+            merged[str(record["source"])] = record
+    for record in current:
+        merged[str(record["source"])] = record
+    return sorted(merged.values(), key=lambda item: str(item["source"]).casefold())
+
+
+def _write_content_manifest(report_path: Path, records: list[dict[str, Any]]) -> None:
+    """以穩定格式寫入內容分類 provenance。"""
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "records": records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _pending_guide_rel(relative: Path) -> Path:
     """Add a synthetic English locale only when the source has no locale slot."""
 
@@ -64,8 +128,6 @@ def classify_other_output_assets(
 
     root = Path(merge_output_dir)
     source_root = root / "other_output" / "assets"
-    if not source_root.is_dir():
-        return []
 
     canonical_root = root / "assets"
     pending_root = root / "patchouli_output" / pending_folder_name
@@ -122,18 +184,9 @@ def classify_other_output_assets(
         if content_manifest_path is not None
         else root.parent / "translation_content_manifest.json"
     )
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "records": records,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    _write_content_manifest(
+        report_path,
+        _merge_content_records(root, report_path, records),
     )
     return records
 
