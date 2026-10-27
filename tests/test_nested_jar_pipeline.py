@@ -729,6 +729,84 @@ def test_cross_jar_asset_collision_uses_input_order_not_worker_order(tmp_path: P
     )
 
 
+def test_cross_jar_language_sources_union_keys_without_overwriting(
+    tmp_path: Path,
+):
+    """同 namespace 的外層語言檔要合併額外 key，而不是整份丟掉。"""
+    first = _outer_jar(
+        tmp_path / "create-enchantment-industry.jar",
+        direct={
+            "assets/create_dragons_plus/lang/en_us.json": json.dumps(
+                {
+                    "create_dragons_plus.fragile_fluid_tank.effect.infused_dragon_breath": (
+                        "Infused Dragon Breath"
+                    ),
+                    "shared.key": "First source",
+                }
+            )
+        },
+    )
+    second = _outer_jar(
+        tmp_path / "CreateDragonsPlus.jar",
+        direct={
+            "assets/create_dragons_plus/lang/en_us.json": json.dumps(
+                {
+                    "item.create_dragons_plus.dyenamics_conifer_dye_bucket": (
+                        "Dyenamics Conifer Dye Bucket"
+                    ),
+                    "shared.key": "Second source",
+                }
+            )
+        },
+    )
+    regex = build_lang_file_regex(codes=["en_us"])
+
+    scanned = scan_jars(
+        tmp_path,
+        [regex.pattern],
+        max_workers=2,
+        jar_files=[first, second],
+    )
+    merged = json.loads(
+        scanned[first]["assets/create_dragons_plus/lang/en_us.json"]
+    )
+    assert merged == {
+        "create_dragons_plus.fragile_fluid_tank.effect.infused_dragon_breath": (
+            "Infused Dragon Breath"
+        ),
+        "shared.key": "First source",
+        "item.create_dragons_plus.dyenamics_conifer_dye_bucket": (
+            "Dyenamics Conifer Dye Bucket"
+        ),
+    }
+    assert any("外層語言來源合併" in note for note in scanned.collision_notes[first])
+
+    output = tmp_path / "out"
+    # Worker/extraction order must not change the canonical merged output.
+    assert _extract_from_jar(str(second), str(output), regex, scanned) == {
+        "status": "success",
+        "extracted": 0,
+        "skipped": 1,
+    }
+    assert _extract_from_jar(str(first), str(output), regex, scanned) == {
+        "status": "success",
+        "extracted": 1,
+        "skipped": 0,
+    }
+    assert json.loads(
+        (output / "assets/create_dragons_plus/lang/en_us.json").read_text(
+            encoding="utf-8"
+        )
+    ) == merged
+
+    db_result = scan_jar(second, ScanOptions("1.21.1"), dir_names=())
+    assert any(
+        item.key == "item.create_dragons_plus.dyenamics_conifer_dye_bucket"
+        for item in db_result.items
+        if item.kind == "lang"
+    )
+
+
 def test_cross_jar_data_paths_are_isolated_for_colliding_normalized_names(
     tmp_path: Path,
 ):

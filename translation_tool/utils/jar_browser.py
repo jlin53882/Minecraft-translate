@@ -157,6 +157,66 @@ class _JarScanDetails:
     error: str | None = None
 
 
+def _merge_cross_jar_language_entries(
+    results: ScanResults,
+    jar_files: Iterable[Path],
+) -> None:
+    """Merge colliding direct language resources in stable JAR order.
+
+    The extracted ``assets/`` tree is shared by all outer JARs, so the
+    historical first-file-wins rule can silently discard keys when two mods
+    publish the same namespace and locale file.  Language resources are
+    structured key/value maps; merge only those files and keep the first
+    value for duplicate keys.  Every other asset keeps the existing
+    first-source ownership rule.
+    """
+    first_entries: dict[str, tuple[Path, int]] = {}
+
+    for jar_path in jar_files:
+        entries = results.entries.get(jar_path, ())
+        for entry_index, entry in enumerate(entries):
+            logical_path = entry.logical_path
+            if (
+                entry.is_nested
+                or not logical_path.startswith("assets/")
+                or not _LANG_RESOURCE_RE.fullmatch(logical_path)
+            ):
+                continue
+
+            first = first_entries.get(logical_path)
+            if first is None:
+                first_entries[logical_path] = (jar_path, entry_index)
+                continue
+
+            first_jar, first_index = first
+            first_entry = results.entries[first_jar][first_index]
+            merged, merged_ok = _merge_language_sources(
+                logical_path,
+                first_entry.content,
+                entry.content,
+            )
+            if not merged_ok:
+                # Invalid or binary language content must not be partially
+                # reconstructed.  The normal asset winner below preserves
+                # the historical first-source behavior for this case.
+                continue
+
+            results.entries[first_jar][first_index] = ScannedEntry(
+                logical_path=first_entry.logical_path,
+                member_chain=first_entry.member_chain,
+                content=merged,
+                size=first_entry.size + entry.size,
+            )
+            if first_jar in results:
+                results[first_jar][logical_path] = merged
+            note = (
+                f"{jar_path.name}!{logical_path} 與 {first_jar.name} 的外層語言來源合併，"
+                "重複 key 保留先出現的來源"
+            )
+            results.collision_notes.setdefault(first_jar, []).append(note)
+            log_warning("[jar_browser] %s", note)
+
+
 def _scan_single_jar(
     jar_path: Path,
     patterns: list[str | re.Pattern[str]],
@@ -451,6 +511,8 @@ def scan_jars(
                 processed += 1
                 if processed_callback:
                     processed_callback(processed, total)
+
+    _merge_cross_jar_language_entries(results, jar_files)
 
     # Resolve direct assets in stable input order after all workers finish.
     # Nested entries are written below an outer-JAR-specific directory and do
