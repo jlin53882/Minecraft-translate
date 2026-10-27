@@ -45,9 +45,35 @@ from translation_tool.translation_db.schema import KIND_GUIDE, cache_type_for_ki
 from translation_tool.utils.log_unit import log_warning
 
 GUIDE_SUFFIXES = (".md", ".mdx", ".txt")
+GUIDE_SUPPORT_SUFFIXES = frozenset(
+    {
+        ".gif",
+        ".jpeg",
+        ".jpg",
+        ".mcmeta",
+        ".nbt",
+        ".obj",
+        ".png",
+        ".snbt",
+        ".svg",
+        ".webp",
+    }
+)
 GUIDE_MARKER = "__guide__"
 _LOCALE_DIR = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
 _MAX_GUIDE_BYTES = 1024 * 1024
+GUIDE_DIR_NAMES = frozenset(
+    {
+        "ae2guide",
+        "guide",
+        "guides",
+        "guidebook",
+        "manual",
+        "manuals",
+        "documentation",
+        "docs",
+    }
+)
 
 
 class GuidePath(type(Path())):
@@ -193,20 +219,39 @@ def render_guide(doc: dict) -> str:
     return "\n".join(lines) + ("\n" if str(doc["source"]).endswith("\n") else "")
 
 
-def guide_output_rel(rel: Path, root: Path) -> Path:
-    """翻譯輸出的相對路徑。
+def guide_locale_rel(rel: Path, root: Path, locale: str) -> Path:
+    """Return a guide path with ``locale`` at the guide-wide locale slot.
 
-    有 ``en_us``／``_en_us`` 資料夾就換成 ``zh_tw``／``_zh_tw``；英文放在指南根目錄的
-    （AE2、GuideME）則在指南根目錄下加 ``_zh_tw``——指南根目錄是模組資料夾之下、
-    旁邊已經有 ``_xx_xx`` 語系資料夾的那一層，找不到就用模組資料夾下的第一層。
+    ``locale`` should include the leading underscore for GuideME-style paths
+    (for example ``_en_us`` or ``_zh_tw``).  Existing explicit locale folders
+    retain their style so Patchouli-style ``en_us`` paths continue to map to
+    ``zh_tw``.
     """
+
     parts = list(rel.parts)
     offset = 1 if parts and parts[0].endswith("_extracted") else 0
     for index in range(offset + 2, len(parts) - 1):
         segment = parts[index].lower()
         if segment in ("en_us", "_en_us"):
-            parts[index] = "_zh_tw" if segment.startswith("_") else "zh_tw"
+            parts[index] = locale if segment.startswith("_") else locale.lstrip("_")
             return Path(*parts)
+
+    # GuideME/AE2 guides put the locale beside the guide's first-level
+    # directories, rather than below each chapter directory.  The old
+    # implementation inferred that level from whichever locale directory it
+    # happened to find while walking upwards.  That made a source tree with a
+    # nested locale (or a stale extraction) produce paths such as
+    # ``ae2guide/epp_intro/_zh_tw/assembler_matrix.md``.  Links in the guide
+    # are relative to the common locale root, so all neutral guide files must
+    # use the same deterministic anchor.
+    for index in range(offset + 2, len(parts) - 1):
+        segment = parts[index].casefold()
+        if segment in GUIDE_DIR_NAMES or segment.endswith("guide"):
+            return Path(*parts[: index + 1], locale, *parts[index + 1 :])
+
+    # Custom guide layouts may use a project-specific directory name.  If the
+    # source tree already contains locale siblings, prefer the closest such
+    # ancestor before falling back to the module's first child directory.
     insert_at = offset + 3
     for depth in range(len(parts) - 1, offset + 2, -1):
         directory = root.joinpath(*parts[:depth])
@@ -220,4 +265,10 @@ def guide_output_rel(rel: Path, root: Path) -> Path:
         except OSError:
             continue
     insert_at = min(insert_at, len(parts) - 1)
-    return Path(*parts[:insert_at], "_zh_tw", *parts[insert_at:])
+    return Path(*parts[:insert_at], locale, *parts[insert_at:])
+
+
+def guide_output_rel(rel: Path, root: Path) -> Path:
+    """Return the standard ``_zh_tw`` output path for a translated guide."""
+
+    return guide_locale_rel(rel, root, "_zh_tw")

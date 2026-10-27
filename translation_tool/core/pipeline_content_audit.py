@@ -20,6 +20,7 @@ from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     has_translatable_text,
 )
+from translation_tool.core.guide_translation import guide_locale_rel
 from translation_tool.core.lang_merge_dict import contains_cjk
 
 _TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt"})
@@ -113,7 +114,13 @@ def _pending_guide_rel(relative: Path) -> Path:
         return relative
     if len(parts) < 2:
         return relative
-    return Path(*parts[:-1], "_en_us", parts[-1])
+    # Use the same guide-wide locale slot as the final writer.  In particular,
+    # ``assets/mod/ae2guide/chapter/page.md`` becomes
+    # ``assets/mod/ae2guide/_en_us/chapter/page.md`` rather than placing the
+    # locale below ``chapter``.  The latter makes every relative link resolve
+    # against a different tree and was the source of the in-game "Page does
+    # not exist" errors.
+    return guide_locale_rel(relative, Path(), "_en_us")
 
 
 def _copy_if_needed(source: Path, destination: Path) -> bool:
