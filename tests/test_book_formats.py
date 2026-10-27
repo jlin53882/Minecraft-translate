@@ -228,9 +228,7 @@ def test_recoverable_neutral_book_is_detected_by_archive_sniffer(tmp_path: Path)
     jar = tmp_path / "recoverable.jar"
     malformed = json.dumps(_neutral_document(), ensure_ascii=False) + "\n]}"
     with zipfile.ZipFile(jar, "w") as archive:
-        archive.writestr(
-            "assets/herbsandharvest/books/chapters/grapes.json", malformed
-        )
+        archive.writestr("assets/herbsandharvest/books/chapters/grapes.json", malformed)
 
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
 

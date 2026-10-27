@@ -329,9 +329,7 @@ def _read_json_member(
         return _load_legacy_lang(raw)
     if is_neutral_pages_candidate(member):
         try:
-            return load_neutral_book_json(
-                raw.decode("utf-8-sig"), member
-            ).data
+            return load_neutral_book_json(raw.decode("utf-8-sig"), member).data
         except (UnicodeDecodeError, ValueError, TypeError):
             return None
     return _load_json(raw)

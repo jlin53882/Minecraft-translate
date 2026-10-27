@@ -421,9 +421,7 @@ def process_content_or_copy_file_impl(
         if should_write:
             write_bytes_atomic_fn(target, output_bytes)
         repair_note = (
-            "；已移除已確認的多餘尾端 `]}` 並重新序列化"
-            if load_result.repaired
-            else ""
+            "；已移除已確認的多餘尾端 `]}` 並重新序列化" if load_result.repaired else ""
         )
         if load_result.repaired:
             log_warning(

@@ -29,8 +29,7 @@ def test_other_output_text_is_emitted_or_queued_without_silent_drop(tmp_path: Pa
     ).is_file()
     assert unsupported.is_file()
     assert any(
-        record["reason"] == "unsupported_other_output_format"
-        for record in records
+        record["reason"] == "unsupported_other_output_format" for record in records
     )
 
 
@@ -40,15 +39,11 @@ def test_bundle_manifest_records_emitted_pending_and_excluded(tmp_path: Path):
     (merge_output / "assets/demo/lang/zh_tw.json").write_text(
         '{"demo.key": "示例"}', encoding="utf-8"
     )
-    (merge_output / "data/demo/advancements/start.json").parent.mkdir(
-        parents=True
-    )
+    (merge_output / "data/demo/advancements/start.json").parent.mkdir(parents=True)
     (merge_output / "data/demo/advancements/start.json").write_text(
         '{"display": {"title": {"text": "Literal"}}}', encoding="utf-8"
     )
-    (merge_output / "patchouli_output/待翻譯/assets/demo/_en_us").mkdir(
-        parents=True
-    )
+    (merge_output / "patchouli_output/待翻譯/assets/demo/_en_us").mkdir(parents=True)
     (merge_output / "patchouli_output/待翻譯/assets/demo/_en_us/guide.md").write_text(
         "# English", encoding="utf-8"
     )
@@ -78,9 +73,7 @@ def test_bundle_manifest_keeps_reclassified_assets_emitted(tmp_path: Path):
     build_bundle_staging([str(merge_output)], str(tmp_path / "staging"))
 
     manifest = json.loads(
-        (tmp_path / "translation_output_manifest.json").read_text(
-            encoding="utf-8"
-        )
+        (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
     )
     assert manifest["status_counts"]["emitted"] == 1
     assert manifest["status_counts"].get("excluded", 0) == 0

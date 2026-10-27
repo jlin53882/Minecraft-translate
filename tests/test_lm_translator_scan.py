@@ -80,9 +80,7 @@ class TestScanTranslatableFiles:
         path.write_text("demo.title=Hello", encoding="utf-8")
 
         batches = list(
-            extract_items_parallel(
-                files=[path], export_lang=False, work_thread=1
-            )
+            extract_items_parallel(files=[path], export_lang=False, work_thread=1)
         )
 
         assert batches[-1][0][str(path)]["demo.title"] == "Hello"

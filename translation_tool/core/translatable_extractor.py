@@ -94,7 +94,7 @@ def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
         data = load_neutral_book_json(
             path.read_text(encoding="utf-8-sig"), "/".join(parts)
         ).data
-    except (OSError, ValueError) as exc:
+    except (OSError, TypeError, ValueError) as exc:
         if is_neutral_pages_candidate("/".join(parts)):
             log_warning("略過無法解析的自訂書籍 JSON：%s（%s）", path, exc)
         return False

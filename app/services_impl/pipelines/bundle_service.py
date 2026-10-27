@@ -142,9 +142,7 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
     """盤點不屬於 Resource Pack staging 的輸出，並產生可顯示的原因。"""
     grouped: dict[tuple[str, str], int] = {}
     excluded = 0
-    nested_sources = {
-        os.path.normcase(os.path.abspath(source)) for source in sources
-    }
+    nested_sources = {os.path.normcase(os.path.abspath(source)) for source in sources}
     for source in sources:
         if not os.path.isdir(source):
             continue
@@ -245,20 +243,14 @@ def _write_output_manifest(
     records: list[dict[str, str]] = []
     classified_sources: set[str] = set()
     classified_outputs: set[str] = set()
-    classification_path = (
-        Path(staging_dir).parent / "translation_content_manifest.json"
-    )
+    classification_path = Path(staging_dir).parent / "translation_content_manifest.json"
     if classification_path.is_file():
         try:
-            classification = json.loads(
-                classification_path.read_text(encoding="utf-8")
-            )
+            classification = json.loads(classification_path.read_text(encoding="utf-8"))
             for record in classification.get("records", []):
                 if not isinstance(record, dict) or not record.get("source"):
                     continue
-                normalized = os.path.normcase(
-                    os.path.abspath(str(record["source"]))
-                )
+                normalized = os.path.normcase(os.path.abspath(str(record["source"])))
                 classified_sources.add(normalized)
                 output = str(record.get("output", "")).replace("\\", "/")
                 if output:
@@ -268,9 +260,7 @@ def _write_output_manifest(
                         "source": str(record["source"]),
                         "output": output,
                         "status": str(record.get("status", "pending")),
-                        "reason": str(
-                            record.get("reason", "classified_content")
-                        ),
+                        "reason": str(record.get("reason", "classified_content")),
                     }
                 )
         except (OSError, TypeError, ValueError) as exc:
@@ -300,9 +290,7 @@ def _write_output_manifest(
                 }
             )
 
-    source_roots = {
-        os.path.normcase(os.path.abspath(source)) for source in sources
-    }
+    source_roots = {os.path.normcase(os.path.abspath(source)) for source in sources}
     for source in sources:
         if not os.path.isdir(source):
             continue
@@ -320,7 +308,10 @@ def _write_output_manifest(
                 for name in files:
                     source_path = os.path.join(root, name)
                     normalized = os.path.normcase(os.path.abspath(source_path))
-                    if normalized in emitted_sources or normalized in classified_sources:
+                    if (
+                        normalized in emitted_sources
+                        or normalized in classified_sources
+                    ):
                         continue
                     rel = os.path.join(rel_root, name)
                     if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
