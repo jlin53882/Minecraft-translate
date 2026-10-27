@@ -337,6 +337,7 @@ def _append_unplanned_asset_records(
 
 def _append_unplanned_source_records(
     sources: list[str],
+    bundle_root: str,
     emitted_sources: set[str],
     classified_sources: set[str],
     classified_outputs: set[str],
@@ -344,6 +345,7 @@ def _append_unplanned_source_records(
 ) -> None:
     """記錄所有來源中未進入 Resource Pack plan 的檔案。"""
     source_roots = {os.path.normcase(os.path.abspath(source)) for source in sources}
+    bundle_root = os.path.abspath(bundle_root)
     for source in sources:
         if not os.path.isdir(source):
             continue
@@ -373,7 +375,14 @@ def _append_unplanned_source_records(
                 if normalized in emitted_sources or normalized in classified_sources:
                     continue
                 rel = os.path.join(rel_root, name)
-                if os.path.normcase(rel) in classified_outputs:
+                try:
+                    rel_from_bundle = os.path.relpath(source_path, bundle_root)
+                except ValueError:
+                    rel_from_bundle = ""
+                if (
+                    rel_from_bundle
+                    and os.path.normcase(rel_from_bundle) in classified_outputs
+                ):
                     continue
                 status, reason = _manifest_status_for_non_asset(top_lower, rel)
                 records.append(_manifest_record(source_path, "", status, reason))
@@ -397,7 +406,12 @@ def _write_output_manifest(
     )
     emitted_sources = _append_plan_manifest_records(plan, classified_outputs, records)
     _append_unplanned_source_records(
-        sources, emitted_sources, classified_sources, classified_outputs, records
+        sources,
+        sources[0] if sources else staging_dir,
+        emitted_sources,
+        classified_sources,
+        classified_outputs,
+        records,
     )
 
     records.sort(key=lambda item: (item["status"], item["source"].casefold()))

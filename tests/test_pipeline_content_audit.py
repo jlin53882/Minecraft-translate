@@ -101,14 +101,19 @@ def test_bundle_manifest_keeps_reclassified_assets_emitted(tmp_path: Path):
     assert manifest["status_counts"].get("excluded", 0) == 0
 
 
-def test_bundle_manifest_does_not_duplicate_classified_pending(tmp_path: Path):
+def test_bundle_manifest_does_not_duplicate_classified_pending_across_sources(
+    tmp_path: Path,
+):
     merge_output = tmp_path / "merge"
     source = merge_output / "other_output/assets/demo/guide.md"
     source.parent.mkdir(parents=True)
     source.write_text("# English guide", encoding="utf-8")
     classify_other_output_assets(merge_output)
 
-    build_bundle_staging([str(merge_output)], str(tmp_path / "staging"))
+    build_bundle_staging(
+        [str(merge_output), str(merge_output / "patchouli_output")],
+        str(tmp_path / "staging"),
+    )
 
     manifest = json.loads(
         (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
