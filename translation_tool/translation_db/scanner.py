@@ -157,6 +157,9 @@ class ScanReport:
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
     dry_run: bool = False
+    _issue_markers: set[tuple[str, ...]] = field(
+        default_factory=set, init=False, repr=False
+    )
 
     def add_issue(self, issue: dict[str, str]) -> None:
         """加入一筆去重後的內容處置紀錄。"""
@@ -164,11 +167,9 @@ class ScanReport:
             return
         keys = ("source_archive", "source_member", "kind", "status", "reason")
         marker = tuple(str(issue.get(key, "")) for key in keys)
-        if any(
-            tuple(str(existing.get(key, "")) for key in keys) == marker
-            for existing in self.issues
-        ):
+        if marker in self._issue_markers:
             return
+        self._issue_markers.add(marker)
         self.issues.append(
             {str(key): str(value) for key, value in issue.items() if value is not None}
         )
@@ -1031,6 +1032,22 @@ def find_jars(folder: str | Path, *, translated: bool = False) -> list[Path]:
     return sorted(found, key=lambda x: x.as_posix().lower())
 
 
+def _source_archive_identity(root: str | Path, archive: str | Path) -> str:
+    """Return a stable source identity relative to the scan root.
+
+    ``JarResult.name`` intentionally stays short for progress messages, but
+    persisted content issues need to distinguish same-named jars in different
+    subdirectories.  A relative POSIX path is stable across platforms and is
+    sufficient to identify the outer archive within one scan context.
+    """
+    root_path = Path(root)
+    archive_path = Path(archive)
+    try:
+        return archive_path.resolve().relative_to(root_path.resolve()).as_posix()
+    except (OSError, ValueError):
+        return archive_path.name
+
+
 def _progress(
     done: int, jars: Sequence[Path], result: JarResult, log: str, level: str = "info"
 ) -> dict[str, Any]:
@@ -1134,6 +1151,15 @@ def scan_folder_generator(
     jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
     if not jars:
+        if db is not None and not options.dry_run:
+            # An empty completed scan is a valid current snapshot.  Persisting
+            # it clears issues from jars that were removed since the last scan.
+            db.record_scan(
+                options.version,
+                str(folder),
+                report.as_dict(),
+                issues=[],
+            )
         yield {
             "progress": 1.0,
             "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}"
@@ -1188,13 +1214,14 @@ def scan_folder_generator(
                 report.cancelled = True
                 break
             result: JarResult = fut.result()
+            source_archive = _source_archive_identity(folder, _jar_path)
             replay_logs(result.logs)
             if result.cancelled:
                 report.cancelled = True
                 break
             done += 1
             for issue in result.issues:
-                report.add_issue(issue)
+                report.add_issue({**issue, "source_archive": source_archive})
             report.nested_jars += result.nested_jars
             report.skipped_nested += result.skipped_nested
             report.truncated_nested += result.truncated_nested
@@ -1206,7 +1233,7 @@ def scan_folder_generator(
                 report.jars_failed.append(result.name)
                 report.add_issue(
                     {
-                        "source_archive": result.name,
+                        "source_archive": source_archive,
                         "source_member": "",
                         "kind": "archive",
                         "status": "parse_failed",
@@ -1252,7 +1279,8 @@ def scan_folder_generator(
             options.version,
             str(folder),
             report.as_dict(),
-            issues=report.issues,
+            issues=report.issues if not report.cancelled else None,
+            replace_issues=not report.cancelled,
         )
         summary = f"🎉 掃描{state}：{found}；{counts}"
     if report.jars_failed:

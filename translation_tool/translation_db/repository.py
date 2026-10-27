@@ -745,6 +745,7 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         ]
         if not rows:
             return 0
+        before = conn.total_changes
         conn.executemany(
             "INSERT OR IGNORE INTO content_issue ("
             "scan_run_id, origin, mc_version, context, source_archive, "
@@ -752,7 +753,10 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
             ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows,
         )
-        return len(rows)
+        # ``INSERT OR IGNORE`` can discard duplicate rows inside the same
+        # manifest/snapshot.  Return the number actually inserted so callers
+        # do not report more records than the database contains.
+        return conn.total_changes - before
 
     def record_scan(
         self,
@@ -761,29 +765,36 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         stats: dict,
         *,
         issues: Sequence[dict[str, Any]] | None = None,
+        replace_issues: bool = True,
     ) -> None:
-        """記錄一次掃描與其完整內容處置（總覽頁的「最近掃描」）。"""
+        """記錄一次掃描與其內容處置（總覽頁的「最近掃描」）。
+
+        A cancelled scan still records its run statistics, but must not replace
+        a previously complete content-issue snapshot with a partial one.
+        """
         with self._tx() as conn:
             # content_issue 是目前來源的處置 snapshot；scan_run 仍保留歷史統計，
             # 但同一版本／資料夾的舊問題不能在下一次成功掃描後繼續被查到。
-            conn.execute(
-                "DELETE FROM content_issue WHERE origin='scan' "
-                "AND mc_version=? AND context=?",
-                (version, folder),
-            )
+            if replace_issues:
+                conn.execute(
+                    "DELETE FROM content_issue WHERE origin='scan' "
+                    "AND mc_version=? AND context=?",
+                    (version, folder),
+                )
             cursor = conn.execute(
                 "INSERT INTO scan_run (mc_version, folder, finished_at, stats) "
                 "VALUES (?, ?, CURRENT_TIMESTAMP, ?)",
                 (version, folder, json.dumps(stats, ensure_ascii=False)),
             )
-            self._insert_content_issues(
-                conn,
-                issues or (),
-                origin="scan",
-                version=version,
-                context=folder,
-                scan_run_id=int(cursor.lastrowid),
-            )
+            if replace_issues:
+                self._insert_content_issues(
+                    conn,
+                    issues or (),
+                    origin="scan",
+                    version=version,
+                    context=folder,
+                    scan_run_id=int(cursor.lastrowid),
+                )
 
     def record_content_issues(
         self,

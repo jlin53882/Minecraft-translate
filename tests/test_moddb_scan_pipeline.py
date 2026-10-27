@@ -211,6 +211,58 @@ def test_scan_persists_bad_archive_as_issue_without_partial_entries(db, tmp_path
     assert db.count_entries() == 0
 
 
+def test_scan_keeps_same_named_archives_as_distinct_issue_sources(db, tmp_path):
+    for folder in (tmp_path / "pack_a", tmp_path / "pack_b"):
+        folder.mkdir()
+        (folder / "broken.jar").write_bytes(b"not a zip")
+
+    report = list(
+        scan_folder_generator(db, tmp_path, ScanOptions("1.21.1"), workers=1)
+    )[-1]["report"]
+
+    assert report.jars_failed == ["broken.jar", "broken.jar"]
+    issues = db.content_issues("1.21.1", origin="scan")
+    assert {issue["source_archive"] for issue in issues} == {
+        "pack_a/broken.jar",
+        "pack_b/broken.jar",
+    }
+
+
+def test_empty_rescan_clears_previous_issue_snapshot(db, tmp_path):
+    broken = tmp_path / "broken.jar"
+    broken.write_bytes(b"not a zip")
+    list(scan_folder_generator(db, tmp_path, ScanOptions("1.21.1"), workers=1))
+    assert db.content_issues("1.21.1", origin="scan")
+
+    broken.unlink()
+    report = list(
+        scan_folder_generator(db, tmp_path, ScanOptions("1.21.1"), workers=1)
+    )[-1]["report"]
+
+    assert report.jars_total == 0
+    assert db.content_issues("1.21.1", origin="scan") == []
+
+
+def test_cancelled_rescan_preserves_previous_issue_snapshot(db, tmp_path):
+    broken = tmp_path / "broken.jar"
+    broken.write_bytes(b"not a zip")
+    list(scan_folder_generator(db, tmp_path, ScanOptions("1.21.1"), workers=1))
+    before = db.content_issues("1.21.1", origin="scan")
+
+    report = list(
+        scan_folder_generator(
+            db,
+            tmp_path,
+            ScanOptions("1.21.1"),
+            should_cancel=lambda: True,
+            workers=1,
+        )
+    )[-1]["report"]
+
+    assert report.cancelled
+    assert db.content_issues("1.21.1", origin="scan") == before
+
+
 def test_scan_content_issues_replace_previous_snapshot(db, tmp_path):
     context = str(tmp_path / "mods")
     first = [
@@ -240,6 +292,7 @@ def test_pipeline_content_issues_replace_previous_manifest_snapshot(db, tmp_path
         }
     ]
     assert db.record_content_issues("1.21.1", context, first) == 1
+    assert db.record_content_issues("1.21.1", context, first + first) == 1
     assert db.content_issues("1.21.1", origin="pipeline")[0]["status"] == "pending"
 
     assert db.record_content_issues("1.21.1", context, []) == 0
