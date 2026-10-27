@@ -681,6 +681,25 @@ class TestCleanupSingleModExtracted:
         _cleanup_single_mod_extracted(tmp_path, "ae2ct")
         assert not extracted_dir.exists(), "空的 _extracted 目錄應被刪除"
 
+    def test_cleanup_preserves_non_language_assets_in_target_mod(self, tmp_path: Path):
+        """成功清理語言檔時，不得刪除同一 mod 的 SNBT 或圖片支援檔。"""
+        extracted_dir = tmp_path / "ae2ct_extracted"
+        source = extracted_dir / "ae2ct" / "lang" / "zh_cn.json"
+        source.parent.mkdir(parents=True)
+        source.write_text('{"key": "中文"}', encoding="utf-8")
+        snbt = extracted_dir / "ae2ct" / "assets" / "guide" / "machine.snbt"
+        image = extracted_dir / "ae2ct" / "assets" / "guide" / "machine.png"
+        snbt.parent.mkdir(parents=True)
+        snbt.write_bytes(b"structure")
+        image.write_bytes(b"image")
+
+        assert _cleanup_single_mod_extracted(tmp_path, "ae2ct", [source]) is True
+
+        assert not source.exists()
+        assert snbt.read_bytes() == b"structure"
+        assert image.read_bytes() == b"image"
+        assert extracted_dir.exists()
+
     def test_stage2_cleans_deep_extracted_layout(self, tmp_path: Path):
         """深層 JAR wrapper layout 成功寫入後也要清掉中間目錄。"""
         lang_output_dir = tmp_path / "lang_output"
@@ -701,6 +720,46 @@ class TestCleanupSingleModExtracted:
 
         assert (lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json").exists()
         assert not (lang_output_dir / "aether_extracted").exists()
+
+    def test_stage2_preserves_non_language_assets_in_extracted_layout(
+        self, tmp_path: Path
+    ):
+        """Stage 2 只能清理語言檔，不得清掉同一來源的支援資產。"""
+        lang_output_dir = tmp_path / "lang_output"
+        source = (
+            lang_output_dir
+            / "aether_extracted"
+            / "packs"
+            / "classic_b173"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "zh_cn.json"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text('{"new_key": "中文"}', encoding="utf-8")
+        snbt = (
+            lang_output_dir
+            / "aether_extracted"
+            / "packs"
+            / "classic_b173"
+            / "assets"
+            / "aether"
+            / "guide"
+            / "machine.snbt"
+        )
+        image = snbt.with_name("machine.png")
+        snbt.parent.mkdir(parents=True)
+        snbt.write_bytes(b"structure")
+        image.write_bytes(b"image")
+
+        updates = list(merge_extracted_to_assets(lang_output_dir))
+
+        assert updates[-1]["error"] is False
+        assert (lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json").exists()
+        assert snbt.read_bytes() == b"structure"
+        assert image.read_bytes() == b"image"
+        assert (lang_output_dir / "aether_extracted").exists()
 
     def test_duplicate_keys_are_not_counted_as_new_and_source_is_cleaned(
         self, tmp_path: Path
@@ -904,11 +963,14 @@ class TestCleanupSingleModExtracted:
         source = tmp_path / "demo_extracted" / "demo" / "lang" / "zh_cn.json"
         source.parent.mkdir(parents=True)
         source.write_text('{"key": "中文"}', encoding="utf-8")
-        monkeypatch.setattr(
-            extracted_assets.shutil,
-            "rmtree",
-            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
-        )
+        real_unlink = Path.unlink
+
+        def fail_source_unlink(path, *args, **kwargs):
+            if path == source:
+                raise OSError("cleanup failed")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", fail_source_unlink)
 
         updates = list(merge_extracted_to_assets(tmp_path))
 
