@@ -20,6 +20,7 @@ import re
 import zipfile
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from translation_tool.utils.bounded_executor import bounded_as_completed
@@ -157,6 +158,165 @@ class _JarScanDetails:
     error: str | None = None
 
 
+@dataclass
+class _ScanAccumulator:
+    """Mutable state for one bounded outer-JAR scan."""
+
+    result: dict[str, str | None]
+    entries: list[ScannedEntry]
+    entry_indexes: dict[str, int]
+    collisions: list[str]
+    nested_jars: int = 0
+    skipped_nested: int = 0
+    truncated_nested: int = 0
+
+
+def _read_matching_member(
+    zf: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    label: str,
+    name: str,
+    jar_path: Path,
+    skipped_callback: Callable[[Path], None] | None,
+    budget: ZipReadBudget,
+) -> bytes | None:
+    """Read one matched member; an oversized member is skipped in isolation."""
+
+    try:
+        return read_limited(zf, info, budget=budget)
+    except ArchiveBudgetError:
+        raise
+    except ZipSizeError as size_err:
+        if skipped_callback:
+            skipped_callback(jar_path)
+        log_warning(f"[jar_browser] 略過過大檔案 {label}!{name}: {size_err!r}")
+        return None
+
+
+def _record_scan_member(
+    accumulator: _ScanAccumulator,
+    *,
+    name: str,
+    text: str | None,
+    data: bytes,
+    info: zipfile.ZipInfo,
+    archive_chain: tuple[str, ...],
+    label: str,
+) -> None:
+    """Record a matched member, merging duplicate language maps safely."""
+
+    if name in accumulator.result:
+        merged, merged_ok = _merge_language_sources(
+            name,
+            accumulator.result[name],
+            text,
+        )
+        first_index = accumulator.entry_indexes[name]
+        first_entry = accumulator.entries[first_index]
+        note = (
+            f"{label}!{name} 與既有語言來源合併，重複 key 保留先出現的來源"
+            if merged_ok
+            else f"{label}!{name} 與既有來源的 canonical 路徑衝突，保留先出現的來源"
+        )
+        accumulator.collisions.append(note)
+        log_warning("[jar_browser] %s", note)
+        if merged_ok:
+            accumulator.result[name] = merged
+            accumulator.entries[first_index] = ScannedEntry(
+                logical_path=first_entry.logical_path,
+                member_chain=first_entry.member_chain,
+                content=merged,
+                size=first_entry.size + info.file_size,
+            )
+        return
+
+    accumulator.result[name] = text
+    accumulator.entry_indexes[name] = len(accumulator.entries)
+    accumulator.entries.append(
+        ScannedEntry(
+            logical_path=name,
+            member_chain=archive_chain + (name,),
+            content=text,
+            size=info.file_size,
+            # Nested binary resources are already bounded and cached so
+            # extraction does not have to recharge the outer archive budget.
+            raw_data=data if archive_chain and text is None else None,
+        )
+    )
+
+
+def _visit_scan_archive(
+    accumulator: _ScanAccumulator,
+    patterns: list[str | re.Pattern[str]],
+    jar_path: Path,
+    skipped_callback: Callable[[Path], None] | None,
+    zf: zipfile.ZipFile,
+    label: str,
+    depth: int,
+    archive_chain: tuple[str, ...],
+    archive_budget: ZipReadBudget,
+) -> bool:
+    """Visit one archive level and record only matching members."""
+
+    if depth:
+        accumulator.nested_jars += 1
+    for info in zf.infolist():
+        raise_if_cancelled()
+        if info.is_dir():
+            continue
+        name = info.filename.replace("\\", "/")
+        if not any(re.search(pattern, name) for pattern in patterns):
+            continue
+        data = _read_matching_member(
+            zf,
+            info,
+            label=label,
+            name=name,
+            jar_path=jar_path,
+            skipped_callback=skipped_callback,
+            budget=archive_budget,
+        )
+        if data is None:
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+        _record_scan_member(
+            accumulator,
+            name=name,
+            text=text,
+            data=data,
+            info=info,
+            archive_chain=archive_chain,
+            label=label,
+        )
+    return True
+
+
+def _on_scan_nested_error(
+    accumulator: _ScanAccumulator, label: str, name: str, exc: BaseException
+) -> None:
+    accumulator.skipped_nested += 1
+    log_warning("[jar_browser] 略過內嵌 jar %s：%s", label, exc)
+
+
+def _on_scan_nested_truncated(
+    accumulator: _ScanAccumulator, label: str, depth: int
+) -> None:
+    accumulator.truncated_nested += 1
+    log_warning(
+        "[jar_browser] nested archive depth limit reached at %s (depth=%s)",
+        label,
+        depth,
+    )
+
+
+def _reuse_scan_budget(budget: ZipReadBudget, _label: str) -> ZipReadBudget:
+    return budget
+
+
 def _merge_cross_jar_language_entries(
     results: ScanResults,
     jar_files: Iterable[Path],
@@ -261,102 +421,9 @@ def _scan_single_jar_detailed(
     scan_nested: bool = True,
 ) -> _JarScanDetails:
     """掃描單一 outer JAR，並保留巢狀資源的來源鏈供抽取階段使用。"""
-    result: dict[str, str | None] = {}
-    entries: list[ScannedEntry] = []
-    entry_indexes: dict[str, int] = {}
-    collisions: list[str] = []
-    nested_jars = 0
-    skipped_nested = 0
-    truncated_nested = 0
     if budget is None:
         budget = ZipReadBudget(label=jar_path.name)
-
-    def visit_archive(
-        zf: zipfile.ZipFile,
-        label: str,
-        depth: int,
-        archive_chain: tuple[str, ...],
-        archive_budget: ZipReadBudget,
-    ) -> bool:
-        nonlocal nested_jars
-        if depth:
-            nested_jars += 1
-        for info in zf.infolist():
-            raise_if_cancelled()
-            if info.is_dir():
-                continue
-            name = info.filename.replace("\\", "/")
-            if not any(re.search(pattern, name) for pattern in patterns):
-                continue
-            try:
-                data = read_limited(zf, info, budget=archive_budget)
-            except ArchiveBudgetError:
-                raise
-            except ZipSizeError as size_err:
-                if skipped_callback:
-                    skipped_callback(jar_path)
-                log_warning(f"[jar_browser] 略過過大檔案 {label}!{name}: {size_err!r}")
-                continue
-            try:
-                text = data.decode("utf-8")
-            except UnicodeDecodeError:
-                text = None
-
-            if name in result:
-                merged, merged_ok = _merge_language_sources(
-                    name,
-                    result[name],
-                    text,
-                )
-                if merged_ok:
-                    result[name] = merged
-                    first_index = entry_indexes[name]
-                    first_entry = entries[first_index]
-                    entries[first_index] = ScannedEntry(
-                        logical_path=first_entry.logical_path,
-                        member_chain=first_entry.member_chain,
-                        content=merged,
-                        size=first_entry.size + info.file_size,
-                    )
-                    collisions.append(
-                        f"{label}!{name} 與既有語言來源合併，重複 key 保留先出現的來源"
-                    )
-                    log_warning("[jar_browser] %s", collisions[-1])
-                else:
-                    collisions.append(
-                        f"{label}!{name} 與既有來源的 canonical 路徑衝突，保留先出現的來源"
-                    )
-                    log_warning("[jar_browser] %s", collisions[-1])
-                continue
-            result[name] = text
-            entry_indexes[name] = len(entries)
-            entries.append(
-                ScannedEntry(
-                    logical_path=name,
-                    member_chain=archive_chain + (name,),
-                    content=text,
-                    size=info.file_size,
-                    # Nested binary resources are already bounded and cached so
-                    # extraction does not have to recharge the outer archive
-                    # budget merely to reopen the same inner JAR.
-                    raw_data=data if archive_chain and text is None else None,
-                )
-            )
-        return True
-
-    def on_nested_error(label: str, name: str, exc: BaseException) -> None:
-        nonlocal skipped_nested
-        skipped_nested += 1
-        log_warning("[jar_browser] 略過內嵌 jar %s：%s", label, exc)
-
-    def on_nested_truncated(label: str, depth: int) -> None:
-        nonlocal truncated_nested
-        truncated_nested += 1
-        log_warning(
-            "[jar_browser] nested archive depth limit reached at %s (depth=%s)",
-            label,
-            depth,
-        )
+    accumulator = _ScanAccumulator({}, [], {}, [])
 
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
@@ -364,17 +431,27 @@ def _scan_single_jar_detailed(
                 zf,
                 jar_path.name,
                 budget,
-                visit_archive,
-                budget_factory=lambda _label: budget,
-                on_nested_error=on_nested_error,
-                on_nested_truncated=on_nested_truncated,
+                partial(
+                    _visit_scan_archive,
+                    accumulator,
+                    patterns,
+                    jar_path,
+                    skipped_callback,
+                ),
+                budget_factory=partial(_reuse_scan_budget, budget),
+                on_nested_error=partial(_on_scan_nested_error, accumulator),
+                on_nested_truncated=partial(
+                    _on_scan_nested_truncated, accumulator
+                ),
                 scan_nested=scan_nested,
             )
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
         if failure_callback:
             failure_callback(jar_path)
-        return _JarScanDetails({}, [], collision_notes=collisions, error="BadZipFile")
+        return _JarScanDetails(
+            {}, [], collision_notes=accumulator.collisions, error="BadZipFile"
+        )
     except ArchiveBudgetError as budget_err:
         # 整包累計超限：捨棄部分結果，避免後續把不完整的 JAR 當成成功。
         log_error(
@@ -384,20 +461,22 @@ def _scan_single_jar_detailed(
         if failure_callback:
             failure_callback(jar_path)
         return _JarScanDetails(
-            {}, [], collision_notes=collisions, error=str(budget_err)
+            {}, [], collision_notes=accumulator.collisions, error=str(budget_err)
         )
     except Exception as ex:  # noqa: BLE001
         log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex!r}")
         if failure_callback:
             failure_callback(jar_path)
-        return _JarScanDetails({}, [], collision_notes=collisions, error=str(ex))
+        return _JarScanDetails(
+            {}, [], collision_notes=accumulator.collisions, error=str(ex)
+        )
     return _JarScanDetails(
-        result,
-        entries,
-        nested_jars=nested_jars,
-        skipped_nested=skipped_nested,
-        truncated_nested=truncated_nested,
-        collision_notes=collisions,
+        accumulator.result,
+        accumulator.entries,
+        nested_jars=accumulator.nested_jars,
+        skipped_nested=accumulator.skipped_nested,
+        truncated_nested=accumulator.truncated_nested,
+        collision_notes=accumulator.collisions,
     )
 
 

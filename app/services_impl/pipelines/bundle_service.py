@@ -622,6 +622,123 @@ def _materialize_bundle_plan(
     return copied, merged, written, unchanged, expected
 
 
+def _safe_staging_path(staging_root: Path, rel: str) -> Path | None:
+    candidate = (staging_root / Path(rel)).resolve()
+    try:
+        candidate.relative_to(staging_root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _mark_staging_expected(expected: set[str], staging_root: Path, path: Path) -> None:
+    expected.add(os.path.normcase(os.path.relpath(path, staging_root)))
+
+
+def _localized_guide_paths(staging_root: Path) -> list[Path]:
+    content_root = staging_root / _STAGING_CONTENT_ROOT
+    if not content_root.is_dir():
+        return []
+    return sorted(
+        path
+        for path in content_root.rglob("*")
+        if path.is_file()
+        and path.suffix.casefold() in GUIDE_SUFFIXES
+        and any(
+            part.casefold() in {"_zh_tw", "zh_tw"}
+            for part in path.relative_to(staging_root).parts
+        )
+    )
+
+
+def _guide_source_paths(guide_rel: Path, locale_index: int) -> list[Path]:
+    parts = list(guide_rel.parts)
+    source_paths = [
+        Path(*parts[:locale_index], *parts[locale_index + 1 :])
+    ]
+    for source_locale in ("_en_us", "en_us", "_zh_cn", "zh_cn"):
+        candidate_parts = list(parts)
+        candidate_parts[locale_index] = source_locale
+        candidate = Path(*candidate_parts)
+        if candidate not in source_paths:
+            source_paths.append(candidate)
+    return source_paths
+
+
+def _find_guide_support_source(
+    staging_root: Path, source_paths: list[Path], reference: str
+) -> Path | None:
+    for source_rel in source_paths:
+        source_target = resolve_guide_support_reference(
+            source_rel.as_posix(), reference
+        )
+        if source_target is None:
+            continue
+        candidate = _safe_staging_path(staging_root, source_target)
+        if candidate is not None and candidate.is_file():
+            return candidate
+    return None
+
+
+def _add_guide_warning(
+    warnings: list[str], warning_keys: set[str], key: str, message: str
+) -> None:
+    if key in warning_keys:
+        return
+    warning_keys.add(key)
+    warnings.append(message)
+
+
+def _mirror_guide_reference(
+    staging_root: Path,
+    expected: set[str],
+    guide_rel: Path,
+    source_paths: list[Path],
+    reference: str,
+    warnings: list[str],
+    warning_keys: set[str],
+) -> tuple[int, int, int]:
+    """Mirror one guide reference and return (mirrored, unchanged, missing)."""
+
+    target_rel = resolve_guide_support_reference(guide_rel.as_posix(), reference)
+    if target_rel is None:
+        return 0, 0, 0
+    target_path = _safe_staging_path(staging_root, target_rel)
+    if target_path is None:
+        return 0, 0, 0
+
+    source_path = _find_guide_support_source(staging_root, source_paths, reference)
+    if source_path is None:
+        if target_path.is_file():
+            _mark_staging_expected(expected, staging_root, target_path)
+            return 0, 1, 0
+        _add_guide_warning(
+            warnings,
+            warning_keys,
+            f"{guide_rel.as_posix()}|{reference}",
+            f"找不到指南引用的支援檔：{guide_rel.as_posix()} -> {reference}",
+        )
+        return 0, 0, 1
+
+    _mark_staging_expected(expected, staging_root, target_path)
+    if target_path == source_path or (
+        target_path.is_file()
+        and _same_file_content(str(source_path), str(target_path))
+    ):
+        return 0, 1, 0
+    if target_path.is_file():
+        _add_guide_warning(
+            warnings,
+            warning_keys,
+            f"collision:{target_rel}",
+            f"指南支援檔路徑衝突，保留既有輸出：{target_rel}",
+        )
+        return 0, 0, 0
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, target_path)
+    return 1, 0, 0
+
+
 def _mirror_localized_guide_support(
     staging_dir: str, expected: set[str]
 ) -> tuple[int, int, int, list[str]]:
@@ -636,115 +753,37 @@ def _mirror_localized_guide_support(
     """
 
     staging_root = Path(staging_dir).resolve()
-    content_root = staging_root / _STAGING_CONTENT_ROOT
-    if not content_root.is_dir():
+    if not (staging_root / _STAGING_CONTENT_ROOT).is_dir():
         return 0, 0, 0, []
 
     mirrored = unchanged = missing = 0
     warnings: list[str] = []
     warning_keys: set[str] = set()
-
-    def safe_path(rel: str) -> Path | None:
-        candidate = (staging_root / Path(rel)).resolve()
-        try:
-            candidate.relative_to(staging_root)
-        except ValueError:
-            return None
-        return candidate
-
-    def expected_key(path: Path) -> None:
-        expected.add(os.path.normcase(os.path.relpath(path, staging_root)))
-
-    localized_guides = [
-        path
-        for path in content_root.rglob("*")
-        if path.is_file()
-        and path.suffix.casefold() in GUIDE_SUFFIXES
-        and any(part.casefold() == "_zh_tw" or part.casefold() == "zh_tw"
-                for part in path.relative_to(staging_root).parts)
-    ]
-
-    for guide_path in sorted(localized_guides):
+    for guide_path in _localized_guide_paths(staging_root):
         guide_rel = guide_path.relative_to(staging_root)
-        guide_parts = list(guide_rel.parts)
         locale_index = next(
             index
-            for index, part in enumerate(guide_parts)
+            for index, part in enumerate(guide_rel.parts)
             if part.casefold() in {"_zh_tw", "zh_tw"}
         )
-        neutral_rel = Path(
-            *guide_parts[:locale_index], *guide_parts[locale_index + 1 :]
-        )
-        source_rels = [neutral_rel]
-        for source_locale in ("_en_us", "en_us", "_zh_cn", "zh_cn"):
-            source_rel = Path(*guide_parts)
-            source_parts = list(source_rel.parts)
-            source_parts[locale_index] = source_locale
-            candidate = Path(*source_parts)
-            if candidate not in source_rels:
-                source_rels.append(candidate)
-
+        source_paths = _guide_source_paths(guide_rel, locale_index)
         try:
             text = guide_path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError):
             continue
-
         for reference in guide_support_references(text):
-            target_rel = resolve_guide_support_reference(
-                guide_rel.as_posix(), reference
+            counts = _mirror_guide_reference(
+                staging_root,
+                expected,
+                guide_rel,
+                source_paths,
+                reference,
+                warnings,
+                warning_keys,
             )
-            if target_rel is None:
-                continue
-            target_path = safe_path(target_rel)
-            if target_path is None:
-                continue
-
-            source_path: Path | None = None
-            for source_rel in source_rels:
-                source_target_rel = resolve_guide_support_reference(
-                    source_rel.as_posix(), reference
-                )
-                if source_target_rel is None:
-                    continue
-                candidate = safe_path(source_target_rel)
-                if candidate is not None and candidate.is_file():
-                    source_path = candidate
-                    break
-
-            if source_path is None:
-                if target_path.is_file():
-                    expected_key(target_path)
-                    continue
-                missing += 1
-                warning_key = f"{guide_rel.as_posix()}|{reference}"
-                if warning_key not in warning_keys:
-                    warning_keys.add(warning_key)
-                    warnings.append(
-                        "找不到指南引用的支援檔："
-                        f"{guide_rel.as_posix()} -> {reference}"
-                    )
-                continue
-
-            expected_key(target_path)
-            if target_path == source_path:
-                unchanged += 1
-                continue
-            if target_path.is_file():
-                if _same_file_content(str(source_path), str(target_path)):
-                    unchanged += 1
-                else:
-                    warning_key = f"collision:{target_rel}"
-                    if warning_key not in warning_keys:
-                        warning_keys.add(warning_key)
-                        warnings.append(
-                            "指南支援檔路徑衝突，保留既有輸出："
-                            f"{target_rel}"
-                        )
-                continue
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source_path, target_path)
-            mirrored += 1
-
+            mirrored += counts[0]
+            unchanged += counts[1]
+            missing += counts[2]
     return mirrored, unchanged, missing, warnings
 
 
