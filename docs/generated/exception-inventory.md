@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **365** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **369** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 327 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 331 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -153,6 +153,10 @@
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._launch` | BLE001 | 已記錄／回報 | restore dialog when worker cannot launch |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
 | `app/views/moddb/entry_selection.py:select_entry.load` | BLE001 | 已記錄／回報 | worker 邊界：回報錯誤並恢復編輯區 |

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,26 @@ class FileIdentity:
         if self.kind == KIND_LANG:
             return item_path
         return f"{self.file_key}#{item_path}"
+
+
+def canonical_entry_key(kind: str, key: str) -> str:
+    """回傳可比較的條目鍵值，不改寫資料庫裡保留的原始鍵值。
+
+    舊版指南掃描曾把來源語系目錄留在資料庫鍵值，例如
+    ``bestiary/_en_us/alchemy_0.txt#0``；新版掃描會移除語系目錄。只對
+    指南／Patchouli 的檔案鍵套用既有 ``split_locale`` 規則，語言鍵與未知語系
+    不做猜測，避免把不同內容誤合併。
+    """
+    value = unicodedata.normalize("NFC", str(key).replace("\\", "/"))
+    if kind not in {KIND_GUIDE, KIND_PATCHOULI}:
+        return value
+    file_key, separator, item_path = value.partition("#")
+    if not separator:
+        return value
+    locale = split_locale(file_key.split("/"))
+    if locale.other:
+        return value
+    return f"{locale.neutral}#{item_path}"
 
 
 def patchouli_dir_names() -> tuple[str, ...]:

@@ -31,6 +31,7 @@ from app.ui.dialogs import (
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
+from app.views.moddb.duplicate_cleanup_dialog import DuplicateCleanupDialog
 from app.views.moddb.formatting import format_count, kind_label
 from app.views.moddb.operation_summaries import (
     cleanup_category_lines,
@@ -85,6 +86,12 @@ class CleanupDialog:
         )
         self.open_folder_btn = kit.button(
             "開啟檢查檔資料夾", "ghost", size="sm", on_click=self._open_folder
+        )
+        self.duplicate_btn = kit.button(
+            "掃描重複鍵",
+            "secondary",
+            icon=ft.Icons.MERGE_TYPE,
+            on_click=self._open_duplicate_cleanup,
         )
         self.overview_title = ft.Text(
             "", size=13, weight=ft.FontWeight.BOLD, color=C.TEXT
@@ -166,6 +173,7 @@ class CleanupDialog:
                                 self.export_btn,
                                 self.export_translated_btn,
                                 self.open_folder_btn,
+                                self.duplicate_btn,
                             ],
                             spacing=10,
                             wrap=True,
@@ -434,6 +442,13 @@ class CleanupDialog:
                 f"無法開啟資料夾：{svc.cleanup_report_dir(db)}",
                 C.GOLD,
             )
+
+    def _open_duplicate_cleanup(self, _e=None) -> None:
+        db, version = self.get_db(), self.version_dd.value
+        if db is None or not version:
+            show_snack(self.page, "請先選擇版本。", C.GOLD)
+            return
+        DuplicateCleanupDialog(self.page, self.get_db, version, self.on_complete).open()
 
     # ------------------------------------------------------------------ 預覽與刪除
     def _selected_report(self) -> Path | None:

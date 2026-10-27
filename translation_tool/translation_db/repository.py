@@ -39,6 +39,7 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
+from translation_tool.translation_db.duplicate_cleanup import DuplicateCleanupMixin
 from translation_tool.translation_db.history_retention import (
     HISTORY_RETENTION_LIMIT,
     prune_history_for_entries,
@@ -226,7 +227,9 @@ def _like(text: str) -> str:
 _REVERSIBLE_SORTS = {"default": "default_desc", "default_desc": "default"}
 
 
-class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
+class TranslationDB(
+    DuplicateCleanupMixin, SmartReviewMixin, BulkReviewMixin, CleanupMixin
+):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 
     # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。

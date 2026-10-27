@@ -8,6 +8,14 @@ from translation_tool.translation_db.cleanup import (
     CleanupReport,
     RevertResult,
 )
+from translation_tool.translation_db.duplicate_cleanup import (
+    DuplicateEntry,
+    DuplicateGroup,
+    DuplicateMergeBatchInfo,
+    DuplicateMergePlan,
+    DuplicatePlanChanged,
+    DuplicateRevertResult,
+)
 from translation_tool.translation_db.models import (
     AITranslationReplaceResult,
     BatchReplaceChange,
@@ -81,6 +89,12 @@ __all__ = [
     "CleanupPlanChanged",
     "CleanupReport",
     "DbSettings",
+    "DuplicateEntry",
+    "DuplicateGroup",
+    "DuplicateMergeBatchInfo",
+    "DuplicateMergePlan",
+    "DuplicatePlanChanged",
+    "DuplicateRevertResult",
     "EffectiveSourceStat",
     "EntryDetail",
     "EntryFilter",

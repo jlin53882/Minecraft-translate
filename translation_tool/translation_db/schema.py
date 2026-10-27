@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -190,6 +190,19 @@ CREATE TABLE IF NOT EXISTS cleanup_batch (
     reverted_at TEXT
 );
 
+-- 路徑別名合併批次：與「刪除垃圾條目」分開保存，允許安全預覽與復原。
+CREATE TABLE IF NOT EXISTS duplicate_merge_batch (
+    id          TEXT PRIMARY KEY,
+    mc_version  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    group_count INTEGER NOT NULL,
+    entry_count INTEGER NOT NULL,
+    payload     TEXT NOT NULL,
+    reverted_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_duplicate_merge_batch_created
+    ON duplicate_merge_batch (created_at DESC);
+
 CREATE TABLE IF NOT EXISTS scan_run (
     id          INTEGER PRIMARY KEY,
     mc_version  TEXT NOT NULL,
@@ -336,6 +349,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_history_projection_migration(conn)
     if next_version == 11:
         return _backup_before_content_issue_migration(conn)
+    if next_version == 12:
+        return _backup_before_duplicate_merge_migration(conn)
     return None
 
 
@@ -379,6 +394,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_history_projection_state_v10(conn)
     elif next_version == 11:
         _migrate_content_issue_v11(conn)
+    elif next_version == 12:
+        _migrate_duplicate_merge_v12(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -880,6 +897,33 @@ def _migrate_content_issue_v11(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if exists is None:
         raise sqlite3.DatabaseError("schema v11 缺少 content_issue 表")
+
+
+def _backup_before_duplicate_merge_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在加入可復原的重複合併批次前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v12-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_duplicate_merge_v12(conn: sqlite3.Connection) -> None:
+    """確認 v12 的路徑別名合併批次表已安裝。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type='table' AND name='duplicate_merge_batch'"
+    ).fetchone()
+    if exists is None:
+        raise sqlite3.DatabaseError("schema v12 缺少 duplicate_merge_batch 表")
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
