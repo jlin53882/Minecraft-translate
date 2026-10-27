@@ -433,7 +433,11 @@ class TestMergeExtractedToAssets:
             ext_dir = lang_output_dir / ext_name / "ae2ct" / "lang"
             ext_dir.mkdir(parents=True)
             (ext_dir / "en_us.json").write_text(
-                json.dumps({"k": "v"}, ensure_ascii=False), encoding="utf-8"
+                json.dumps(
+                    {"k": "v" if ext_name.endswith("v1") else "v2"},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
             )
 
         # 用 captureWarnings() 抓 stdlib logging.WARNING
@@ -452,9 +456,19 @@ class TestMergeExtractedToAssets:
         finally:
             logging.getLogger().removeHandler(handler)
 
-        # 應有 log "多個來源"
+        first_source = (
+            lang_output_dir / "ae2ct_extracted_v1" / "ae2ct" / "lang" / "en_us.json"
+        ).as_posix()
+
+        # 應有 log "多個來源"，且包含完整來源路徑，避免同名檔案無法定位。
         assert any("多個來源" in msg and "採第一個" in msg for msg in captured), (
             f"沒有 multi-source warning,實際 log: {captured}"
+        )
+        assert any(first_source in msg for msg in captured), (
+            f"multi-source warning 沒有完整來源路徑,實際 log: {captured}"
+        )
+        assert any("衝突" in msg and first_source in msg for msg in captured), (
+            f"conflict warning 沒有完整來源路徑,實際 log: {captured}"
         )
 
     def test_session_receives_progress_updates(self, tmp_path: Path):

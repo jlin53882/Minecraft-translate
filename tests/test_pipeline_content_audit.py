@@ -125,6 +125,34 @@ def test_bundle_manifest_does_not_duplicate_classified_pending_across_sources(
     assert pending[0]["reason"] == "english_text_queued_for_guide_translation"
 
 
+def test_bundle_manifest_does_not_depend_on_common_root_order(tmp_path: Path):
+    """重排 custom bundle sources 不應重複記錄已分類的輸出。"""
+    merge_output = tmp_path / "merge"
+    source = merge_output / "other_output/assets/demo/guide.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("# English guide", encoding="utf-8")
+    content_manifest = tmp_path / "translation_content_manifest.json"
+    classify_other_output_assets(
+        merge_output,
+        content_manifest_path=content_manifest,
+    )
+
+    build_bundle_staging(
+        [str(merge_output / "patchouli_output"), str(merge_output)],
+        str(tmp_path / "staging"),
+        content_manifest_path=str(content_manifest),
+    )
+
+    manifest = json.loads(
+        (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
+    )
+    pending = [
+        record for record in manifest["records"] if record["status"] == "pending"
+    ]
+    assert len(pending) == 1
+    assert pending[0]["reason"] == "english_text_queued_for_guide_translation"
+
+
 def test_pipeline_manifest_path_is_shared_by_merge_and_bundle(tmp_path: Path):
     """正式輸出層級不同時，打包仍要讀到合併階段的 provenance manifest。"""
     output_root = tmp_path / "output"

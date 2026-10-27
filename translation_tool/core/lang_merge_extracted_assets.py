@@ -207,7 +207,7 @@ def _merge_stage2_sources(
     if len(ordered_paths) > 1:
         log_warning(
             f"[MergeExt→Assets] {modid}/{lang_code}: 多個來源 {len(ordered_paths)} 個,"
-            f" 採第一個 ({ordered_paths[0].name})"
+            f" 採第一個 ({ordered_paths[0].as_posix()})"
         )
     for source_path in ordered_paths:
         data = _load_stage2_lang_source(source_path)
@@ -216,7 +216,7 @@ def _merge_stage2_sources(
                 if merged[key] != value:
                     log_warning(
                         f"[MergeExt→Assets] {modid}/{lang_code}: key {key!r} "
-                        f"衝突，保留先出現來源 {first_sources[key].name}"
+                        f"衝突，保留先出現來源 {first_sources[key].as_posix()}"
                     )
                 continue
             first_sources[key] = source_path

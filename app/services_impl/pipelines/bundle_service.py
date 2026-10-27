@@ -337,7 +337,7 @@ def _append_unplanned_asset_records(
 
 def _append_unplanned_source_records(
     sources: list[str],
-    bundle_root: str,
+    classified_output_roots: list[str],
     emitted_sources: set[str],
     classified_sources: set[str],
     classified_outputs: set[str],
@@ -345,7 +345,21 @@ def _append_unplanned_source_records(
 ) -> None:
     """記錄所有來源中未進入 Resource Pack plan 的檔案。"""
     source_roots = {os.path.normcase(os.path.abspath(source)) for source in sources}
-    bundle_root = os.path.abspath(bundle_root)
+    # A classified output is stored relative to the common merge root.  Do not
+    # assume that the common root is sources[0]: custom callers may reorder the
+    # roots, while the formal pipeline still includes the common root itself.
+    output_roots = [os.path.abspath(root) for root in classified_output_roots]
+
+    def is_classified_output(source_path: str) -> bool:
+        for output_root in output_roots:
+            try:
+                rel_from_root = os.path.relpath(source_path, output_root)
+            except ValueError:
+                continue
+            if os.path.normcase(rel_from_root) in classified_outputs:
+                return True
+        return False
+
     for source in sources:
         if not os.path.isdir(source):
             continue
@@ -375,14 +389,7 @@ def _append_unplanned_source_records(
                 if normalized in emitted_sources or normalized in classified_sources:
                     continue
                 rel = os.path.join(rel_root, name)
-                try:
-                    rel_from_bundle = os.path.relpath(source_path, bundle_root)
-                except ValueError:
-                    rel_from_bundle = ""
-                if (
-                    rel_from_bundle
-                    and os.path.normcase(rel_from_bundle) in classified_outputs
-                ):
+                if is_classified_output(source_path):
                     continue
                 status, reason = _manifest_status_for_non_asset(top_lower, rel)
                 records.append(_manifest_record(source_path, "", status, reason))
@@ -407,7 +414,7 @@ def _write_output_manifest(
     emitted_sources = _append_plan_manifest_records(plan, classified_outputs, records)
     _append_unplanned_source_records(
         sources,
-        sources[0] if sources else staging_dir,
+        sources or [staging_dir],
         emitted_sources,
         classified_sources,
         classified_outputs,
