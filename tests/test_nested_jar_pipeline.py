@@ -767,9 +767,7 @@ def test_cross_jar_language_sources_union_keys_without_overwriting(
         max_workers=2,
         jar_files=[first, second],
     )
-    merged = json.loads(
-        scanned[first]["assets/create_dragons_plus/lang/en_us.json"]
-    )
+    merged = json.loads(scanned[first]["assets/create_dragons_plus/lang/en_us.json"])
     assert merged == {
         "create_dragons_plus.fragile_fluid_tank.effect.infused_dragon_breath": (
             "Infused Dragon Breath"
@@ -793,11 +791,14 @@ def test_cross_jar_language_sources_union_keys_without_overwriting(
         "extracted": 1,
         "skipped": 0,
     }
-    assert json.loads(
-        (output / "assets/create_dragons_plus/lang/en_us.json").read_text(
-            encoding="utf-8"
+    assert (
+        json.loads(
+            (output / "assets/create_dragons_plus/lang/en_us.json").read_text(
+                encoding="utf-8"
+            )
         )
-    ) == merged
+        == merged
+    )
 
     db_result = scan_jar(second, ScanOptions("1.21.1"), dir_names=())
     assert any(

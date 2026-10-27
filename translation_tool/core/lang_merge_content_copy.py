@@ -38,6 +38,7 @@ from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismat
 _patchouli_eff_cache: dict = {}
 _patchouli_eff_cache_lock = threading.RLock()
 
+
 def _is_guide_support_path(normalized_path: str) -> bool:
     """Whether a non-text member is an explicitly supported guide asset."""
 
@@ -54,8 +55,7 @@ def _is_guide_support_path(normalized_path: str) -> bool:
     if suffix not in GUIDE_SUPPORT_SUFFIXES:
         return False
     return any(
-        is_guide_directory_segment(part)
-        for part in parts[assets_index + 2 : -1]
+        is_guide_directory_segment(part) for part in parts[assets_index + 2 : -1]
     )
 
 

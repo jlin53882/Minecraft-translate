@@ -653,9 +653,7 @@ def _localized_guide_paths(staging_root: Path) -> list[Path]:
 
 def _guide_source_paths(guide_rel: Path, locale_index: int) -> list[Path]:
     parts = list(guide_rel.parts)
-    source_paths = [
-        Path(*parts[:locale_index], *parts[locale_index + 1 :])
-    ]
+    source_paths = [Path(*parts[:locale_index], *parts[locale_index + 1 :])]
     for source_locale in ("_en_us", "en_us", "_zh_cn", "zh_cn"):
         candidate_parts = list(parts)
         candidate_parts[locale_index] = source_locale
@@ -722,8 +720,7 @@ def _mirror_guide_reference(
 
     _mark_staging_expected(expected, staging_root, target_path)
     if target_path == source_path or (
-        target_path.is_file()
-        and _same_file_content(str(source_path), str(target_path))
+        target_path.is_file() and _same_file_content(str(source_path), str(target_path))
     ):
         return 0, 1, 0
     if target_path.is_file():

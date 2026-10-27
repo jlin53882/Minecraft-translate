@@ -75,9 +75,7 @@ def test_bundle_mirrors_guide_support_for_localized_relative_references(tmp_path
     image.parent.mkdir(parents=True)
     image.write_bytes(b"image")
 
-    translated_guide = (
-        translated / "assets/demo/ae2guide/_zh_tw/ae2-mechanics/page.md"
-    )
+    translated_guide = translated / "assets/demo/ae2guide/_zh_tw/ae2-mechanics/page.md"
     translated_guide.parent.mkdir(parents=True)
     translated_guide.write_text(
         '<ImportStructure src="../assets/blocks/export_bus.snbt" />\n'

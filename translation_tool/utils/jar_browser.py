@@ -440,9 +440,7 @@ def _scan_single_jar_detailed(
                 ),
                 budget_factory=partial(_reuse_scan_budget, budget),
                 on_nested_error=partial(_on_scan_nested_error, accumulator),
-                on_nested_truncated=partial(
-                    _on_scan_nested_truncated, accumulator
-                ),
+                on_nested_truncated=partial(_on_scan_nested_truncated, accumulator),
                 scan_nested=scan_nested,
             )
     except zipfile.BadZipFile:
