@@ -11,12 +11,17 @@
 from __future__ import annotations
 
 import os
+import posixpath
+import re
 import zipfile
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.guide_translation import (
+    GUIDE_SUPPORT_SUFFIXES,
+)
 from translation_tool.core.jar_processor_extract import (
     _normalize_jar_base_name,
     build_collision_safe_output_names,
@@ -41,6 +46,58 @@ from translation_tool.utils.zip_safety import (
 )
 
 _BOOK_KINDS = (KIND_PATCHOULI, KIND_GUIDE)
+_GUIDE_TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt", ".json", ".lang"})
+_IMPORT_STRUCTURE_RE = re.compile(
+    r"<ImportStructure\b[^>]*\bsrc\s*=\s*(['\"])(.*?)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+_SRC_ATTRIBUTE_RE = re.compile(
+    r"<[^>]+\bsrc\s*=\s*(['\"])(.*?)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
+
+
+def _guide_support_references(text: str) -> set[str]:
+    """Return relative binary/structure references used by a guide document.
+
+    Guide prose is translated separately.  Only explicitly referenced
+    non-text assets are copied here; copying every file under ``ae2guide``
+    would bypass the normal JSON/Markdown extraction and could emit English
+    content as if it were translated.
+    """
+
+    references: set[str] = set()
+    candidates: list[tuple[str, bool]] = [
+        (match.group(2), True) for match in _IMPORT_STRUCTURE_RE.finditer(text)
+    ]
+    candidates.extend(
+        (match.group(2), False) for match in _SRC_ATTRIBUTE_RE.finditer(text)
+    )
+    candidates.extend((match.group(1), False) for match in _MARKDOWN_IMAGE_RE.finditer(text))
+
+    for raw, structure_reference in candidates:
+        reference = raw.strip().split("#", 1)[0].split("?", 1)[0]
+        if not reference or reference.startswith(("/", "#")):
+            continue
+        lowered = reference.casefold()
+        if lowered.startswith(("http:", "https:", "data:", "minecraft:")):
+            continue
+        suffix = posixpath.splitext(reference)[1].casefold()
+        if suffix in GUIDE_SUPPORT_SUFFIXES or (
+            structure_reference and suffix not in _GUIDE_TEXT_SUFFIXES
+        ):
+            references.add(reference)
+    return references
+
+
+def _resolve_archive_reference(member: str, reference: str) -> str | None:
+    """Resolve one guide-relative archive member without leaving the archive."""
+
+    target = posixpath.normpath(posixpath.join(posixpath.dirname(member), reference))
+    if target in (".", "..") or target.startswith(("../", "/")):
+        return None
+    return target
 
 
 @dataclass
@@ -195,6 +252,38 @@ def _extract_sniffed_from_jar_detailed(
     written = skipped = 0
     jar_base = _normalize_jar_base_name(jar_path)
     jar_identity = Path(jar_path).resolve()
+    archive_members: dict[int, set[str]] = {}
+    copied_support: set[tuple[int, str]] = set()
+
+    def copy_referenced_support(
+        zf: zipfile.ZipFile,
+        member: str,
+        data: bytes,
+        archive_chain: tuple[str, ...],
+        budget: ZipReadBudget,
+    ) -> None:
+        """Copy support files explicitly referenced by a selected guide."""
+
+        try:
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            return
+        members = archive_members.setdefault(id(zf), set(zf.namelist()))
+        for reference in _guide_support_references(text):
+            target_member = _resolve_archive_reference(member, reference)
+            if target_member is None or target_member not in members:
+                continue
+            identity = (id(zf), target_member)
+            if identity in copied_support:
+                continue
+            copied_support.add(identity)
+            write_member(
+                zf,
+                target_member,
+                "guide_support",
+                archive_chain,
+                budget,
+            )
 
     def write_member(
         zf: zipfile.ZipFile,
@@ -238,15 +327,23 @@ def _extract_sniffed_from_jar_detailed(
             log_error("略過過大檔案 %s: %s", member, exc)
             skipped += 1
             return
+        already_present = False
         if os.path.exists(target):
             with open(target, "rb") as existing:
                 if get_file_hash(existing.read()) == get_file_hash(data):
                     skipped += 1
-                    return
-        os.makedirs(os.path.dirname(target), exist_ok=True)
-        with open(target, "wb") as out:
-            out.write(data)
-        written += 1
+                    already_present = True
+        if not already_present:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as out:
+                out.write(data)
+            written += 1
+
+        # A guide can load structures/images that are not themselves
+        # translatable.  Extract them after the guide has been read, including
+        # when the guide file already exists from another extraction phase.
+        if _kind == KIND_GUIDE:
+            copy_referenced_support(zf, member, data, archive_chain, budget)
 
     status = _walk_sniffed_members(jar_path, claimed, langs, write_member)
     return written, skipped, status

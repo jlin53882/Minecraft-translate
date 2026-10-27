@@ -10,6 +10,7 @@ import os
 import re
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ..utils.cache_registry import register_cache
@@ -23,6 +24,7 @@ from .book_formats import (
     map_neutral_pages_values,
     resolve_book_format,
 )
+from .guide_translation import GUIDE_DIR_NAMES, GUIDE_SUPPORT_SUFFIXES
 from .neutral_book_json import load_neutral_book_json
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
@@ -32,6 +34,26 @@ from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismat
 # ----------------------------------------------------------------------
 _patchouli_eff_cache: dict = {}
 _patchouli_eff_cache_lock = threading.RLock()
+
+def _is_guide_support_path(normalized_path: str) -> bool:
+    """Whether a non-text member is an explicitly supported guide asset."""
+
+    parts = normalized_path.replace("\\", "/").split("/")
+    try:
+        assets_index = next(
+            index for index, part in enumerate(parts) if part.casefold() == "assets"
+        )
+    except StopIteration:
+        return False
+    if len(parts) <= assets_index + 3:
+        return False
+    suffix = os.path.splitext(parts[-1])[1].casefold()
+    if suffix not in GUIDE_SUPPORT_SUFFIXES:
+        return False
+    return any(
+        part.casefold() in GUIDE_DIR_NAMES or part.casefold().endswith("guide")
+        for part in parts[assets_index + 2 : -1]
+    )
 
 
 def clear_patchouli_eff_cache() -> None:
@@ -282,7 +304,13 @@ def detect_content_wrapper_prefix(all_names: list[str] | None) -> str | None:
     }
     if len(tops) == 1:
         candidate = next(iter(tops)) + "/"
-        if all_names[0].startswith(candidate):
+        # ``assets/`` and ``data/`` are Minecraft roots, not an artificial
+        # archive wrapper.  Stripping either one changes the resource-pack
+        # contract and makes content land under ``other_output/demo`` instead
+        # of ``other_output/assets/demo`` (or bypasses classification).
+        if candidate.casefold() not in {"assets/", "data/"} and all_names[0].startswith(
+            candidate
+        ):
             return candidate
     return None
 
@@ -336,10 +364,17 @@ def process_content_or_copy_file_impl(
     log_debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
     log_debug(f"[Patchouli DEBUG] normalized_path(初始) = {normalized_path}")
 
-    assets_idx = normalized_path.find("/assets/")
+    # Select the first path-segment ``assets/``.  Guide support files can
+    # legitimately live below ``ae2guide/assets/``; using a plain substring
+    # search would select that nested directory and discard the module and
+    # guide identity before classification.
+    assets_match = re.search(r"(?:^|/)assets/", normalized_path)
+    assets_idx = assets_match.start() if assets_match else -1
     log_debug(f"[Patchouli DEBUG] assets_idx = {assets_idx}")
     if assets_idx != -1:
-        normalized_path = normalized_path[assets_idx + 1 :]
+        normalized_path = normalized_path[
+            assets_idx if normalized_path[assets_idx] == "a" else assets_idx + 1 :
+        ]
     log_debug(f"[Patchouli DEBUG] normalized_path(裁切後) = {normalized_path}")
 
     # --- v3 新增：zh_cn skip logic (在 early return 判斷之前，先做全局開關檢查) ---
@@ -373,6 +408,33 @@ def process_content_or_copy_file_impl(
             and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower)
         ):
             return {"success": True, "log": None}
+
+    # Guide documents may reference structures and images stored beside the
+    # Markdown.  They are runtime assets, not translatable prose, so keep them
+    # on the canonical Resource Pack path instead of sending them to
+    # ``other_output`` (which is intentionally excluded from the ZIP).
+    if _is_guide_support_path(normalized_path):
+        source_path = _strip(input_path.replace("\\", "/"))
+        assets_index = source_path.casefold().find("assets/")
+        if assets_index < 0:
+            return {"success": True, "log": None}
+        resource_path = source_path[assets_index:]
+        try:
+            target = safe_join(output_dir, resource_path)
+        except UnsafePathError:
+            log_error(f"拒絕不安全路徑: {resource_path}")
+            return {"success": False, "error": True}
+        raw = reader.read_bytes(input_path)
+        should_write = True
+        if os.path.isfile(target):
+            try:
+                should_write = Path(target).read_bytes() != raw
+            except OSError:
+                should_write = True
+        if should_write:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            write_bytes_atomic_fn(target, raw)
+        return {"success": True, "log": f"[指南附屬資源] 保留原檔: {target}"}
 
     custom_format = resolve_book_format(normalized_path)
     custom_resource_path = normalized_path
