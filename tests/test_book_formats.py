@@ -6,6 +6,8 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from translation_tool.core import lang_merge_content, lang_merger
 from translation_tool.core.book_formats import (
     FORMAT_ETERNAL_STARLIGHT,
@@ -16,6 +18,7 @@ from translation_tool.core.book_formats import (
     resolve_book_format,
 )
 from translation_tool.core.guide_translation import find_guide_files
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.translatable_extractor import extract_translatables
 from translation_tool.translation_db.scanner import ScanOptions, scan_jar
 
@@ -57,6 +60,25 @@ def test_neutral_pages_profile_extracts_safe_fields_only():
     }
     assert all("image_path" not in item["path"] for item in items)
     assert all("target_page" not in item["path"] for item in items)
+
+
+def test_neutral_book_recovery_normalizes_only_confirmed_trailing_tail():
+    path = "assets/herbsandharvest/books/chapters/grapes.json"
+    malformed = json.dumps(_neutral_document(), ensure_ascii=False) + "\n]}\n"
+
+    loaded = load_neutral_book_json(malformed, path)
+
+    assert loaded.repaired
+    assert loaded.repaired_tail == "]}"
+    assert loaded.data == _neutral_document()
+
+
+def test_neutral_book_recovery_rejects_unrelated_trailing_json():
+    path = "assets/herbsandharvest/books/chapters/herbs.json"
+    malformed = json.dumps(_neutral_document()) + "\n{}"
+
+    with pytest.raises(json.JSONDecodeError):
+        load_neutral_book_json(malformed, path)
 
 
 def test_neutral_pages_identity_matches_existing_database_contract(tmp_path: Path):

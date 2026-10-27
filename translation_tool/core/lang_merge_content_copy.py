@@ -23,6 +23,7 @@ from .book_formats import (
     map_neutral_pages_values,
     resolve_book_format,
 )
+from .neutral_book_json import load_neutral_book_json
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
 # ----------------------------------------------------------------------
@@ -385,7 +386,8 @@ def process_content_or_copy_file_impl(
         if os.path.splitext(input_path)[1].lower() == ".json":
             text = reader.read_text(input_path)
             try:
-                source_data = json_module.loads(text)
+                load_result = load_neutral_book_json(text, normalized_path)
+                source_data = load_result.data
             except Exception as exc:  # noqa: BLE001 - invalid source is quarantined, never rewritten
                 quarantine_copy_fn(
                     reader=reader,
@@ -418,7 +420,20 @@ def process_content_or_copy_file_impl(
                 should_write = True
         if should_write:
             write_bytes_atomic_fn(target, output_bytes)
-        return {"success": True, "log": f"[自訂書籍] 保留格式並輸出: {target}"}
+        repair_note = (
+            "；已移除已確認的多餘尾端 `]}` 並重新序列化"
+            if load_result.repaired
+            else ""
+        )
+        if load_result.repaired:
+            log_warning(
+                "[自訂書籍] %s 含已確認的多餘尾端 `]}`，已安全正規化輸出",
+                input_path,
+            )
+        return {
+            "success": True,
+            "log": f"[自訂書籍] 保留格式並輸出: {target}{repair_note}",
+        }
 
     if custom_format.name in {
         FORMAT_ETERNAL_STARLIGHT,

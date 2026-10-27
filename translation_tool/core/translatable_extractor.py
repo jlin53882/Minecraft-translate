@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
@@ -20,6 +19,7 @@ from translation_tool.core.book_formats import (
 from translation_tool.core.lm_config_rules import (
     is_value_translatable,
 )
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.patchouli_semantics import (
     PatchouliContext,
     patchouli_translatable_items,
@@ -91,7 +91,9 @@ def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
     try:
         if path.stat().st_size > _MAX_SNIFF_BYTES:
             return False
-        data = json.loads(path.read_bytes())
+        data = load_neutral_book_json(
+            path.read_text(encoding="utf-8-sig"), "/".join(parts)
+        ).data
     except (OSError, ValueError) as exc:
         if is_neutral_pages_candidate("/".join(parts)):
             log_warning("略過無法解析的自訂書籍 JSON：%s（%s）", path, exc)
@@ -118,7 +120,9 @@ def find_lang_json(root: Path):
     # 會看到不同的候選集合。
     paths = [
         *root.rglob("assets/*/lang/*.json"),
+        *root.rglob("assets/*/lang/*.lang"),
         *root.rglob("data/*/lang/*.json"),
+        *root.rglob("data/*/lang/*.lang"),
     ]
     return sorted(set(paths), key=lambda path: path.as_posix().lower())
 
