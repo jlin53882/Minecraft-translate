@@ -207,6 +207,34 @@ def test_nested_content_sniff_is_shared_by_preview_and_extraction(tmp_path: Path
     assert (pipeline_output / "nested-sniff_extracted" / member).is_file()
 
 
+def test_sniffed_guide_referenced_support_assets_are_extracted(tmp_path: Path):
+    """指南引用的結構與圖片必須跟著指南進入 canonical assets。"""
+    guide_member = "assets/demo/ae2guide/ae2-mechanics/page.md"
+    structure_member = "assets/demo/ae2guide/assets/blocks/export_bus.snbt"
+    image_member = "assets/demo/ae2guide/assets/images/network.png"
+    jar = _outer_jar(
+        tmp_path / "guide.jar",
+        direct={
+            guide_member: (
+                "# Export Bus\n\n"
+                '<ImportStructure src="../assets/blocks/export_bus.snbt" />\n\n'
+                "![Network](../assets/images/network.png)\n\n"
+                "Connect the bus to the network.\n"
+            ),
+            structure_member: "{Blocks: []}\n",
+            image_member: b"\x89PNG\r\n",
+        },
+    )
+
+    written, skipped = extract_sniffed_from_jar(
+        str(jar), str(tmp_path / "output"), lambda _name: False, {"en_us"}
+    )
+
+    assert (written, skipped) == (3, 0)
+    for member in (guide_member, structure_member, image_member):
+        assert (tmp_path / "output" / member).is_file()
+
+
 def test_nested_sniff_outputs_are_isolated_for_same_named_outer_jars(tmp_path: Path):
     """內容嗅探與名稱提取使用相同的 nested 來源隔離規則。"""
     first = _outer_jar(

@@ -28,13 +28,13 @@ def _old_mod_prefix(names):
     """修正前 _process_single_mod 內的原始邏輯 (逐字保留作為對照)。"""
     _wp = None
     if names:
-        _tops = set(
+        _tops = {
             n.replace("\\", "/").split("/")[0]
             for n in names
             if n.replace("\\", "/").split("/")[0]
-        )
+        }
         if len(_tops) == 1:
-            _candidate = list(_tops)[0]
+            _candidate = next(iter(_tops))
             if _candidate not in _STANDARD:
                 _wp = _candidate + "/"
     return _wp
@@ -44,13 +44,13 @@ def _old_content_prefix(names):
     """修正前 process_content_or_copy_file_impl 內的原始邏輯 (逐字保留作為對照)。"""
     _wp = None
     if names:
-        _tops = set(
+        _tops = {
             n.replace("\\", "/").split("/")[0]
             for n in names
             if n.replace("\\", "/").split("/")[0]
-        )
+        }
         if len(_tops) == 1:
-            _candidate = list(_tops)[0] + "/"
+            _candidate = next(iter(_tops)) + "/"
             if names[0].startswith(_candidate):
                 _wp = _candidate
     return _wp
@@ -72,7 +72,12 @@ _CASES = [
 @pytest.mark.parametrize("names", _CASES)
 def test_detect_helpers_match_original_logic(names):
     assert detect_mod_wrapper_prefix(names) == _old_mod_prefix(names)
-    assert detect_content_wrapper_prefix(names) == _old_content_prefix(names)
+    expected = _old_content_prefix(names)
+    if expected and expected.casefold() in {"assets/", "data/"}:
+        # Minecraft roots are resource/data-pack contracts, not archive
+        # wrappers, so the production helper intentionally keeps them.
+        expected = None
+    assert detect_content_wrapper_prefix(names) == expected
 
 
 def test_detect_content_wrapper_prefix_respects_caller_casing():
@@ -243,3 +248,27 @@ def test_content_copy_explicit_none_wrapper_prefix_means_no_strip(tmp_path):
     other = _run_content_copy(tmp_path, wrapper_prefix=None)
 
     assert (other / "MyPack" / "assets" / "mod0" / "models" / "m.json").exists()
+
+
+def test_guide_support_copy_stays_in_resource_pack_assets(tmp_path):
+    """指南的 SNBT／圖片等附屬檔不可被分類到排除的 other_output。"""
+    from translation_tool.core.lang_merge_content import _process_content_or_copy_file
+    from translation_tool.core.lang_merge_io import FolderReader
+
+    source = tmp_path / "in"
+    support = source / "assets/demo/ae2guide/assets/blocks/export_bus.snbt"
+    support.parent.mkdir(parents=True)
+    support.write_text("{Blocks: []}\n", encoding="utf-8")
+    output = tmp_path / "out"
+
+    result = _process_content_or_copy_file(
+        FolderReader(str(source)),
+        "assets/demo/ae2guide/assets/blocks/export_bus.snbt",
+        [],
+        str(output),
+        other_output_dir=str(output / "other_output"),
+    )
+
+    assert result.get("success")
+    assert (output / "assets/demo/ae2guide/assets/blocks/export_bus.snbt").is_file()
+    assert not (output / "other_output").exists()

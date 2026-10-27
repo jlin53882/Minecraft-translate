@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 
 from app.services_impl.pipelines.bundle_service import build_bundle_staging
-from translation_tool.core.pipeline_content_audit import classify_other_output_assets
+from translation_tool.core.pipeline_content_audit import (
+    _pending_guide_rel,
+    classify_other_output_assets,
+)
 
 
 def test_other_output_text_is_emitted_or_queued_without_silent_drop(tmp_path: Path):
@@ -30,6 +33,14 @@ def test_other_output_text_is_emitted_or_queued_without_silent_drop(tmp_path: Pa
     assert unsupported.is_file()
     assert any(
         record["reason"] == "unsupported_other_output_format" for record in records
+    )
+
+
+def test_pending_guide_uses_one_locale_root_for_relative_links():
+    relative = Path("assets/demo/ae2guide/ae2-mechanics/page.md")
+
+    assert _pending_guide_rel(relative) == Path(
+        "assets/demo/ae2guide/_en_us/ae2-mechanics/page.md"
     )
 
 
