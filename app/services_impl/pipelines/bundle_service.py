@@ -492,6 +492,7 @@ def _write_output_manifest(
     plan: dict[str, tuple[str, list[str]]],
     staging_dir: str,
     content_manifest_path: str | None = None,
+    additional_records: list[dict[str, str]] | None = None,
 ) -> str:
     """Write a file-level disposition report outside the Resource Pack ZIP."""
 
@@ -512,6 +513,18 @@ def _write_output_manifest(
         classified_outputs,
         records,
     )
+    recorded_outputs = {
+        os.path.normcase(str(record.get("output", "")).replace("/", os.sep))
+        for record in records
+        if record.get("output")
+    }
+    for record in additional_records or []:
+        output = str(record.get("output", ""))
+        output_key = os.path.normcase(output.replace("/", os.sep))
+        if not output or output_key in recorded_outputs:
+            continue
+        records.append(record)
+        recorded_outputs.add(output_key)
 
     records.sort(key=lambda item: (item["status"], item["source"].casefold()))
     counts = Counter(record["status"] for record in records)
@@ -695,34 +708,40 @@ def _mirror_guide_reference(
     reference: str,
     warnings: list[str],
     warning_keys: set[str],
-) -> tuple[int, int, int]:
+) -> tuple[int, int, int, dict[str, str] | None]:
     """Mirror one guide reference and return (mirrored, unchanged, missing)."""
 
     target_rel = resolve_guide_support_reference(guide_rel.as_posix(), reference)
     if target_rel is None:
-        return 0, 0, 0
+        return 0, 0, 0, None
     target_path = _safe_staging_path(staging_root, target_rel)
     if target_path is None:
-        return 0, 0, 0
+        return 0, 0, 0, None
 
     source_path = _find_guide_support_source(staging_root, source_paths, reference)
     if source_path is None:
         if target_path.is_file():
             _mark_staging_expected(expected, staging_root, target_path)
-            return 0, 1, 0
+            return 0, 1, 0, None
         _add_guide_warning(
             warnings,
             warning_keys,
             f"{guide_rel.as_posix()}|{reference}",
             f"找不到指南引用的支援檔：{guide_rel.as_posix()} -> {reference}",
         )
-        return 0, 0, 1
+        return 0, 0, 1, None
 
     _mark_staging_expected(expected, staging_root, target_path)
+    manifest_record = _manifest_record(
+        str(source_path),
+        str(target_rel).replace("\\", "/"),
+        "emitted",
+        "localized_guide_support",
+    )
     if target_path == source_path or (
         target_path.is_file() and _same_file_content(str(source_path), str(target_path))
     ):
-        return 0, 1, 0
+        return 0, 1, 0, manifest_record
     if target_path.is_file():
         _add_guide_warning(
             warnings,
@@ -730,15 +749,15 @@ def _mirror_guide_reference(
             f"collision:{target_rel}",
             f"指南支援檔路徑衝突，保留既有輸出：{target_rel}",
         )
-        return 0, 0, 0
+        return 0, 0, 0, None
     target_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source_path, target_path)
-    return 1, 0, 0
+    return 1, 0, 0, manifest_record
 
 
 def _mirror_localized_guide_support(
     staging_dir: str, expected: set[str]
-) -> tuple[int, int, int, list[str]]:
+) -> tuple[int, int, int, list[str], list[dict[str, str]]]:
     """Mirror explicitly referenced guide assets below each locale root.
 
     Guide translation changes the path from a neutral or ``en_us`` directory
@@ -751,11 +770,12 @@ def _mirror_localized_guide_support(
 
     staging_root = Path(staging_dir).resolve()
     if not (staging_root / _STAGING_CONTENT_ROOT).is_dir():
-        return 0, 0, 0, []
+        return 0, 0, 0, [], []
 
     mirrored = unchanged = missing = 0
     warnings: list[str] = []
     warning_keys: set[str] = set()
+    manifest_records: list[dict[str, str]] = []
     for guide_path in _localized_guide_paths(staging_root):
         guide_rel = guide_path.relative_to(staging_root)
         locale_index = next(
@@ -781,7 +801,9 @@ def _mirror_localized_guide_support(
             mirrored += counts[0]
             unchanged += counts[1]
             missing += counts[2]
-    return mirrored, unchanged, missing, warnings
+            if counts[3] is not None:
+                manifest_records.append(counts[3])
+    return mirrored, unchanged, missing, warnings, manifest_records
 
 
 def build_bundle_staging(
@@ -817,9 +839,6 @@ def build_bundle_staging(
 
     plan, canon = _collect_bundle_sources(sources)
     excluded, warnings = _collect_excluded_outputs(sources)
-    manifest_path = _write_output_manifest(
-        sources, plan, staging_dir, content_manifest_path
-    )
     _normalize_staging_case(staging_dir, canon)
 
     copied, merged, written, unchanged, expected = _materialize_bundle_plan(
@@ -830,8 +849,16 @@ def build_bundle_staging(
         guide_support_unchanged,
         guide_support_missing,
         guide_support_warnings,
+        guide_support_manifest_records,
     ) = _mirror_localized_guide_support(staging_dir, expected)
     warnings.extend(guide_support_warnings)
+    manifest_path = _write_output_manifest(
+        sources,
+        plan,
+        staging_dir,
+        content_manifest_path,
+        guide_support_manifest_records,
+    )
     removed = _prune_staging(staging_dir, expected)
     return {
         "copied": copied,

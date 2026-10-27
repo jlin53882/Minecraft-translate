@@ -87,6 +87,7 @@ def test_apply_rejects_a_completed_plan_after_database_switch(tmp_path, monkeypa
 
         assert second._one("SELECT COUNT(*) FROM entry")[0] == before
         assert dialog._plan is None
+        assert dialog.apply_btn.disabled is True
         assert shown == ["資料庫已變動，請重新預覽。"]
     finally:
         first.close()

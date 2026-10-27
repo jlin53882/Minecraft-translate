@@ -181,7 +181,12 @@ class DuplicateCleanupDialog:
         db = self.get_db()
         if db is not previewed_db:
             self._plan = None
+            self._set_busy(False)
+            self.apply_btn.content = "確認合併"
+            self.summary.value = "資料庫已變動，請重新預覽。"
+            self.summary.color = C.GOLD
             show_snack(self.page, "資料庫已變動，請重新預覽。", C.GOLD)
+            self._safe_update()
             return
         generation = self._generation
         self._set_busy(True, "合併重複鍵中…")

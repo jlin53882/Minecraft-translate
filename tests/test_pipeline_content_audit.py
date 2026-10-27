@@ -136,6 +136,26 @@ def test_bundle_mirrors_guide_support_for_localized_relative_references(tmp_path
     assert (mirrored_root / "images/network.png").read_bytes() == b"image"
     assert stats["guide_support_mirrored"] == 2
     assert stats["guide_support_missing"] == 0
+    manifest = json.loads(
+        (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
+    )
+    support_records = {
+        record["output"]: record
+        for record in manifest["records"]
+        if record["reason"] == "localized_guide_support"
+    }
+    assert (
+        support_records["assets/demo/ae2guide/_zh_tw/assets/blocks/export_bus.snbt"][
+            "status"
+        ]
+        == "emitted"
+    )
+    assert (
+        support_records["assets/demo/ae2guide/_zh_tw/assets/images/network.png"][
+            "status"
+        ]
+        == "emitted"
+    )
 
 
 def test_bundle_mirrors_support_for_default_guideme_root(tmp_path: Path):
