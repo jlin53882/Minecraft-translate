@@ -10,11 +10,15 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import traceback
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
+from translation_tool.core.book_formats import is_neutral_pages_candidate
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
     bundle_outputs_generator,
@@ -27,12 +31,71 @@ from translation_tool.core.pack_mcmeta import (
     pack_description_text,  # noqa: F401 - View 由此取用
 )
 from translation_tool.core.patchouli_compat import find_old_nbt_item_files
+from translation_tool.translation_db import open_db
 
 logger = logging.getLogger(__name__)
 
 # 打包暫存區只收資源包內容；translation_map.json 等報表檔不應進入資源包
 _STAGING_CONTENT_ROOT = "assets"
 _STAGING_SKIP_DIRS = {"待翻譯", "待翻譯整理需翻譯"}
+
+
+@dataclass(frozen=True)
+class ContentIssueSyncResult:
+    """流水線 manifest 同步到 Mod DB 的結果；失敗不應掩蓋已產生的 manifest。"""
+
+    count: int = 0
+    warning: str | None = None
+
+
+def sync_pipeline_content_manifest(
+    *,
+    settings,
+    version: str,
+    context: str,
+    manifest_path: str,
+) -> ContentIssueSyncResult:
+    """將 manifest 的非 emitted 紀錄寫入資料庫共用的內容處置表。"""
+    try:
+        payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        records = payload.get("records", [])
+        if not isinstance(records, list):
+            raise TypeError("translation output manifest records 必須是陣列")
+        issues = [
+            record
+            for record in records
+            if isinstance(record, dict) and record.get("status") != "emitted"
+        ]
+    except (OSError, UnicodeError, TypeError, ValueError) as exc:
+        return ContentIssueSyncResult(
+            warning=f"⚠️ 無法把輸出 manifest 同步到 Mod DB：{exc}"
+        )
+
+    db = open_db(settings, create=False, sync_priority=False)
+    if db is None:
+        return ContentIssueSyncResult(
+            warning=(
+                "⚠️ 已產生輸出 manifest，但目前無法開啟 Mod DB；"
+                "非 emitted 內容仍保留在 manifest，未被當成已完成。"
+            )
+        )
+    try:
+        try:
+            count = db.record_content_issues(
+                version,
+                context,
+                issues,
+                origin="pipeline",
+            )
+        except sqlite3.Error as exc:
+            return ContentIssueSyncResult(
+                warning=(
+                    f"⚠️ 輸出 manifest 已保留，但同步非 emitted 內容到 Mod DB 失敗：{exc}"
+                )
+            )
+    finally:
+        db.close()
+    return ContentIssueSyncResult(count=count)
 
 
 def _read_json_dict(path: str) -> dict | None:
@@ -212,10 +275,29 @@ def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
     return excluded, warnings
 
 
-def _manifest_status_for_non_asset(top_lower: str, rel: str) -> tuple[str, str]:
+def _pending_file_status(source_path: str, rel: str) -> tuple[str, str]:
+    """判斷待翻譯檔案是否在送入翻譯前就已經無法解析。"""
+    if not source_path.lower().endswith(".json"):
+        return "pending", "translation_pending"
+    try:
+        text = Path(source_path).read_text(encoding="utf-8-sig")
+        if is_neutral_pages_candidate(rel):
+            load_neutral_book_json(text, rel)
+        else:
+            json.loads(text)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        return "parse_failed", "json_parse_failed_before_translation"
+    return "pending", "translation_pending"
+
+
+def _manifest_status_for_non_asset(
+    top_lower: str, rel: str, source_path: str | None = None
+) -> tuple[str, str]:
     """Classify one output that is outside the accepted assets staging root."""
 
     if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        if source_path is not None:
+            return _pending_file_status(source_path, rel)
         return "pending", "translation_pending"
     if top_lower == "errordata_output":
         return "parse_failed", "quarantined_after_parse_failure"
@@ -229,6 +311,13 @@ def _manifest_status_for_non_asset(top_lower: str, rel: str) -> tuple[str, str]:
             return "excluded", "resource_pack_excludes_advancement_data"
         return "excluded", "resource_pack_excludes_data_root"
     return "excluded", "resource_pack_accepts_assets_only"
+
+
+def _manifest_status_for_asset(source_path: str, rel: str) -> tuple[str, str]:
+    """分類 assets 內的待處理檔案，辨識翻譯前就已損壞的 JSON。"""
+    if not any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        return "excluded", "not_in_bundle_plan"
+    return _pending_file_status(source_path, rel)
 
 
 def _manifest_record(
@@ -320,17 +409,13 @@ def _append_unplanned_asset_records(
         if normalized in emitted_sources or normalized in classified_sources:
             continue
         rel = os.path.join(rel_root, name)
-        status = (
-            "pending"
-            if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts)
-            else "excluded"
-        )
+        status, reason = _manifest_status_for_asset(source_path, rel)
         records.append(
             _manifest_record(
                 source_path,
                 rel.replace(os.sep, "/"),
                 status,
-                "translation_pending" if status == "pending" else "not_in_bundle_plan",
+                reason,
             )
         )
 
@@ -391,7 +476,9 @@ def _append_unplanned_source_records(
                 rel = os.path.join(rel_root, name)
                 if is_classified_output(source_path):
                     continue
-                status, reason = _manifest_status_for_non_asset(top_lower, rel)
+                status, reason = _manifest_status_for_non_asset(
+                    top_lower, rel, source_path
+                )
                 records.append(_manifest_record(source_path, "", status, reason))
 
 

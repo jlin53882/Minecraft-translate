@@ -273,6 +273,8 @@ def test_neutral_pages_merge_routes_pending_and_preserves_structure(
     )
     source.parent.mkdir(parents=True)
     source.write_text(json.dumps(_neutral_document()), encoding="utf-8")
+    binary_asset = source.parent / "cover.png"
+    binary_asset.write_bytes(b"PNG\r\n\x1a\n")
 
     monkeypatch.setattr(lang_merger, "load_config", _merge_config)
     monkeypatch.setattr(lang_merger, "load_replace_rules", lambda _path: [])
@@ -307,6 +309,15 @@ def test_neutral_pages_merge_routes_pending_and_preserves_structure(
     assert not (
         output_dir / "other_output" / "assets" / "herbsandharvest" / "books"
     ).exists()
+    assert (
+        output_dir
+        / "patchouli_output"
+        / "assets"
+        / "herbsandharvest"
+        / "books"
+        / "chapters"
+        / "cover.png"
+    ).read_bytes() == binary_asset.read_bytes()
 
 
 def test_invalid_neutral_pages_merge_is_quarantined(tmp_path: Path, monkeypatch):

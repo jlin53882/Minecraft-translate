@@ -23,6 +23,7 @@ from app.services_impl.pipelines.bundle_service import (
     build_bundle_staging,
     run_bundling_service,
     scan_staging_old_nbt_items,
+    sync_pipeline_content_manifest,
 )
 from app.services_impl.pipelines.extract_service import (
     run_book_extraction_service,
@@ -292,6 +293,29 @@ class PipelineActions:
         finally:
             session.finish()
 
+    @staticmethod
+    def _record_pipeline_content_issues(config, cfg, stats, session) -> None:
+        """把 Resource Pack manifest 的非 emitted 內容同步到 Mod DB。"""
+        snapshot = config.get("lm_db_snapshot")
+        if snapshot is None or not getattr(snapshot, "use_db", False):
+            return
+        version = str(getattr(snapshot, "version", "") or "").strip()
+        settings = getattr(snapshot, "database_settings", None)
+        manifest_path = stats.get("manifest_path") if isinstance(stats, dict) else None
+        if not version or settings is None or not manifest_path:
+            return
+
+        result = sync_pipeline_content_manifest(
+            settings=settings,
+            version=version,
+            context=str(cfg.input_dir),
+            manifest_path=str(manifest_path),
+        )
+        if result.warning:
+            session.add_log(result.warning, level="warning")
+            return
+        session.add_log(f"📚 已同步 {result.count:,} 筆非 emitted 內容處置到 Mod DB")
+
     def _step_bundle(self, config, cfg, session):
         session.start()
         try:
@@ -307,6 +331,7 @@ class PipelineActions:
             session.add_log(message)
             if stats.get("manifest_path"):
                 session.add_log(f"[系統] 輸出完整性 manifest：{stats['manifest_path']}")
+                self._record_pipeline_content_issues(config, cfg, stats, session)
             for warning in stats.get("warnings", []):
                 session.add_log(f"⚠️ {warning}", level="warning")
             if not stats.get("copied", 0) and not stats.get("merged", 0):

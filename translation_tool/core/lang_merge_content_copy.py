@@ -383,6 +383,7 @@ def process_content_or_copy_file_impl(
         # Neutral custom books have no en_us/zh_tw directory.  JSON source
         # belongs in pending so the original English is not bundled; binary
         # book assets belong in the normal patchouli output and are bundled.
+        load_result = None
         if os.path.splitext(input_path)[1].lower() == ".json":
             text = reader.read_text(input_path)
             try:
@@ -420,10 +421,9 @@ def process_content_or_copy_file_impl(
                 should_write = True
         if should_write:
             write_bytes_atomic_fn(target, output_bytes)
-        repair_note = (
-            "；已移除已確認的多餘尾端 `]}` 並重新序列化" if load_result.repaired else ""
-        )
-        if load_result.repaired:
+        repaired = bool(load_result and load_result.repaired)
+        repair_note = "；已移除已確認的多餘尾端 `]}` 並重新序列化" if repaired else ""
+        if repaired:
             log_warning(
                 "[自訂書籍] %s 含已確認的多餘尾端 `]}`，已安全正規化輸出",
                 input_path,

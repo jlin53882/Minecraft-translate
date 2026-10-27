@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -198,6 +198,32 @@ CREATE TABLE IF NOT EXISTS scan_run (
     finished_at TEXT,
     stats       TEXT NOT NULL DEFAULT '{}'
 );
+
+-- 來源內容的完整處置紀錄。有效內容進 entry；無法安全輸出的內容也必須
+-- 留下可查的 pending／parse_failed／excluded 紀錄，不能只存在 UI 日誌或被靜默丟棄。
+-- scan_run_id 為 NULL 時代表流水線 manifest 的處置紀錄。
+CREATE TABLE IF NOT EXISTS content_issue (
+    id            INTEGER PRIMARY KEY,
+    scan_run_id   INTEGER REFERENCES scan_run (id) ON DELETE CASCADE,
+    origin        TEXT NOT NULL,
+    mc_version    TEXT NOT NULL,
+    context       TEXT NOT NULL,
+    source_archive TEXT NOT NULL,
+    source_member TEXT NOT NULL DEFAULT '',
+    kind          TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    reason        TEXT NOT NULL,
+    detail        TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (
+        origin, mc_version, context, source_archive, source_member,
+        kind, status, reason
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_content_issue_context
+    ON content_issue (mc_version, context, origin, id DESC);
+CREATE INDEX IF NOT EXISTS idx_content_issue_status
+    ON content_issue (status, created_at DESC);
 """
 
 
@@ -308,6 +334,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_history_retention_migration(conn)
     if next_version == 10:
         return _backup_before_history_projection_migration(conn)
+    if next_version == 11:
+        return _backup_before_content_issue_migration(conn)
     return None
 
 
@@ -349,6 +377,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_history_retention_v9(conn)
     elif next_version == 10:
         _migrate_history_projection_state_v10(conn)
+    elif next_version == 11:
+        _migrate_content_issue_v11(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -824,6 +854,32 @@ def _migrate_history_retention_v9(conn: sqlite3.Connection) -> None:
 def _migrate_history_projection_state_v10(conn: sqlite3.Connection) -> None:
     """為已經完成 v9 的資料庫補上 JSON 投影狀態欄位。"""
     _ensure_history_projection_state_column(conn)
+
+
+def _backup_before_content_issue_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在加入來源內容處置紀錄前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v11-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_content_issue_v11(conn: sqlite3.Connection) -> None:
+    """確認 v11 的內容處置表已安裝；DDL 在 migration 前已冪等執行。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='content_issue'"
+    ).fetchone()
+    if exists is None:
+        raise sqlite3.DatabaseError("schema v11 缺少 content_issue 表")
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:

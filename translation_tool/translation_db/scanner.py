@@ -16,6 +16,7 @@ import json
 import re
 import sqlite3
 import zipfile
+from collections import Counter
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
@@ -127,6 +128,8 @@ class JarResult:
     cancelled: bool = False
     notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
     invalid_books: list[str] = field(default_factory=list)
+    # 非 entry 的來源處置；保留結構化資料，避免只能從人類日誌反推遺漏。
+    issues: list[dict[str, str]] = field(default_factory=list)
     logs: list[tuple[int, str]] = field(
         default_factory=list
     )  # 行程池 worker 收集的日誌
@@ -151,8 +154,24 @@ class ScanReport:
     partial_jars: int = 0
     items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
     stats: IngestStats = field(default_factory=IngestStats)
+    issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
     dry_run: bool = False
+
+    def add_issue(self, issue: dict[str, str]) -> None:
+        """加入一筆去重後的內容處置紀錄。"""
+        if not isinstance(issue, dict):
+            return
+        keys = ("source_archive", "source_member", "kind", "status", "reason")
+        marker = tuple(str(issue.get(key, "")) for key in keys)
+        if any(
+            tuple(str(existing.get(key, "")) for key in keys) == marker
+            for existing in self.issues
+        ):
+            return
+        self.issues.append(
+            {str(key): str(value) for key, value in issue.items() if value is not None}
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -172,6 +191,14 @@ class ScanReport:
             "en_changed": self.stats.en_changed,
             "adopted": self.stats.adopted,
             "cancelled": self.cancelled,
+            "issue_count": len(self.issues),
+            "issue_counts": dict(
+                sorted(
+                    Counter(
+                        issue.get("status", "pending") for issue in self.issues
+                    ).items()
+                )
+            ),
         }
 
 
@@ -835,10 +862,34 @@ def _scan_archive(
                     "Book sniff 讀取預算耗盡，僅保留已確認的項目："
                     f"{sniff_result.budget_error}"
                 )
+                result.issues.append(
+                    {
+                        "source_archive": label,
+                        "source_member": current_label,
+                        "kind": "content_sniff",
+                        "status": "pending",
+                        "reason": "sniff_budget_exhausted",
+                        "detail": sniff_result.budget_error,
+                    }
+                )
             for member in dict.fromkeys(sniff_diagnostics):
                 result.invalid_books.append(f"{current_label}:{member}")
                 result.notes.append(
                     f"略過無法解析的書籍 JSON：{current_label}:{member}"
+                )
+                result.issues.append(
+                    {
+                        "source_archive": label,
+                        "source_member": (
+                            member
+                            if current_label == label
+                            else f"{current_label}!{member}"
+                        ),
+                        "kind": "patchouli",
+                        "status": "parse_failed",
+                        "reason": "invalid_book_json",
+                        "detail": "書籍格式候選無法解析，未建立虛假 entry",
+                    }
                 )
             patchouli_contexts = (
                 _patchouli_contexts_for_archive(
@@ -871,10 +922,30 @@ def _scan_archive(
     def on_nested_error(child_label: str, name: str, exc: BaseException) -> None:
         result.skipped_nested += 1
         result.notes.append(f"略過內嵌 jar {child_label}：{_reason(exc)}")
+        result.issues.append(
+            {
+                "source_archive": label,
+                "source_member": child_label,
+                "kind": "nested_archive",
+                "status": "excluded",
+                "reason": "nested_archive_read_failed",
+                "detail": _reason(exc),
+            }
+        )
 
     def on_nested_truncated(child_label: str, depth: int) -> None:
         result.truncated_nested += 1
         result.notes.append(f"內嵌 jar 深度超過上限（depth={depth}）：{child_label}")
+        result.issues.append(
+            {
+                "source_archive": label,
+                "source_member": child_label,
+                "kind": "nested_archive",
+                "status": "excluded",
+                "reason": "nested_archive_depth_limit",
+                "detail": f"depth={depth}",
+            }
+        )
 
     root_budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
     try:
@@ -1122,6 +1193,8 @@ def scan_folder_generator(
                 report.cancelled = True
                 break
             done += 1
+            for issue in result.issues:
+                report.add_issue(issue)
             report.nested_jars += result.nested_jars
             report.skipped_nested += result.skipped_nested
             report.truncated_nested += result.truncated_nested
@@ -1131,6 +1204,16 @@ def scan_folder_generator(
                 result.error
             ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
                 report.jars_failed.append(result.name)
+                report.add_issue(
+                    {
+                        "source_archive": result.name,
+                        "source_member": "",
+                        "kind": "archive",
+                        "status": "parse_failed",
+                        "reason": "archive_read_failed",
+                        "detail": result.error,
+                    }
+                )
                 yield _progress(
                     done,
                     jars,
@@ -1165,7 +1248,12 @@ def scan_folder_generator(
         state = (
             "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
         )
-        db.record_scan(options.version, str(folder), report.as_dict())
+        db.record_scan(
+            options.version,
+            str(folder),
+            report.as_dict(),
+            issues=report.issues,
+        )
         summary = f"🎉 掃描{state}：{found}；{counts}"
     if report.jars_failed:
         summary += (

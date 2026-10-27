@@ -177,6 +177,29 @@ class TestEquivalenceWithFullRebuild:
         assert not (staging / "data").exists()
         assert not (staging / "other_output").exists()
 
+    def test_pending_invalid_json_is_parse_failed_in_output_manifest(self, tmp_path):
+        source = tmp_path / "source"
+        _put(
+            source
+            / "patchouli_output"
+            / "待翻譯"
+            / "assets"
+            / "demo"
+            / "books"
+            / "chapter.json",
+            '{"pages": [}',
+        )
+
+        stats = build_bundle_staging([str(source)], str(tmp_path / "staging"))
+        manifest = json.loads(Path(stats["manifest_path"]).read_text("utf-8"))
+
+        assert any(
+            record["status"] == "parse_failed"
+            and record["reason"] == "json_parse_failed_before_translation"
+            for record in manifest["records"]
+        )
+        assert not list((tmp_path / "staging").rglob("chapter.json"))
+
 
 class TestIncrementalBehaviour:
     def test_second_run_with_same_sources_writes_nothing(

@@ -697,14 +697,165 @@ class TranslationDB(SmartReviewMixin, BulkReviewMixin, CleanupMixin):
         """掃描預覽用的分類目標：只讀這個資料庫，分類規則與 :meth:`ingest_many` 相同。"""
         return PreviewIngestTarget(lambda sql, params: self._q(sql, params), version)
 
-    def record_scan(self, version: str, folder: str, stats: dict) -> None:
-        """記錄一次掃描（總覽頁的「最近掃描」）。"""
+    @staticmethod
+    def _content_issue_row(
+        issue: dict[str, Any],
+        *,
+        origin: str,
+        version: str,
+        context: str,
+        scan_run_id: int | None,
+    ) -> tuple:
+        """把掃描／流水線的處置資料正規化成資料庫列。"""
+        return (
+            scan_run_id,
+            origin,
+            version,
+            context,
+            str(issue.get("source_archive") or issue.get("source") or ""),
+            str(issue.get("source_member") or issue.get("relative_path") or ""),
+            str(issue.get("kind") or "content"),
+            str(issue.get("status") or "pending"),
+            str(issue.get("reason") or "unclassified_content"),
+            str(issue.get("detail") or issue.get("output") or ""),
+        )
+
+    @classmethod
+    def _insert_content_issues(
+        cls,
+        conn: sqlite3.Connection,
+        issues: Sequence[dict[str, Any]],
+        *,
+        origin: str,
+        version: str,
+        context: str,
+        scan_run_id: int | None,
+    ) -> int:
+        """在目前交易內寫入處置紀錄，回傳實際提供的紀錄數。"""
+        rows = [
+            cls._content_issue_row(
+                issue,
+                origin=origin,
+                version=version,
+                context=context,
+                scan_run_id=scan_run_id,
+            )
+            for issue in issues
+            if isinstance(issue, dict)
+        ]
+        if not rows:
+            return 0
+        conn.executemany(
+            "INSERT OR IGNORE INTO content_issue ("
+            "scan_run_id, origin, mc_version, context, source_archive, "
+            "source_member, kind, status, reason, detail"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        return len(rows)
+
+    def record_scan(
+        self,
+        version: str,
+        folder: str,
+        stats: dict,
+        *,
+        issues: Sequence[dict[str, Any]] | None = None,
+    ) -> None:
+        """記錄一次掃描與其完整內容處置（總覽頁的「最近掃描」）。"""
         with self._tx() as conn:
+            # content_issue 是目前來源的處置 snapshot；scan_run 仍保留歷史統計，
+            # 但同一版本／資料夾的舊問題不能在下一次成功掃描後繼續被查到。
             conn.execute(
+                "DELETE FROM content_issue WHERE origin='scan' "
+                "AND mc_version=? AND context=?",
+                (version, folder),
+            )
+            cursor = conn.execute(
                 "INSERT INTO scan_run (mc_version, folder, finished_at, stats) "
                 "VALUES (?, ?, CURRENT_TIMESTAMP, ?)",
                 (version, folder, json.dumps(stats, ensure_ascii=False)),
             )
+            self._insert_content_issues(
+                conn,
+                issues or (),
+                origin="scan",
+                version=version,
+                context=folder,
+                scan_run_id=int(cursor.lastrowid),
+            )
+
+    def record_content_issues(
+        self,
+        version: str,
+        context: str,
+        issues: Sequence[dict[str, Any]],
+        *,
+        origin: str = "pipeline",
+    ) -> int:
+        """保存非 entry 內容的處置結果，讓流水線與掃描共用同一個查詢面。"""
+        with self._tx() as conn:
+            # 同一個流水線 context 代表目前這次輸出；移除舊 snapshot，避免
+            # 修復後仍把已不存在的 pending／parse_failed 誤報成目前問題。
+            conn.execute(
+                "DELETE FROM content_issue WHERE origin=? AND mc_version=? AND context=?",
+                (origin, version, context),
+            )
+            return self._insert_content_issues(
+                conn,
+                issues,
+                origin=origin,
+                version=version,
+                context=context,
+                scan_run_id=None,
+            )
+
+    def content_issues(
+        self,
+        version: str | None = None,
+        *,
+        origin: str | None = None,
+        context: str | None = None,
+        statuses: Sequence[str] | None = None,
+        limit: int = 500,
+    ) -> list[dict[str, Any]]:
+        """查詢掃描／流水線留下的非 entry 內容處置紀錄。"""
+        conditions: list[str] = []
+        params: list[Any] = []
+        if version is not None:
+            conditions.append("mc_version=?")
+            params.append(version)
+        if origin is not None:
+            conditions.append("origin=?")
+            params.append(origin)
+        if context is not None:
+            conditions.append("context=?")
+            params.append(context)
+        if statuses:
+            marks = ",".join("?" for _ in statuses)
+            conditions.append(f"status IN ({marks})")
+            params.extend(statuses)
+        where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(max(1, int(limit)))
+        rows = self._q(
+            "SELECT origin, mc_version, context, source_archive, source_member, "
+            "kind, status, reason, detail, created_at "
+            f"FROM content_issue{where} ORDER BY id DESC LIMIT ?",
+            params,
+        )
+        keys = (
+            "origin",
+            "mc_version",
+            "context",
+            "source_archive",
+            "source_member",
+            "kind",
+            "status",
+            "reason",
+            "detail",
+            "created_at",
+        )
+        return [dict(zip(keys, row, strict=True)) for row in rows]
 
     def last_scans(self, limit: int = 5) -> list[dict]:
         rows = self._q(
