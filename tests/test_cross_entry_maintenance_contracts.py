@@ -192,9 +192,7 @@ def test_same_jar_fixture_is_consistent_across_db_preview_extraction_and_lm(
         for kind, mod_id, key in db_identities
     )
     assert any(
-        kind == KIND_GUIDE
-        and mod_id == "nested"
-        and key.startswith("books/guide.md#")
+        kind == KIND_GUIDE and mod_id == "nested" and key.startswith("books/guide.md#")
         for kind, mod_id, key in db_identities
     )
 
@@ -236,15 +234,12 @@ def test_same_jar_fixture_is_consistent_across_db_preview_extraction_and_lm(
     actual_sources = {
         _relative_source(path, extracted)
         for path in extracted.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in {".json", ".md", ".txt"}
+        if path.is_file() and path.suffix.lower() in {".json", ".md", ".txt"}
     }
     assert expected_sources <= actual_sources
 
     files, lm_items = _last_extraction_batch(extracted)
-    lm_sources = {
-        _relative_source(item["file"], extracted) for item in lm_items
-    }
+    lm_sources = {_relative_source(item["file"], extracted) for item in lm_items}
     assert expected_sources <= lm_sources
     assert {str(path.relative_to(extracted).as_posix()) for path in files} >= {
         source for source in expected_sources if not source.startswith("assets/nested/")
@@ -311,9 +306,7 @@ def test_book_and_markdown_fixture_preserves_block_identity_between_db_and_lm(
 
     # JSON 書籍也必須至少由兩邊辨識到相同的來源與可翻譯文字；指南的精確
     # block ordinal 則由上面的 db_ident 等值比較固定下來。
-    db_book_texts = {
-        item.en_us for item in db_items if item.kind == KIND_PATCHOULI
-    }
+    db_book_texts = {item.en_us for item in db_items if item.kind == KIND_PATCHOULI}
     lm_book_texts = {
         item["source_text"]
         for item in lm_items
@@ -337,8 +330,7 @@ def _write_output_contract_fixture(root: Path) -> None:
         "assets/demo/patchouli_books/manual/zh_tw/entries/intro.json": _standard_book(),
         "assets/demo/books/chapters/foods.json": _neutral_book("收穫手冊"),
         "data/demo/advancements/story/start.json": json.dumps(
-            {"display": {"title": {"text": "Data Pack title"}}
-            }
+            {"display": {"title": {"text": "Data Pack title"}}}
         ),
         "other_output/assets/demo/guide/pending.md": "Pending English guide\n",
         "assets/demo/pack.mcmeta": "{}",
@@ -411,9 +403,7 @@ def test_standalone_and_pipeline_bundles_share_resource_pack_data_pack_boundary(
     )
     assert "assets/demo/books/chapters/foods.json" in standalone_names
     assert all(
-        name == "pack.mcmeta"
-        or name == "pack.png"
-        or name.startswith("assets/")
+        name == "pack.mcmeta" or name == "pack.png" or name.startswith("assets/")
         for name in standalone_names
     )
     assert not any(name.startswith("data/") for name in standalone_names)
