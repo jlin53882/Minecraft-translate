@@ -22,7 +22,7 @@ from __future__ import annotations
 import json
 import os
 import re
-import shutil  # 用於 _cleanup_extracted_dirs 刪除整個 _extracted 子資料夾
+import shutil  # 用於 pending 資產搬移
 import traceback
 from collections import defaultdict
 from collections.abc import Generator, Iterable
@@ -65,6 +65,7 @@ from translation_tool.utils.text_processor import (
 _EXTRACTED_NAME_RE = re.compile(r".*_extracted(_\w+)?$")
 _LANG_FILE_SUFFIXES = frozenset({".json", ".lang"})
 _LANG_CODE_STEM = re.compile(r"^[A-Za-z_]+$")  # en_us, zh_cn, zh_tw, ru_ru ...
+_STAGE2_MERGED_LANG_CODES = frozenset({"zh_cn", "zh_tw", "en_us"})
 
 
 def _infer_modid_from_lang_file(lang_file: Path) -> str | None:
@@ -352,7 +353,7 @@ def _iter_extracted_language_sources(
             if path.is_file()
             and path.parent.name.casefold() == "lang"
             and path.suffix.casefold() in _LANG_FILE_SUFFIXES
-            and path.stem.casefold() in {"zh_cn", "zh_tw", "en_us"}
+            and path.stem in _STAGE2_MERGED_LANG_CODES
         )
 
 
@@ -362,8 +363,11 @@ def _cleanup_extracted_language_sources(
     """清理一批已成功合併的語言來源，回傳是否至少清理一個檔案。"""
     cleaned = False
     for source_path in source_paths:
+        source_path = Path(source_path)
+        if source_path.stem not in _STAGE2_MERGED_LANG_CODES:
+            continue
         cleaned = (
-            _remove_extracted_language_source(lang_output_dir, modid, Path(source_path))
+            _remove_extracted_language_source(lang_output_dir, modid, source_path)
             or cleaned
         )
     return cleaned
@@ -393,6 +397,19 @@ def _cleanup_single_mod_extracted(
         modid,
         _iter_extracted_language_sources(lang_output_dir, modid),
     )
+
+
+def _stage2_cleanup_sources(
+    lang_files: dict[str, list[Path]],
+) -> list[Path]:
+    """只回傳本次 Stage 2 實際合併的語言來源。"""
+    return [
+        source_path
+        for lang_code, source_paths in lang_files.items()
+        if lang_code in _STAGE2_MERGED_LANG_CODES
+        for source_path in source_paths
+        if "待翻譯" not in source_path.parts
+    ]
 
 
 def _safe_session_log(session, message: str) -> None:
@@ -500,11 +517,12 @@ def normalize_pending_extracted_wrappers(
 
 
 def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
-    """Stage 2 完成後,刪除 lang_output_dir 下所有 *_extracted 子資料夾。
+    """Stage 2 完成後，只移除已經變空的 ``*_extracted`` 子資料夾。
 
     目的 (2026-08-02 user 確認):
         防止下次 merge 時,_scan_extracted_lang_files 又掃到這些已合併的 ext 目錄,
-        造成重複處理或不預期的 side effect。
+        造成重複處理或不預期的 side effect。這個相容 helper 不會刪除
+        非語言資產；只要目錄內仍有 SNBT、圖片或其他檔案，就保留整棵目錄。
 
     Args:
         lang_output_dir: 通常是 `{output_dir}/lang_output`。
@@ -523,15 +541,26 @@ def _cleanup_extracted_dirs(lang_output_dir: Path, session: Any = None) -> int:
         if not _EXTRACTED_NAME_RE.match(entry.name):
             continue
         try:
-            shutil.rmtree(entry)
-            cleaned += 1
-            log_info(f"[MergeExt→Assets] 已清理 _extracted 子資料夾: {entry.name}")
-            if session is not None:
-                _safe_session_log(
-                    session, f"[清理] 已刪除 {entry.name}/ (內容已併入 assets/)"
-                )
-        except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
-            log_warning(f"[MergeExt→Assets] 無法刪除 {entry}: {exc!r}")
+            # 只移除空目錄；不可用 rmtree，否則會刪除尚未進入 assets/
+            # 的 SNBT、圖片與其他支援檔。
+            for directory in sorted(
+                (path for path in entry.rglob("*") if path.is_dir()),
+                key=lambda path: len(path.parts),
+                reverse=True,
+            ):
+                try:
+                    directory.rmdir()
+                except OSError:
+                    pass
+            entry.rmdir()
+        except OSError:
+            continue
+        cleaned += 1
+        log_info(f"[MergeExt→Assets] 已清理空的 _extracted 子資料夾: {entry.name}")
+        if session is not None:
+            _safe_session_log(
+                session, f"[清理] 已刪除空的 {entry.name}/ (內容已併入 assets/)"
+            )
     return cleaned
 
 
@@ -628,7 +657,7 @@ def _merge_extracted_to_assets(
 
             # 多 source 時保留所有不重複 key；同 key 衝突時採穩定排序後的第一個。
             for lang_code, source_paths in lang_files.items():
-                if not source_paths:
+                if not source_paths or lang_code not in _STAGE2_MERGED_LANG_CODES:
                     continue
                 try:
                     data = _merge_stage2_sources(modid, lang_code, source_paths)
@@ -702,12 +731,7 @@ def _merge_extracted_to_assets(
                     # (per-mod commit).  Use the exact scanned source paths so
                     # deep wrapper layouts are cleaned as well.
                     try:
-                        scanned_sources = [
-                            source_path
-                            for paths in lang_files.values()
-                            for source_path in paths
-                            if "待翻譯" not in source_path.parts
-                        ]
+                        scanned_sources = _stage2_cleanup_sources(lang_files)
                         _cleanup_single_mod_extracted(
                             lang_output_dir, modid, scanned_sources
                         )

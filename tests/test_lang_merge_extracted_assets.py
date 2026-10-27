@@ -738,6 +738,8 @@ class TestCleanupSingleModExtracted:
         )
         source.parent.mkdir(parents=True)
         source.write_text('{"new_key": "中文"}', encoding="utf-8")
+        other_language = source.with_name("fr_fr.json")
+        other_language.write_text('{"new_key": "français"}', encoding="utf-8")
         snbt = (
             lang_output_dir
             / "aether_extracted"
@@ -757,9 +759,26 @@ class TestCleanupSingleModExtracted:
 
         assert updates[-1]["error"] is False
         assert (lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json").exists()
+        assert other_language.read_text(encoding="utf-8") == '{"new_key": "français"}'
         assert snbt.read_bytes() == b"structure"
         assert image.read_bytes() == b"image"
         assert (lang_output_dir / "aether_extracted").exists()
+
+    def test_legacy_cleanup_only_removes_empty_extracted_dirs(self, tmp_path: Path):
+        """相容清理 helper 不得刪除仍含支援檔的 extracted 目錄。"""
+        lang_output_dir = tmp_path / "lang_output"
+        empty_extracted = lang_output_dir / "empty_extracted" / "assets"
+        empty_extracted.mkdir(parents=True)
+        retained = lang_output_dir / "retained_extracted" / "assets" / "guide.snbt"
+        retained.parent.mkdir(parents=True)
+        retained.write_bytes(b"structure")
+
+        cleaned = extracted_assets._cleanup_extracted_dirs(lang_output_dir)
+
+        assert cleaned == 1
+        assert not (lang_output_dir / "empty_extracted").exists()
+        assert retained.read_bytes() == b"structure"
+        assert (lang_output_dir / "retained_extracted").exists()
 
     def test_duplicate_keys_are_not_counted_as_new_and_source_is_cleaned(
         self, tmp_path: Path
