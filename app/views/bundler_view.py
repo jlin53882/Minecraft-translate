@@ -19,7 +19,10 @@ from app.services_impl.pack_format_service import (
     resolve_version_input,
 )
 from app.services_impl.pipelines.bundle_service import (
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
     bundle_outputs_generator,
+    coerce_extra_bundle_source,
     find_source_pack_files,
     normalize_output_zip_name,
     pack_description_text,
@@ -46,11 +49,6 @@ from app.views.pipeline.extra_bundle_sources import (
     read_extra_source_controls,
     refresh_extra_source_preview,
     set_extra_source_feedback,
-)
-from translation_tool.core.bundle_sources import (
-    RESOURCE_PACK_MODE,
-    ExtraBundleSource,
-    coerce_extra_bundle_source,
 )
 from translation_tool.utils.log_unit import log_debug, log_error
 from translation_tool.utils.ui_mirror import in_new_task, mirror_lines

@@ -12,16 +12,16 @@ from dataclasses import dataclass
 
 import flet as ft
 
-from app.ui import design, kit
-from app.ui.design import C
-from translation_tool.core.bundle_sources import (
+from app.services_impl.pipelines.bundle_service import (
     RAW_ATTACHMENT_MODE,
     RESOURCE_PACK_MODE,
     ExtraBundleSource,
     coerce_extra_bundle_source,
+    inspect_extra_bundle_sources,
     source_identity,
 )
-from translation_tool.core.output_bundler import inspect_extra_bundle_sources
+from app.ui import design, kit
+from app.ui.design import C
 
 
 def _human_size(size: int) -> str:
@@ -40,9 +40,13 @@ def _source_title(value: object) -> str:
 
 def _source_detail(value: object, report: dict | None = None) -> str:
     spec = coerce_extra_bundle_source(value)
-    mode = "原樣附加" if spec.mode == RAW_ATTACHMENT_MODE else "Resource Pack"
-    target = spec.target or "（來源名稱）"
-    detail = f"{mode}｜遞迴：{'是' if spec.recursive else '否'}｜ZIP 目標：{target}"
+    if spec.mode == RAW_ATTACHMENT_MODE:
+        detail = (
+            f"原樣附加｜遞迴：{'是' if spec.recursive else '否'}｜"
+            f"ZIP 目標：{spec.target or '（來源名稱）'}"
+        )
+    else:
+        detail = "Resource Pack｜遞迴：固定是｜ZIP 目標：assets/（固定規則）"
     if report is not None:
         if report.get("valid"):
             detail += f"｜{report.get('files', 0):,} 檔案／{_human_size(report.get('bytes', 0))}"
@@ -55,6 +59,29 @@ def _source_detail(value: object, report: dict | None = None) -> str:
     return detail
 
 
+def sync_extra_source_mode_fields(
+    mode_field: ft.Dropdown,
+    recursive_field: ft.Checkbox,
+    target_field: ft.TextField,
+    mode_hint: ft.Text | None = None,
+) -> None:
+    """讓表單狀態與兩種來源模式的實際打包契約保持一致。"""
+    is_raw_attachment = mode_field.value == RAW_ATTACHMENT_MODE
+    recursive_field.disabled = not is_raw_attachment
+    target_field.disabled = not is_raw_attachment
+
+    if is_raw_attachment:
+        hint = "原樣附加：依遞迴設定加入所有一般檔案，可指定 ZIP 內目標路徑。"
+    else:
+        # Resource Pack 的收集器固定遞迴找 assets/；表單值不能暗示可以改變
+        # 這個既有規則，讀取層也會再次正規化，避免舊設定繞過 UI。
+        recursive_field.value = True
+        target_field.value = ""
+        hint = "Resource Pack：固定遞迴收集 assets/；遞迴與 ZIP 目標僅適用原樣附加。"
+    if mode_hint is not None:
+        mode_hint.value = hint
+
+
 @dataclass
 class ExtraBundleSourceControls:
     """三個打包入口共用的控制項集合。"""
@@ -63,12 +90,76 @@ class ExtraBundleSourceControls:
     mode_field: ft.Dropdown
     recursive_field: ft.Checkbox
     target_field: ft.TextField
+    mode_hint: ft.Text
     source_list: ft.ListView
     source_list_container: ft.Container
     source_list_height: int
     preview_text: ft.Text
     feedback_text: ft.Text
     content: ft.Column
+
+
+def _build_extra_source_mode_controls() -> tuple[
+    ft.Dropdown, ft.Checkbox, ft.TextField, ft.Text
+]:
+    recursive_field = ft.Checkbox(
+        label="遞迴子資料夾（僅原樣附加）",
+        value=True,
+        on_change=lambda _event: None,
+    )
+    target_field = kit.text_field(
+        label="ZIP 內目標路徑（僅原樣附加）",
+        hint="留空使用來源名稱；例如 attachments/guide",
+        mono=True,
+        # Do not use expand=True here.  This field is placed in its own Row;
+        # Flet Web can resolve an expanded single-child Row with an unbounded
+        # vertical height, which paints the large grey area seen in the form.
+        path=True,
+        width=360,
+    )
+    mode_hint = ft.Text("", size=10, color=C.DIM, selectable=True)
+
+    def on_mode_change(event: object) -> None:
+        event_data = getattr(event, "data", None)
+        event_control = getattr(event, "control", None)
+        control_value = getattr(event_control, "value", None)
+        # Flet 版本與 Web 渲染器的事件順序不同：有的先把新 key 放在
+        # data，有的只在 control.value 更新後才可取得。只接受已知模式，
+        # 避免把選項索引或顯示文字誤當成設定值。
+        event_value = (
+            event_data
+            if event_data in (RESOURCE_PACK_MODE, RAW_ATTACHMENT_MODE)
+            else control_value
+        )
+        if event_value in (RESOURCE_PACK_MODE, RAW_ATTACHMENT_MODE):
+            mode_field.value = event_value
+        sync_extra_source_mode_fields(
+            mode_field,
+            recursive_field,
+            target_field,
+            mode_hint,
+        )
+        page = getattr(mode_field, "page", None)
+        if page is not None:
+            page.update()
+
+    mode_field = kit.dropdown(
+        label="附加模式（各來源獨立保留）",
+        value=RESOURCE_PACK_MODE,
+        width=190,
+        options=[
+            ft.dropdown.Option(RESOURCE_PACK_MODE, "Resource Pack（只收 assets/）"),
+            ft.dropdown.Option(RAW_ATTACHMENT_MODE, "原樣附加（所有檔案）"),
+        ],
+        on_select=on_mode_change,
+    )
+    sync_extra_source_mode_fields(
+        mode_field,
+        recursive_field,
+        target_field,
+        mode_hint,
+    )
+    return mode_field, recursive_field, target_field, mode_hint
 
 
 def build_extra_source_controls(
@@ -86,29 +177,8 @@ def build_extra_source_controls(
         path=True,
         expand=True,
     )
-    mode_field = kit.dropdown(
-        label="附加模式（各來源獨立保留）",
-        value=RESOURCE_PACK_MODE,
-        width=190,
-        options=[
-            ft.dropdown.Option(RESOURCE_PACK_MODE, "Resource Pack（只收 assets/）"),
-            ft.dropdown.Option(RAW_ATTACHMENT_MODE, "原樣附加（所有檔案）"),
-        ],
-    )
-    recursive_field = ft.Checkbox(
-        label="遞迴子資料夾",
-        value=True,
-        on_change=lambda _event: None,
-    )
-    target_field = kit.text_field(
-        label="ZIP 內目標路徑",
-        hint="留空使用來源名稱；例如 attachments/guide",
-        mono=True,
-        # Do not use expand=True here.  This field is placed in its own Row;
-        # Flet Web can resolve an expanded single-child Row with an unbounded
-        # vertical height, which paints the large grey area seen in the form.
-        path=True,
-        width=360,
+    mode_field, recursive_field, target_field, mode_hint = (
+        _build_extra_source_mode_controls()
     )
     # Keep the list bounded and scrollable when sources exist.  The container
     # is collapsed while empty, so Flet Web cannot turn an empty ListView into
@@ -155,6 +225,7 @@ def build_extra_source_controls(
             ),
             ft.Row([mode_field, recursive_field], wrap=True, spacing=8),
             ft.Row([target_field], spacing=8),
+            mode_hint,
             ft.Text(
                 "各來源會保留自己的模式：請先選擇狀態，再加入來源；之後切換只影響下一筆來源。",
                 size=10,
@@ -189,6 +260,7 @@ def build_extra_source_controls(
         mode_field,
         recursive_field,
         target_field,
+        mode_hint,
         source_list,
         source_list_container,
         list_height + 8,
@@ -202,11 +274,18 @@ def read_extra_source_controls(
     controls: ExtraBundleSourceControls,
 ) -> ExtraBundleSource:
     """讀取目前表單並建立來源模型。"""
+    mode = controls.mode_field.value or RESOURCE_PACK_MODE
+    if mode == RESOURCE_PACK_MODE:
+        recursive = True
+        target = ""
+    else:
+        recursive = bool(controls.recursive_field.value)
+        target = (controls.target_field.value or "").strip()
     return ExtraBundleSource(
         source=(controls.source_field.value or "").strip(),
-        mode=controls.mode_field.value or RESOURCE_PACK_MODE,
-        recursive=bool(controls.recursive_field.value),
-        target=(controls.target_field.value or "").strip(),
+        mode=mode,
+        recursive=recursive,
+        target=target,
     )
 
 

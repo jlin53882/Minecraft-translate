@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import zipfile
+from types import SimpleNamespace
 
 import flet as ft
 import pytest
 
 from app.views.pipeline.extra_bundle_sources import (
     build_extra_source_controls,
+    read_extra_source_controls,
     refresh_extra_source_preview,
 )
 from translation_tool.core.bundle_sources import (
@@ -327,3 +329,41 @@ def test_extra_source_target_field_has_bounded_web_layout():
     assert target_rows[0].wrap is False
     assert controls.target_field.expand is None
     assert controls.target_field.width == 360
+
+
+def test_resource_pack_mode_disables_raw_attachment_options():
+    controls = build_extra_source_controls(
+        on_pick=lambda _event=None: None,
+        on_manual_add=lambda _event=None: None,
+        picker_label="新增資料夾",
+    )
+
+    assert controls.mode_field.value == RESOURCE_PACK_MODE
+    assert controls.recursive_field.disabled is True
+    assert controls.target_field.disabled is True
+    assert "固定遞迴收集 assets/" in controls.mode_hint.value
+
+    controls.mode_field.on_select(
+        SimpleNamespace(
+            data=RAW_ATTACHMENT_MODE,
+            control=SimpleNamespace(value=RESOURCE_PACK_MODE),
+        )
+    )
+    controls.recursive_field.value = False
+    controls.target_field.value = "docs"
+    assert controls.recursive_field.disabled is False
+    assert controls.target_field.disabled is False
+
+    controls.mode_field.on_select(
+        SimpleNamespace(
+            data=RESOURCE_PACK_MODE,
+            control=SimpleNamespace(value=RAW_ATTACHMENT_MODE),
+        )
+    )
+    assert controls.recursive_field.disabled is True
+    assert controls.target_field.disabled is True
+    assert controls.recursive_field.value is True
+    assert controls.target_field.value == ""
+
+    controls.source_field.value = "source"
+    assert read_extra_source_controls(controls) == ExtraBundleSource("source")

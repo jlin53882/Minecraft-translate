@@ -18,6 +18,14 @@ from pathlib import Path
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.core.book_formats import is_neutral_pages_candidate
+from translation_tool.core.bundle_sources import (
+    RAW_ATTACHMENT_MODE,  # noqa: F401 - View 由此取用
+    RESOURCE_PACK_MODE,  # noqa: F401 - View 由此取用
+    ExtraBundleSource,  # noqa: F401 - View 由此取用
+    coerce_extra_bundle_source,  # noqa: F401 - View 由此取用
+    serialize_extra_bundle_sources,  # noqa: F401 - View 由此取用
+    source_identity,  # noqa: F401 - View 由此取用
+)
 from translation_tool.core.guide_translation import (
     GUIDE_SUFFIXES,
     guide_support_references,
@@ -31,6 +39,7 @@ from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
     bundle_outputs_generator,
     find_source_pack_files,  # noqa: F401 - View 由此取用
+    inspect_extra_bundle_sources,  # noqa: F401 - View 由此取用
     normalize_output_zip_name,  # noqa: F401 - View 由此取用
     preview_pack_mcmeta,  # noqa: F401 - View 由此取用
 )

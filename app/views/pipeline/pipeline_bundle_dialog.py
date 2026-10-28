@@ -15,7 +15,11 @@ import types
 import flet as ft
 
 from app.services_impl.pack_format_service import build_pack_mcmeta
-from app.services_impl.pipelines.bundle_service import normalize_output_zip_name
+from app.services_impl.pipelines.bundle_service import (
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
+    normalize_output_zip_name,
+)
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
@@ -37,7 +41,6 @@ from app.views.pipeline.pipeline_forms import (
     dialog_dimensions,
     dialog_text_field,
 )
-from translation_tool.core.bundle_sources import RESOURCE_PACK_MODE, ExtraBundleSource
 from translation_tool.utils.config_manager import (
     get_lm_translate_folder_name,
     load_config,

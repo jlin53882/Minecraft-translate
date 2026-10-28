@@ -42,6 +42,7 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
     "BUNDLER_VIEW_ARCHITECTURE.md": (
         "app/views/bundler_view.py",
         "app/views/bundler/**/*.py",
+        "app/views/pipeline/extra_bundle_sources.py",
         "app/views/pipeline/pipeline_view.py",  # 文件說明與 pipeline_view 流程的差異
     ),
     "CACHE_VIEW_ARCHITECTURE.md": (

@@ -23,7 +23,12 @@ from app.services_impl.pack_format_service import (
     resolve_max_input,
     resolve_version_input,
 )
-from app.services_impl.pipelines.bundle_service import normalize_output_zip_name
+from app.services_impl.pipelines.bundle_service import (
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
+    normalize_output_zip_name,
+    serialize_extra_bundle_sources,
+)
 from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.views.merge.merge_db_options import MergeDbOptions
@@ -57,11 +62,6 @@ from app.views.pipeline.pipeline_forms import (
 )
 from app.views.pipeline.pipeline_one_click_bundle_widgets import (
     build_step4_version_widgets,
-)
-from translation_tool.core.bundle_sources import (
-    RESOURCE_PACK_MODE,
-    ExtraBundleSource,
-    serialize_extra_bundle_sources,
 )
 from translation_tool.utils.config_manager import (
     get_lm_translate_folder_name,
