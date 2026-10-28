@@ -215,13 +215,16 @@ def select_guideme_canonical_candidates[T](
 ) -> list[T]:
     """Drop legacy GuideME aliases when a canonical candidate is available.
 
-    Candidate order is otherwise preserved, so normal later-source precedence
-    remains unchanged. This shared rule keeps staging and final ZIP generation
-    consistent without coupling their candidate data structures.
+    Candidate order is otherwise preserved when canonical candidates exist, so
+    normal later-source precedence remains unchanged. If only legacy aliases
+    exist, keep the first candidate to match the direct bundler's established
+    deterministic fallback and avoid emitting ``_1`` duplicates.
     """
 
     ordered = list(candidates)
     has_canonical = any(not is_legacy for is_legacy, _candidate in ordered)
+    if not has_canonical:
+        return [ordered[0][1]] if ordered else []
     return [
         candidate
         for is_legacy, candidate in ordered

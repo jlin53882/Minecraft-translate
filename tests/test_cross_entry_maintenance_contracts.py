@@ -505,3 +505,77 @@ def test_staging_and_standalone_bundling_share_guideme_canonical_precedence(
         and record["reason"] == "legacy_guideme_alias_replaced_by_canonical"
         for record in manifest["records"]
     )
+
+
+@pytest.mark.parametrize("first_legacy", ["root", "chapter"])
+def test_staging_and_standalone_choose_one_legacy_guideme_fallback(
+    tmp_path: Path, first_legacy: str
+):
+    """Two legacy aliases without canonical output still have one stable winner."""
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    root_alias = "assets/demo/guides/_zh_tw/demo/guide/machines/page.md"
+    chapter_alias = "assets/demo/guides/demo/guide/machines/_zh_tw/page.md"
+    ordered = (
+        [
+            (root_alias, first_root, "# first-root\n"),
+            (chapter_alias, second_root, "# second-chapter\n"),
+        ]
+        if first_legacy == "root"
+        else [
+            (chapter_alias, first_root, "# first-chapter\n"),
+            (root_alias, second_root, "# second-root\n"),
+        ]
+    )
+    for relative, root, content in ordered:
+        _write_relative_text(root, relative, content)
+    source_paths = [str(item[1]) for item in ordered]
+
+    standalone_zip = tmp_path / "standalone-legacy-only.zip"
+    standalone_updates = list(
+        bundle_outputs_generator(
+            source_paths[0],
+            str(standalone_zip),
+            description="contract",
+            pack_format=34,
+            extra_folders=source_paths[1:],
+            force_rebuild=True,
+        )
+    )
+    assert not any(update.get("error") for update in standalone_updates)
+
+    staging = tmp_path / "legacy-only-staging"
+    build_bundle_staging(source_paths, str(staging))
+    pipeline_zip = tmp_path / "pipeline-legacy-only.zip"
+    pipeline_updates = list(
+        bundle_outputs_generator(
+            str(staging),
+            str(pipeline_zip),
+            description="contract",
+            pack_format=34,
+            force_rebuild=True,
+        )
+    )
+    assert not any(update.get("error") for update in pipeline_updates)
+
+    standalone_snapshot = _zip_snapshot(standalone_zip)
+    pipeline_snapshot = _zip_snapshot(pipeline_zip)
+    assert standalone_snapshot == pipeline_snapshot
+    canonical = "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+    assert canonical in standalone_snapshot
+    assert not any(
+        name.startswith(canonical[:-3] + "_") for name in standalone_snapshot
+    )
+    expected = ordered[0][2].encode("utf-8").replace(b"\n", b"\r\n")
+    assert standalone_snapshot[canonical] == expected
+
+    manifest = json.loads(
+        (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
+    )
+    assert (
+        sum(
+            record["reason"] == "legacy_guideme_alias_replaced_by_canonical"
+            for record in manifest["records"]
+        )
+        == 1
+    )
