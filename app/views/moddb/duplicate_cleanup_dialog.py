@@ -190,12 +190,27 @@ class DuplicateCleanupDialog:
             except Exception as exc:  # noqa: BLE001 - worker boundary reports UI error
                 error = exc
                 log_exception("重複鍵清理範圍選單載入失敗")
-            self._post(self._apply_scope_options, seq, version, result, error)
+            self._post(
+                self._apply_scope_options,
+                seq,
+                version,
+                result,
+                error,
+                db,
+            )
 
         self._launch(work, "載入重複鍵清理範圍", CommitPolicy.PARTIAL_ALLOWED)
 
-    def _apply_scope_options(self, seq, version, result, error) -> None:
+    def _apply_scope_options(self, seq, version, result, error, queried_db) -> None:
         if self._closed or seq != self._scope_seq:
+            return
+        if self.get_db() is not queried_db:
+            # 舊資料庫的版本／模組結果不能套到新資料庫；立即丟棄並重新載入
+            # 目前 instance，避免選單看似成功但實際範圍屬於另一份資料。
+            self.status.visible = True
+            self.status.value = "資料庫已變動，正在重新載入範圍選項…"
+            self._safe_update()
+            self._start_scope_options_load()
             return
         if error is not None or result is None:
             self.status.visible = True

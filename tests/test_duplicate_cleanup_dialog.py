@@ -133,3 +133,34 @@ def test_apply_rejects_a_completed_plan_after_database_switch(tmp_path, monkeypa
     finally:
         first.close()
         second.close()
+
+
+def test_scope_options_discard_stale_database_result_and_reload_current_db(
+    tmp_path, monkeypatch
+):
+    first = _db(tmp_path / "first-options.db")
+    second = _db(tmp_path / "second-options.db")
+    with second._tx() as conn:
+        conn.execute(
+            "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
+            "VALUES ('guide', ?, 'second-mod', 'second.key', ?)",
+            (VERSION, "Second database"),
+        )
+    current_db = {"value": first}
+    try:
+        dialog, workers, _shown = _dialog(monkeypatch, current_db)
+
+        dialog._start_scope_options_load()
+        assert len(workers) == 1
+        current_db["value"] = second
+        workers[0]()
+
+        # 第一份 DB 的結果被丟棄，並針對目前 DB 排程第二次讀取。
+        assert len(workers) == 2
+        assert "bestiary" not in {option.key for option in dialog.mod_dd.options}
+
+        workers[1]()
+        assert "second-mod" in {option.key for option in dialog.mod_dd.options}
+    finally:
+        first.close()
+        second.close()

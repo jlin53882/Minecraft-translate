@@ -126,6 +126,49 @@ class TestBundleOutputsGenerator:
                 == "# 新版內容\n"
             )
 
+    @pytest.mark.parametrize("canonical_in_extra", [False, True])
+    def test_bundle_prefers_canonical_guideme_path_across_source_folders(
+        self, tmp_path, canonical_in_extra
+    ):
+        """主來源與額外來源順序不同時，canonical 內容仍必須獲勝。"""
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        canonical_rel = "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+        legacy_rel = "assets/demo/guides/_zh_tw/demo/guide/machines/page.md"
+        main = tmp_path / "main"
+        extra = tmp_path / "extra"
+        canonical_root = extra if canonical_in_extra else main
+        legacy_root = main if canonical_in_extra else extra
+        canonical = canonical_root / canonical_rel
+        legacy = legacy_root / legacy_rel
+        canonical.parent.mkdir(parents=True)
+        legacy.parent.mkdir(parents=True)
+        canonical.write_text("# 新版內容\n", encoding="utf-8")
+        legacy.write_text("# 舊版內容\n", encoding="utf-8")
+        output_zip = tmp_path / "output.zip"
+
+        updates = list(
+            bundle_outputs_generator(
+                str(main),
+                str(output_zip),
+                extra_folders=[str(extra)],
+                force_rebuild=True,
+            )
+        )
+
+        assert not any(update.get("error") for update in updates)
+        with zipfile.ZipFile(output_zip) as archive:
+            names = archive.namelist()
+            assert names.count(canonical_rel) == 1
+            assert not any(
+                name.startswith("assets/demo/guides/demo/guide/_zh_tw/machines/page_")
+                for name in names
+            )
+            assert (
+                archive.read(canonical_rel).decode("utf-8").replace("\r\n", "\n")
+                == "# 新版內容\n"
+            )
+
     def test_bundle_with_nonexistent_input_folder(self, tmp_path):
         """測試來源資料夾不存在時的處理"""
         from translation_tool.core.output_bundler import bundle_outputs_generator

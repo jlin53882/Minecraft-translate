@@ -247,6 +247,24 @@ def _normalize_archive_name(archive_name: str) -> str:
     return normalize_guideme_default_locale_rel(Path(archive_name)).as_posix()
 
 
+def _folder_candidates(
+    folder_path: str,
+    base_path_in_zip: str,
+    exclude: frozenset[str] | None = None,
+) -> Iterator[tuple[bool, str, str]]:
+    """回傳資料夾內的 (是否為 GuideME 舊別名, ZIP 路徑, 實體路徑)。"""
+    for relative_path, file_path in _walk_files(folder_path, exclude):
+        raw_archive_name = os.path.join(base_path_in_zip, relative_path).replace(
+            "\\", "/"
+        )
+        archive_name = _normalize_archive_name(raw_archive_name)
+        if _is_invalid_pack_metadata_entry(archive_name):
+            continue
+        if "/" not in archive_name and _is_pack_file(archive_name):
+            continue
+        yield archive_name != raw_archive_name, archive_name, file_path
+
+
 def _resource_pack_folders(
     input_root_dir: str, extra_folders: list[str] | None
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
@@ -374,12 +392,7 @@ def _collect_sources(
     folders, _ignored = _resource_pack_folders(input_root_dir, extra_folders)
     sources: list[tuple[str, str, str]] = []
     for label, folder, base in folders:
-        for rel, full in _walk_files(folder, exclude):
-            archive_name = _normalize_archive_name(
-                os.path.join(base, rel).replace("\\", "/")
-            )
-            if _is_invalid_pack_metadata_entry(archive_name):
-                continue
+        for _is_legacy, archive_name, full in _folder_candidates(folder, base, exclude):
             sources.append((label, archive_name, full))
 
     pack_mcmeta, pack_png = find_source_pack_files(input_root_dir, extra_folders)
@@ -387,6 +400,43 @@ def _collect_sources(
         if path and not _is_artifact(path, exclude):
             sources.append(("pack-metadata", os.path.basename(path).lower(), path))
     return sources
+
+
+def _plan_resource_pack_writes(
+    resource_folders: list[tuple[str, str, str]],
+    exclude: frozenset[str] | None = None,
+) -> dict[str, list[tuple[str, str]]]:
+    """建立跨所有來源資料夾共用的 Resource Pack 寫入計畫。
+
+    同一個 canonical ZIP 路徑若同時有 GuideME 新路徑與舊別名，無論來源
+    資料夾順序如何，都只保留 canonical 內容。其他真正相同輸出路徑的來源
+    仍保留既有的 ``_1`` 衝突策略。
+    """
+    grouped: dict[str, list[tuple[int, bool, str, str]]] = {}
+    sequence = 0
+    for _folder_index, (_label, folder, base) in enumerate(resource_folders):
+        folder_key = _norm(folder)
+        for is_legacy, archive_name, file_path in _folder_candidates(
+            folder, base, exclude
+        ):
+            grouped.setdefault(archive_name, []).append(
+                (sequence, is_legacy, file_path, folder_key)
+            )
+            sequence += 1
+
+    selected: list[tuple[int, str, str, str]] = []
+    for archive_name, candidates in grouped.items():
+        canonical = [candidate for candidate in candidates if not candidate[1]]
+        chosen = canonical if canonical else candidates[:1]
+        selected.extend(
+            (item[0], archive_name, item[2], item[3]) for item in chosen
+        )
+
+    selected.sort(key=lambda item: item[0])
+    by_folder: dict[str, list[tuple[str, str]]] = {}
+    for _sequence, archive_name, file_path, folder_key in selected:
+        by_folder.setdefault(folder_key, []).append((archive_name, file_path))
+    return by_folder
 
 
 def _validate_resource_pack_entries(names: list[str]) -> None:
@@ -551,6 +601,7 @@ def _iter_add_folder_to_zip(
     base_path_in_zip: str,
     seen_files: dict | None = None,
     exclude: frozenset[str] | None = None,
+    planned_candidates: list[tuple[str, str]] | None = None,
 ) -> Generator[None, None, tuple[int, dict]]:
     """逐檔寫入 ZIP 的 generator 版本：每寫完一個檔案 yield 一次，回傳 (檔案數, seen_files)。"""
     added_count = 0
@@ -561,31 +612,16 @@ def _iter_add_folder_to_zip(
         log_warning(f"打包時找不到來源資料夾: {folder_path}，將略過。")
         return 0, seen_files
 
-    candidates: list[tuple[bool, str, str]] = []
-    for root, dirs, files in os.walk(folder_path):
-        dirs.sort()
-        for file in sorted(files):
-            file_path = os.path.join(root, file)
-            if _is_artifact(file_path, exclude):
-                continue
-            relative_path = os.path.relpath(file_path, folder_path)
-            raw_archive_name = os.path.join(base_path_in_zip, relative_path).replace(
-                "\\", "/"
-            )
-            archive_name = _normalize_archive_name(raw_archive_name)
-            if _is_invalid_pack_metadata_entry(archive_name):
-                continue
-            if "/" not in archive_name and _is_pack_file(archive_name):
-                continue  # 根目錄的 pack.mcmeta／pack.png 由專用步驟寫入
-            candidates.append(
-                (archive_name != raw_archive_name, archive_name, file_path)
-            )
-
-    # 同一個輸出根目錄可能同時殘留舊版與新版 GuideME 路徑。先寫 canonical
-    # 路徑，之後遇到只差 GuideME locale 位置的舊別名時略過，避免輸出
-    # ``..._1.md`` 讓遊戲仍讀到不確定的內容。一般來源的同名檔案仍維持
-    # 原本的 _1、_2 衝突處理。
-    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    if planned_candidates is None:
+        candidates = list(_folder_candidates(folder_path, base_path_in_zip, exclude))
+        # 單一來源的直接呼叫仍要先寫 canonical，再略過舊別名；跨來源時由
+        # _plan_resource_pack_writes 建立全域計畫，避免來源資料夾順序造成差異。
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    else:
+        candidates = [
+            (False, archive_name, file_path)
+            for archive_name, file_path in planned_candidates
+        ]
     for is_legacy_guideme_alias, archive_name, file_path in candidates:
         if archive_name in seen_files:
             if is_legacy_guideme_alias:
@@ -727,7 +763,9 @@ def bundle_outputs_generator(
             return
         # 重建期間不得留下舊的有效狀態：任何中途失敗／取消，下次都必須重建。
         _remove_quietly(_state_path(output_zip_path))
-        tracker = _ProgressTracker(len(sources))
+        write_plan = _plan_resource_pack_writes(resource_folders, exclude)
+        planned_file_count = sum(len(items) for items in write_plan.values())
+        tracker = _ProgressTracker(planned_file_count)
 
         for ignored in ignored_sources:
             if not os.path.exists(ignored):
@@ -839,7 +877,12 @@ def bundle_outputs_generator(
 
                 count, seen_files = yield from tracker.run(
                     _iter_add_folder_to_zip(
-                        zf, full_source_path, base, seen_files, exclude
+                        zf,
+                        full_source_path,
+                        base,
+                        seen_files,
+                        exclude,
+                        write_plan.get(_norm(full_source_path), []),
                     )
                 )
 
