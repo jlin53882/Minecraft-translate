@@ -21,7 +21,7 @@ class Step4BundleWidgets:
     zip_output_field: SyncTextField
     description_field: SyncTextField
     pack_image_field: SyncTextField
-    extra_folders_view: ft.ListView
+    extra_folders_view: ft.Control
     version_input: VersionInputControls
 
 
@@ -66,7 +66,7 @@ def build_step4_version_widgets(ctx):
         border_color=C.ENCH,
         read_only=True,
     )
-    extra_folders_view = ft.ListView(height=60, spacing=2, auto_scroll=False)
+    extra_folders_view = ft.Column(spacing=2, tight=True)
     version_input = build_version_input(
         page=ctx.page,
         value=ctx.state.bundle.version_input,

@@ -179,9 +179,7 @@ def _raw_attachment_entries(
             try:
                 names = sorted(os.listdir(source_path))
             except OSError as exc:
-                raise OSError(
-                    f"無法讀取原樣附加來源 {source.source!r}：{exc}"
-                ) from exc
+                raise OSError(f"無法讀取原樣附加來源 {source.source!r}：{exc}") from exc
             for name in names:
                 full = os.path.join(source_path, name)
                 if os.path.isfile(full):
@@ -192,7 +190,9 @@ def _raw_attachment_entries(
 
     target = _validate_raw_archive_path(
         source.target,
-        default="" if os.path.isfile(source_path) else _raw_source_default_target(source.source),
+        default=""
+        if os.path.isfile(source_path)
+        else _raw_source_default_target(source.source),
     )
     entries: list[tuple[str, str]] = []
     total_bytes = 0
@@ -277,7 +277,9 @@ def _read_custom_pack_mcmeta(
     return repair_source_pack_mcmeta(content, generated)
 
 
-def _zip_root_files(input_root_dir: str, extra_folders: list[object] | None) -> list[str]:
+def _zip_root_files(
+    input_root_dir: str, extra_folders: list[object] | None
+) -> list[str]:
     """打包時會直接落在 ZIP 根目錄的檔案（依寫入順序，後寫入者優先）。
 
     包含：名為 ``root`` 的子資料夾內的檔案、根目錄第一層的檔案、直接加入的額外檔案，
@@ -693,7 +695,14 @@ def inspect_extra_bundle_sources(values: list[object] | None) -> list[dict[str, 
                     for candidate in _folder_candidates(folder, base)
                 ]
                 item["files"] = len(candidates)
-                item["bytes"] = sum(os.path.getsize(path) for _old, _name, path in candidates)
+                item["bytes"] = sum(
+                    os.path.getsize(path) for _old, _name, path in candidates
+                )
+                if not candidates:
+                    item["warning"] = (
+                        "找不到可加入的 assets/ 檔案；若要保留來源內全部檔案，"
+                        "請改用原樣附加"
+                    )
                 if os.path.isfile(spec.source) and _is_pack_file(spec.source):
                     item["files"] = 1
                     item["bytes"] = os.path.getsize(spec.source)
@@ -1004,7 +1013,7 @@ def bundle_outputs_generator(
         extra_sources = normalize_extra_bundle_sources(extra_folders)
     except ValueError as exc:
         yield {"progress": 1.0, "log": f"額外來源設定無效：{exc}", "error": True}
-        log_error(f"額外來源設定無效：{exc!r}")
+        log_error(f"額外來源設定無效：{exc}")
         return
 
     resource_folders, ignored_sources = _resource_pack_folders(

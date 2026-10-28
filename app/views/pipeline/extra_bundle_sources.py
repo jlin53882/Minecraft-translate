@@ -46,6 +46,8 @@ def _source_detail(value: object, report: dict | None = None) -> str:
     if report is not None:
         if report.get("valid"):
             detail += f"｜{report.get('files', 0):,} 檔案／{_human_size(report.get('bytes', 0))}"
+            if report.get("warning"):
+                detail += f"｜提示：{report['warning']}"
         else:
             detail += f"｜來源錯誤：{report.get('error') or '無法讀取'}"
     if spec.mode == RAW_ATTACHMENT_MODE:
@@ -61,8 +63,9 @@ class ExtraBundleSourceControls:
     mode_field: ft.Dropdown
     recursive_field: ft.Checkbox
     target_field: ft.TextField
-    source_list: ft.ListView
+    source_list: ft.Column
     source_list_container: ft.Container
+    source_list_height: int
     preview_text: ft.Text
     feedback_text: ft.Text
     content: ft.Column
@@ -80,10 +83,11 @@ def build_extra_source_controls(
         label="來源路徑（Web 可直接輸入）",
         hint="執行程式那台電腦上的檔案或資料夾路徑",
         mono=True,
+        path=True,
         expand=True,
     )
     mode_field = kit.dropdown(
-        label="附加模式",
+        label="附加模式（各來源獨立保留）",
         value=RESOURCE_PACK_MODE,
         width=190,
         options=[
@@ -100,13 +104,19 @@ def build_extra_source_controls(
         label="ZIP 內目標路徑",
         hint="留空使用來源名稱；例如 attachments/guide",
         mono=True,
-        expand=True,
+        # Do not use expand=True here.  This field is placed in its own Row;
+        # Flet Web can resolve an expanded single-child Row with an unbounded
+        # vertical height, which paints the large grey area seen in the form.
+        path=True,
+        width=360,
     )
-    source_list = ft.ListView(
-        height=list_height,
+    # This list is intentionally a non-scrollable Column.  The surrounding
+    # dialog already owns the scroll position; nesting a ListView here makes
+    # Flet Web treat an empty list as an unconstrained viewport and it can
+    # consume the remaining dialog height.
+    source_list = ft.Column(
         spacing=4,
-        auto_scroll=False,
-        expand=False,
+        tight=True,
     )
     preview_text = ft.Text(
         "尚未加入來源。Resource Pack 只收 assets/；原樣附加會保留所有一般檔案。",
@@ -116,9 +126,9 @@ def build_extra_source_controls(
     )
     feedback_text = ft.Text("", size=11, color=C.GOLD, visible=False, selectable=True)
     source_list_container = ft.Container(
-        height=list_height + 8,
+        height=0,
         visible=False,
-        content=source_list,
+        content=None,
         border=ft.Border.all(1, C.LINE),
         border_radius=design.RADIUS_CONTROL,
         padding=4,
@@ -142,7 +152,14 @@ def build_extra_source_controls(
                 ],
                 spacing=6,
             ),
-            ft.Row([mode_field, recursive_field, target_field], wrap=True, spacing=8),
+            ft.Row([mode_field, recursive_field], wrap=True, spacing=8),
+            ft.Row([target_field], spacing=8),
+            ft.Text(
+                "各來源會保留自己的模式：請先選擇狀態，再加入來源；之後切換只影響下一筆來源。",
+                size=10,
+                color=C.DIM,
+                selectable=True,
+            ),
             ft.Row(
                 [
                     ft.Button(
@@ -173,13 +190,16 @@ def build_extra_source_controls(
         target_field,
         source_list,
         source_list_container,
+        list_height + 8,
         preview_text,
         feedback_text,
         content,
     )
 
 
-def read_extra_source_controls(controls: ExtraBundleSourceControls) -> ExtraBundleSource:
+def read_extra_source_controls(
+    controls: ExtraBundleSourceControls,
+) -> ExtraBundleSource:
     """讀取目前表單並建立來源模型。"""
     return ExtraBundleSource(
         source=(controls.source_field.value or "").strip(),
@@ -211,7 +231,15 @@ def refresh_extra_source_preview(
 ) -> None:
     """刷新來源清單，並顯示與正式打包相同的統計／錯誤狀態。"""
     controls.source_list.controls.clear()
-    controls.source_list_container.visible = bool(values)
+    has_values = bool(values)
+    controls.source_list_container.visible = has_values
+    controls.source_list_container.height = (
+        controls.source_list_height if has_values else 0
+    )
+    controls.source_list_container.padding = 4 if has_values else 0
+    controls.source_list_container.content = (
+        controls.source_list if has_values else None
+    )
     reports: list[dict] = []
     for value in values:
         try:
@@ -259,7 +287,7 @@ def refresh_extra_source_preview(
                             icon_size=14,
                             tooltip="移除",
                             on_click=lambda _event, item=value: on_remove(item),
-                        )
+                        ),
                     ]
                 ),
             )
@@ -269,6 +297,9 @@ def refresh_extra_source_preview(
     files = sum(int(report.get("files") or 0) for report in reports)
     size = sum(int(report.get("bytes") or 0) for report in reports)
     errors = [str(report.get("error")) for report in reports if not report.get("valid")]
+    warnings = [
+        str(report.get("warning")) for report in reports if report.get("warning")
+    ]
     if not values:
         controls.preview_text.value = (
             "尚未加入來源。Resource Pack 只收 assets/；原樣附加會保留所有一般檔案。"
@@ -278,7 +309,10 @@ def refresh_extra_source_preview(
             f"來源 {valid_count}/{len(values)} 個可讀取｜預計加入 {files:,} 個檔案／"
             f"{_human_size(size)}"
             + (f"｜錯誤：{'；'.join(errors[:2])}" if errors else "")
+            + (f"｜提示：{'；'.join(warnings[:2])}" if warnings else "")
         )
+
+
 def append_extra_source(
     values: list[object], value: object, *, allow_unvalidated: bool = False
 ) -> tuple[bool, str]:

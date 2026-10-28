@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import zipfile
 
+import flet as ft
 import pytest
 
 from app.views.pipeline.extra_bundle_sources import (
@@ -105,9 +106,7 @@ def test_raw_attachment_non_recursive_keeps_only_direct_files(tmp_path):
 def test_legacy_extra_folder_still_uses_resource_pack_assets_rule(tmp_path):
     src = tmp_path / "staging"
     (src / "assets" / "base" / "lang").mkdir(parents=True)
-    (src / "assets" / "base" / "lang" / "zh_tw.json").write_text(
-        "{}", encoding="utf-8"
-    )
+    (src / "assets" / "base" / "lang" / "zh_tw.json").write_text("{}", encoding="utf-8")
     extra = tmp_path / "extra"
     (extra / "assets" / "addon" / "lang").mkdir(parents=True)
     (extra / "assets" / "addon" / "lang" / "zh_tw.json").write_text(
@@ -152,7 +151,9 @@ def test_raw_duplicate_target_aborts_without_replacing_existing_zip(tmp_path):
     assert not (tmp_path / "pack.zip.tmp").exists()
 
 
-@pytest.mark.parametrize("target", ["../escape", "C:/escape", "/escape", r"\\server\escape"])
+@pytest.mark.parametrize(
+    "target", ["../escape", "C:/escape", "/escape", r"\\server\escape"]
+)
 def test_raw_target_rejects_path_escape_or_absolute(target, tmp_path):
     src = tmp_path / "staging"
     src.mkdir()
@@ -256,6 +257,26 @@ def test_extra_source_preview_reports_files_bytes_and_invalid_source(tmp_path):
     assert invalid["valid"] is False
 
 
+def test_resource_pack_preview_warns_when_source_has_no_assets(tmp_path):
+    source = tmp_path / "smart-review.chunks"
+    source.mkdir()
+    (source / "chunk-0001.json").write_text("{}", encoding="utf-8")
+
+    report = inspect_extra_bundle_sources([str(source)])[0]
+
+    assert report["valid"] is True
+    assert report["files"] == 0
+    assert "改用原樣附加" in report["warning"]
+
+    controls = build_extra_source_controls(
+        on_pick=lambda _event=None: None,
+        on_manual_add=lambda _event=None: None,
+        picker_label="新增資料夾",
+    )
+    refresh_extra_source_preview(controls, [str(source)], lambda _value: None)
+    assert "改用原樣附加" in controls.preview_text.value
+
+
 def test_empty_extra_source_list_does_not_reserve_large_ui_area(tmp_path):
     controls = build_extra_source_controls(
         on_pick=lambda _event=None: None,
@@ -265,8 +286,12 @@ def test_empty_extra_source_list_does_not_reserve_large_ui_area(tmp_path):
     )
 
     assert controls.source_list_container.visible is False
+    assert controls.source_list_container.height == 0
+    assert controls.source_list_container.content is None
     refresh_extra_source_preview(controls, [], lambda _value: None)
     assert controls.source_list_container.visible is False
+    assert controls.source_list_container.height == 0
+    assert controls.source_list_container.content is None
 
     source = tmp_path / "source"
     source.mkdir()
@@ -278,3 +303,24 @@ def test_empty_extra_source_list_does_not_reserve_large_ui_area(tmp_path):
     )
     assert controls.source_list_container.visible is True
     assert controls.source_list_container.height == 108
+    assert controls.source_list_container.content is controls.source_list
+    assert controls.source_list_container.padding == 4
+
+
+def test_extra_source_target_field_has_bounded_web_layout():
+    controls = build_extra_source_controls(
+        on_pick=lambda _event=None: None,
+        on_manual_add=lambda _event=None: None,
+        picker_label="新增資料夾",
+    )
+
+    target_rows = [
+        item
+        for item in controls.content.controls
+        if isinstance(item, ft.Row) and controls.target_field in item.controls
+    ]
+
+    assert len(target_rows) == 1
+    assert target_rows[0].wrap is False
+    assert controls.target_field.expand is None
+    assert controls.target_field.width == 360
