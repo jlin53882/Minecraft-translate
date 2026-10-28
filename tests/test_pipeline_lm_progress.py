@@ -18,12 +18,16 @@ def test_directory_lm_progress_is_streamed_with_shared_batch_plan(monkeypatch):
         for index in range(4)
     ]
 
-    monkeypatch.setattr(lm_translator, "_note_directory_checkpoint", lambda *a, **k: None)
+    monkeypatch.setattr(
+        lm_translator, "_note_directory_checkpoint", lambda *a, **k: None
+    )
     monkeypatch.setattr(lm_translator, "_plan_directory_batches", lambda _items: 2)
     monkeypatch.setattr(
         lm_translator,
         "load_config",
-        lambda: {"lm_translator": {"provider": "gemini", "token_budget_enabled": False}},
+        lambda: {
+            "lm_translator": {"provider": "gemini", "token_budget_enabled": False}
+        },
     )
     monkeypatch.setattr(lm_translator, "flush_write_back", lambda *_a, **_k: None)
     monkeypatch.setattr(lm_translator, "clear_checkpoint", lambda: None)
@@ -56,22 +60,24 @@ def test_directory_lm_progress_is_streamed_with_shared_batch_plan(monkeypatch):
 
     monkeypatch.setattr(lm_translator, "run_translator_skeleton", fake_skeleton)
 
-    result, pending, _translation_log, processed = lm_translator._run_directory_translation(
-        remaining=items,
-        file_cache={},
-        root=lm_translator.Path("."),
-        out_root=lm_translator.Path("."),
-        export_lang=False,
-        should_cancel=None,
-        write_new_cache=False,
-        input_dir=".",
-        items_to_translate=items,
-        cache_hit_count=0,
-        checkpoint_fingerprint="test",
-        total=len(items),
-        update_sink=updates.append,
-        event_sink=events.append,
-        event_task_id="pipeline-task",
+    result, pending, _translation_log, processed = (
+        lm_translator._run_directory_translation(
+            remaining=items,
+            file_cache={},
+            root=lm_translator.Path("."),
+            out_root=lm_translator.Path("."),
+            export_lang=False,
+            should_cancel=None,
+            write_new_cache=False,
+            input_dir=".",
+            items_to_translate=items,
+            cache_hit_count=0,
+            checkpoint_fingerprint="test",
+            total=len(items),
+            update_sink=updates.append,
+            event_sink=events.append,
+            event_task_id="pipeline-task",
+        )
     )
 
     assert observed_before_skeleton_returns and observed_before_skeleton_returns[0]

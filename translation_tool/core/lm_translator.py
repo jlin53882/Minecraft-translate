@@ -578,9 +578,7 @@ def _directory_provider_name(lm_cfg: dict[str, Any]) -> str:
 def _directory_model_name(lm_cfg: dict[str, Any]) -> str:
     """回傳目錄 LM 批次事件使用的模型顯示名稱。"""
     return str(
-        lm_cfg.get("chatgpt_model")
-        or lm_cfg.get("default_model")
-        or "model-pool"
+        lm_cfg.get("chatgpt_model") or lm_cfg.get("default_model") or "model-pool"
     )
 
 
@@ -682,9 +680,7 @@ def _run_directory_translation(
         )
 
     planned_batches = _plan_directory_batches(remaining)
-    run_progress = RunProgress(
-        total=len(remaining), planned_batches=planned_batches
-    )
+    run_progress = RunProgress(total=len(remaining), planned_batches=planned_batches)
     _publish_directory_update(
         {"progress": 0.2, "log": run_progress.start_line()},
         pending_events,
