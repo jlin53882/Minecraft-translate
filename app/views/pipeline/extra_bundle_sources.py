@@ -63,7 +63,7 @@ class ExtraBundleSourceControls:
     mode_field: ft.Dropdown
     recursive_field: ft.Checkbox
     target_field: ft.TextField
-    source_list: ft.Column
+    source_list: ft.ListView
     source_list_container: ft.Container
     source_list_height: int
     preview_text: ft.Text
@@ -110,13 +110,14 @@ def build_extra_source_controls(
         path=True,
         width=360,
     )
-    # This list is intentionally a non-scrollable Column.  The surrounding
-    # dialog already owns the scroll position; nesting a ListView here makes
-    # Flet Web treat an empty list as an unconstrained viewport and it can
-    # consume the remaining dialog height.
-    source_list = ft.Column(
+    # Keep the list bounded and scrollable when sources exist.  The container
+    # is collapsed while empty, so Flet Web cannot turn an empty ListView into
+    # the large grey area previously seen in this form.
+    source_list = ft.ListView(
+        height=list_height,
         spacing=4,
-        tight=True,
+        auto_scroll=False,
+        expand=False,
     )
     preview_text = ft.Text(
         "尚未加入來源。Resource Pack 只收 assets/；原樣附加會保留所有一般檔案。",

@@ -305,6 +305,9 @@ def test_empty_extra_source_list_does_not_reserve_large_ui_area(tmp_path):
     assert controls.source_list_container.height == 108
     assert controls.source_list_container.content is controls.source_list
     assert controls.source_list_container.padding == 4
+    assert isinstance(controls.source_list, ft.ListView)
+    assert controls.source_list.height == 100
+    assert controls.source_list.expand is False
 
 
 def test_extra_source_target_field_has_bounded_web_layout():
