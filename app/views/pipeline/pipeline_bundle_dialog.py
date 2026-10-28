@@ -381,7 +381,10 @@ def _bundle_add_extra_folder(ctx, e=None):
         if result:
             controls = ctx.extra_source_controls
             mode = controls.mode_field.value or RESOURCE_PACK_MODE
-            if mode == RESOURCE_PACK_MODE and not (controls.target_field.value or "").strip():
+            if (
+                mode == RESOURCE_PACK_MODE
+                and not (controls.target_field.value or "").strip()
+            ):
                 value: object = result
             else:
                 value = ExtraBundleSource(
