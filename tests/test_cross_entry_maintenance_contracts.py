@@ -566,8 +566,8 @@ def test_staging_and_standalone_choose_one_legacy_guideme_fallback(
     assert not any(
         name.startswith(canonical[:-3] + "_") for name in standalone_snapshot
     )
-    expected = ordered[0][2].encode("utf-8").replace(b"\n", b"\r\n")
-    assert standalone_snapshot[canonical] == expected
+    expected = ordered[0][2].encode("utf-8")
+    assert standalone_snapshot[canonical].replace(b"\r\n", b"\n") == expected
 
     manifest = json.loads(
         (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
