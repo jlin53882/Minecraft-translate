@@ -428,9 +428,7 @@ def _plan_resource_pack_writes(
     for archive_name, candidates in grouped.items():
         canonical = [candidate for candidate in candidates if not candidate[1]]
         chosen = canonical if canonical else candidates[:1]
-        selected.extend(
-            (item[0], archive_name, item[2], item[3]) for item in chosen
-        )
+        selected.extend((item[0], archive_name, item[2], item[3]) for item in chosen)
 
     selected.sort(key=lambda item: item[0])
     by_folder: dict[str, list[tuple[str, str]]] = {}
