@@ -6,6 +6,8 @@
 import json
 import zipfile
 
+import pytest
+
 
 class TestAddFolderToZip:
     """測試 _add_folder_to_zip 函式"""
@@ -61,6 +63,68 @@ class TestAddFolderToZip:
 
 class TestBundleOutputsGenerator:
     """測試 bundle_outputs_generator 生成器函式"""
+
+    @pytest.mark.parametrize(
+        "legacy_rel",
+        [
+            "assets/demo/guides/_zh_tw/demo/guide/machines/page.md",
+            "assets/demo/guides/demo/guide/machines/_zh_tw/page.md",
+        ],
+    )
+    def test_bundle_normalizes_legacy_guideme_locale_paths(self, tmp_path, legacy_rel):
+        """直接打包入口也必須遵守 GuideME 的共同 locale 根路徑。"""
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        legacy = tmp_path / legacy_rel
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("# 批次多方塊結構\n", encoding="utf-8")
+        output_zip = tmp_path / "output.zip"
+
+        updates = list(
+            bundle_outputs_generator(str(tmp_path), str(output_zip), force_rebuild=True)
+        )
+
+        assert not any(update.get("error") for update in updates)
+        canonical = "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+        with zipfile.ZipFile(output_zip) as archive:
+            names = archive.namelist()
+            assert canonical in names
+            assert legacy_rel not in names
+            assert (
+                archive.read(canonical).decode("utf-8").replace("\r\n", "\n")
+                == "# 批次多方塊結構\n"
+            )
+
+    def test_bundle_prefers_canonical_guideme_path_over_legacy_alias(self, tmp_path):
+        """同時存在新舊路徑時，不得產生 canonical 的 _1 副本。"""
+        from translation_tool.core.output_bundler import bundle_outputs_generator
+
+        canonical_rel = "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+        legacy_rel = "assets/demo/guides/_zh_tw/demo/guide/machines/page.md"
+        canonical = tmp_path / canonical_rel
+        legacy = tmp_path / legacy_rel
+        canonical.parent.mkdir(parents=True)
+        legacy.parent.mkdir(parents=True)
+        canonical.write_text("# 新版內容\n", encoding="utf-8")
+        legacy.write_text("# 舊版內容\n", encoding="utf-8")
+        output_zip = tmp_path / "output.zip"
+
+        updates = list(
+            bundle_outputs_generator(str(tmp_path), str(output_zip), force_rebuild=True)
+        )
+
+        assert not any(update.get("error") for update in updates)
+        with zipfile.ZipFile(output_zip) as archive:
+            names = archive.namelist()
+            assert names.count(canonical_rel) == 1
+            assert not any(
+                name.startswith("assets/demo/guides/demo/guide/_zh_tw/machines/page_")
+                for name in names
+            )
+            assert (
+                archive.read(canonical_rel).decode("utf-8").replace("\r\n", "\n")
+                == "# 新版內容\n"
+            )
 
     def test_bundle_with_nonexistent_input_folder(self, tmp_path):
         """測試來源資料夾不存在時的處理"""

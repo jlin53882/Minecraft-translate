@@ -329,6 +329,7 @@ def _write_output_contract_fixture(root: Path) -> None:
         ),
         "assets/demo/patchouli_books/manual/zh_tw/entries/intro.json": _standard_book(),
         "assets/demo/books/chapters/foods.json": _neutral_book("收穫手冊"),
+        "assets/demo/guides/_zh_tw/demo/guide/machines/batching.md": "# 舊版路徑\n",
         "data/demo/advancements/story/start.json": json.dumps(
             {"display": {"title": {"text": "Data Pack title"}}}
         ),
@@ -402,6 +403,13 @@ def test_standalone_and_pipeline_bundles_share_resource_pack_data_pack_boundary(
         in standalone_names
     )
     assert "assets/demo/books/chapters/foods.json" in standalone_names
+    assert (
+        "assets/demo/guides/demo/guide/_zh_tw/machines/batching.md" in standalone_names
+    )
+    assert (
+        "assets/demo/guides/_zh_tw/demo/guide/machines/batching.md"
+        not in standalone_names
+    )
     assert all(
         name == "pack.mcmeta" or name == "pack.png" or name.startswith("assets/")
         for name in standalone_names

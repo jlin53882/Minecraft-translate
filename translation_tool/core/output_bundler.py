@@ -13,8 +13,12 @@ import re
 import time
 import zipfile
 from collections.abc import Generator, Iterator
+from pathlib import Path
 from typing import Any
 
+from translation_tool.core.guide_translation import (
+    normalize_guideme_default_locale_rel,
+)
 from translation_tool.core.pack_mcmeta import (
     DEFAULT_PACK_FORMAT,
     build_pack_mcmeta,
@@ -232,6 +236,17 @@ def _is_invalid_pack_metadata_entry(archive_name: str) -> bool:
     return bool(_PACK_METADATA_VARIANT.fullmatch(basename))
 
 
+def _normalize_archive_name(archive_name: str) -> str:
+    """將 Resource Pack ZIP 內的相對路徑正規化。
+
+    一鍵流水線會先建立 staging，但單獨打包與其他頁面可以直接呼叫
+    ``bundle_outputs_generator``。最終打包層也必須套用同一個 GuideME
+    路徑契約，避免舊輸出繞過 staging 後重新產生 ``guides/_zh_tw``。
+    """
+
+    return normalize_guideme_default_locale_rel(Path(archive_name)).as_posix()
+
+
 def _resource_pack_folders(
     input_root_dir: str, extra_folders: list[str] | None
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
@@ -360,7 +375,9 @@ def _collect_sources(
     sources: list[tuple[str, str, str]] = []
     for label, folder, base in folders:
         for rel, full in _walk_files(folder, exclude):
-            archive_name = os.path.join(base, rel).replace("\\", "/")
+            archive_name = _normalize_archive_name(
+                os.path.join(base, rel).replace("\\", "/")
+            )
             if _is_invalid_pack_metadata_entry(archive_name):
                 continue
             sources.append((label, archive_name, full))
@@ -544,31 +561,45 @@ def _iter_add_folder_to_zip(
         log_warning(f"打包時找不到來源資料夾: {folder_path}，將略過。")
         return 0, seen_files
 
-    for root, _, files in os.walk(folder_path):
-        for file in files:
+    candidates: list[tuple[bool, str, str]] = []
+    for root, dirs, files in os.walk(folder_path):
+        dirs.sort()
+        for file in sorted(files):
             file_path = os.path.join(root, file)
             if _is_artifact(file_path, exclude):
                 continue
             relative_path = os.path.relpath(file_path, folder_path)
-            archive_name = os.path.join(base_path_in_zip, relative_path).replace(
+            raw_archive_name = os.path.join(base_path_in_zip, relative_path).replace(
                 "\\", "/"
             )
+            archive_name = _normalize_archive_name(raw_archive_name)
             if _is_invalid_pack_metadata_entry(archive_name):
                 continue
             if "/" not in archive_name and _is_pack_file(archive_name):
                 continue  # 根目錄的 pack.mcmeta／pack.png 由專用步驟寫入
+            candidates.append(
+                (archive_name != raw_archive_name, archive_name, file_path)
+            )
 
-            if archive_name in seen_files:
-                base, ext = os.path.splitext(archive_name)
-                counter = 1
-                while f"{base}_{counter}{ext}" in seen_files:
-                    counter += 1
-                archive_name = f"{base}_{counter}{ext}"
+    # 同一個輸出根目錄可能同時殘留舊版與新版 GuideME 路徑。先寫 canonical
+    # 路徑，之後遇到只差 GuideME locale 位置的舊別名時略過，避免輸出
+    # ``..._1.md`` 讓遊戲仍讀到不確定的內容。一般來源的同名檔案仍維持
+    # 原本的 _1、_2 衝突處理。
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    for is_legacy_guideme_alias, archive_name, file_path in candidates:
+        if archive_name in seen_files:
+            if is_legacy_guideme_alias:
+                continue
+            base, ext = os.path.splitext(archive_name)
+            counter = 1
+            while f"{base}_{counter}{ext}" in seen_files:
+                counter += 1
+            archive_name = f"{base}_{counter}{ext}"
 
-            seen_files[archive_name] = 1
-            zip_file.write(file_path, archive_name)
-            added_count += 1
-            yield
+        seen_files[archive_name] = 1
+        zip_file.write(file_path, archive_name)
+        added_count += 1
+        yield
 
     return added_count, seen_files
 
