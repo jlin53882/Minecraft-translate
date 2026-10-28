@@ -73,7 +73,7 @@ flowchart TD
 | 分析 | 不呼叫 service，只讀 `_last_overview_data` 並寫入日誌與提示 | 無 |
 | 切換查詢 | 不呼叫 service，切到查詢分頁並設定 `dd_query_mode` 為 `KEY` | 無 |
 
-總覽頂端的「重新載入全部」走 `cache_reload_service`（`RELOADING`，顯示進度）。「刷新統計」`_on_refresh_stats` 例外：它在 UI 執行緒上同步呼叫 `_load_overview`，不經背景 worker。
+總覽頂端的「重新載入全部」走 `cache_reload_service`（`RELOADING`，顯示進度）。「刷新統計」也經 `run_cache_action`／`OperationRegistry` 在背景讀取總覽；按鈕會立即停用並顯示「刷新統計中」，完成或失敗後才回到 UI 更新統計。
 
 「重建搜尋索引」`_on_rebuild_index` 也不經 `run_cache_action`，而是自行 `reserve_page_operation`，worker 呼叫 `cache_rebuild_index_service`，完成後把 `_set_state` 設回 `READY`。
 
@@ -104,16 +104,18 @@ flowchart TD
 flowchart TD
     A["套用（_on_apply_dst）"] --> B{"ui_busy 或未選取結果？"}
     B -- 是 --> C["_notify 警告並結束"]
-    B -- 否 --> D["cache_update_dst_service：只更新記憶體"]
+    B -- 否 --> D["背景 worker：cache_update_dst_service 更新記憶體"]
     D --> E{"更新成功？"}
     E -- 否 --> F["_notify error：找不到目標 key"]
-    E -- 是 --> G["cache_save_all_service(write_new_shard=False, only_types=[ctype])"]
-    G --> H["寫入 cache_history 歷史事件（jsonl 與 json 鏡像）"]
-    H --> I["更新 query_original_dst 與結果列 preview"]
-    I --> J["重新渲染結果列與詳情，_notify info"]
+    E -- 是 --> G["背景 worker：cache_save_all_service(write_new_shard=False, only_types=[ctype])"]
+    G --> H{"分片保存成功？"}
+    H -- 否 --> I["保留 dirty/pending，不寫成功 history，顯示錯誤"]
+    H -- 是 --> J["背景 worker：寫入 cache_history JSONL（鏡像另由背景執行緒處理）"]
+    J --> K["回到 UI 更新 query_original_dst 與結果列 preview"]
+    K --> L["重新渲染結果列與詳情，_notify info"]
 ```
 
-此流程在 UI 執行緒上同步執行，沒有經過背景 worker。「還原」（`_on_revert_dst`）只把輸入框改回 `query_original_dst`，不寫入快取。「還原最新歷史」（`_on_restore_latest_query`）讀取最新一筆歷史的 `old_dst` 填入輸入框，同樣不寫入快取，需再按「套用」。
+四條套用路徑（查詢 DST、查詢歷史、分片歷史、分片詳情 DST）共用同一個背景操作契約：先更新記憶體，再確認 `cache_save_all_service` 的保存結果，成功後才追加 authoritative JSONL history，最後在 UI 執行緒更新控制項。「還原」（`_on_revert_dst`）只把輸入框改回原始值，不寫入快取。「還原最新歷史」（`_on_restore_latest_query`）首次遇到冷 JSONL 索引時也會背景解析，完成後才把 `old_dst` 填入輸入框，仍需再按「套用」。
 
 ### 分片詳情與套用
 
@@ -121,23 +123,23 @@ flowchart TD
 flowchart TD
     A["點選分片列（_on_select_shard_row）"] --> B["_load_shard_keys 載入 key 清單"]
     B --> C["預設選第一個 key，開啟分片工作區"]
-    C --> D["點選 key（_on_select_shard_key）→ 刷新 SRC／DST 面板"]
+    C --> D["點選 key（_on_select_shard_key）→ 記憶體命中或背景冷讀 SRC／DST"]
     D --> E["套用 DST（_on_shard_dst_apply）"]
-    E --> F["cache_update_dst_service → cache_save_all_service"]
-    F --> G["寫入歷史事件，action 為 apply_from_shard_detail"]
-    G --> H["同步刷新查詢結果與分片面板"]
+    E --> F["背景 worker：cache_update_dst_service → cache_save_all_service"]
+    F --> G["保存成功後背景寫入歷史事件，action 為 apply_from_shard_detail"]
+    G --> H["回到 UI 刷新查詢結果與分片面板"]
 ```
 
 分片區的「套用舊值」（`_on_shard_apply_selected_history`）以所選歷史事件的 `old_dst` 作為新值，依序執行記憶體更新、寫檔、寫入歷史（action 為 `revert_from_shard_history`），再刷新查詢區與分片區。查詢區的「套用歷史」（`_on_apply_selected_history`）同樣以所選事件的 `old_dst` 為新值，並先讀取目前的 DST 作為記錄用的舊值。
 
 ### 歷史視窗
 
-`_on_open_history_window(e, source)` 依 `source`（`query` 或 `shard`）開啟對應的浮動視窗並渲染紀錄（`_render_query_history`／`_render_shard_history`）。切換主分頁時（`_on_tab_change`）會自動關閉兩個視窗。視窗標題列的拖曳與右下角縮放只調整 `top`、`left`、`width`、`height`。
+`_on_open_history_window(e, source)` 依 `source`（`query` 或 `shard`）開啟對應的浮動視窗並渲染紀錄（`_render_query_history`／`_render_shard_history`）。若 JSONL 索引尚未預熱，立即顯示「載入中」並由 OperationRegistry 背景解析；cache type/key 或頁面掛載世代改變時丟棄晚到結果。切換主分頁時（`_on_tab_change`）會自動關閉兩個視窗。視窗標題列的拖曳與右下角縮放只調整 `top`、`left`、`width`、`height`。
 
 ## 背景任務與 UI 更新
 
 - **走背景 worker 的操作**：總覽的類型操作（`run_cache_action`）、重建索引、快取查詢、頁面掛載時的總覽讀取。這些都透過 `reserve_page_operation` 或 `launch_page_operation` 取得 operation，worker 結束後以 `done_event` 通知事件迴圈，UI 更新一律在事件迴圈執行。
-- **同步在 UI 執行緒的操作**：套用 DST、套用歷史、還原、刷新統計、分頁切換、分片詳情的選取。這些操作會呼叫磁碟寫入，因此操作期間頁面會阻塞。
+- **同步在 UI 執行緒的操作**：還原輸入框、分頁切換與只使用已預熱摘要的輕量選取。套用 DST、套用歷史、刷新統計、冷歷史索引與分片冷讀取都由背景 operation 執行，完成後才在 event loop 更新控制項。
 - **忙碌狀態**：`_set_state(busy, reason, trace)` 更新 `ui_busy`、`busy_reason` 與狀態列文字，並呼叫 `_refresh_disabled_state` 依忙碌狀態切換所有按鈕與分頁控制項。
 - **日誌與提示**：`_append_log` 依前綴 `[ERROR`、`[WARN` 分別寫入 `log_error`、`log_warning`，其餘寫入 `log_info`，並同步加入記憶體日誌（上限 1500 筆）。`_notify` 同時寫日誌並顯示 `show_snack`。日誌面板可切換「只看警告以上」。
 - **換頁與視窗大小**：Flet 1.0 的 `Page` 只有 `on_resize`（沒有 on_resized 這個屬性），且由 AppShell 持有。`did_mount` 以 `subscribe_page_resize`（`app/ui/page_resize.py`）向 AppShell 的 resize 派送登記 `_on_page_resized`（重算分片鍵清單寬度並重新渲染分片區），`will_unmount` 取消訂閱，離開本頁後不留下回呼；單一訂閱者失敗只記錄，不影響其他頁面。總覽讀取的 operation 為 `NON_CANCELLABLE`／`DRAIN_ONLY`，由 `OperationRegistry` 管理，不需要頁面自行取消。
@@ -159,4 +161,4 @@ flowchart TD
 - **忙碌中被觸發**：`run_cache_action`、查詢、套用、還原都會先檢查 `ui_busy`，直接以警告拒絕，不排入任務。
 - **應用程式關閉中**：`reserve_page_operation` 回傳 `admitted=False` 時，類型操作與索引重建都會以錯誤回呼，顯示「應用程式正在關閉」。
 - **歷史寫入失敗**：`_append_mirror` 寫入 json 鏡像失敗時只記錄 `log_warning`，不影響 jsonl 主記錄。
-- **套用失敗**：UI 層的 `try/except` 捕捉例外並 `_notify` 錯誤；記憶體可能已被更新而檔案未寫入，這種情況需要使用者以重新載入復原。
+- **套用失敗**：`cache_save_all_service` 會檢查每個 `save_translation_cache` 的布林結果；保存失敗時丟出錯誤、保留底層的 dirty/pending 狀態、不追加成功 history，UI 顯示錯誤。記憶體值可保留待下次重試，或由重新載入復原。

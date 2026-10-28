@@ -255,14 +255,16 @@ class CacheQueryMixin:
         new_dst = str(self.query_detail_dst.value or "")
         old_dst = str(self.query_original_dst or "")
 
-        try:
+        def work():
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                self._notify("套用失敗：找不到目標 key", "error")
-                return
+                raise RuntimeError("找不到目標 key")
 
             # 寫入快取檔（不是新增，直接覆寫既有 key 的內容）
-            cache_save_all_service(write_new_shard=False, only_types=[ctype])
+            overview = cache_save_all_service(
+                write_new_shard=False,
+                only_types=[ctype],
+            )
 
             # 持久化歷史（jsonl + pretty json）
             history_event = {
@@ -276,7 +278,9 @@ class CacheQueryMixin:
                 "actor": "cache_query_ui",
             }
             self._history_append_event(ctype, history_event)
+            return overview
 
+        def apply_ui(_overview):
             self.query_original_dst = new_dst
             for row in self.query_results:
                 if row.get("cache_type") == ctype and row.get("key") == key:
@@ -285,11 +289,13 @@ class CacheQueryMixin:
 
             self._render_query_results()
             self._render_query_detail()
-            self._notify("已套用並寫入快取", "info")
-            if self.page:
-                self.page.update()
-        except Exception as ex:  # noqa: BLE001
-            self._notify(f"套用失敗：{ex}", "error")
+
+        self._run_action(
+            "SAVING",
+            work,
+            "已套用並寫入快取",
+            on_success=apply_ui,
+        )
 
     def _on_revert_dst(self, e):
         """還原 DST 到原始值（查詢區）"""
@@ -318,23 +324,33 @@ class CacheQueryMixin:
             show_snack(self.page, "無法取得 cache_type 或 key", C.RED)
             return
 
-        # 載入最新歷史紀錄
-        records = self._history_load_recent(ctype, key, limit=1)
+        def apply_latest(records):
+            if not records:
+                show_snack(self.page, "此 key 目前沒有歷史紀錄", C.GOLD)
+                return
+            latest = records[0]
+            old_dst = str(latest.get("old_dst", ""))
+
+            # 只填入 DST 輸入框，不寫入快取
+            self.query_detail_dst.value = old_dst
+            show_snack(
+                self.page,
+                "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用」儲存）",
+                C.DIA,
+            )
+            self.update()
+
+        # 載入最新歷史紀錄；冷 JSONL 索引由背景操作建立。
+        records = self._history_load_for_ui(
+            "query", ctype, key, limit=1, on_loaded=apply_latest
+        )
+        if records is None:
+            return
         if not records:
             show_snack(self.page, "此 key 目前沒有歷史紀錄", C.GOLD)
             return
 
-        latest = records[0]
-        old_dst = str(latest.get("old_dst", ""))
-
-        # 只填入 DST 輸入框，不寫入快取
-        self.query_detail_dst.value = old_dst
-        show_snack(
-            self.page,
-            "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用」儲存）",
-            C.DIA,
-        )
-        self.update()
+        apply_latest(records)
 
     # PR5-7: 查詢變更提示
     def _on_query_input_change(self, e):

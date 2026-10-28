@@ -93,6 +93,10 @@ app/views/config/
 | `_retry_config_reload` / `reload_before_entry` | 重試 UI 同步；離開恢復狀態後，確保再次進入設定頁前先重載 |
 | `set_registry` / `page` | 外部注入 view registry / page 屬性 |
 
+### ChatGPT OAuth 模型載入生命週期
+
+`ChatGPTOAuthPanel` 的模型清單仍以 `asyncio.to_thread()` 執行 provider 讀取。`ConfigView.did_mount()`／`will_unmount()` 會同步通知 panel 的生命週期；帳號 generation guard 會丟棄舊帳號結果。頁面卸載或 task 收到取消例外時只清理 busy/pending 狀態，不把關閉視為模型載入失敗，也不呼叫已銷毀 session 的 `page.update()`。destroyed-session 的 Flet `RuntimeError` 只作為生命週期終止處理，不會顯示 provider 失敗訊息。
+
 ## 關鍵設計
 
 - **schema 單一來源**：控制項、版面、載入、儲存、預設值、套用時機、機密標記都由 `Setting` 衍生；`controls_map` 以 `"section.key"` 為索引，但不再需要在多處手動同步（測試 `test_config_settings_coverage.py` 檢查 schema、預設值、版面與真實控制項完全一致）。

@@ -14,8 +14,10 @@ from app.services_impl.cache.cache_services import (
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
 from app.ui.snack import show_snack
+from app.views.cache_manager.cache_actions import run_cache_background
 from app.views.cache_manager.cache_history_store import (
     history_append_event,
+    history_index_is_warm,
     history_load_recent,
     history_now_ts,
 )
@@ -23,6 +25,47 @@ from app.views.cache_manager.cache_history_store import (
 
 class CacheHistoryMixin:
     """歷史：查詢區與分片區共用的歷史視窗與還原。"""
+
+    def _render_history_rows(self, history_list, records, selected_event, on_select):
+        """渲染共用的歷史列並回傳仍然有效的選取事件。"""
+
+        def _ev_id(ev: dict):
+            return (
+                str(ev.get("ts", "")),
+                str(ev.get("old_dst", "")),
+                str(ev.get("new_dst", "")),
+            )
+
+        selected_id = _ev_id(selected_event) if selected_event else None
+        selected = next(
+            (ev for ev in records if selected_id and _ev_id(ev) == selected_id),
+            records[0],
+        )
+        for ev in records:
+            ts = str(ev.get("ts", ""))
+            action = str(ev.get("action", "apply"))
+            old_dst = str(ev.get("old_dst", ""))
+            new_dst = str(ev.get("new_dst", ""))
+            is_selected = _ev_id(ev) == _ev_id(selected)
+            history_list.controls.append(
+                ft.Container(
+                    padding=6,
+                    border=ft.Border.all(1, C.DIA_BG if is_selected else C.LINE),
+                    border_radius=8,
+                    bgcolor=C.DIA_BG if is_selected else None,
+                    on_click=lambda e, item=ev: on_select(item),
+                    content=ft.Column(
+                        [
+                            ft.Text(f"{ts} | {action}", size=10, color=C.MUTED),
+                            ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
+                            ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
+                        ],
+                        spacing=2,
+                        horizontal_alignment=ft.CrossAxisAlignment.START,
+                    ),
+                )
+            )
+        return selected
 
     def _on_select_shard_history_event(self, event: dict):
         """選擇歷史事件"""
@@ -54,7 +97,11 @@ class CacheHistoryMixin:
 
         self.shard_history_key_text.value = f"Key: {key} ({ctype})"
 
-        self.shard_history_records = self._history_load_recent(ctype, key, limit=20)
+        self.shard_history_records = self._history_load_for_ui(
+            "shard", ctype, key, limit=20
+        )
+        if self.shard_history_records is None:
+            return
         if not self.shard_history_records:
             self.shard_history_selected_event = None
             self.shard_history_selected_text.value = "此 key 目前沒有歷史紀錄"
@@ -64,57 +111,12 @@ class CacheHistoryMixin:
             self._refresh_disabled_state()
             return
 
-        # 若當前選取不在新清單中，就預設第一筆
-        def _ev_id(ev: dict):
-            """從事件物件取出 ID 組合"""
-            return (
-                str(ev.get("ts", "")),
-                str(ev.get("old_dst", "")),
-                str(ev.get("new_dst", "")),
-            )
-
-        selected_id = (
-            _ev_id(self.shard_history_selected_event)
-            if self.shard_history_selected_event
-            else None
+        self.shard_history_selected_event = self._render_history_rows(
+            self.shard_history_list,
+            self.shard_history_records,
+            self.shard_history_selected_event,
+            self._on_select_shard_history_event,
         )
-        found = None
-        for ev in self.shard_history_records:
-            if selected_id and _ev_id(ev) == selected_id:
-                found = ev
-                break
-        self.shard_history_selected_event = found or self.shard_history_records[0]
-
-        for ev in self.shard_history_records:
-            ts = str(ev.get("ts", ""))
-            action = str(ev.get("action", "apply"))
-            old_dst = str(ev.get("old_dst", ""))
-            new_dst = str(ev.get("new_dst", ""))
-            is_selected = _ev_id(ev) == _ev_id(self.shard_history_selected_event)
-
-            self.shard_history_list.controls.append(
-                ft.Container(
-                    padding=6,
-                    border=ft.Border.all(
-                        1,
-                        C.DIA_BG if is_selected else C.LINE,
-                    ),
-                    border_radius=8,
-                    bgcolor=C.DIA_BG if is_selected else None,
-                    on_click=lambda e, item=ev: self._on_select_shard_history_event(
-                        item
-                    ),
-                    content=ft.Column(
-                        [
-                            ft.Text(f"{ts} | {action}", size=10, color=C.MUTED),
-                            ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
-                            ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
-                        ],
-                        spacing=2,
-                        horizontal_alignment=ft.CrossAxisAlignment.START,
-                    ),
-                )
-            )
 
         self._update_shard_history_preview()
         self._refresh_disabled_state()
@@ -154,13 +156,15 @@ class CacheHistoryMixin:
         new_dst = str(ev.get("old_dst", ""))
         old_dst_now = str(self.shard_dst_original or "")
 
-        try:
+        def work():
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                self._notify("套用舊值失敗：找不到目標 key", "error")
-                return
+                raise RuntimeError("找不到目標 key")
 
-            cache_save_all_service(write_new_shard=False, only_types=[ctype])
+            overview = cache_save_all_service(
+                write_new_shard=False,
+                only_types=[ctype],
+            )
 
             history_event = {
                 "ts": self._history_now_ts(),
@@ -173,7 +177,9 @@ class CacheHistoryMixin:
                 "actor": "cache_shard_detail_ui",
             }
             self._history_append_event(ctype, history_event)
+            return overview
 
+        def apply_ui(_overview):
             self.shard_dst_original = new_dst
             self.shard_dst_field.value = new_dst
             if self.shard_dst_loaded_sig != (
@@ -197,11 +203,13 @@ class CacheHistoryMixin:
             self._render_shard_src_panel()
             self._render_shard_dst_panel()
             self._render_shard_history()
-            self._notify("已套用選取舊值並寫入快取", "info")
-            if self.page:
-                self.page.update()
-        except Exception as ex:  # noqa: BLE001
-            self._notify(f"套用舊值失敗：{ex}", "error")
+
+        self._run_action(
+            "SAVING",
+            work,
+            "已套用選取舊值並寫入快取",
+            on_success=apply_ui,
+        )
 
     # -------------------- History storage helpers --------------------
     def _history_now_ts(self) -> str:
@@ -217,8 +225,113 @@ class CacheHistoryMixin:
         self, cache_type: str, key: str, limit: int = 20
     ) -> list[dict]:
         """載入最近的歷史記錄"""
-        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+        root = self._history_root()
         return history_load_recent(root, cache_type, key, limit)
+
+    def _history_root(self) -> str:
+        return str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+
+    def _history_selection_is_current(
+        self, source: str, cache_type: str, key: str
+    ) -> bool:
+        if source == "query":
+            row = getattr(self, "query_selected_result", None) or {}
+            return (
+                str(row.get("cache_type", "")) == cache_type
+                and str(row.get("key", "")) == key
+            )
+        return (
+            str(getattr(self, "shard_detail_selected_type", "") or "") == cache_type
+            and str(getattr(self, "shard_detail_selected_key", "") or "") == key
+        )
+
+    def _show_history_loading(self, source: str, cache_type: str, key: str) -> None:
+        if source == "query" and hasattr(self, "query_history_list"):
+            self.query_history_records = []
+            self.query_history_selected_event = None
+            self.query_history_list.controls.clear()
+            self.query_history_list.controls.append(
+                ft.Text("歷史紀錄載入中…", size=11, color=C.MUTED)
+            )
+            self.query_history_key_text.value = f"Key: {key} ({cache_type})"
+            self.query_history_selected_text.value = "正在建立歷史索引"
+            self._refresh_disabled_state()
+        elif source == "shard" and hasattr(self, "shard_history_list"):
+            self.shard_history_records = []
+            self.shard_history_selected_event = None
+            self.shard_history_list.controls.clear()
+            self.shard_history_list.controls.append(
+                ft.Text("歷史紀錄載入中…", size=11, color=C.MUTED)
+            )
+            self.shard_history_key_text.value = f"Key: {key} ({cache_type})"
+            self.shard_history_selected_text.value = "正在建立歷史索引"
+            self._refresh_disabled_state()
+
+    def _history_load_for_ui(
+        self,
+        source: str,
+        cache_type: str,
+        key: str,
+        limit: int,
+        on_loaded=None,
+    ):
+        """Load history synchronously only after the JSONL index is warm.
+
+        A cold index is always parsed by an OperationRegistry-owned worker.  A
+        late result is accepted only while the same query/shard key remains
+        selected and the CacheView mount generation is current.
+        """
+        root = self._history_root()
+        if history_index_is_warm(root, cache_type):
+            return self._history_load_recent(cache_type, key, limit)
+
+        self._show_history_loading(source, cache_type, key)
+        request_key = (root, cache_type, key, limit)
+        pending = getattr(self, "_history_pending_requests", None)
+        if pending is None:
+            pending = set()
+            self._history_pending_requests = pending
+        if request_key in pending:
+            return None
+        pending.add(request_key)
+
+        def loaded(records):
+            pending.discard(request_key)
+            if not self._history_selection_is_current(source, cache_type, key):
+                return
+            if on_loaded is not None:
+                on_loaded(records)
+            elif source == "query":
+                self._render_query_history()
+            else:
+                self._render_shard_history()
+
+        def failed(error):
+            pending.discard(request_key)
+            if not self._history_selection_is_current(source, cache_type, key):
+                return
+            message = f"歷史紀錄載入失敗：{error}"
+            if source == "query" and hasattr(self, "query_history_list"):
+                self.query_history_list.controls.clear()
+                self.query_history_list.controls.append(
+                    ft.Text(message, size=11, color=C.RED)
+                )
+            elif source == "shard" and hasattr(self, "shard_history_list"):
+                self.shard_history_list.controls.clear()
+                self.shard_history_list.controls.append(
+                    ft.Text(message, size=11, color=C.RED)
+                )
+            self._notify(message, "error")
+
+        run_cache_background(
+            self,
+            f"讀取快取歷史 {cache_type}",
+            lambda: history_load_recent(root, cache_type, key, limit),
+            loaded,
+            failed,
+            on_discard=lambda: pending.discard(request_key),
+        )
+        return None
 
     def _render_query_history(self):
         """渲染查詢區的歷史記錄列表"""
@@ -244,7 +357,11 @@ class CacheHistoryMixin:
         key = str(row.get("key", ""))
         self.query_history_key_text.value = f"Key: {key} ({ctype})"
 
-        self.query_history_records = self._history_load_recent(ctype, key, limit=20)
+        self.query_history_records = self._history_load_for_ui(
+            "query", ctype, key, limit=20
+        )
+        if self.query_history_records is None:
+            return
         if not self.query_history_records:
             self.query_history_selected_event = None
             self.query_history_selected_text.value = "此 key 目前沒有歷史紀錄"
@@ -254,55 +371,12 @@ class CacheHistoryMixin:
             self._refresh_disabled_state()
             return
 
-        # 若當前選取不在新清單中，就預設第一筆
-        def _ev_id(ev: dict):
-            """從事件物件取出 ID 組合"""
-            return (
-                str(ev.get("ts", "")),
-                str(ev.get("old_dst", "")),
-                str(ev.get("new_dst", "")),
-            )
-
-        selected_id = (
-            _ev_id(self.query_history_selected_event)
-            if self.query_history_selected_event
-            else None
+        self.query_history_selected_event = self._render_history_rows(
+            self.query_history_list,
+            self.query_history_records,
+            self.query_history_selected_event,
+            self._on_select_history_event,
         )
-        found = None
-        for ev in self.query_history_records:
-            if selected_id and _ev_id(ev) == selected_id:
-                found = ev
-                break
-        self.query_history_selected_event = found or self.query_history_records[0]
-
-        for ev in self.query_history_records:
-            ts = str(ev.get("ts", ""))
-            action = str(ev.get("action", "apply"))
-            old_dst = str(ev.get("old_dst", ""))
-            new_dst = str(ev.get("new_dst", ""))
-            is_selected = _ev_id(ev) == _ev_id(self.query_history_selected_event)
-
-            self.query_history_list.controls.append(
-                ft.Container(
-                    padding=6,
-                    border=ft.Border.all(
-                        1,
-                        C.DIA_BG if is_selected else C.LINE,
-                    ),
-                    border_radius=8,
-                    bgcolor=C.DIA_BG if is_selected else None,
-                    on_click=lambda e, item=ev: self._on_select_history_event(item),
-                    content=ft.Column(
-                        [
-                            ft.Text(f"{ts} | {action}", size=10, color=C.MUTED),
-                            ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
-                            ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
-                        ],
-                        spacing=2,
-                        horizontal_alignment=ft.CrossAxisAlignment.START,
-                    ),
-                )
-            )
 
         self._update_history_preview()
         self._refresh_disabled_state()
@@ -416,13 +490,15 @@ class CacheHistoryMixin:
         current = cache_get_entry_service(ctype, key) or {}
         old_dst_now = str(current.get("dst", ""))
 
-        try:
+        def work():
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                self._notify("套用舊值失敗：找不到目標 key", "error")
-                return
+                raise RuntimeError("找不到目標 key")
 
-            cache_save_all_service(write_new_shard=False, only_types=[ctype])
+            overview = cache_save_all_service(
+                write_new_shard=False,
+                only_types=[ctype],
+            )
 
             history_event = {
                 "ts": self._history_now_ts(),
@@ -435,7 +511,9 @@ class CacheHistoryMixin:
                 "actor": "cache_query_ui",
             }
             self._history_append_event(ctype, history_event)
+            return overview
 
+        def apply_ui(_overview):
             self.query_original_dst = new_dst
             self.query_detail_dst.value = new_dst
             for row in self.query_results:
@@ -445,7 +523,10 @@ class CacheHistoryMixin:
 
             self._render_query_results()
             self._render_query_detail()
-            self._notify("已套用選取舊值並寫入快取", "info")
-            self.update()
-        except Exception as ex:  # noqa: BLE001
-            self._notify(f"套用舊值失敗：{ex}", "error")
+
+        self._run_action(
+            "SAVING",
+            work,
+            "已套用選取舊值並寫入快取",
+            on_success=apply_ui,
+        )

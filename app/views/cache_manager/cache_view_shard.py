@@ -9,6 +9,7 @@ import flet as ft
 
 # UI 共用元件：總覽區使用新 UI kit。
 from app.ui.design import C
+from app.views.cache_manager.cache_actions import run_cache_background
 from app.views.cache_manager.cache_history_store import warm_history_index
 from app.views.cache_manager.cache_status_text import entries_line, shard_line
 from app.views.cache_manager.shard_reader import (
@@ -271,10 +272,18 @@ class CacheShardMixin:
             self.update()
 
     def _load_shard_entry(
-        self, cache_type: str, filename: str, key: str
+        self, cache_type: str, filename: str, key: str, *, root: str | None = None
     ) -> dict | None:
-        """載入單一鍵值的詳細資料（fallback；最近用過的分片留在 LRU）。"""
-        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+        """載入單一鍵值的詳細資料。
+
+        This method is the blocking fallback used by the background shard
+        reader.  UI renderers must use ``_request_shard_entry`` so a cold
+        ``shard_raw`` parse never runs in the Flet event loop.
+        """
+        root = (
+            root
+            or str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+        )
         if not root:
             return None
         fp = Path(root) / cache_type / filename
@@ -285,6 +294,67 @@ class CacheShardMixin:
             entry = raw.get(key)
             return entry if isinstance(entry, dict) else None
         return None
+
+    def _get_cached_shard_entry(self, signature):
+        cache = getattr(self, "_shard_entry_cache", {})
+        if signature in cache:
+            return True, cache[signature]
+        return False, None
+
+    def _request_shard_entry(self, cache_type: str, filename: str, key: str) -> None:
+        """Read a cold shard entry through an owned background operation."""
+        signature = (cache_type, filename, key)
+        pending = getattr(self, "_shard_entry_pending", None)
+        if pending is None:
+            pending = set()
+            self._shard_entry_pending = pending
+        if signature in pending:
+            return
+        pending.add(signature)
+
+        root = str((self._last_overview_data or {}).get("cache_root", "") or "").strip()
+
+        def loaded(entry):
+            pending.discard(signature)
+            cache = getattr(self, "_shard_entry_cache", None)
+            if cache is None:
+                cache = {}
+                self._shard_entry_cache = cache
+            cache[signature] = entry
+            while len(cache) > 8:
+                cache.pop(next(iter(cache)))
+            if (
+                str(getattr(self, "shard_detail_selected_type", "") or ""),
+                str(getattr(self, "shard_detail_selected_file", "") or ""),
+                str(getattr(self, "shard_detail_selected_key", "") or ""),
+            ) != signature:
+                return
+            self._render_shard_src_panel()
+            self._render_shard_dst_panel()
+            self._refresh_disabled_state()
+
+        def failed(error):
+            pending.discard(signature)
+            if (
+                str(getattr(self, "shard_detail_selected_type", "") or ""),
+                str(getattr(self, "shard_detail_selected_file", "") or ""),
+                str(getattr(self, "shard_detail_selected_key", "") or ""),
+            ) == signature:
+                self._notify(f"分片內容載入失敗：{error}", "error")
+
+        run_cache_background(
+            self,
+            f"讀取分片內容 {cache_type}/{filename}",
+            lambda: self._load_shard_entry(
+                cache_type,
+                filename,
+                key,
+                root=root,
+            ),
+            loaded,
+            failed,
+            on_discard=lambda: pending.discard(signature),
+        )
 
     async def _on_shard_dst_copy(self, e):
         """複製目標內容到剪貼簿"""

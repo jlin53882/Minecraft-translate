@@ -483,6 +483,65 @@ def test_rapid_account_switch_discards_late_model_response(monkeypatch):
     assert [option.key for option in view.chatgpt_model_control.options] == ["gpt-beta"]
 
 
+def test_model_load_ignores_destroyed_session_update(monkeypatch):
+    from app.views.config import chatgpt_oauth_panel as panel_module
+
+    view = _chatgpt_config_view(monkeypatch)
+    panel = view.chatgpt_oauth_panel
+    panel.did_mount()
+    panel.account_selector.value = "profile-a"
+    monkeypatch.setattr(
+        panel_module,
+        "chatgpt_account_status",
+        lambda: {
+            "connected": True,
+            "active_profile_id": "profile-a",
+            "accounts": [{"profile_id": "profile-a"}],
+        },
+    )
+    monkeypatch.setattr(
+        panel_module,
+        "list_chatgpt_models",
+        lambda *, profile_id=None: [
+            SimpleNamespace(slug="gpt-alpha", display_name="GPT Alpha")
+        ],
+    )
+
+    def destroyed_update():
+        raise RuntimeError("An attempt to fetch destroyed session")
+
+    view.page.update = destroyed_update
+    asyncio.run(
+        panel._load_models_on_entry("profile-a", panel._account_switch_generation)
+    )
+
+    assert panel._busy is False
+    assert panel._auto_model_load_pending is False
+    assert "失敗" not in str(panel.status_text.value)
+
+
+def test_cancelled_model_load_after_unmount_does_not_report_failure(monkeypatch):
+    view = _chatgpt_config_view(monkeypatch)
+    panel = view.chatgpt_oauth_panel
+    panel.did_mount()
+    generation = panel._account_switch_generation
+    panel._auto_model_load_pending = True
+    panel._busy = True
+
+    async def cancelled_load(**_kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(panel, "_load_models", cancelled_load)
+    panel.will_unmount()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(panel._load_models_on_entry("profile-a", generation))
+
+    assert panel._busy is False
+    assert panel._auto_model_load_pending is False
+    assert "失敗" not in str(panel.status_text.value)
+
+
 @pytest.mark.parametrize(
     ("budget", "effort", "message"),
     [("0", "low", "大於 0"), ("abc", "low", "正整數"), ("1000", "maximum", "思考強度")],

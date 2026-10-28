@@ -17,6 +17,7 @@ from translation_tool.utils.log_unit import log_warning
 #   單一背景執行緒依序處理（``history_flush`` 可等待全部完成）。
 _INDEX_LOCK = threading.Lock()
 _INDEX_MEMO: dict[str, tuple[tuple[int, int], dict[str, list[dict]]]] = {}
+_INDEX_INFLIGHT: dict[str, threading.Event] = {}
 _MIRROR_EXECUTOR = ThreadPoolExecutor(
     max_workers=1, thread_name_prefix="history-mirror"
 )
@@ -59,10 +60,51 @@ def _file_index(fp: Path) -> dict[str, list[dict]]:
         hit = _INDEX_MEMO.get(name)
         if hit is not None and hit[0] == sig:
             return hit[1]
-    by_key = _parse_index(fp)
+        waiter = _INDEX_INFLIGHT.get(name)
+        if waiter is None:
+            waiter = threading.Event()
+            _INDEX_INFLIGHT[name] = waiter
+            owner = True
+        else:
+            owner = False
+
+    if not owner:
+        waiter.wait()
+        return _file_index(fp)
+
+    try:
+        by_key = _parse_index(fp)
+        with _INDEX_LOCK:
+            _INDEX_MEMO[name] = (sig, by_key)
+        return by_key
+    finally:
+        with _INDEX_LOCK:
+            _INDEX_INFLIGHT.pop(name, None)
+            waiter.set()
+
+
+def history_index_is_warm(cache_root: str, cache_type: str) -> bool:
+    """Return whether every JSONL file for a type is already indexed.
+
+    This check only stats/list files.  It never parses JSONL, so a UI handler
+    can use it to decide whether the actual load must be scheduled in a worker.
+    A missing history directory is considered warm because there is nothing to
+    parse.
+    """
+    root = str(cache_root or "").strip()
+    if not root:
+        return True
+    jsonl_dir = Path(root) / "cache_history" / str(cache_type) / "jsonl"
+    if not jsonl_dir.exists():
+        return True
+    files = list(jsonl_dir.glob(f"{cache_type}_h*.jsonl"))
+    if not files:
+        return True
     with _INDEX_LOCK:
-        _INDEX_MEMO[name] = (sig, by_key)
-    return by_key
+        return all(
+            (memo := _INDEX_MEMO.get(str(fp))) is not None and memo[0] == _stat_sig(fp)
+            for fp in files
+        )
 
 
 def warm_history_index(cache_root: str, cache_types) -> int:
