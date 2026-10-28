@@ -79,15 +79,34 @@ def test_open_starts_read_only_preview_and_renders_candidates(tmp_path, monkeypa
 
         dialog.open()
 
-        assert len(workers) == 1
+        assert len(workers) == 2
         assert dialog._busy is True
-        workers[0]()
+        workers[0]()  # 範圍選單
+        workers[1]()  # 唯讀預覽
 
         assert dialog._busy is False
         assert dialog._plan is not None
         assert dialog.summary.value.startswith("共找到 1 組候選")
         assert dialog.details.controls
         assert dialog.apply_btn.disabled is False
+    finally:
+        db.close()
+
+
+def test_scope_change_invalidates_existing_preview(tmp_path, monkeypatch):
+    db = _db(tmp_path / "scope.db")
+    try:
+        dialog, workers, _shown = _dialog(monkeypatch, {"value": db})
+        dialog._preview()
+        workers[0]()
+        assert dialog._plan is not None
+
+        dialog.mod_dd.value = "another-mod"
+        dialog._on_scope_changed()
+
+        assert dialog._plan is None
+        assert dialog.apply_btn.disabled is True
+        assert dialog.summary.value == "掃描範圍已變更，請按「預覽／重新掃描」。"
     finally:
         db.close()
 

@@ -18,12 +18,20 @@ def _db(tmp_path):
     return TranslationDB(tmp_path / "duplicate.db")
 
 
-def _insert_alias(db: TranslationDB, key: str, *, translation: str = "") -> int:
+def _insert_alias(
+    db: TranslationDB,
+    key: str,
+    *,
+    translation: str = "",
+    mod_id: str = "bestiary",
+    kind: str = "guide",
+    english: str = ENGLISH,
+) -> int:
     with db._tx() as conn:
         entry_id = conn.execute(
             "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
-            "VALUES ('guide', ?, 'bestiary', ?, ?)",
-            (VERSION, key, ENGLISH),
+            "VALUES (?, ?, ?, ?, ?)",
+            (kind, VERSION, mod_id, key, english),
         ).lastrowid
         if translation:
             conn.execute(
@@ -201,6 +209,51 @@ def test_translation_conflict_is_reported_and_not_merged(tmp_path):
         assert preview.group_count == 0
         assert preview.skipped["translation_conflict"] == 1
         assert db._one("SELECT COUNT(*) FROM entry") == (2,)
+    finally:
+        db.close()
+
+
+def test_duplicate_preview_scope_filters_module_and_kind(tmp_path):
+    db = _db(tmp_path)
+    try:
+        _insert_alias(db, LEGACY_KEY)
+        _insert_alias(db, CURRENT_KEY)
+        _insert_alias(
+            db,
+            "lang/other/_en_us/intro.txt#0",
+            mod_id="other-mod",
+            kind="patchouli",
+        )
+        _insert_alias(
+            db,
+            "lang/other/intro.txt#0",
+            mod_id="other-mod",
+            kind="patchouli",
+        )
+
+        all_plan = db.preview_duplicate_cleanup(VERSION)
+        scoped = db.preview_duplicate_cleanup(
+            VERSION,
+            mod_id="other-mod",
+            kind="patchouli",
+        )
+        assert len(all_plan.candidates) == 2
+        assert len(scoped.candidates) == 1
+        assert scoped.candidates[0].mod_id == "other-mod"
+        assert scoped.candidates[0].kind == "patchouli"
+        assert scoped.mod_id == "other-mod"
+        assert scoped.kind == "patchouli"
+        assert scoped.token != all_plan.token
+
+        applied = db.apply_duplicate_cleanup(
+            VERSION,
+            scoped.token,
+            mod_id="other-mod",
+            kind="patchouli",
+        )
+        assert applied.duplicate_count == 1
+        assert db._one("SELECT COUNT(*) FROM entry") == (3,)
+        assert len(db.preview_duplicate_cleanup(VERSION).candidates) == 1
     finally:
         db.close()
 

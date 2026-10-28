@@ -69,6 +69,8 @@ class DuplicateMergePlan:
     skipped: Counter = field(default_factory=Counter)
     token: str = ""
     batch_id: str = ""
+    mod_id: str | None = None
+    kind: str | None = None
 
     @property
     def group_count(self) -> int:
@@ -134,14 +136,24 @@ def _group_payload(group: DuplicateGroup) -> dict[str, Any]:
     }
 
 
-def _token(candidates: list[DuplicateGroup], states: dict[int, str]) -> str:
-    payload = [
-        {
-            **_group_payload(group),
-            "state": [states.get(entry.entry_id, "") for entry in group.entries],
-        }
-        for group in candidates
-    ]
+def _token(
+    candidates: list[DuplicateGroup],
+    states: dict[int, str],
+    *,
+    version: str,
+    mod_id: str | None,
+    kind: str | None,
+) -> str:
+    payload = {
+        "scope": {"version": version, "mod": mod_id, "kind": kind},
+        "candidates": [
+            {
+                **_group_payload(group),
+                "state": [states.get(entry.entry_id, "") for entry in group.entries],
+            }
+            for group in candidates
+        ],
+    }
     blob = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
@@ -149,14 +161,30 @@ def _token(candidates: list[DuplicateGroup], states: dict[int, str]) -> str:
 class DuplicateCleanupMixin:
     """TranslationDB 的路徑別名掃描、合併與復原方法。"""
 
-    def duplicate_candidates(self, version: str) -> list[DuplicateGroup]:
-        """列出同版本中可能是同一來源檔的重複條目。只讀、不合併。"""
+    def duplicate_candidates(
+        self,
+        version: str,
+        *,
+        mod_id: str | None = None,
+        kind: str | None = None,
+    ) -> list[DuplicateGroup]:
+        """列出指定範圍中可能是同一來源檔的重複條目。只讀、不合併。"""
+        if kind is not None and kind not in _MERGE_KINDS:
+            return []
+        clauses = ["e.mc_version=?", "e.kind IN (?,?)"]
+        params: list[str] = [version, KIND_GUIDE, KIND_PATCHOULI]
+        if mod_id:
+            clauses.append("e.mod_id=?")
+            params.append(mod_id)
+        if kind:
+            clauses.append("e.kind=?")
+            params.append(kind)
         rows = self._q(
             "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
             "COALESCE(f.zh_tw, ''), f.source "
             "FROM entry e LEFT JOIN effective f ON f.entry_id=e.id "
-            "WHERE e.mc_version=? AND e.kind IN (?,?)",
-            (version, KIND_GUIDE, KIND_PATCHOULI),
+            "WHERE " + " AND ".join(clauses),
+            params,
         )
         if not rows:
             return []
@@ -177,7 +205,7 @@ class DuplicateCleanupMixin:
             )
             grouped[(row[1], row[3], canonical_entry_key(row[1], row[4]))].append(entry)
         candidates = []
-        for (kind, mod_id, canonical), entries in grouped.items():
+        for (group_kind, group_mod_id, canonical), entries in grouped.items():
             if len(entries) < 2:
                 continue
             entries.sort(key=lambda item: item.entry_id)
@@ -198,9 +226,9 @@ class DuplicateCleanupMixin:
             )
             candidates.append(
                 DuplicateGroup(
-                    kind,
+                    group_kind,
                     version,
-                    mod_id,
+                    group_mod_id,
                     canonical,
                     tuple(entries),
                     safe,
@@ -212,17 +240,28 @@ class DuplicateCleanupMixin:
             key=lambda group: (group.kind, group.mod_id, group.canonical_key),
         )
 
-    def preview_duplicate_cleanup(self, version: str) -> DuplicateMergePlan:
+    def preview_duplicate_cleanup(
+        self,
+        version: str,
+        *,
+        mod_id: str | None = None,
+        kind: str | None = None,
+    ) -> DuplicateMergePlan:
         """掃描高信心別名並產生 token；不寫入資料庫。"""
         with self._read_snapshot():
-            return self._duplicate_plan(version)
+            return self._duplicate_plan(version, mod_id=mod_id, kind=kind)
 
     def apply_duplicate_cleanup(
-        self, version: str, expected_token: str
+        self,
+        version: str,
+        expected_token: str,
+        *,
+        mod_id: str | None = None,
+        kind: str | None = None,
     ) -> DuplicateMergePlan:
         """在單一交易內合併高信心別名，並保存完整快照供復原。"""
         with self._tx(keep_review=True):
-            plan = self._duplicate_plan(version)
+            plan = self._duplicate_plan(version, mod_id=mod_id, kind=kind)
             if not expected_token or plan.token != expected_token:
                 raise DuplicatePlanChanged("重複候選已變動，請重新掃描與預覽")
             if not plan.valid_groups:
@@ -352,8 +391,14 @@ class DuplicateCleanupMixin:
             )
         return result
 
-    def _duplicate_plan(self, version: str) -> DuplicateMergePlan:
-        candidates = self.duplicate_candidates(version)
+    def _duplicate_plan(
+        self,
+        version: str,
+        *,
+        mod_id: str | None = None,
+        kind: str | None = None,
+    ) -> DuplicateMergePlan:
+        candidates = self.duplicate_candidates(version, mod_id=mod_id, kind=kind)
         valid = [group for group in candidates if group.safe]
         skipped = Counter(group.reason for group in candidates if not group.safe)
         ids = [entry.entry_id for group in candidates for entry in group.entries]
@@ -363,7 +408,15 @@ class DuplicateCleanupMixin:
             candidates,
             valid,
             skipped,
-            _token(candidates, states),
+            _token(
+                candidates,
+                states,
+                version=version,
+                mod_id=mod_id,
+                kind=kind,
+            ),
+            mod_id=mod_id,
+            kind=kind,
         )
 
     def _duplicate_counts(self, table: str, ids: list[int]) -> dict[int, int]:
