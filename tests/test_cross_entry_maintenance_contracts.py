@@ -12,6 +12,8 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from app.services_impl.pipelines.bundle_service import build_bundle_staging
 from translation_tool.core.jar_processor import (
     build_book_path_regex,
@@ -69,6 +71,12 @@ def _neutral_book(summary: str) -> str:
 
 def _guide_text(title: str, body: str) -> str:
     return f"---\nnavigation:\n  title: {title}\n---\n\n# {title}\n\n{body}\n"
+
+
+def _write_relative_text(root: Path, relative: str, content: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
 
 
 def _contract_members() -> dict[str, str]:
@@ -426,5 +434,74 @@ def test_standalone_and_pipeline_bundles_share_resource_pack_data_pack_boundary(
     assert any(
         record["status"] == "excluded"
         and record["reason"] == "resource_pack_excludes_advancement_data"
+        for record in manifest["records"]
+    )
+
+
+@pytest.mark.parametrize("canonical_first", [False, True])
+def test_staging_and_standalone_bundling_share_guideme_canonical_precedence(
+    tmp_path: Path, canonical_first: bool
+):
+    """GuideME aliases cannot change the winner between pipeline and direct bundling."""
+    canonical_root = tmp_path / "canonical"
+    legacy_root = tmp_path / "legacy"
+    canonical_rel = "assets/demo/guides/demo/guide/_zh_tw/machines/batching.md"
+    legacy_rel = "assets/demo/guides/_zh_tw/demo/guide/machines/batching.md"
+    _write_relative_text(canonical_root, canonical_rel, "# canonical\n")
+    _write_relative_text(legacy_root, legacy_rel, "# legacy\n")
+    sources = (
+        [canonical_root, legacy_root]
+        if canonical_first
+        else [legacy_root, canonical_root]
+    )
+    source_paths = [str(path) for path in sources]
+
+    standalone_zip = tmp_path / "standalone-guideme.zip"
+    standalone_updates = list(
+        bundle_outputs_generator(
+            source_paths[0],
+            str(standalone_zip),
+            description="contract",
+            pack_format=34,
+            extra_folders=source_paths[1:],
+            force_rebuild=True,
+        )
+    )
+    assert not any(update.get("error") for update in standalone_updates)
+
+    staging = tmp_path / "guideme-staging"
+    build_bundle_staging(source_paths, str(staging))
+    pipeline_zip = tmp_path / "pipeline-guideme.zip"
+    pipeline_updates = list(
+        bundle_outputs_generator(
+            str(staging),
+            str(pipeline_zip),
+            description="contract",
+            pack_format=34,
+            force_rebuild=True,
+        )
+    )
+    assert not any(update.get("error") for update in pipeline_updates)
+
+    standalone_snapshot = _zip_snapshot(standalone_zip)
+    pipeline_snapshot = _zip_snapshot(pipeline_zip)
+    assert standalone_snapshot == pipeline_snapshot
+    assert (
+        standalone_snapshot[
+            "assets/demo/guides/demo/guide/_zh_tw/machines/batching.md"
+        ].replace(b"\r\n", b"\n")
+        == b"# canonical\n"
+    )
+    assert (
+        "assets/demo/guides/_zh_tw/demo/guide/machines/batching.md"
+        not in standalone_snapshot
+    )
+
+    manifest = json.loads(
+        (tmp_path / "translation_output_manifest.json").read_text(encoding="utf-8")
+    )
+    assert any(
+        record["status"] == "excluded"
+        and record["reason"] == "legacy_guideme_alias_replaced_by_canonical"
         for record in manifest["records"]
     )

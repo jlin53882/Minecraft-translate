@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.guide_translation import (
+    is_guideme_default_locale_alias,
     normalize_guideme_default_locale_rel,
+    select_guideme_canonical_candidates,
 )
 from translation_tool.core.pack_mcmeta import (
     DEFAULT_PACK_FORMAT,
@@ -257,12 +259,15 @@ def _folder_candidates(
         raw_archive_name = os.path.join(base_path_in_zip, relative_path).replace(
             "\\", "/"
         )
+        is_legacy_guideme_alias = is_guideme_default_locale_alias(
+            Path(raw_archive_name)
+        )
         archive_name = _normalize_archive_name(raw_archive_name)
         if _is_invalid_pack_metadata_entry(archive_name):
             continue
         if "/" not in archive_name and _is_pack_file(archive_name):
             continue
-        yield archive_name != raw_archive_name, archive_name, file_path
+        yield is_legacy_guideme_alias, archive_name, file_path
 
 
 def _resource_pack_folders(
@@ -426,8 +431,9 @@ def _plan_resource_pack_writes(
 
     selected: list[tuple[int, str, str, str]] = []
     for archive_name, candidates in grouped.items():
-        canonical = [candidate for candidate in candidates if not candidate[1]]
-        chosen = canonical if canonical else candidates[:1]
+        chosen = select_guideme_canonical_candidates(
+            [(candidate[1], candidate) for candidate in candidates]
+        )
         selected.extend((item[0], archive_name, item[2], item[3]) for item in chosen)
 
     selected.sort(key=lambda item: item[0])

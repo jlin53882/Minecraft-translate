@@ -185,7 +185,12 @@ class DuplicateCleanupDialog:
             result = error = None
             try:
                 versions = list(db.versions()) if db else []
-                modules = list(db.mods(version)) if db and version else []
+                query_version = (
+                    version
+                    if version in versions
+                    else (versions[0] if versions else None)
+                )
+                modules = list(db.mods(query_version)) if db and query_version else []
                 result = (versions, modules)
             except Exception as exc:  # noqa: BLE001 - worker boundary reports UI error
                 error = exc

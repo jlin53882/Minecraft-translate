@@ -21,8 +21,10 @@ from translation_tool.core.book_formats import is_neutral_pages_candidate
 from translation_tool.core.guide_translation import (
     GUIDE_SUFFIXES,
     guide_support_references,
+    is_guideme_default_locale_alias,
     normalize_guideme_default_locale_rel,
     resolve_guide_support_reference,
+    select_guideme_canonical_candidates,
 )
 from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.output_bundler import (
@@ -52,6 +54,14 @@ class ContentIssueSyncResult:
 
     count: int = 0
     warning: str | None = None
+
+
+@dataclass(frozen=True)
+class _BundleSourceCandidate:
+    """一個 staging 輸出候選及其 GuideME 路徑來源標記。"""
+
+    path: str
+    is_legacy_guideme_alias: bool
 
 
 def sync_pipeline_content_manifest(
@@ -181,15 +191,15 @@ def _canonical_path(rel_path: str, canon: dict[str, str]) -> str:
 
 def _collect_bundle_sources(
     sources: list[str],
-) -> tuple[dict[str, tuple[str, list[str]]], dict[str, str]]:
+) -> tuple[dict[str, tuple[str, list[_BundleSourceCandidate]]], dict[str, str]]:
     """依來源優先序收集各輸出路徑對應的來源檔案。
 
     Returns:
-        (plan, canon)。plan：{路徑比對鍵: (staging 內的標準相對路徑, [來源檔案…（優先序由低到高）])}；
+        (plan, canon)。plan：{路徑比對鍵: (staging 內的標準相對路徑, [來源候選…（優先序由低到高）])}；
         canon：每一層路徑（資料夾與檔案）的標準拼法。
         比對鍵用 ``os.path.normcase``，使 Windows 上僅大小寫不同的路徑視為同一個檔案。
     """
-    plan: dict[str, tuple[str, list[str]]] = {}
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]] = {}
     canon: dict[str, str] = {}
     for source in sources:
         content_root = os.path.join(source, _STAGING_CONTENT_ROOT)
@@ -207,7 +217,12 @@ def _collect_bundle_sources(
                 key = os.path.normcase(rel_path)
                 if key not in plan:
                     plan[key] = (rel_path, [])
-                plan[key][1].append(os.path.join(root, name))
+                plan[key][1].append(
+                    _BundleSourceCandidate(
+                        os.path.join(root, name),
+                        is_guideme_default_locale_alias(Path(raw_rel_path)),
+                    )
+                )
     return plan, canon
 
 
@@ -378,21 +393,35 @@ def _load_content_manifest(
 
 
 def _append_plan_manifest_records(
-    plan: dict[str, tuple[str, list[str]]],
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]],
     classified_outputs: set[str],
     records: list[dict[str, str]],
 ) -> set[str]:
     """記錄會進入 staging 的 plan，並回傳已計入的來源檔。"""
     emitted_sources: set[str] = set()
-    for rel_path, source_paths in plan.values():
+    for rel_path, candidates in plan.values():
+        source_paths = select_guideme_canonical_candidates(
+            [(candidate.is_legacy_guideme_alias, candidate) for candidate in candidates]
+        )
         if os.path.normcase(rel_path) in classified_outputs:
             emitted_sources.update(
-                os.path.normcase(os.path.abspath(source_path))
-                for source_path in source_paths
+                os.path.normcase(os.path.abspath(candidate.path))
+                for candidate in candidates
             )
             continue
-        for source_path in source_paths:
+        for candidate in candidates:
+            source_path = candidate.path
             emitted_sources.add(os.path.normcase(os.path.abspath(source_path)))
+            if candidate not in source_paths:
+                records.append(
+                    _manifest_record(
+                        source_path,
+                        rel_path.replace(os.sep, "/"),
+                        "excluded",
+                        "legacy_guideme_alias_replaced_by_canonical",
+                    )
+                )
+                continue
             records.append(
                 _manifest_record(
                     source_path,
@@ -494,7 +523,7 @@ def _append_unplanned_source_records(
 
 def _write_output_manifest(
     sources: list[str],
-    plan: dict[str, tuple[str, list[str]]],
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]],
     staging_dir: str,
     content_manifest_path: str | None = None,
     additional_records: list[dict[str, str]] | None = None,
@@ -591,20 +620,24 @@ def _prune_staging(staging_dir: str, expected: set[str]) -> int:
 
 
 def _materialize_bundle_plan(
-    plan: dict[str, tuple[str, list[str]]], staging_dir: str
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]], staging_dir: str
 ) -> tuple[int, int, int, int, set[str]]:
     """將已解析的輸出 plan 寫入 staging，回傳計數與預期檔案集合。"""
     copied = merged = written = unchanged = 0
     expected: set[str] = set()
-    for key, (rel_path, srcs) in plan.items():
+    for key, (rel_path, candidates) in plan.items():
+        srcs = select_guideme_canonical_candidates(
+            [(candidate.is_legacy_guideme_alias, candidate) for candidate in candidates]
+        )
         dst = os.path.join(staging_dir, rel_path)
         expected.add(key)
 
         # 逐一疊加來源，語意與舊版「依序寫入 staging」相同：JSON 物件與前一份合併，
         # 否則整個覆蓋。state 要嘛是來源檔路徑（原樣複製），要嘛是合併後的 dict。
-        state: str | dict = srcs[0]
+        state: str | dict = srcs[0].path
         copied += 1
-        for src in srcs[1:]:
+        for candidate in srcs[1:]:
+            src = candidate.path
             if src.lower().endswith(".json"):
                 base = state if isinstance(state, dict) else _read_json_dict(state)
                 extra = _read_json_dict(src)

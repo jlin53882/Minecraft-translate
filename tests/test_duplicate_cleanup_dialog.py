@@ -164,3 +164,30 @@ def test_scope_options_discard_stale_database_result_and_reload_current_db(
     finally:
         first.close()
         second.close()
+
+
+def test_scope_options_reload_uses_a_version_available_in_the_new_database(
+    tmp_path, monkeypatch
+):
+    first = _db(tmp_path / "first-version.db")
+    second = TranslationDB(tmp_path / "second-version.db")
+    with second._tx() as conn:
+        conn.execute(
+            "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
+            "VALUES ('guide', ?, 'second-mod', 'second.key', ?)",
+            ("1.20.1", "Second database"),
+        )
+    current_db = {"value": first}
+    try:
+        dialog, workers, _shown = _dialog(monkeypatch, current_db)
+
+        dialog._start_scope_options_load()
+        current_db["value"] = second
+        workers[0]()
+        workers[1]()
+
+        assert dialog.version_dd.value == "1.20.1"
+        assert "second-mod" in {option.key for option in dialog.mod_dd.options}
+    finally:
+        first.close()
+        second.close()

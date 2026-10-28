@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import posixpath
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -196,6 +196,37 @@ def normalize_guideme_default_locale_rel(rel: Path) -> Path:
             *parts[candidate + 1 :],
         )
     return rel
+
+
+def is_guideme_default_locale_alias(rel: Path) -> bool:
+    """Return whether ``rel`` uses a legacy GuideME locale placement.
+
+    The normalizer is the single source of truth for the path contract. Both
+    pipeline staging and direct ZIP bundling use this predicate so a legacy
+    alias cannot win merely because a caller supplied its source first.
+    """
+
+    normalized = normalize_guideme_default_locale_rel(rel)
+    return normalized.as_posix() != rel.as_posix()
+
+
+def select_guideme_canonical_candidates[T](
+    candidates: Iterable[tuple[bool, T]],
+) -> list[T]:
+    """Drop legacy GuideME aliases when a canonical candidate is available.
+
+    Candidate order is otherwise preserved, so normal later-source precedence
+    remains unchanged. This shared rule keeps staging and final ZIP generation
+    consistent without coupling their candidate data structures.
+    """
+
+    ordered = list(candidates)
+    has_canonical = any(not is_legacy for is_legacy, _candidate in ordered)
+    return [
+        candidate
+        for is_legacy, candidate in ordered
+        if not has_canonical or not is_legacy
+    ]
 
 
 def _guide_index_insert_at(parts: list[str], root: Path, offset: int) -> int | None:
