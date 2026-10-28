@@ -70,6 +70,28 @@ def test_preview_discards_result_when_database_changes_while_worker_runs(
         second.close()
 
 
+def test_open_starts_read_only_preview_and_renders_candidates(tmp_path, monkeypatch):
+    db = _db(tmp_path / "open.db")
+    try:
+        dialog, workers, _shown = _dialog(monkeypatch, {"value": db})
+        monkeypatch.setattr(module, "isolate", lambda _dialog: None)
+        monkeypatch.setattr(module, "present_page_dialog", lambda _page, _dialog: None)
+
+        dialog.open()
+
+        assert len(workers) == 1
+        assert dialog._busy is True
+        workers[0]()
+
+        assert dialog._busy is False
+        assert dialog._plan is not None
+        assert dialog.summary.value.startswith("共找到 1 組候選")
+        assert dialog.details.controls
+        assert dialog.apply_btn.disabled is False
+    finally:
+        db.close()
+
+
 def test_apply_rejects_a_completed_plan_after_database_switch(tmp_path, monkeypatch):
     first = _db(tmp_path / "first.db")
     second = _db(tmp_path / "second.db")

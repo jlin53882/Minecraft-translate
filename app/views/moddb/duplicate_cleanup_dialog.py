@@ -110,6 +110,9 @@ class DuplicateCleanupDialog:
             isolate(self.dialog)
             present_page_dialog(self.page, self.dialog)
             self._load_batches()
+            # 開啟即做唯讀預覽，避免使用者看到空白清單而誤以為掃描沒有反應。
+            # 「預覽合併」仍保留作為使用者修改資料後的明確重掃入口。
+            self._preview()
         except (AttributeError, RuntimeError):
             show_snack(self.page, "目前畫面無法開啟重複鍵清理視窗。", C.GOLD)
 
