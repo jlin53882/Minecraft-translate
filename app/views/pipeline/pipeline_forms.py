@@ -53,7 +53,8 @@ class BundleFormState:
     version_input: str = ""
     max_input: str = ""
     pack_image: str | None = None
-    extra_folders: list[str] = field(default_factory=list)
+    # 舊設定仍可放路徑字串；新版 UI 可放 ExtraBundleSource。
+    extra_folders: list[object] = field(default_factory=list)
     zip_output: str = ""
 
 

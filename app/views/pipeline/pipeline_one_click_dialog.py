@@ -28,6 +28,14 @@ from app.ui.design import C
 from app.ui.dialogs import dispose_dialogs, present_dialog
 from app.views.merge.merge_db_options import MergeDbOptions
 from app.views.moddb.lm_db_options import LmDbOptions
+from app.views.pipeline.extra_bundle_sources import (
+    append_extra_source,
+    build_extra_source_controls,
+    clear_extra_source_controls,
+    read_extra_source_controls,
+    refresh_extra_source_preview,
+    set_extra_source_feedback,
+)
 from app.views.pipeline.pipeline_config import (
     RESOURCE_PACK_INSTALL_HINT,
     PipelineConfig,
@@ -49,6 +57,11 @@ from app.views.pipeline.pipeline_forms import (
 )
 from app.views.pipeline.pipeline_one_click_bundle_widgets import (
     build_step4_version_widgets,
+)
+from translation_tool.core.bundle_sources import (
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
+    serialize_extra_bundle_sources,
 )
 from translation_tool.utils.config_manager import (
     get_lm_translate_folder_name,
@@ -88,7 +101,7 @@ def open_one_click_dialog(
                 "pack_format": int,     # 由 version_input 換算；空白為預設（1.21.1 = 34）
                 "max_pack_format": int | None,  # 使用者填的最大使用版本；None 用預設
                 "pack_image": str | None,
-                "extra_folders": list[str],
+                "extra_folders": list[str | dict],
                 "zip_output": str,
             }
         show_snack_bar: 回調：(message: str, color: str) -> void
@@ -343,39 +356,74 @@ def _one_click__build_step4(ctx):
     widgets = build_step4_version_widgets(ctx)
     ctx.bundle_widgets = widgets
 
-    def _refresh_extra():
-        widgets.extra_folders_view.controls.clear()
-        for path in ctx.state.bundle.extra_folders:
-            widgets.extra_folders_view.controls.append(
-                ft.Row(
-                    [
-                        ft.Text(os.path.basename(path), expand=True, size=12),
-                        ft.IconButton(
-                            icon=ft.Icons.CLOSE,
-                            icon_size=14,
-                            on_click=lambda e, p=path: _remove_extra(p),
-                        ),
-                    ]
-                )
-            )
-
-    def _remove_extra(p: str):
+    def _remove_extra(p: object):
         if p in ctx.state.bundle.extra_folders:
             ctx.state.bundle.extra_folders.remove(p)
             _refresh_extra()
             ctx.page.update()
 
-    _refresh_extra()
-
     def _add_extra(e=None):
         async def do():
             result = await ctx.file_picker.get_directory_path()
-            if result and result not in ctx.state.bundle.extra_folders:
-                ctx.state.bundle.extra_folders.append(result)
+            if result:
+                controls = ctx.extra_source_controls
+                mode = controls.mode_field.value or RESOURCE_PACK_MODE
+                if mode == RESOURCE_PACK_MODE and not (controls.target_field.value or "").strip():
+                    value: object = result
+                else:
+                    value = ExtraBundleSource(
+                        result,
+                        mode=mode,
+                        recursive=bool(controls.recursive_field.value),
+                        target=(controls.target_field.value or "").strip(),
+                    )
+                added, message = append_extra_source(
+                    ctx.state.bundle.extra_folders,
+                    value,
+                    allow_unvalidated=True,
+                )
+                if not added:
+                    set_extra_source_feedback(controls, message, error=True)
+                    ctx.page.update()
+                    return
+                clear_extra_source_controls(controls)
                 _refresh_extra()
                 ctx.page.update()
 
         ctx.page.run_task(do)
+
+    def _add_extra_manually(e=None):
+        del e
+        controls = ctx.extra_source_controls
+        try:
+            value = read_extra_source_controls(controls)
+            added, message = append_extra_source(ctx.state.bundle.extra_folders, value)
+        except ValueError as exc:
+            added, message = False, str(exc)
+        if not added:
+            set_extra_source_feedback(controls, message, error=True)
+            ctx.page.update()
+            return
+        clear_extra_source_controls(controls)
+        _refresh_extra()
+        ctx.page.update()
+
+    ctx.extra_source_controls = build_extra_source_controls(
+        on_pick=_add_extra,
+        on_manual_add=_add_extra_manually,
+        picker_label="+ 新增資料夾",
+        list_height=100,
+    )
+    widgets.extra_folders_view = ctx.extra_source_controls.source_list
+
+    def _refresh_extra():
+        refresh_extra_source_preview(
+            ctx.extra_source_controls,
+            ctx.state.bundle.extra_folders,
+            _remove_extra,
+        )
+
+    _refresh_extra()
 
     path_section = ft.Column(
         [
@@ -398,13 +446,7 @@ def _one_click__build_step4(ctx):
     )
     extras = ft.Column(
         [
-            ft.Container(
-                content=widgets.extra_folders_view,
-                border=ft.Border.all(1, C.DIM),
-                border_radius=6,
-                padding=4,
-            ),
-            ft.Button("+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=_add_extra),
+            ctx.extra_source_controls.content,
         ],
         spacing=6,
     )
@@ -614,7 +656,7 @@ def _one_click__build_execute_config(ctx, lang_codes: list[str]) -> dict:
         ).pack_format,
         "max_pack_format": resolve_max_input(ctx.state.bundle.max_input),
         "pack_image": ctx.state.bundle.pack_image,
-        "extra_folders": list(ctx.state.bundle.extra_folders),
+        "extra_folders": serialize_extra_bundle_sources(ctx.state.bundle.extra_folders),
         "zip_output": ctx.state.bundle.zip_output,
         "merge_input": ctx.input_path,
     }

@@ -30,7 +30,7 @@ BundlerView.start_bundling_clicked()
 
 `BundlerView`（`ft.Column`）由 `_build_controls` 組裝，其下的建構器為 `_build_bundler_version_section`、`_build_bundler_info_card`、`_build_bundler_paths_card`、`_build_bundler_preview_cards`。版面為頁首 `kit.page_header`，下方左右兩欄，最底為可收合的「打包日誌」卡（預設展開，高度 200）：
 
-- 左欄：「資源包資訊」卡（由上而下：「遊戲版本或 pack_format」`version_field`（下方為常用版本按鈕、「最大使用版本（選填）」`max_format_field` 與換算說明 `version_summary`）；「檔案敘述」`description_field`；「資源包圖片」`pack_image_field`，右側為選圖按鈕）、「路徑與額外內容」卡（「翻譯專案根目錄 *」、「最終 ZIP 儲存路徑」，各自右側有選擇按鈕；「其他指定資料夾 / 檔案」與「新增資料夾」按鈕）。
+- 左欄：「資源包資訊」卡（由上而下：「遊戲版本或 pack_format」`version_field`（下方為常用版本按鈕、「最大使用版本（選填）」`max_format_field` 與換算說明 `version_summary`）；「檔案敘述」`description_field`；「資源包圖片」`pack_image_field`，右側為選圖按鈕）、「路徑與額外內容」卡（「翻譯專案根目錄 *」、「最終 ZIP 儲存路徑」，各自右側有選擇按鈕；共用的 `ExtraBundleSourceControls` 顯示來源路徑、`resource_pack`／`raw_attachment` 模式、遞迴、ZIP 目標、檔案數／大小與移除按鈕）。Web 無法使用原生資料夾 picker 時，可直接輸入路徑加入。
 - 右欄：「資源包預覽」卡（`preview_image` / `preview_title` / `preview_format`；`preview_source_note` 在封面圖來自來源 `pack.png` 時提示，描述與封面圖由 `_update_preview_card` 依實際生效的來源決定）、「pack.mcmeta」卡（`mcmeta_source_note` 提示來源檔狀況，`mcmeta_view` 內容由 `mcmeta_text()` 產生：與打包同一套規則的 `output_bundler.preview_pack_mcmeta`，來源資料夾有可用的 `pack.mcmeta` 時顯示它〔含修正後內容〕並標明會覆蓋 UI 設定，無法使用時標明原因並顯示 UI 設定的內容）、執行卡（左側 `status_text` 預設「準備就緒」，其下 `progress_bar` 預設隱藏；右側「開始打包」`start_button`）。預覽卡未輸入描述時顯示「（尚未輸入描述）」，`mcmeta_view` 預設顯示 description 為空、`pack_format` 34 與 `supported_formats` 34–46 的 JSON（版本輸入框空白時使用預設）。
 - 描述、版本、圖片、翻譯專案根目錄或額外資料夾改變時由 `_update_preview` 更新預覽；描述以 `mc_text_spans` 渲染 § 顏色代碼。
 
@@ -45,7 +45,7 @@ BundlerView.start_bundling_clicked()
 | `pack_image_field` | pack.png 路徑（可選，FilePicker 選圖） |
 | `root_dir_field` | 翻譯專案根目錄（必填） |
 | `output_zip_field` | ZIP 儲存路徑（留空 → root_dir + `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`） |
-| `extra_folders` / `extra_folders_view` | 額外資料夾/檔案清單。額外資料夾的子資料夾內容與檔案放入 ZIP 根目錄（資料夾本身的名稱不進入 ZIP）；額外檔案放入 ZIP 根目錄 |
+| `extra_folders` / `extra_folders_view` | 額外來源清單。舊字串預設是 `resource_pack`；明確的 `raw_attachment` 依來源相對路徑與 `target` 複製所有一般檔案，且 UI 顯示預檢統計與錯誤 |
 | `progress_bar` / `status_text` | 打包進度（執行時顯示、完成後隱藏）與狀態文字（完成時由 `bundle_result_text` 顯示檔案數或「沿用上次的 ZIP」） |
 | `log_view` | LogView，`mode="tail"`，tail_lines=250 |
 
@@ -62,8 +62,8 @@ BundlerView.start_bundling_clicked()
 
 | 函式 | 職責 |
 |------|------|
-| `bundle_outputs_generator(input_root_dir, output_zip_path, description, pack_format, max_pack_format, pack_image_path, extra_folders, force_rebuild=False)` | 主流程 generator，yield `{progress, log, error?}` |
-| `_collect_sources(input_root_dir, extra_folders, exclude)` | 列出所有可能進入 ZIP 的來源檔（標籤、相對路徑、絕對路徑），並排除打包自身產生的檔案 |
+| `bundle_outputs_generator(input_root_dir, output_zip_path, description, pack_format, max_pack_format, pack_image_path, extra_folders, force_rebuild=False)` | 主流程 generator；先正規化來源、預檢 raw 附件，再寫入 ZIP，yield `{progress, log, error?, bundle_result?}` |
+| `_collect_sources(input_root_dir, extra_folders, exclude, raw_plans)` | 列出 Resource Pack 與已預檢 raw 附件的來源檔（標籤、相對路徑、絕對路徑），並排除打包自身產生的檔案 |
 | `_compute_fingerprint(sources, description, pack_format, max_pack_format, pack_image_path)` | 計算輸入指紋（來源內容雜湊、相對路徑、pack 參數、壓縮設定）；任一來源讀取失敗時回 None |
 | `_load_reusable_state(output_zip_path, fingerprint)` / `_commit_state(output_zip_path, fingerprint)` | 讀取／寫入狀態 sidecar（見下節「增量沿用」） |
 | `_iter_add_folder_to_zip(zip_file, folder_path, base_path_in_zip, seen_files, exclude)` | 遞迴寫入資料夾，每寫完一個檔案 yield 一次（供進度回報）；檔案命名衝突自動加 `_1`、`_2` 後綴 |
@@ -77,7 +77,8 @@ BundlerView.start_bundling_clicked()
 - 打包自身產生的檔案（輸出 ZIP、`.tmp`、狀態檔）不列為來源，也不寫入 ZIP。
 
 ### generator 行為細節
-- **pack.mcmeta / pack.png 來源優先序**：若 root_dir 或 extra_folders 內已存在實際檔案 → 用檔案、跳過 UI 設定並 warn；否則用 UI 欄位。
+- **pack.mcmeta / pack.png 來源優先序**：若 root_dir 或 Resource Pack 額外來源內已存在實際檔案 → 用檔案、跳過 UI 設定並 warn；raw 附件不得覆蓋根目錄保留檔。
+- **raw 預檢與安全邊界**：`_plan_raw_attachments` 只接受一般檔案，拒絕絕對／`..` ZIP 路徑、來源外 symlink／junction／reparse point、讀取失敗與目標碰撞；任何失敗都在 ZIP 替換前中止。
   - 來源 `pack.mcmeta` 經 `_read_custom_pack_mcmeta`（`pack_mcmeta.repair_source_pack_mcmeta`）檢查：讀不出來、不是有效 JSON 或沒有 `pack` 物件時不沿用，改用 UI 設定產生並 warn；沒有問題時逐字沿用；`pack_format`、`min_format`／`max_format`、`supported_formats` 寫成數字字串時改成整數，值無法使用（非數字、負數、範圍反向）時丟掉該欄位，缺少可用的版本欄位或 `description` 時用 UI 設定補上，其他自訂欄位（overlays、filter 等）原樣保留，並逐項 warn 修正了什麼。
   - 來源沒有 pack.mcmeta 時一律寫入（`_write_pack_mcmeta`）：所有 format 數值皆為整數。`pack_format` 1～17 只寫 `pack_format`；18～64（1.20.2～1.21.8）寫 `pack_format` 加 `supported_formats`，`min_inclusive` 為 `pack_format`，`max_inclusive` 使用者未填時在 18～46 為 46、47～64 為 64；65 以上（1.21.9 起，`supported_formats` 已移除）不寫 `pack_format`，改寫 `min_format`（`pack_format`）與 `max_format`（未填為 9999）。使用者填的最大使用版本取代上述預設；`pack_format` 18～64 而最大使用版本 ≥ 65 時，另外寫入 `min_format`（`pack_format`）與 `max_format`（最大使用版本），新舊版遊戲各讀自己認得的欄位。小於 `pack_format` 時拋出 ValueError，1～17 沒有對應欄位而忽略。未指定版本時 `pack_format` 為 34（1.21～1.21.1）。規則集中在 `translation_tool/core/pack_mcmeta.py`（`build_pack_mcmeta`、`parse_pack_format`），輸入換算在 `translation_tool/core/pack_format_lookup.py`（`resolve_version_input`、`resolve_max_input`、`explain_version_input`）。
   - pack.png 僅接受 `.png/.jpg/.jpeg` 副檔名；UI 來源若與已寫入的 `pack.png` 衝突 → 改名 `pack_1.png`

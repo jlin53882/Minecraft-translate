@@ -936,7 +936,7 @@ def run_bundling_service(
     pack_format: int = DEFAULT_PACK_FORMAT,
     max_pack_format: int | None = None,
     pack_image_path: str | None = None,
-    extra_folders: list[str] | None = None,
+    extra_folders: list[object] | None = None,
     force_rebuild: bool = False,
 ):
     """執行此 generator 並逐步回報進度（yield update dict）。"""

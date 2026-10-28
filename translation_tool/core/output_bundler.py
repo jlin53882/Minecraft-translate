@@ -10,12 +10,20 @@ import hashlib
 import json
 import os
 import re
+import stat
 import time
 import zipfile
 from collections.abc import Generator, Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.bundle_sources import (
+    RAW_ATTACHMENT_MODE,
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
+    normalize_extra_bundle_sources,
+)
 from translation_tool.core.guide_translation import (
     is_guideme_default_locale_alias,
     normalize_guideme_default_locale_rel,
@@ -67,6 +75,172 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 _PACK_METADATA_VARIANT = re.compile(r"pack_\d+\.mcmeta$", re.IGNORECASE)
 
 
+@dataclass(frozen=True, slots=True)
+class _RawAttachmentPlan:
+    """原樣附加來源的完整預檢結果。"""
+
+    source: ExtraBundleSource
+    entries: tuple[tuple[str, str], ...]
+    total_bytes: int
+
+
+def _archive_key(name: str) -> str:
+    """以 ZIP 路徑的大小寫不敏感形式檢查碰撞。"""
+    return name.replace("\\", "/").strip("/").casefold()
+
+
+def _is_reparse_point(path: str) -> bool:
+    """判斷 Windows junction／reparse point 與一般符號連結。"""
+    if os.path.islink(path):
+        return True
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400))
+
+
+def _raise_if_unsafe_source(path: str) -> None:
+    if _is_reparse_point(path):
+        raise ValueError(f"原樣附加來源不可包含符號連結或 junction：{path}")
+
+
+def _validate_raw_archive_path(path: str, *, default: str = "") -> str:
+    """正規化 raw ZIP 目標，拒絕絕對路徑、磁碟機與穿越。"""
+    value = (path or default or "").replace("\\", "/").strip()
+    if "\x00" in value:
+        raise ValueError("原樣附加 ZIP 路徑不可包含 NUL 字元")
+    if value.startswith("/") or re.match(r"^[A-Za-z]:", value):
+        raise ValueError(f"原樣附加 ZIP 路徑不可是絕對路徑：{path!r}")
+    parts: list[str] = []
+    for part in value.split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            raise ValueError(f"原樣附加 ZIP 路徑不可包含 ..：{path!r}")
+        parts.append(part)
+    return "/".join(parts)
+
+
+def _raw_source_default_target(source: str) -> str:
+    normalized = os.path.normpath(source)
+    name = os.path.basename(normalized)
+    return name or Path(normalized).name
+
+
+def _readable_regular_file(path: str) -> int:
+    """確認來源是一般檔案且目前可讀，回傳大小。"""
+    _raise_if_unsafe_source(path)
+    try:
+        info = os.stat(path)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f"原樣附加來源不是一般檔案：{path}")
+        with open(path, "rb") as stream:
+            stream.read(0)
+    except OSError as exc:
+        raise OSError(f"無法讀取原樣附加檔案 {path!r}：{exc}") from exc
+    return info.st_size
+
+
+def _raw_attachment_entries(
+    source: ExtraBundleSource,
+    exclude: frozenset[str] | None = None,
+) -> tuple[tuple[tuple[str, str], ...], int]:
+    """列出 raw source 的 archive path 與實體路徑，且不追蹤 reparse point。"""
+    source_path = os.path.abspath(source.source)
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"原樣附加來源不存在：{source.source}")
+    _raise_if_unsafe_source(source_path)
+
+    if os.path.isfile(source_path):
+        relative_files = [(os.path.basename(source_path), source_path)]
+    elif os.path.isdir(source_path):
+        relative_files: list[tuple[str, str]] = []
+
+        def on_walk_error(error: OSError) -> None:
+            raise OSError(f"無法掃描原樣附加來源 {source.source!r}：{error}") from error
+
+        if source.recursive:
+            for root, dirs, files in os.walk(
+                source_path,
+                topdown=True,
+                onerror=on_walk_error,
+                followlinks=False,
+            ):
+                dirs.sort()
+                files.sort()
+                for directory in dirs:
+                    _raise_if_unsafe_source(os.path.join(root, directory))
+                for name in files:
+                    full = os.path.join(root, name)
+                    _raise_if_unsafe_source(full)
+                    relative_files.append((os.path.relpath(full, source_path), full))
+        else:
+            try:
+                names = sorted(os.listdir(source_path))
+            except OSError as exc:
+                raise OSError(
+                    f"無法讀取原樣附加來源 {source.source!r}：{exc}"
+                ) from exc
+            for name in names:
+                full = os.path.join(source_path, name)
+                if os.path.isfile(full):
+                    _raise_if_unsafe_source(full)
+                    relative_files.append((name, full))
+    else:
+        raise ValueError(f"原樣附加來源不是檔案或資料夾：{source.source}")
+
+    target = _validate_raw_archive_path(
+        source.target,
+        default="" if os.path.isfile(source_path) else _raw_source_default_target(source.source),
+    )
+    entries: list[tuple[str, str]] = []
+    total_bytes = 0
+    for relative, full in relative_files:
+        if exclude and _norm(full) in exclude:
+            continue
+        size = _readable_regular_file(full)
+        relative_name = _validate_raw_archive_path(relative)
+        archive_name = "/".join(part for part in (target, relative_name) if part)
+        if not archive_name:
+            raise ValueError(f"無法建立原樣附加 ZIP 路徑：{full}")
+        entries.append((archive_name, full))
+        total_bytes += size
+    return tuple(entries), total_bytes
+
+
+def _plan_raw_attachments(
+    values: list[ExtraBundleSource],
+    exclude: frozenset[str] | None = None,
+) -> list[_RawAttachmentPlan]:
+    plans: list[_RawAttachmentPlan] = []
+    seen: dict[str, str] = {}
+    for index, source in enumerate(values):
+        if source.mode != RAW_ATTACHMENT_MODE:
+            continue
+        entries, total_bytes = _raw_attachment_entries(source, exclude)
+        for archive_name, full in entries:
+            key = _archive_key(archive_name)
+            if key in {"pack.mcmeta", "pack.png"}:
+                raise ValueError(
+                    f"原樣附加來源不可覆蓋 Resource Pack 保留檔案：{archive_name}"
+                )
+            if key in seen:
+                raise ValueError(
+                    "原樣附加來源 ZIP 路徑重複："
+                    f"{archive_name}（來源 {seen[key]} 與 {full}）"
+                )
+            seen[key] = full
+        plans.append(_RawAttachmentPlan(source, entries, total_bytes))
+        log_info(
+            f"原樣附加來源 raw[{index}]：來源={source.source!r}，"
+            f"目標={source.target or _raw_source_default_target(source.source)!r}，"
+            f"遞迴={source.recursive}，掃描到 {len(entries)} 個檔案、"
+            f"{total_bytes} bytes；不翻譯、不解析"
+        )
+    return plans
+
+
 def normalize_output_zip_name(value: object) -> str:
     """設定檔的輸出檔名 → 可安全接在資料夾後的 ZIP 檔名。
 
@@ -103,7 +277,7 @@ def _read_custom_pack_mcmeta(
     return repair_source_pack_mcmeta(content, generated)
 
 
-def _zip_root_files(input_root_dir: str, extra_folders: list[str] | None) -> list[str]:
+def _zip_root_files(input_root_dir: str, extra_folders: list[object] | None) -> list[str]:
     """打包時會直接落在 ZIP 根目錄的檔案（依寫入順序，後寫入者優先）。
 
     包含：名為 ``root`` 的子資料夾內的檔案、根目錄第一層的檔案、直接加入的額外檔案，
@@ -123,7 +297,18 @@ def _zip_root_files(input_root_dir: str, extra_folders: list[str] | None) -> lis
             if os.path.basename(folder).lower() == "root":
                 found += entries(folder, dirs=False)
         found += entries(input_root_dir, dirs=False)
-    for extra in extra_folders or []:
+    for raw_extra in extra_folders or []:
+        extra_source = raw_extra
+        try:
+            extra_spec = normalize_extra_bundle_sources([raw_extra])[0]
+            if extra_spec.mode != RESOURCE_PACK_MODE:
+                continue
+            extra_source = extra_spec.source
+        except ValueError:
+            # Invalid settings are reported by the bundle generator. Preview helpers
+            # should remain best-effort and must not treat a mapping as a filesystem path.
+            continue
+        extra = extra_source
         if os.path.isfile(extra):
             found.append(extra)
         elif os.path.isdir(extra):
@@ -134,7 +319,7 @@ def _zip_root_files(input_root_dir: str, extra_folders: list[str] | None) -> lis
 
 
 def find_source_pack_files(
-    input_root_dir: str, extra_folders: list[str] | None
+    input_root_dir: str, extra_folders: list[object] | None
 ) -> tuple[str | None, str | None]:
     """來源裡既有的 (pack.mcmeta, pack.png) 路徑：會落在 ZIP 根目錄的同名檔案；沒有則為 None。
 
@@ -157,7 +342,7 @@ def _is_pack_file(path: str) -> bool:
 
 def preview_pack_mcmeta(
     input_root_dir: str,
-    extra_folders: list[str] | None,
+    extra_folders: list[object] | None,
     description: str,
     pack_format: int,
     max_pack_format: int | None = None,
@@ -271,7 +456,7 @@ def _folder_candidates(
 
 
 def _resource_pack_folders(
-    input_root_dir: str, extra_folders: list[str] | None
+    input_root_dir: str, extra_folders: list[object] | None
 ) -> tuple[list[tuple[str, str, str]], list[str]]:
     """選出可寫入 Resource Pack 的 assets 根目錄。
 
@@ -292,7 +477,15 @@ def _resource_pack_folders(
         ignored=ignored,
         seen=seen,
     )
-    for index, extra in enumerate(extra_folders or []):
+    for index, raw_extra in enumerate(extra_folders or []):
+        try:
+            extra_spec = normalize_extra_bundle_sources([raw_extra])[0]
+        except ValueError:
+            ignored.append(str(raw_extra))
+            continue
+        if extra_spec.mode != RESOURCE_PACK_MODE:
+            continue
+        extra = extra_spec.source
         label = f"extra[{index}]"
         if os.path.isfile(extra):
             if not _is_pack_file(extra) and not _is_artifact(extra, None):
@@ -390,8 +583,9 @@ def _inspect_resource_pack_container(
 
 def _collect_sources(
     input_root_dir: str,
-    extra_folders: list[str] | None,
+    extra_folders: list[object] | None,
     exclude: frozenset[str] | None = None,
+    raw_plans: list[_RawAttachmentPlan] | None = None,
 ) -> list[tuple[str, str, str]]:
     """列出 Resource Pack 允許進入 ZIP 的來源檔。"""
     folders, _ignored = _resource_pack_folders(input_root_dir, extra_folders)
@@ -404,6 +598,9 @@ def _collect_sources(
     for path in (pack_mcmeta, pack_png):
         if path and not _is_artifact(path, exclude):
             sources.append(("pack-metadata", os.path.basename(path).lower(), path))
+    for index, plan in enumerate(raw_plans or []):
+        for archive_name, full in plan.entries:
+            sources.append((f"raw[{index}]", archive_name, full))
     return sources
 
 
@@ -443,16 +640,85 @@ def _plan_resource_pack_writes(
     return by_folder
 
 
-def _validate_resource_pack_entries(names: list[str]) -> None:
-    """驗證最終 ZIP 不含 data 或抽取／打包 wrapper。"""
+def inspect_extra_bundle_sources(values: list[object] | None) -> list[dict[str, Any]]:
+    """預覽額外來源的實際檔案數、大小與錯誤。
+
+    這個函式供三個 UI 入口共用。Resource Pack 模式只預覽會被既有
+    ``assets/`` 規則接受的檔案；raw 模式則預覽全部一般檔案，並套用與正式
+    打包相同的路徑／連結安全檢查。
+    """
+    specs = normalize_extra_bundle_sources(values)
+    raw_by_source: dict[int, _RawAttachmentPlan] = {}
+    raw_errors: dict[int, str] = {}
+    for spec in specs:
+        if spec.mode != RAW_ATTACHMENT_MODE:
+            continue
+        try:
+            plan = _plan_raw_attachments([spec])[0]
+        except (OSError, ValueError) as exc:
+            raw_errors[id(spec)] = str(exc)
+        else:
+            raw_by_source[id(spec)] = plan
+    results: list[dict[str, Any]] = []
+    for spec in specs:
+        item: dict[str, Any] = {
+            "source": spec.source,
+            "mode": spec.mode,
+            "recursive": spec.recursive,
+            "target": spec.target or _raw_source_default_target(spec.source),
+            "files": 0,
+            "bytes": 0,
+            "valid": True,
+            "error": None,
+        }
+        try:
+            if spec.mode == RAW_ATTACHMENT_MODE:
+                if id(spec) in raw_errors:
+                    raise ValueError(raw_errors[id(spec)])
+                plan = raw_by_source.get(id(spec))
+                if plan is None:
+                    entries, total_bytes = _raw_attachment_entries(spec)
+                else:
+                    entries, total_bytes = plan.entries, plan.total_bytes
+                item["files"] = len(entries)
+                item["bytes"] = total_bytes
+            else:
+                if not os.path.exists(spec.source):
+                    raise FileNotFoundError(f"額外來源不存在：{spec.source}")
+                folders, ignored = _resource_pack_folders("", [spec])
+                item["ignored"] = ignored
+                candidates = [
+                    candidate
+                    for _label, folder, base in folders
+                    for candidate in _folder_candidates(folder, base)
+                ]
+                item["files"] = len(candidates)
+                item["bytes"] = sum(os.path.getsize(path) for _old, _name, path in candidates)
+                if os.path.isfile(spec.source) and _is_pack_file(spec.source):
+                    item["files"] = 1
+                    item["bytes"] = os.path.getsize(spec.source)
+        except (OSError, ValueError) as exc:
+            item["valid"] = False
+            item["error"] = str(exc)
+        results.append(item)
+    return results
+
+
+def _validate_resource_pack_entries(
+    names: list[str], allowed_raw_entries: set[str] | None = None
+) -> None:
+    """驗證 Resource Pack 與明確 raw 附件的最終 ZIP 路徑。"""
     normalized = [name.replace("\\", "/").strip("/") for name in names]
     if normalized.count("pack.mcmeta") != 1:
         raise ValueError("Resource Pack ZIP 必須恰好包含一個根目錄 pack.mcmeta")
 
+    allowed_raw = {_archive_key(name) for name in (allowed_raw_entries or set())}
     invalid: list[str] = []
     for name in normalized:
         lowered = name.lower()
         top = lowered.split("/", 1)[0]
+        if _archive_key(name) in allowed_raw:
+            continue
         if (
             _is_invalid_pack_metadata_entry(name)
             or top in {"data", "other_output"}
@@ -698,7 +964,7 @@ def bundle_outputs_generator(
     pack_format: int = DEFAULT_PACK_FORMAT,
     max_pack_format: int | None = None,
     pack_image_path: str | None = None,
-    extra_folders: list[str] | None = None,
+    extra_folders: list[object] | None = None,
     force_rebuild: bool = False,
 ) -> Generator[dict[str, Any], None, None]:
     """Generator that bundles output folders into a ZIP archive.
@@ -710,7 +976,9 @@ def bundle_outputs_generator(
         pack_format: pack.mcmeta 的 pack_format（整數）；1.20.2 以上另寫 supported_formats
         max_pack_format: 最大使用版本（supported_formats.max_inclusive 或 max_format）；None 用預設
         pack_image_path: Optional path to pack.png to copy into ZIP root
-        extra_folders: Optional list of extra folder paths to merge into ZIP root
+        extra_folders: Optional list of legacy paths or explicit source objects.
+            Legacy strings keep ``resource_pack`` behavior; ``raw_attachment``
+            copies every ordinary file without parsing or translating it.
         force_rebuild: True 時忽略上次打包狀態，一律重建 ZIP
 
     輸入（內容、路徑、pack 參數、壓縮設定）與上次成功打包相同、且輸出 ZIP 未被改動時，
@@ -732,8 +1000,15 @@ def bundle_outputs_generator(
         }
         return
 
+    try:
+        extra_sources = normalize_extra_bundle_sources(extra_folders)
+    except ValueError as exc:
+        yield {"progress": 1.0, "log": f"額外來源設定無效：{exc}", "error": True}
+        log_error(f"額外來源設定無效：{exc!r}")
+        return
+
     resource_folders, ignored_sources = _resource_pack_folders(
-        input_root_dir, extra_folders
+        input_root_dir, extra_sources
     )
     log_info(
         f"輸入目錄: {input_root_dir}，找到 Resource Pack assets 來源: "
@@ -741,7 +1016,18 @@ def bundle_outputs_generator(
     )
 
     total_files_added = 0
+    raw_files_added = 0
+    raw_bytes_added = 0
     yield {"progress": 0.0, "log": f"開始建立 ZIP 檔案於: {output_zip_path}"}
+    for index, source in enumerate(extra_sources):
+        yield {
+            "progress": 0.0,
+            "log": (
+                f"額外來源[{index}]：來源={source.source!r}｜模式={source.mode}｜"
+                f"遞迴={'是' if source.recursive else '否'}｜"
+                f"ZIP 目標={source.target or '（來源名稱／檔案根目錄）'}"
+            ),
+        }
 
     seen_files: dict = {}
     tmp_zip_path = output_zip_path + ".tmp"
@@ -749,7 +1035,10 @@ def bundle_outputs_generator(
     committed = False
 
     try:
-        sources = _collect_sources(input_root_dir, extra_folders, exclude)
+        raw_plans = _plan_raw_attachments(extra_sources, exclude)
+        sources = _collect_sources(
+            input_root_dir, extra_sources, exclude, raw_plans=raw_plans
+        )
         fingerprint = _compute_fingerprint(
             sources, description, pack_format, max_pack_format, pack_image_path
         )
@@ -768,7 +1057,9 @@ def bundle_outputs_generator(
         # 重建期間不得留下舊的有效狀態：任何中途失敗／取消，下次都必須重建。
         _remove_quietly(_state_path(output_zip_path))
         write_plan = _plan_resource_pack_writes(resource_folders, exclude)
-        planned_file_count = sum(len(items) for items in write_plan.values())
+        planned_file_count = sum(len(items) for items in write_plan.values()) + sum(
+            len(plan.entries) for plan in raw_plans
+        )
         tracker = _ProgressTracker(planned_file_count)
 
         for ignored in ignored_sources:
@@ -788,7 +1079,7 @@ def bundle_outputs_generator(
         pack_png_source = None
 
         pack_mcmeta_source, pack_png_source = find_source_pack_files(
-            input_root_dir, extra_folders
+            input_root_dir, extra_sources
         )
 
         # If pack.png/pack.mcmeta found in folders, skip UI settings and warn
@@ -904,8 +1195,48 @@ def bundle_outputs_generator(
                     }
                     log_warning(f"'{label}' 中沒有可打包的檔案")
 
+            raw_names = {
+                archive_name
+                for plan in raw_plans
+                for archive_name, _full in plan.entries
+            }
+            for index, plan in enumerate(raw_plans):
+                yield {
+                    "progress": tracker.progress,
+                    "log": (
+                        f"正在加入原樣附加來源 raw[{index}]：{plan.source.source}；"
+                        f"目標 {plan.source.target or _raw_source_default_target(plan.source.source)}；"
+                        f"{len(plan.entries)} 個檔案、{plan.total_bytes} bytes；"
+                        "不翻譯、不解析"
+                    ),
+                }
+                for archive_name, file_path in plan.entries:
+                    key = _archive_key(archive_name)
+                    if any(_archive_key(name) == key for name in seen_files):
+                        raise ValueError(
+                            f"原樣附加來源 ZIP 路徑與既有輸出重複：{archive_name}"
+                        )
+                    # Re-read through ZipFile.write so binary data is copied as-is;
+                    # the preflight already verified existence and readability.
+                    zf.write(file_path, archive_name)
+                    seen_files[archive_name] = 1
+                    total_files_added += 1
+                    raw_files_added += 1
+                    raw_bytes_added += os.path.getsize(file_path)
+                    update = tracker.tick()
+                    if update:
+                        yield update
+                if plan.entries:
+                    yield {
+                        "progress": tracker.progress,
+                        "log": (
+                            f"成功從原樣附加來源 '{plan.source.source}' 加入 "
+                            f"{len(plan.entries)} 個檔案。"
+                        ),
+                    }
+
         with zipfile.ZipFile(tmp_zip_path) as check:
-            _validate_resource_pack_entries(check.namelist())
+            _validate_resource_pack_entries(check.namelist(), raw_names)
         replace_with_retry(tmp_zip_path, output_zip_path)
         committed = True
         state_warning = None
@@ -923,6 +1254,10 @@ def bundle_outputs_generator(
         log_parts = [
             f"打包完成！總共 {total_files_added} 個檔案被加入 ZIP。耗時 {duration:.2f} 秒"
         ]
+        if raw_plans:
+            log_parts.append(
+                f"原樣附加 {raw_files_added} 個檔案／{raw_bytes_added} bytes"
+            )
         if skipped_pack_mcmeta:
             log_parts.append(f"跳過 pack.mcmeta（已存在於：{skipped_pack_mcmeta}）")
         if skipped_pack_png:
@@ -936,6 +1271,8 @@ def bundle_outputs_generator(
             "bundle_result": {
                 "reused": False,
                 "files": total_files_added,
+                "raw_files": raw_files_added,
+                "raw_bytes": raw_bytes_added,
                 "duration_sec": round(duration, 2),
             },
         }

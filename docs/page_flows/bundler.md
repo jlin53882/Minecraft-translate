@@ -8,7 +8,7 @@
 
 - 選擇翻譯專案根目錄、輸出 ZIP 路徑（留空時自動帶入 `根目錄\<output_zip_name>`）、封面圖。
 - 在單一輸入框填 Minecraft 版本（如 `1.20.4`）或 `pack_format` 整數，換算出寫入 `pack.mcmeta` 的 `pack_format`（18～64 另寫 `supported_formats`；65 以上改寫 `min_format`／`max_format`）；選填「最大使用版本」取代預設上限。
-- 新增、移除額外資料夾或檔案。
+- 新增、移除額外來源。每個來源都明確標示 `resource_pack` 或 `raw_attachment` 模式、是否遞迴、ZIP 內目標路徑，以及預計檔案數／總大小。
 - 即時預覽描述（含 § 顏色碼）、封面圖、版本格式與實際會寫進 ZIP 的 `pack.mcmeta` 內容，描述與封面圖同樣以來源資料夾的 `pack.mcmeta`／`pack.png` 優先；來源資料夾有 `pack.mcmeta` 時預覽顯示該檔（含修正）並提示會覆蓋 UI 設定。
 - 顯示打包日誌與進度。
 
@@ -17,7 +17,10 @@
 - 標準語言檔輸出為 `assets/<namespace>/lang/zh_tw.json`；`data/<namespace>/lang` 只可作為掃描來源，不能直接成為資源包 ZIP 內容。
 - 標準 Patchouli 的 `assets/<namespace>/patchouli_books/<book>/en_us/...` 會輸出到 `zh_tw/`；沒有明確語系資料夾的自訂書本（例如 Herbs and Harvest 的 `assets/herbsandharvest/books/...`）保留原相對路徑。
 - Advancement 的 `data/<namespace>/advancement(s)/...` 不會進入 Resource Pack。使用 translate key 的文字應透過 `assets/<namespace>/lang/zh_tw.json` 生效；literal 文字會列為「目前資源包無法直接套用」，需要另建 Data Pack 才能套用。
-- `extra_folders` 只接受其中的 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。
+- 舊版 `extra_folders: list[str]` 仍維持 `resource_pack` 行為：只接受 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。
+- 新版來源物件可指定 `mode: "raw_attachment"`、`recursive` 與 `target`。這個模式會遞迴複製所有一般檔案（含 `.md`、`.txt`、`.snbt`、JSON、圖片與二進位檔），不解析、不翻譯、不改寫 bytes，並保留來源相對目錄。
+- `raw_attachment` 仍執行安全檢查：拒絕絕對／穿越路徑、符號連結／junction／其他 reparse point、來源讀取錯誤與 ZIP 目標碰撞；預檢失敗會停止打包，不產生不完整 ZIP。Resource Pack 的保留檔 `pack.mcmeta`／`pack.png` 也不可被 raw 來源覆蓋。
+- Web 沒有可用的原生資料夾選擇器時，使用者可直接輸入來源路徑後按「加入手動來源」；只有通過實際檔案預覽的來源才會加入清單，不能因 picker 回傳 `None` 而顯示虛假的已加入狀態。
 - 一鍵流水線會把內容分類的 `translation_content_manifest.json` 寫在整個輸出根目錄；合併階段與打包階段透過同一個明確路徑讀寫，讓 `other_output` 的 emitted／pending／parse_failed provenance 能接到最後的 `translation_output_manifest.json`。手動單獨呼叫服務時若未提供路徑，才使用各自輸出根的相容預設位置。
 
 打包本身由 `translation_tool/core/output_bundler.py` 的 `bundle_outputs_generator` 完成。`BundlerView` 直接呼叫它（經由 `app/services_impl/pipelines/bundle_service.py` 的 re-export），沒有使用 `run_bundling_service`，因此這一頁不經過 `GLOBAL_LOG_LIMITER` 節流。
@@ -129,7 +132,7 @@ flowchart TD
 ## 狀態與資料
 
 - **版本對照表**：`translation_tool/core/pack_format_table.json`，由 `pack_format_lookup.load_table()` 讀入並快取。檔案不存在或損毀時使用空表並記錄 `log_warning`，此時輸入版本會提示改填 `pack_format` 整數。
-- **`extra_folders`**：使用者新增的額外資料夾或檔案路徑清單，只存在記憶體中；打包時只收集其中的 `assets/` 與根目錄 metadata，其他輸出會列 warning，不會整包塞入 ZIP。
+- **`extra_folders`**：使用者新增的額外來源清單，只存在記憶體中。舊字串與 `mode: resource_pack` 只收集 `assets/` 與根目錄 metadata；`mode: raw_attachment` 則依 `recursive`／`target` 直接加入所有一般檔案。三個入口共用 `app/views/pipeline/extra_bundle_sources.py`，預覽統計與正式打包使用同一套來源模型。
 - **版本輸入**：`version_field.value` 為版本或 `pack_format`；`max_format_field.value` 為選填的最大使用版本。
 - **輸出檔名**：`_config_output_zip_name` 來自設定 `output_bundler.output_zip_name`，預設 `可使用翻譯.zip`（`OUTPUT_ZIP_NAME_PATH` 為訂閱的設定路徑）。
 - **打包狀態檔**：`_state_path(output_zip_path)` 記錄上次成功打包的指紋，供下次判斷是否可沿用既有 ZIP。
