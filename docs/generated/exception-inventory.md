@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **369** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **367** 項；其中 **98** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 331 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 329 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -31,6 +31,7 @@
 | `app/services.py:run_variant_compare_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_english_residue_check_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_variant_compare_tsv_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `app/services_impl/cache/cache_services.py:cache_save_all_service` | BLE001 | 已記錄／回報 | preserve the original save failure |
 | `app/services_impl/cache/cache_services.py:cache_search_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/moddb_batch_operation.py:_run_batch_job` | BLE001 | 已記錄／回報 | worker boundary must publish unexpected failures |
@@ -72,24 +73,21 @@
 | `app/ui/update_scope.py:suppress_auto_update` | BLE001 | 已記錄／回報 | 不在 Flet 事件脈絡內（單元測試）時沒有影響 |
 | `app/views/bundler_view.py:BundlerView._bundling_worker` | BLE001 | 已記錄／回報 | 背景執行緒邊界，錯誤顯示於日誌 |
 | `app/views/cache_manager/cache_actions.py:_execute_cache_work` | BLE001 | 已記錄／回報 | 錯誤顯示在 UI |
+| `app/views/cache_manager/cache_actions.py:_finish_cache_action` | BLE001 | 已記錄／回報 | UI callback boundary |
 | `app/views/cache_manager/cache_history_store.py:history_load_active` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | 鏡像是衍生資料，失敗只記錄 |
-| `app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._on_shard_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_history.py:CacheHistoryMixin._on_apply_selected_history` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._copy_logs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._load_overview` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._on_rebuild_index.work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_apply_dst` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search._search_standalone` | BLE001 | 已記錄／回報 | event loop displays the error |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_query_search.search` | BLE001 | 已記錄／回報 | event loop displays the error |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_type_shard_panel_height` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._dynamic_shard_key_panel_width` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._set_shard_workspace_visible` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_shard.py:CacheShardMixin._on_shard_dst_copy` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_shard_detail.py:CacheShardDetailMixin._on_shard_dst_apply` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView._batch_refresh` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_view.py:CacheView.did_mount` | BLE001/S110 | UI／畫面保護 | 尚未完成掛載時略過 |
 | `app/views/cache_view.py:CacheView._fetch_overview` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |

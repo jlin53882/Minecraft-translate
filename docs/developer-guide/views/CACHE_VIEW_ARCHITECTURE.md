@@ -39,16 +39,16 @@ app/views/cache_manager/
 ## 呼叫鏈（實際）
 
 ```
-CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已卸載或舊掛載的總覽結果）
+CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已卸載或舊掛載的總覽、冷歷史與冷分片結果）
   ├─ 總覽：_load_overview() → cache_get_overview_service() → _render_type_list()
   │        動作：_run_action() → run_cache_action(view, reason, work_fn, ...)
   │              ├─ mounted App 先向 OperationRegistry admission，再由 owner worker 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
   │              └─ _on_reload_all / _on_save_one_new / _on_rotate_one ... 各自組 work_fn
   ├─ 查詢：_on_query_search() → _compute_query_results()（背景執行緒，內部呼叫 cache_search_service）→ _apply_query_results() → _render_query_results()
   │        _on_select_result() → 詳情（cache_get_entry_service）→ _on_apply_dst() → cache_update_dst_service()
-  ├─ 分片：_load_shard_rows() → _load_shard_keys() → _load_shard_entry() → 編輯 dst / 歷史
+  ├─ 分片：_load_shard_rows() → _load_shard_keys() → 背景 _load_shard_entry() → 編輯 dst / 歷史
   └─ 歷史：cache_history_store（history_load_active / history_save_active / history_append_event /
-           history_load_recent）— 查詢與分片共用浮動視窗（_on_open_history_window）
+            history_load_recent）— 冷 JSONL 索引經 OperationRegistry 背景載入，再由查詢與分片共用浮動視窗（_on_open_history_window）
 ```
 
 ## 主要方法（cache_view.py）
@@ -66,7 +66,7 @@ CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已�
 - 分頁：`_set_query_page` + `_on_page_first/prev/next/last/jump` + `_on_page_size_change`
 
 ### 分片區
-- **分片讀取的執行緒契約**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。單筆 SRC 先以 `cache_get_entry_service` 取得，找不到才 fallback 到 `_load_shard_entry`（經 `shard_reader.shard_raw` 讀取整個分片，LRU 只保留最近 2 個分片）。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
+- **分片讀取的執行緒契約**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。單筆 SRC/DST 先以 `cache_get_entry_service` 取得，找不到才由 `_request_shard_entry` 以 OperationRegistry 背景呼叫 `_load_shard_entry`（經 `shard_reader.shard_raw` 讀取整個分片，保留既有 LRU）。選取變更或卸載時丟棄晚到結果。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，冷索引只在背景解析，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
 - `_load_shard_rows` → `_load_shard_keys(cache_type, filename)` → `_on_select_shard_key` → `_load_shard_entry` → `_render_shard_src_panel` / `_render_shard_dst_panel`
 - dst 編輯：`_on_shard_dst_apply` / `_on_shard_dst_revert` / `_on_shard_dst_copy` / `_on_shard_dst_restore_latest`
 - 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發；經 `app/ui/page_resize.py` 向 AppShell 的 resize 派送訂閱，`will_unmount` 取消）

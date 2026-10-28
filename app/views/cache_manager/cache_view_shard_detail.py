@@ -44,7 +44,13 @@ class CacheShardDetailMixin:
 
         entry = cache_get_entry_service(ctype, key)
         if not isinstance(entry, dict):
-            entry = self._load_shard_entry(ctype, filename, key)
+            cached, entry = self._get_cached_shard_entry((ctype, filename, key))
+            if not cached:
+                self.shard_src_meta.value = f"SRC：{key}（載入中…）"
+                self.shard_src_field.value = "讀取分片內容中…"
+                self._request_shard_entry(ctype, filename, key)
+                self._refresh_disabled_state()
+                return
 
         src_text = ""
         if isinstance(entry, dict):
@@ -91,7 +97,14 @@ class CacheShardDetailMixin:
         if self.shard_dst_loaded_sig != current_sig:
             entry = cache_get_entry_service(ctype, key)
             if not isinstance(entry, dict):
-                entry = self._load_shard_entry(ctype, filename, key)
+                cached, entry = self._get_cached_shard_entry(current_sig)
+                if not cached:
+                    self.shard_dst_meta.value = f"DST：{key}（載入中…）"
+                    self.shard_dst_field.value = "讀取分片內容中…"
+                    self.shard_dst_original = ""
+                    self._request_shard_entry(ctype, filename, key)
+                    self._refresh_disabled_state()
+                    return
 
             dst_text = ""
             if isinstance(entry, dict):
@@ -120,13 +133,15 @@ class CacheShardDetailMixin:
         old_dst = str(self.shard_dst_original or "")
         new_dst = str(self.shard_dst_field.value or "")
 
-        try:
+        def work():
             done = cache_update_dst_service(ctype, key, new_dst)
             if not done:
-                self._notify("套用失敗：找不到目標 key", "error")
-                return
+                raise RuntimeError("找不到目標 key")
 
-            cache_save_all_service(write_new_shard=False, only_types=[ctype])
+            overview = cache_save_all_service(
+                write_new_shard=False,
+                only_types=[ctype],
+            )
 
             history_event = {
                 "ts": self._history_now_ts(),
@@ -139,7 +154,9 @@ class CacheShardDetailMixin:
                 "actor": "cache_shard_detail_ui",
             }
             self._history_append_event(ctype, history_event)
+            return overview
 
+        def apply_ui(_overview):
             self.shard_dst_original = new_dst
             if self.shard_dst_loaded_sig != (ctype, filename, key):
                 self.shard_dst_loaded_sig = (ctype, filename, key)
@@ -153,11 +170,13 @@ class CacheShardDetailMixin:
             self._render_query_detail()
             self._render_shard_src_panel()
             self._render_shard_dst_panel()
-            self._notify("已套用 C3 DST 並寫入快取", "info")
-            if self.page:
-                self.page.update()
-        except Exception as ex:  # noqa: BLE001
-            self._notify(f"套用 DST 失敗：{ex}", "error")
+
+        self._run_action(
+            "SAVING",
+            work,
+            "已套用 C3 DST 並寫入快取",
+            on_success=apply_ui,
+        )
 
     def _on_shard_dst_revert(self, e):
         """還原 DST 到原始值（分類分片）"""
@@ -183,19 +202,29 @@ class CacheShardDetailMixin:
             self._notify("請先選擇分片與 key", "warn")
             return
 
-        # 載入最新歷史紀錄
-        records = self._history_load_recent(ctype, key, limit=1)
+        def apply_latest(records):
+            if not records:
+                self._notify("此 key 目前沒有歷史紀錄", "warn")
+                return
+            latest = records[0]
+            old_dst = str(latest.get("old_dst", ""))
+
+            # 只填入 DST 輸入框，不寫入快取
+            self.shard_dst_field.value = old_dst
+            self._notify(
+                "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用 DST」儲存）", "info"
+            )
+
+        # 冷 JSONL 索引由背景操作建立。
+        records = self._history_load_for_ui(
+            "shard", ctype, key, limit=1, on_loaded=apply_latest
+        )
+        if records is None:
+            return
         if not records:
             self._notify("此 key 目前沒有歷史紀錄", "warn")
             return
 
-        latest = records[0]
-        old_dst = str(latest.get("old_dst", ""))
-
-        # 只填入 DST 輸入框，不寫入快取
-        self.shard_dst_field.value = old_dst
-        self._notify(
-            "已載入最新歷史紀錄到 DST（尚未寫入快取，請點「套用 DST」儲存）", "info"
-        )
+        apply_latest(records)
         if self.page:
             self.page.update()

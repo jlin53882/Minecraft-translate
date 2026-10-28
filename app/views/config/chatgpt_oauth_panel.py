@@ -44,6 +44,9 @@ class ChatGPTOAuthPanel:
         self._switching_account = False
         self._account_switch_generation = 0
         self._account_switch_lock = asyncio.Lock()
+        # Standalone panel tests and pre-mount configuration use the panel
+        # directly; ConfigView toggles this flag with its own lifecycle.
+        self._mounted = True
         self.status_text = ft.Text("尚未連結 ChatGPT 帳號", size=12)
         self.account_selector = ft.Dropdown(
             label="ChatGPT 帳號",
@@ -98,6 +101,27 @@ class ChatGPTOAuthPanel:
                 spacing=6,
             ),
         )
+
+    def did_mount(self) -> None:
+        """Allow late model results to update the live configuration page."""
+        self._mounted = True
+
+    def will_unmount(self) -> None:
+        """Invalidate model loads before the hosting page/session disappears."""
+        self._mounted = False
+        self._account_switch_generation += 1
+        self._auto_model_load_pending = False
+        self._switching_account = False
+        self._busy = False
+
+    def _safe_page_update(self) -> None:
+        """Ignore updates after ConfigView/Flet has detached its session."""
+        if not self._mounted:
+            return
+        try:
+            self.page.update()
+        except RuntimeError:
+            return
 
     def refresh_controls(self) -> None:
         try:
@@ -197,7 +221,7 @@ class ChatGPTOAuthPanel:
         pending = None
         self.status_text.value = "正在準備 ChatGPT 登入…"
         self.refresh_controls()
-        self.page.update()
+        self._safe_page_update()
         try:
             pending = await asyncio.to_thread(
                 begin_chatgpt_login,
@@ -206,7 +230,7 @@ class ChatGPTOAuthPanel:
             )
             self._pending_login = pending
             self.status_text.value = "等待瀏覽器完成 ChatGPT 登入…"
-            self.page.update()
+            self._safe_page_update()
             opened = await ft.UrlLauncher().launch_url(
                 pending.authorization_url,
                 mode=ft.LaunchMode.EXTERNAL_APPLICATION,
@@ -238,7 +262,7 @@ class ChatGPTOAuthPanel:
             self._pending_login = None
             self._busy = False
             self.refresh_controls()
-            self.page.update()
+            self._safe_page_update()
 
     async def _on_account_selected(self, _event=None) -> None:
         if self._busy and not self._switching_account:
@@ -253,7 +277,7 @@ class ChatGPTOAuthPanel:
         self.status_text.value = "正在切換 ChatGPT 帳號並讀取模型…"
         self._invalidate_models("正在載入此帳號的模型…")
         self.refresh_controls()
-        self.page.update()
+        self._safe_page_update()
         try:
             async with self._account_switch_lock:
                 if generation != self._account_switch_generation:
@@ -279,7 +303,7 @@ class ChatGPTOAuthPanel:
                 self._switching_account = False
                 self._busy = False
                 self.refresh_controls()
-                self.page.update()
+                self._safe_page_update()
 
     async def _on_cancel(self, _event=None) -> None:
         pending = self._pending_login
@@ -306,7 +330,7 @@ class ChatGPTOAuthPanel:
         generation = self._account_switch_generation
         self.refresh_controls()
         self.status_text.value = "正在自動載入此帳號的 ChatGPT 模型清單…"
-        self.page.update()
+        self._safe_page_update()
         try:
             run_task(self._load_models_on_entry, profile_id, generation)
         except Exception:  # noqa: BLE001 - page lifecycle may already be closing
@@ -314,7 +338,7 @@ class ChatGPTOAuthPanel:
             self._busy = False
             self.refresh_controls()
             self.status_text.value = "無法自動載入模型清單；請按「更新模型」重試。"
-            self.page.update()
+            self._safe_page_update()
 
     async def _load_models_on_entry(self, profile_id: str, generation: int) -> None:
         try:
@@ -323,8 +347,9 @@ class ChatGPTOAuthPanel:
             if generation == self._account_switch_generation:
                 self._auto_model_load_pending = False
                 self._busy = False
-                self.refresh_controls()
-                self.page.update()
+                if self._mounted:
+                    self.refresh_controls()
+                    self._safe_page_update()
 
     def _invalidate_models(self, message: str) -> None:
         self.on_models_invalidated(message)
@@ -344,7 +369,7 @@ class ChatGPTOAuthPanel:
             return
         self.status_text.value = "正在讀取此帳號可用的 ChatGPT 模型…"
         self.model_control.disabled = True
-        self.page.update()
+        self._safe_page_update()
         try:
             models = await asyncio.to_thread(list_chatgpt_models, profile_id=profile_id)
             if (
@@ -356,20 +381,32 @@ class ChatGPTOAuthPanel:
                 self._invalidate_models("此帳號目前沒有可用的模型")
                 self.status_text.value = "此帳號目前沒有可用的模型。"
             else:
-                self.on_models_loaded(models, profile_id)
+                try:
+                    self.on_models_loaded(models, profile_id)
+                except RuntimeError as exc:
+                    if self._is_destroyed_session_error(exc):
+                        self._mounted = False
+                        return
+                    raise
                 self.status_text.value = (
                     f"已讀取 {len(models)} 個模型。翻譯會使用 ChatGPT 方案或 credits。"
                 )
         except Exception as exc:  # noqa: BLE001 - provider request UI boundary
             if (
                 generation == self._account_switch_generation
+                and self._mounted
                 and str(self.account_selector.value or "") == profile_id
             ):
                 self._invalidate_models("模型清單讀取失敗；請重新載入")
                 self.status_text.value = redact_text(exc)
                 show_snack(self.page, redact_text(exc))
-        self.refresh_controls()
-        self.page.update()
+        if generation == self._account_switch_generation and self._mounted:
+            self.refresh_controls()
+            self._safe_page_update()
+
+    @staticmethod
+    def _is_destroyed_session_error(error: RuntimeError) -> bool:
+        return "destroyed session" in str(error).lower()
 
     async def _on_refresh(self, _event=None) -> None:
         if self._busy:
@@ -384,7 +421,7 @@ class ChatGPTOAuthPanel:
         finally:
             self._busy = False
             self.refresh_controls()
-            self.page.update()
+            self._safe_page_update()
 
     async def _on_disconnect(self, _event=None) -> None:
         if self._busy:
@@ -407,7 +444,7 @@ class ChatGPTOAuthPanel:
         finally:
             self._busy = False
             self.refresh_controls()
-            self.page.update()
+            self._safe_page_update()
 
     async def _on_manage_usage(self, _event=None) -> None:
         await ft.UrlLauncher().launch_url(

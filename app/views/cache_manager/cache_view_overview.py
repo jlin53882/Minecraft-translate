@@ -292,11 +292,21 @@ class CacheOverviewMixin:
         self._render_query_type_shard_page()
 
     def _run_action(
-        self, reason: str, work_fn, success_msg: str, show_progress: bool = False
+        self,
+        reason: str,
+        work_fn,
+        success_msg: str,
+        show_progress: bool = False,
+        on_success=None,
     ):
         """包裝非同步工作函式的執行與狀態更新"""
         return run_cache_action(
-            self, reason, work_fn, success_msg, show_progress=show_progress
+            self,
+            reason,
+            work_fn,
+            success_msg,
+            show_progress=show_progress,
+            on_success=on_success,
         )
 
     # top actions
@@ -311,8 +321,11 @@ class CacheOverviewMixin:
 
     def _on_refresh_stats(self, e):
         """刷新快取統計資料"""
-        self._load_overview()
-        self._notify("已刷新統計", "info")
+        self._run_action(
+            "REFRESHING",
+            cache_get_overview_service,
+            "已刷新統計",
+        )
 
     def _on_rebuild_index(self, e):
         """重建搜尋索引（A3 功能）"""

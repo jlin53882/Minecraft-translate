@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -159,3 +161,64 @@ def test_cache_action_warms_shard_summaries_inside_the_worker(monkeypatch):
     ca.run_cache_action(view, "SAVING", lambda: {"cache_root": "/x", "types": {}}, "ok")
     assert warmed and warmed[0][1] == {"cache_root": "/x", "types": {}}
     assert rendered  # 預熱在渲染之前完成（同步路徑下順序即為 warm → render）
+
+
+def test_cold_shard_entry_is_loaded_in_background_and_late_selection_is_ignored(
+    tmp_path, monkeypatch
+):
+    from app.views.cache_view import CacheView
+
+    tasks = []
+
+    class LoopPage:
+        def __init__(self):
+            self.updated = 0
+
+        def run_task(self, handler, *args):
+            tasks.append((handler, args))
+
+        def update(self):
+            self.updated += 1
+
+    _write(
+        tmp_path / "lang" / "lang_00001.json",
+        {"k1": {"src": "source", "dst": "translation"}},
+    )
+    view = CacheView.__new__(CacheView)
+    view._page = LoopPage()
+    view._last_overview_data = {"cache_root": str(tmp_path)}
+    view.shard_detail_selected_type = "lang"
+    view.shard_detail_selected_file = "lang_00001.json"
+    view.shard_detail_selected_key = "k1"
+    view._refresh_disabled_state = lambda: None
+    rendered = []
+    view._render_shard_src_panel = lambda: rendered.append("src")
+    view._render_shard_dst_panel = lambda: rendered.append("dst")
+    workers = []
+    original = CacheView._load_shard_entry.__get__(view, CacheView)
+
+    def load_entry(cache_type, filename, key, *, root=None):
+        workers.append(threading.current_thread())
+        return original(cache_type, filename, key, root=root)
+
+    monkeypatch.setattr(view, "_load_shard_entry", load_entry)
+
+    CacheView._request_shard_entry(view, "lang", "lang_00001.json", "k1")
+    assert workers == []
+    assert tasks
+
+    handler, args = tasks.pop(0)
+    asyncio.run(handler(*args))
+    assert workers and workers[0] is not threading.main_thread()
+    assert rendered == ["src", "dst"]
+    assert CacheView._get_cached_shard_entry(
+        view, ("lang", "lang_00001.json", "k1")
+    ) == (True, {"src": "source", "dst": "translation"})
+
+    # A second request must not update the newly selected key's panels.
+    rendered.clear()
+    view.shard_detail_selected_key = "k2"
+    CacheView._request_shard_entry(view, "lang", "lang_00001.json", "k1")
+    handler, args = tasks.pop(0)
+    asyncio.run(handler(*args))
+    assert rendered == []

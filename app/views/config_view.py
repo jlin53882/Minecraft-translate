@@ -854,8 +854,14 @@ class ConfigView(ft.Column):
     def did_mount(self):
         """切回設定頁時重新確認資料庫位置（其他頁可能剛建立了資料庫）。"""
         self._mounted = True
+        self.chatgpt_oauth_panel.did_mount()
         self.db_location.safe_refresh()
         self._ensure_chatgpt_models_loaded()
+
+    def will_unmount(self):
+        """Stop late OAuth model updates when the settings page is detached."""
+        self._mounted = False
+        self.chatgpt_oauth_panel.will_unmount()
 
     def _success_color(self):
         """取得成功顏色"""

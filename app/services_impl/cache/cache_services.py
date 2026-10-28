@@ -19,6 +19,16 @@ from translation_tool.utils import cache_manager
 from translation_tool.utils.log_unit import log_error, log_warning
 
 
+class CacheSaveError(RuntimeError):
+    """Raised when one or more cache types were not durably written."""
+
+    def __init__(self, cache_types: list[str], overview: dict[str, Any] | None = None):
+        self.cache_types = tuple(cache_types)
+        self.overview = overview
+        labels = ", ".join(self.cache_types) or "unknown"
+        super().__init__(f"快取保存失敗：{labels}")
+
+
 def cache_get_overview_service() -> dict[str, Any]:
     """取得目前所有翻譯快取（cache）的整體概覽資訊。"""
 
@@ -47,15 +57,31 @@ def cache_save_all_service(
     write_new_shard: bool = True,
     only_types: list[str] | None = None,
 ) -> dict[str, Any]:
-    """將目前記憶體中的翻譯快取寫回磁碟。"""
+    """將目前記憶體中的翻譯快取寫回磁碟。
+
+    ``save_translation_cache`` uses an explicit boolean result to distinguish a
+    durable write from a rejected/failed write.  Do not turn a false result
+    into a successful UI action: callers rely on this service raising so that
+    history is appended only after the shard write has completed.
+    """
 
     targets = only_types or list(cache_manager.CACHE_TYPES)
+    failed_types: list[str] = []
 
     for cache_type in targets:
-        cache_manager.save_translation_cache(
+        saved = cache_manager.save_translation_cache(
             cache_type,
             write_new_shard=write_new_shard,
         )
+        if saved is False:
+            failed_types.append(str(cache_type))
+
+    if failed_types:
+        try:
+            overview = cache_manager.get_cache_overview()
+        except Exception:  # noqa: BLE001 - preserve the original save failure
+            overview = None
+        raise CacheSaveError(failed_types, overview=overview)
 
     return cache_manager.get_cache_overview()
 

@@ -302,6 +302,8 @@ class CacheView(
                 label = "輪替分片中"
             elif reason == "LOADING":
                 label = "載入中"
+            elif reason == "REFRESHING":
+                label = "刷新統計中"
             else:
                 label = "處理中"
             self.overview_status.value = f"狀態：{label}..."
