@@ -579,3 +579,52 @@ def test_staging_and_standalone_choose_one_legacy_guideme_fallback(
         )
         == 1
     )
+
+
+@pytest.mark.parametrize("creation_order", ["root", "chapter"])
+def test_same_source_root_uses_stable_guideme_legacy_fallback_order(
+    tmp_path: Path, creation_order: str
+):
+    """Direct and pipeline bundling sort one source root identically."""
+    source = tmp_path / "single-source"
+    root_alias = "assets/demo/guides/_zh_tw/demo/guide/machines/page.md"
+    chapter_alias = "assets/demo/guides/demo/guide/machines/_zh_tw/page.md"
+    entries = {
+        "root": (root_alias, "# root\n"),
+        "chapter": (chapter_alias, "# chapter\n"),
+    }
+    for name in (creation_order, "chapter" if creation_order == "root" else "root"):
+        relative, content = entries[name]
+        _write_relative_text(source, relative, content)
+
+    standalone_zip = tmp_path / "standalone-single-source.zip"
+    standalone_updates = list(
+        bundle_outputs_generator(
+            str(source),
+            str(standalone_zip),
+            description="contract",
+            pack_format=34,
+            force_rebuild=True,
+        )
+    )
+    assert not any(update.get("error") for update in standalone_updates)
+
+    staging = tmp_path / "single-source-staging"
+    build_bundle_staging([str(source)], str(staging))
+    pipeline_zip = tmp_path / "pipeline-single-source.zip"
+    pipeline_updates = list(
+        bundle_outputs_generator(
+            str(staging),
+            str(pipeline_zip),
+            description="contract",
+            pack_format=34,
+            force_rebuild=True,
+        )
+    )
+    assert not any(update.get("error") for update in pipeline_updates)
+
+    standalone_snapshot = _zip_snapshot(standalone_zip)
+    pipeline_snapshot = _zip_snapshot(pipeline_zip)
+    assert standalone_snapshot == pipeline_snapshot
+    canonical = "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+    assert standalone_snapshot[canonical].replace(b"\r\n", b"\n") == b"# root\n"

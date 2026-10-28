@@ -206,7 +206,10 @@ def _collect_bundle_sources(
         if not os.path.isdir(content_root):
             continue
         for root, dirs, files in os.walk(content_root):
-            dirs[:] = [d for d in dirs if d not in _STAGING_SKIP_DIRS]
+            # Match output_bundler._walk_files: the first legacy fallback must
+            # not depend on filesystem directory or file creation order.
+            dirs[:] = sorted(d for d in dirs if d not in _STAGING_SKIP_DIRS)
+            files.sort()
             rel_root = os.path.relpath(root, source)
             for name in files:
                 raw_rel_path = os.path.join(rel_root, name)
