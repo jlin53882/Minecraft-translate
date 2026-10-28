@@ -26,6 +26,47 @@ from app.views.cache_manager.cache_history_store import (
 class CacheHistoryMixin:
     """歷史：查詢區與分片區共用的歷史視窗與還原。"""
 
+    def _render_history_rows(self, history_list, records, selected_event, on_select):
+        """渲染共用的歷史列並回傳仍然有效的選取事件。"""
+
+        def _ev_id(ev: dict):
+            return (
+                str(ev.get("ts", "")),
+                str(ev.get("old_dst", "")),
+                str(ev.get("new_dst", "")),
+            )
+
+        selected_id = _ev_id(selected_event) if selected_event else None
+        selected = next(
+            (ev for ev in records if selected_id and _ev_id(ev) == selected_id),
+            records[0],
+        )
+        for ev in records:
+            ts = str(ev.get("ts", ""))
+            action = str(ev.get("action", "apply"))
+            old_dst = str(ev.get("old_dst", ""))
+            new_dst = str(ev.get("new_dst", ""))
+            is_selected = _ev_id(ev) == _ev_id(selected)
+            history_list.controls.append(
+                ft.Container(
+                    padding=6,
+                    border=ft.Border.all(1, C.DIA_BG if is_selected else C.LINE),
+                    border_radius=8,
+                    bgcolor=C.DIA_BG if is_selected else None,
+                    on_click=lambda e, item=ev: on_select(item),
+                    content=ft.Column(
+                        [
+                            ft.Text(f"{ts} | {action}", size=10, color=C.MUTED),
+                            ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
+                            ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
+                        ],
+                        spacing=2,
+                        horizontal_alignment=ft.CrossAxisAlignment.START,
+                    ),
+                )
+            )
+        return selected
+
     def _on_select_shard_history_event(self, event: dict):
         """選擇歷史事件"""
         self.shard_history_selected_event = event
@@ -70,57 +111,12 @@ class CacheHistoryMixin:
             self._refresh_disabled_state()
             return
 
-        # 若當前選取不在新清單中，就預設第一筆
-        def _ev_id(ev: dict):
-            """從事件物件取出 ID 組合"""
-            return (
-                str(ev.get("ts", "")),
-                str(ev.get("old_dst", "")),
-                str(ev.get("new_dst", "")),
-            )
-
-        selected_id = (
-            _ev_id(self.shard_history_selected_event)
-            if self.shard_history_selected_event
-            else None
+        self.shard_history_selected_event = self._render_history_rows(
+            self.shard_history_list,
+            self.shard_history_records,
+            self.shard_history_selected_event,
+            self._on_select_shard_history_event,
         )
-        found = None
-        for ev in self.shard_history_records:
-            if selected_id and _ev_id(ev) == selected_id:
-                found = ev
-                break
-        self.shard_history_selected_event = found or self.shard_history_records[0]
-
-        for ev in self.shard_history_records:
-            ts = str(ev.get("ts", ""))
-            action = str(ev.get("action", "apply"))
-            old_dst = str(ev.get("old_dst", ""))
-            new_dst = str(ev.get("new_dst", ""))
-            is_selected = _ev_id(ev) == _ev_id(self.shard_history_selected_event)
-
-            self.shard_history_list.controls.append(
-                ft.Container(
-                    padding=6,
-                    border=ft.Border.all(
-                        1,
-                        C.DIA_BG if is_selected else C.LINE,
-                    ),
-                    border_radius=8,
-                    bgcolor=C.DIA_BG if is_selected else None,
-                    on_click=lambda e, item=ev: self._on_select_shard_history_event(
-                        item
-                    ),
-                    content=ft.Column(
-                        [
-                            ft.Text(f"{ts} | {action}", size=10, color=C.MUTED),
-                            ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
-                            ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
-                        ],
-                        spacing=2,
-                        horizontal_alignment=ft.CrossAxisAlignment.START,
-                    ),
-                )
-            )
 
         self._update_shard_history_preview()
         self._refresh_disabled_state()
@@ -375,55 +371,12 @@ class CacheHistoryMixin:
             self._refresh_disabled_state()
             return
 
-        # 若當前選取不在新清單中，就預設第一筆
-        def _ev_id(ev: dict):
-            """從事件物件取出 ID 組合"""
-            return (
-                str(ev.get("ts", "")),
-                str(ev.get("old_dst", "")),
-                str(ev.get("new_dst", "")),
-            )
-
-        selected_id = (
-            _ev_id(self.query_history_selected_event)
-            if self.query_history_selected_event
-            else None
+        self.query_history_selected_event = self._render_history_rows(
+            self.query_history_list,
+            self.query_history_records,
+            self.query_history_selected_event,
+            self._on_select_history_event,
         )
-        found = None
-        for ev in self.query_history_records:
-            if selected_id and _ev_id(ev) == selected_id:
-                found = ev
-                break
-        self.query_history_selected_event = found or self.query_history_records[0]
-
-        for ev in self.query_history_records:
-            ts = str(ev.get("ts", ""))
-            action = str(ev.get("action", "apply"))
-            old_dst = str(ev.get("old_dst", ""))
-            new_dst = str(ev.get("new_dst", ""))
-            is_selected = _ev_id(ev) == _ev_id(self.query_history_selected_event)
-
-            self.query_history_list.controls.append(
-                ft.Container(
-                    padding=6,
-                    border=ft.Border.all(
-                        1,
-                        C.DIA_BG if is_selected else C.LINE,
-                    ),
-                    border_radius=8,
-                    bgcolor=C.DIA_BG if is_selected else None,
-                    on_click=lambda e, item=ev: self._on_select_history_event(item),
-                    content=ft.Column(
-                        [
-                            ft.Text(f"{ts} | {action}", size=10, color=C.MUTED),
-                            ft.Text(f"old: {old_dst[:60]}", size=11, no_wrap=False),
-                            ft.Text(f"new: {new_dst[:60]}", size=11, no_wrap=False),
-                        ],
-                        spacing=2,
-                        horizontal_alignment=ft.CrossAxisAlignment.START,
-                    ),
-                )
-            )
 
         self._update_history_preview()
         self._refresh_disabled_state()

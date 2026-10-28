@@ -202,16 +202,26 @@ def run_cache_background(
 
     registry = get_page_operation_registry(page)
     if registry is None:
-
-        async def _run_standalone():
-            finish(*await asyncio.to_thread(execute))
-
-        try:
-            run_task(_run_standalone)
-        except RuntimeError:
-            return
+        _run_cache_background_standalone(run_task, execute, finish)
         return
 
+    _run_cache_background_registry(page, name, run_task, execute, finish)
+
+
+def _run_cache_background_standalone(run_task, execute, finish):
+    """Run a cold read when the page has no shared operation registry."""
+
+    async def _run_standalone():
+        finish(*await asyncio.to_thread(execute))
+
+    try:
+        run_task(_run_standalone)
+    except RuntimeError:
+        return
+
+
+def _run_cache_background_registry(page, name, run_task, execute, finish):
+    """Run a cold read under the page-owned operation registry."""
     operation = reserve_page_operation(
         page,
         name=name,

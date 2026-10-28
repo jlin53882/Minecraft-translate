@@ -95,7 +95,7 @@ app/views/config/
 
 ### ChatGPT OAuth 模型載入生命週期
 
-`ChatGPTOAuthPanel` 的模型清單仍以 `asyncio.to_thread()` 執行 provider 讀取。`ConfigView.did_mount()`／`will_unmount()` 會同步通知 panel 的生命週期；帳號 generation guard 會丟棄舊帳號結果。頁面卸載或 task 收到 `CancelledError` 時只清理 busy/pending 狀態，不把關閉視為模型載入失敗，也不呼叫已銷毀 session 的 `page.update()`。destroyed-session 的 Flet `RuntimeError` 只作為生命週期終止處理，不會顯示 provider 失敗訊息。
+`ChatGPTOAuthPanel` 的模型清單仍以 `asyncio.to_thread()` 執行 provider 讀取。`ConfigView.did_mount()`／`will_unmount()` 會同步通知 panel 的生命週期；帳號 generation guard 會丟棄舊帳號結果。頁面卸載或 task 收到取消例外時只清理 busy/pending 狀態，不把關閉視為模型載入失敗，也不呼叫已銷毀 session 的 `page.update()`。destroyed-session 的 Flet `RuntimeError` 只作為生命週期終止處理，不會顯示 provider 失敗訊息。
 
 ## 關鍵設計
 
