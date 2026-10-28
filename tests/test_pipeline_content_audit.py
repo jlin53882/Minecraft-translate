@@ -3,8 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.services_impl.pipelines.bundle_service import build_bundle_staging
-from translation_tool.core.guide_translation import guide_output_rel
+from translation_tool.core.guide_translation import (
+    GUIDE_MARKER,
+    guide_output_rel,
+    normalize_guideme_default_locale_rel,
+)
 from translation_tool.core.pipeline_content_audit import (
     _pending_guide_rel,
     classify_other_output_assets,
@@ -72,6 +78,104 @@ def test_default_guideme_root_uses_registered_guide_folder(tmp_path: Path):
         "assets/extended_industrialization/guides/"
         "extended_industrialization/guide/_zh_tw/machines/batching_multiblocks.md"
     )
+
+
+@pytest.mark.parametrize(
+    "legacy, canonical",
+    [
+        (
+            Path("assets/demo/guides/_en_us/demo/guide/machines/page.md"),
+            Path("assets/demo/guides/demo/guide/_en_us/machines/page.md"),
+        ),
+        (
+            Path("assets/demo/guides/demo/guide/machines/_en_us/page.md"),
+            Path("assets/demo/guides/demo/guide/_en_us/machines/page.md"),
+        ),
+    ],
+)
+def test_legacy_default_guideme_locale_is_normalized_before_translation(
+    tmp_path: Path, legacy: Path, canonical: Path
+):
+    assert normalize_guideme_default_locale_rel(legacy) == canonical
+    locale_index = canonical.parts.index("_en_us")
+    expected_output = Path(
+        *canonical.parts[:locale_index],
+        "_zh_tw",
+        *canonical.parts[locale_index + 1 :],
+    )
+    assert guide_output_rel(legacy, tmp_path) == expected_output
+
+
+@pytest.mark.parametrize(
+    "legacy_rel",
+    [
+        Path("assets/demo/guides/_zh_tw/demo/guide/machines/page.md"),
+        Path("assets/demo/guides/demo/guide/machines/_zh_tw/page.md"),
+    ],
+)
+def test_bundle_normalizes_legacy_default_guideme_locale_paths(
+    tmp_path: Path, legacy_rel: Path
+):
+    source = tmp_path / "legacy-output"
+    legacy = source / legacy_rel
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("# 批次多方塊結構\n", encoding="utf-8")
+
+    staging = tmp_path / "staging"
+    build_bundle_staging([str(source)], str(staging))
+
+    canonical = staging / "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+    assert canonical.read_text(encoding="utf-8") == "# 批次多方塊結構\n"
+    assert not (staging / legacy_rel).exists()
+
+
+def test_lm_writer_and_bundle_keep_default_guideme_locale_at_content_root(
+    tmp_path: Path,
+):
+    """A fresh LM write and a bundle both use the GuideME content-root contract."""
+
+    from translation_tool.core import lm_translator
+
+    source_root = tmp_path / "source"
+    guide_root = source_root / "assets/demo/guides/demo/guide"
+    (guide_root / "machines").mkdir(parents=True)
+    (guide_root / "index.md").write_text("# Guide\n", encoding="utf-8")
+    guide = guide_root / "machines/page.md"
+    guide.write_text(
+        "# Batching Multiblocks\n\n"
+        '<Recipe id="demo:removed_recipe" />\n'
+        '<RecipeFor id="demo:machine" />\n',
+        encoding="utf-8",
+    )
+
+    translated = tmp_path / "translated"
+    doc = {
+        GUIDE_MARKER: True,
+        "source": guide.read_text(encoding="utf-8"),
+        "ranges": [[1, 1]],
+        "prefixes": [""],
+        "originals": ["# Batching Multiblocks"],
+        "blocks": ["# 批次多方塊結構"],
+    }
+    lm_translator._write_directory_outputs(
+        {str(guide): doc}, {str(guide)}, source_root, translated, False
+    )
+
+    localized = translated / "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+    assert localized.read_text(encoding="utf-8") == (
+        "# 批次多方塊結構\n\n"
+        '<Recipe id="demo:removed_recipe" />\n'
+        '<RecipeFor id="demo:machine" />\n'
+    )
+
+    staging = tmp_path / "staging"
+    build_bundle_staging([str(source_root), str(translated)], str(staging))
+    assert (
+        staging / "assets/demo/guides/demo/guide/_zh_tw/machines/page.md"
+    ).read_text(encoding="utf-8") == localized.read_text(encoding="utf-8")
+    assert not (
+        staging / "assets/demo/guides/_zh_tw/demo/guide/machines/page.md"
+    ).exists()
 
 
 def test_pending_default_guideme_root_keeps_relative_links(tmp_path: Path):

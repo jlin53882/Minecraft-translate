@@ -144,6 +144,60 @@ def is_guide_directory_segment(segment: str) -> bool:
     return lowered in GUIDE_DIR_NAMES or lowered.endswith(("guide", "guidebook"))
 
 
+_GUIDEME_LOCALE_SEGMENTS = frozenset(
+    {"en_us", "_en_us", "zh_tw", "_zh_tw", "zh_cn", "_zh_cn"}
+)
+
+
+def normalize_guideme_default_locale_rel(rel: Path) -> Path:
+    """Move legacy default-GuideME locale folders to the content root.
+
+    The default GuideME builder registers content below
+    ``guides/<namespace>/<guide-id>`` and expects the locale directly below
+    that content root.  Older pipeline runs emitted either
+    ``guides/_zh_tw/<namespace>/<guide-id>/...`` or
+    ``guides/<namespace>/<guide-id>/<chapter>/_zh_tw/...``.  Both forms are
+    still found in incremental output directories, so canonicalize them before
+    a new translation is written or bundled.  Explicit ``ae2guide`` and
+    Patchouli layouts are intentionally left untouched.
+    """
+
+    parts = list(rel.parts)
+    try:
+        guides_index = next(
+            index for index, part in enumerate(parts) if part.casefold() == "guides"
+        )
+    except StopIteration:
+        return rel
+
+    guide_root_end = guides_index + 3
+    if guide_root_end + 1 >= len(parts):
+        return rel
+
+    locale_index = guides_index + 1
+    if parts[locale_index].casefold() in _GUIDEME_LOCALE_SEGMENTS:
+        # Legacy: guides/<locale>/<namespace>/guide/...
+        return Path(
+            *parts[: guides_index + 1],
+            parts[guides_index + 2],
+            parts[guides_index + 3],
+            parts[locale_index],
+            *parts[guides_index + 4 :],
+        )
+
+    # Legacy: guides/<namespace>/<guide-id>/guide/<chapter>/<locale>/...
+    for candidate in range(guide_root_end, len(parts) - 1):
+        if parts[candidate].casefold() not in _GUIDEME_LOCALE_SEGMENTS:
+            continue
+        return Path(
+            *parts[:guide_root_end],
+            parts[candidate],
+            *parts[guide_root_end:candidate],
+            *parts[candidate + 1 :],
+        )
+    return rel
+
+
 def _guide_index_insert_at(parts: list[str], root: Path, offset: int) -> int | None:
     """Return the shared GuideME content-root boundary when it is observable.
 
@@ -313,7 +367,7 @@ def guide_locale_rel(rel: Path, root: Path, locale: str) -> Path:
     ``zh_tw``.
     """
 
-    parts = list(rel.parts)
+    parts = list(normalize_guideme_default_locale_rel(rel).parts)
     offset = 1 if parts and parts[0].endswith("_extracted") else 0
     for index in range(offset + 2, len(parts) - 1):
         segment = parts[index].lower()

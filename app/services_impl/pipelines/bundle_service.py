@@ -21,6 +21,7 @@ from translation_tool.core.book_formats import is_neutral_pages_candidate
 from translation_tool.core.guide_translation import (
     GUIDE_SUFFIXES,
     guide_support_references,
+    normalize_guideme_default_locale_rel,
     resolve_guide_support_reference,
 )
 from translation_tool.core.neutral_book_json import load_neutral_book_json
@@ -198,7 +199,11 @@ def _collect_bundle_sources(
             dirs[:] = [d for d in dirs if d not in _STAGING_SKIP_DIRS]
             rel_root = os.path.relpath(root, source)
             for name in files:
-                rel_path = _canonical_path(os.path.join(rel_root, name), canon)
+                raw_rel_path = os.path.join(rel_root, name)
+                rel_path = os.fspath(
+                    normalize_guideme_default_locale_rel(Path(raw_rel_path))
+                )
+                rel_path = _canonical_path(rel_path, canon)
                 key = os.path.normcase(rel_path)
                 if key not in plan:
                     plan[key] = (rel_path, [])
