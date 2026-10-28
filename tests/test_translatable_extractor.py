@@ -84,6 +84,25 @@ class TestFindLangJson:
 
         assert len(results) == 2
 
+    def test_find_lang_json_includes_data_language_sources(self, tmp_path):
+        """data 語言來源也要進入一般目錄掃描，輸出位置另由 writer 正規化。"""
+        from translation_tool.core.translatable_extractor import find_lang_json
+
+        path = tmp_path / "data" / "demo" / "lang" / "en_us.json"
+        path.parent.mkdir(parents=True)
+        path.write_text("{}", encoding="utf-8")
+
+        assert find_lang_json(tmp_path) == [path]
+
+    def test_find_lang_json_includes_legacy_lang_sources(self, tmp_path):
+        from translation_tool.core.translatable_extractor import find_lang_json
+
+        path = tmp_path / "assets" / "legacy" / "lang" / "en_us.lang"
+        path.parent.mkdir(parents=True)
+        path.write_text("legacy.key=Legacy", encoding="utf-8")
+
+        assert find_lang_json(tmp_path) == [path]
+
 
 class TestFindPatchouliJson:
     """測試 find_patchouli_json 函式"""
@@ -111,6 +130,30 @@ class TestFindPatchouliJson:
 
         assert len(results) == 1
         assert "book.json" in str(results[0])
+
+    def test_find_patchouli_json_ignores_valid_non_object_json(self, tmp_path):
+        """內容嗅探不能讓合法的 JSON 陣列中止整批書本掃描。"""
+        from translation_tool.core.translatable_extractor import find_patchouli_json
+
+        patchouli_dir = tmp_path / "assets" / "modid" / "patchouli_books"
+        patchouli_dir.mkdir(parents=True)
+        book_file = patchouli_dir / "book.json"
+        book_file.write_text("{}", encoding="utf-8")
+
+        generic_json = tmp_path / "assets" / "modid" / "custom" / "metadata.json"
+        generic_json.parent.mkdir(parents=True)
+        generic_json.write_text("[]", encoding="utf-8")
+
+        with patch(
+            "translation_tool.core.translatable_extractor.load_config"
+        ) as mock_config:
+            mock_config.return_value = {
+                "lm_translator": {"patchouli": {"dir_names": ["patchouli_books"]}}
+            }
+
+            results = find_patchouli_json(tmp_path)
+
+        assert results == [book_file]
 
     def test_find_patchouli_json_custom_dirs(self, tmp_path):
         """測試自訂目錄名稱"""

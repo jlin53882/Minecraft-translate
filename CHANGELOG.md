@@ -11,6 +11,18 @@
 
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
+### Mod 掃描、資料庫與資源包流水線
+- 統一 ModDB、圖示／內容預覽、JAR 提取與 LM 目錄掃描的巢狀 JAR 來源辨識；保留來源鏈、深度／大小／讀取預算與取消／部分失敗狀態，避免 `META-INF/jarjar` 等內嵌模組被漏掃或被當成空結果。
+- 新增書本格式 profile 與安全 JSON 處理：標準 Patchouli 只在明確存在語系資料夾時轉換 `en_us` → `zh_tw`，中性 custom book 保留原路徑；非法或無法分類內容改以 `parse_failed`／`pending`／`excluded` 留存來源與原因，不靜默丟棄。
+- 收斂掃描匯入與一鍵流水線的內容分類、provenance、manifest 與 Resource Pack staging；ZIP 只輸出合法 `assets/` 與根目錄 `pack.mcmeta`，不把 `data/`、未翻譯內容、未知格式或抽取包裝資料夾誤當成資源包內容。
+- `TranslationDB` schema 升至 v12，新增內容問題快照與安全的重複翻譯鍵清理：只合併同版本／模組／語意 key、原文一致且譯文無衝突的指南／Patchouli 條目；衝突項目只預覽不自動刪除，所有合併可在 survivor 未被後續修改時完整還原。
+- 重複鍵清理視窗的非同步預覽固定資料庫身分；預覽完成或確認套用前若使用者切換資料庫，計畫會失效並要求重新預覽，避免把同內容資料庫的計畫誤套到另一份資料庫。
+- 資料庫切換導致預覽計畫失效時同步重設「確認合併」按鈕與摘要；指南翻譯搬移後產生的圖片／SNBT 等支援資產也寫入輸出 manifest，保留來源到 ZIP 路徑的 emitted provenance。
+- 增量 Resource Pack staging 在指南支援檔鏡像前先清除不再屬於本輪 plan 的舊檔，來源變更或刪除時不再沿用過期的 `_zh_tw` 圖片／SNBT；新增 A→B→刪除與乾淨重建一致性回歸測試。
+- 新增跨入口維護契約，固定同一組 JAR、書本／Markdown／TXT 與輸出 fixture 在 DB、預覽、提取、LM 及獨立／流水線打包流程中的來源、文字區塊與 ZIP 邊界一致。
+- 以五個實際模組包、隔離 SQLite、ZIP 結構檢查、跨入口回歸與重複鍵合併／還原測試驗證；正式資料庫只讀，未被測試寫入。
+- 更新鎖定的 `msgpack` 至 1.2.4，修復 pip-audit 發現的 CVE-2026-114613（修正版門檻為 1.2.3）。
+
 ### Docs
 - `docs/WEB_MODE_LIMITATIONS.md` 說明 Playwright `fill()` 在 Flet Web 不可靠，並給出以真實按鍵驗證欄位同步的步驟。
 - 新增 `docs/WEB_MODE_LIMITATIONS.md`：Flet Web 模式限制（不能選資料夾、只能輸入主機路徑）與未來擴充方向。
@@ -84,6 +96,7 @@
 - **語言合併可在單一 update 內取消**（#170）：`lang_merger.py` 在檔名掃描（每 256 筆）、任務提交、完成迴圈加入取消檢查點；取消或關閉 generator 時，佇列中還沒開始的任務直接丟棄，只等正在執行的少數任務，不再把整個佇列跑完才停止。
 - **一鍵流程對話框在 Flet Web 殘留／按鈕無反應**：Flet 0.85+ 改用 `page.show_dialog()` / `page.pop_dialog()` 管理對話框生命週期（沒有這組 API 的頁面仍走 overlay 相容流程），精靈按鈕改用標準 `ft.Button`，避免 Web 的 `TextButton` 事件沒送達。生命週期函式拆到 `pipeline_one_click_lifecycle.py`。
 - **輸出 ZIP 放在來源資料夾內時打包卡住**：預設輸出路徑就在來源資料夾內，失敗留下的暫存 ZIP（`.zip.tmp`）、輸出 ZIP 與狀態檔會被當成來源掃描，甚至把自己再壓一次。現在打包自己的產物（ZIP、暫存、狀態檔）一律排除在指紋與壓縮之外，也讓「來源未變動就沿用」在預設路徑下能成立。
+- **語系合併成功後誤刪同一 mod 的支援資產或其他語系**：Stage 2 原本以 `rmtree(mod_dir)` 清理已合併的語言來源，會連同尚未處理的非語言資產一起移除；現在只刪除本次實際合併的 `zh_cn`／`zh_tw`／`en_us` 語言檔，並只移除變空的父目錄，保留 SNBT、圖片與 `fr_fr` 等未參與本次合併的來源供後續整理與打包使用。
 - **Flet Web 手動輸入的路徑沒同步到後端**：新增 `SyncTextField`（`app/ui/sync_text_field.py`），單行欄位預設掛空的 `on_change`，讓輸入值即時回到 `.value`（一鍵流程曾收到 `input=[], output=[]`、打包對話框的輸出 ZIP 欄位仍用預設路徑）。`app/` 內全部 `ft.TextField` 改用它（含各流程對話框），並由 AST 契約測試強制。
 - **Flet Web 不支援資料夾選擇器**：新增 `SafeFilePicker`（`app/ui/safe_file_picker.py`），`get_directory_path`／`pick_files`／`save_file` 在不支援的平台改為顯示提示並視為取消，不再拋出未捕捉的 `FletUnsupportedPlatformException`；欄位保持可手動輸入（Web 模式輸入的是執行程式那台電腦的路徑）。
 - **輸出資料夾不必事先存在**：一鍵製作、提取、合併的輸出目錄改為自動建立（路徑是檔案或無法建立時才提示）。

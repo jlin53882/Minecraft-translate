@@ -483,6 +483,36 @@ class TestPreviewExtractionGeneratorImplMultiThreaded:
         # preview_results 數量應等於有檔案的 JAR 數量
         assert len(final["result"]["preview_results"]) == 20
 
+    def test_same_basename_jars_keep_separate_preview_results(self, tmp_path):
+        """不同資料夾的同名 JAR 不可因 basename key 互相覆蓋。"""
+        left_dir = tmp_path / "left"
+        right_dir = tmp_path / "right"
+        left_dir.mkdir()
+        right_dir.mkdir()
+        left = left_dir / "example.jar"
+        right = right_dir / "example.jar"
+        with zipfile.ZipFile(left, "w") as archive:
+            archive.writestr("assets/left/lang/en_us.json", '{"key":"left"}')
+        with zipfile.ZipFile(right, "w") as archive:
+            archive.writestr("assets/right/lang/en_us.json", '{"key":"right"}')
+
+        results = list(
+            preview_extraction_generator_impl(
+                str(tmp_path),
+                "lang",
+                find_jar_files_fn=lambda _path: [str(left), str(right)],
+                book_path_regex=re.compile(r".*"),
+            )
+        )
+
+        final = results[-1]["result"]
+        assert final["total_jars"] == 2
+        assert len(final["preview_results"]) == 2
+        assert [item["files"] for item in final["preview_results"]] == [
+            ["assets/left/lang/en_us.json"],
+            ["assets/right/lang/en_us.json"],
+        ]
+
     def test_each_progress_update_has_current_and_total(self, tmp_path):
         """每個進度 update 都應包含 current 和 total 欄位"""
         mods_dir = tmp_path / "mods"

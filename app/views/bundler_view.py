@@ -19,7 +19,10 @@ from app.services_impl.pack_format_service import (
     resolve_version_input,
 )
 from app.services_impl.pipelines.bundle_service import (
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
     bundle_outputs_generator,
+    coerce_extra_bundle_source,
     find_source_pack_files,
     normalize_output_zip_name,
     pack_description_text,
@@ -32,13 +35,21 @@ from app.tasks.operation_registry import (
     ShutdownPolicy,
     launch_page_operation,
 )
-from app.ui import design, kit
+from app.ui import kit
 from app.ui.design import C
 from app.ui.mc_text import mc_text_spans
 from app.ui.snack import show_snack
 from app.ui.ui_batcher import UiBatcher
 from app.views._log import LogView
 from app.views.bundler.bundler_widgets import BundlerWidgetsMixin
+from app.views.pipeline.extra_bundle_sources import (
+    append_extra_source,
+    build_extra_source_controls,
+    clear_extra_source_controls,
+    read_extra_source_controls,
+    refresh_extra_source_preview,
+    set_extra_source_feedback,
+)
 from translation_tool.utils.log_unit import log_debug, log_error
 from translation_tool.utils.ui_mirror import in_new_task, mirror_lines
 
@@ -58,15 +69,22 @@ def _preview_format_label(mcmeta_text: str, fallback: str) -> str:
 
 
 def bundle_result_text(result: dict | None) -> str:
-    """打包結束的狀態文字：檔案數與耗時；來源未變動時標示沿用上次的 ZIP。"""
+    """打包結束的狀態文字：檔案數、raw 附件統計與耗時。"""
     if not result:
         return "打包完成"
     if result.get("reused"):
         return "打包完成：來源與設定皆未變動，沿用上次的 ZIP"
-    return (
+    text = (
         f"打包完成：{int(result.get('files') or 0):,} 個檔案加入 ZIP"
         f"（耗時 {float(result.get('duration_sec') or 0):.1f} 秒）"
     )
+    raw_files = int(result.get("raw_files") or 0)
+    if raw_files:
+        text += (
+            f"；原樣附加 {raw_files:,} 個檔案／"
+            f"{int(result.get('raw_bytes') or 0):,} bytes"
+        )
+    return text
 
 
 class BundlerView(BundlerWidgetsMixin, ft.Column):
@@ -77,7 +95,8 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         super().__init__(scroll=ft.ScrollMode.ADAPTIVE, expand=True, spacing=16)
         self._page = page
         self.file_picker = file_picker
-        self.extra_folders: list[str] = []
+        # 舊字串仍代表 Resource Pack；UI 新增 raw 來源時使用模型物件。
+        self.extra_folders: list[object] = []
         self._bundling_running = False
 
         self.version_field = kit.text_field(
@@ -118,7 +137,13 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             path=True,
         )
         self._config_output_zip_name = "可使用翻譯.zip"
-        self.extra_folders_view = ft.ListView(spacing=6, auto_scroll=False)
+        self.extra_source_controls = build_extra_source_controls(
+            on_pick=self._pick_extra_folder,
+            on_manual_add=self._add_extra_folder_manually,
+            picker_label="新增資料夾",
+            list_height=130,
+        )
+        self.extra_folders_view = self.extra_source_controls.source_list
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         self.progress_bar.visible = False
         self.status_text = ft.Text(
@@ -295,7 +320,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             allow_multiple=False,
             allowed_extensions=["png", "jpg", "jpeg"],
         )
-        log_debug("_async_pick_pack_image result: {result}")
+        log_debug(f"_async_pick_pack_image result: {result!r}")
         if result:
             self.pack_image_field.value = result[0].path
             self._update_preview()
@@ -311,7 +336,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
         result = await self.file_picker.get_directory_path(
             dialog_title="選擇翻譯專案根目錄"
         )
-        log_debug(f"_async_pick_root_dir result: {result}")
+        log_debug(f"_async_pick_root_dir result: {result!r}")
         if result:
             path = result[0].path if hasattr(result[0], "path") else result
             self.root_dir_field.value = path
@@ -327,7 +352,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             allowed_extensions=["zip"],
             file_name="output.zip",
         )
-        log_debug("_async_pick_output_zip result: {result}")
+        log_debug(f"_async_pick_output_zip result: {result!r}")
         if result:
             self.output_zip_field.value = result
             self._page.update()
@@ -337,54 +362,60 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
 
     async def _async_pick_extra_folder(self):
         result = await self.file_picker.get_directory_path(dialog_title="選擇資料夾")
-        log_debug("_async_pick_extra_folder result: {result}")
-        if result and result not in self.extra_folders:
-            self.extra_folders.append(result)
+        log_debug(f"_async_pick_extra_folder result: {result!r}")
+        if result:
+            controls = self.extra_source_controls
+            mode = controls.mode_field.value or RESOURCE_PACK_MODE
+            if (
+                mode == RESOURCE_PACK_MODE
+                and not (controls.target_field.value or "").strip()
+            ):
+                value: object = result
+            else:
+                value = ExtraBundleSource(
+                    result,
+                    mode=mode,
+                    recursive=bool(controls.recursive_field.value),
+                    target=(controls.target_field.value or "").strip(),
+                )
+            added, message = append_extra_source(
+                self.extra_folders, value, allow_unvalidated=True
+            )
+            if not added:
+                set_extra_source_feedback(controls, message, error=True)
+                self._page.update()
+                return
+            clear_extra_source_controls(controls)
             self._refresh_extra_folders()
             self._update_preview()
             self._page.update()
 
     def _refresh_extra_folders(self):
-        self.extra_folders_view.controls.clear()
-        for path in self.extra_folders:
-            is_file = os.path.isfile(path)
-            icon = (
-                ft.Icons.INSERT_DRIVE_FILE_OUTLINED
-                if is_file
-                else ft.Icons.FOLDER_OUTLINED
-            )
-            self.extra_folders_view.controls.append(
-                ft.Container(
-                    padding=ft.Padding(left=12, top=4, right=4, bottom=4),
-                    bgcolor=C.PANEL2,
-                    border=ft.Border.all(1, C.LINE),
-                    border_radius=design.RADIUS_CONTROL,
-                    content=ft.Row(
-                        [
-                            ft.Icon(icon, size=16, color=C.MUTED),
-                            ft.Text(
-                                path,
-                                expand=True,
-                                size=12.5,
-                                font_family=design.FONT_MONO,
-                                no_wrap=True,
-                                overflow=ft.TextOverflow.ELLIPSIS,
-                            ),
-                            ft.IconButton(
-                                icon=ft.Icons.CLOSE,
-                                icon_size=16,
-                                icon_color=C.MUTED,
-                                tooltip="移除",
-                                on_click=lambda e, p=path: self._remove_extra_folder(p),
-                            ),
-                        ],
-                        spacing=8,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                )
-            )
+        refresh_extra_source_preview(
+            self.extra_source_controls,
+            self.extra_folders,
+            self._remove_extra_folder,
+        )
 
-    def _remove_extra_folder(self, path: str):
+    def _add_extra_folder_manually(self, e: ft.ControlEvent | None = None):
+        """Web 與桌面皆可用的手動來源加入流程；加入前先做實體預覽驗證。"""
+        del e
+        controls = self.extra_source_controls
+        try:
+            value = read_extra_source_controls(controls)
+            added, message = append_extra_source(self.extra_folders, value)
+        except ValueError as exc:
+            added, message = False, str(exc)
+        if not added:
+            set_extra_source_feedback(controls, message, error=True)
+            self._page.update()
+            return
+        clear_extra_source_controls(controls)
+        self._refresh_extra_folders()
+        self._update_preview()
+        self._page.update()
+
+    def _remove_extra_folder(self, path: object):
         if path in self.extra_folders:
             self.extra_folders.remove(path)
             self._refresh_extra_folders()
@@ -431,6 +462,24 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
             f"｜封面圖：{pack_image or '（無）'}"
         )
         self._append_log(message, level="info")
+        for index, value in enumerate(self.extra_folders):
+            try:
+                source = coerce_extra_bundle_source(value)
+                self._append_log(
+                    (
+                        "額外來源[{index}]｜來源：{source}｜模式：{mode}｜遞迴：{recursive}｜"
+                        "ZIP 目標：{target}"
+                    ).format(
+                        index=index,
+                        source=source.source,
+                        mode=source.mode,
+                        recursive="是" if source.recursive else "否",
+                        target=source.target or "（來源名稱／檔案根目錄）",
+                    ),
+                    level="info",
+                )
+            except (TypeError, ValueError) as exc:
+                self._append_log(f"額外來源[{index}] 設定無效：{exc}", level="error")
         self._page.update()
 
         launched = launch_page_operation(

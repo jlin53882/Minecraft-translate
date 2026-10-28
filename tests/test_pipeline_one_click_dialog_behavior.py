@@ -693,6 +693,23 @@ def test_confirm_calls_on_execute_once_with_default_config(env):
     assert env.page.overlay == []
 
 
+def test_confirm_stops_when_merge_database_target_is_unset(env):
+    env.db_settings = DbSettings(
+        enabled=True,
+        merge_enabled=True,
+        version="",
+        path=os.path.join(str(env.out), "test-mod-db.sqlite"),
+    )
+
+    env.open()
+    env.goto(4)
+    env.click("確定執行")
+
+    assert env.executed == []
+    assert env.dialog.open is True
+    assert any("全域未指定版本" in text for text in env.texts())
+
+
 def test_wizard_uses_one_fresh_global_database_snapshot_for_both_steps(env):
     env.open()
     env.db_settings = DbSettings(

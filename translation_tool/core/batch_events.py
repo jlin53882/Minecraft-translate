@@ -245,8 +245,14 @@ def to_legacy_event(event: Mapping[str, Any]) -> dict[str, Any]:
 
 # -- 唯一的中文 formatter -----------------------------------------------------------
 
-OPERATION_LABELS: Final[dict[str, str]] = {"smart_review": "智慧校對"}
-_REQUEST_NOUNS: Final[dict[str, str]] = {"smart_review": "校對請求"}
+OPERATION_LABELS: Final[dict[str, str]] = {
+    "smart_review": "智慧校對",
+    "translate": "LM 翻譯",
+}
+_REQUEST_NOUNS: Final[dict[str, str]] = {
+    "smart_review": "校對請求",
+    "translate": "翻譯請求",
+}
 _WARNING_KINDS: Final = frozenset(
     {
         "attempt_failure",

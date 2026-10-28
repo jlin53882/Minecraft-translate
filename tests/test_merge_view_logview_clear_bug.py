@@ -186,6 +186,8 @@ class TestStartMergeActuallyClearsLogView:
         view.input_mode_group.value = "folder"
         view.folder_path_field.value = r"D:\fake\mods"
         view.output_dir_field.value = r"D:\fake\output"
+        # 這個回歸測試只驗證 LogView API；不讓全域 DB 版本設定影響 admission。
+        view.db_options.switch.value = False
 
         before_count = len(view.log_view._list_view.controls)
         assert before_count == 2

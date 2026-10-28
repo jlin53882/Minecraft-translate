@@ -12,17 +12,18 @@
 
 from __future__ import annotations
 
-import io
 import json
 import re
 import sqlite3
 import zipfile
+from collections import Counter
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.book_dirs import find_book_dir_index
+from translation_tool.core.book_formats import is_neutral_pages_candidate
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     has_translatable_text,
@@ -30,6 +31,7 @@ from translation_tool.core.guide_blocks import (
 from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
     find_patchouli_mismatch,
@@ -65,10 +67,14 @@ from translation_tool.translation_db.schema import (
     KIND_GUIDE,
     SRC_CUSTOM,
 )
-from translation_tool.translation_db.sniff_groups import sniffed_groups
+from translation_tool.translation_db.sniff_groups import sniffed_groups_detailed
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.nested_archive import (
+    is_nested_archive_name,
+    walk_nested_archives,
+)
 from translation_tool.utils.text_processor import (
     ReplaceRules,
     apply_replace_rules,
@@ -116,9 +122,14 @@ class JarResult:
     items: list[ScanItem] = field(default_factory=list)
     nested_jars: int = 0
     skipped_nested: int = 0  # 損毀或過大而略過的內嵌 jar（不影響其餘內容）
+    truncated_nested: int = 0  # 到達安全深度上限而未再走訪的內嵌 jar
+    sniff_incomplete: bool = False  # Book sniff 預算耗盡，僅完成部分候選判斷
     error: str = ""  # 有值＝這個 archive 讀取失敗：items 會被清空，整包不寫入資料庫
     cancelled: bool = False
     notes: list[str] = field(default_factory=list)  # 略過內嵌 jar 的原因（供日誌顯示）
+    invalid_books: list[str] = field(default_factory=list)
+    # 非 entry 的來源處置；保留結構化資料，避免只能從人類日誌反推遺漏。
+    issues: list[dict[str, str]] = field(default_factory=list)
     logs: list[tuple[int, str]] = field(
         default_factory=list
     )  # 行程池 worker 收集的日誌
@@ -139,10 +150,29 @@ class ScanReport:
     jars_failed: list[str] = field(default_factory=list)
     nested_jars: int = 0
     skipped_nested: int = 0
+    truncated_nested: int = 0
+    partial_jars: int = 0
     items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
     stats: IngestStats = field(default_factory=IngestStats)
+    issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
     dry_run: bool = False
+    _issue_markers: set[tuple[str, ...]] = field(
+        default_factory=set, init=False, repr=False
+    )
+
+    def add_issue(self, issue: dict[str, str]) -> None:
+        """加入一筆去重後的內容處置紀錄。"""
+        if not isinstance(issue, dict):
+            return
+        keys = ("source_archive", "source_member", "kind", "status", "reason")
+        marker = tuple(str(issue.get(key, "")) for key in keys)
+        if marker in self._issue_markers:
+            return
+        self._issue_markers.add(marker)
+        self.issues.append(
+            {str(key): str(value) for key, value in issue.items() if value is not None}
+        )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -152,6 +182,8 @@ class ScanReport:
             "jars_failed": len(self.jars_failed),
             "nested_jars": self.nested_jars,
             "skipped_nested": self.skipped_nested,
+            "truncated_nested": self.truncated_nested,
+            "partial_jars": self.partial_jars,
             "items_found": self.items_found,
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
@@ -160,6 +192,14 @@ class ScanReport:
             "en_changed": self.stats.en_changed,
             "adopted": self.stats.adopted,
             "cancelled": self.cancelled,
+            "issue_count": len(self.issues),
+            "issue_counts": dict(
+                sorted(
+                    Counter(
+                        issue.get("status", "pending") for issue in self.issues
+                    ).items()
+                )
+            ),
         }
 
 
@@ -315,6 +355,11 @@ def _read_json_member(
     raw = read_limited(zf, member, budget=budget)
     if member.lower().endswith(".lang"):
         return _load_legacy_lang(raw)
+    if is_neutral_pages_candidate(member):
+        try:
+            return load_neutral_book_json(raw.decode("utf-8-sig"), member).data
+        except (UnicodeDecodeError, ValueError, TypeError):
+            return None
     return _load_json(raw)
 
 
@@ -787,66 +832,144 @@ def _scan_archive(
     should_cancel: Callable[[], bool] | None,
 ) -> None:
     """讀取一個 archive（含內嵌 jar）。安全上限（單一成員、archive、整棵樹）超過時設定 ``result.error``。"""
-    budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
-    names = zf.namelist()
-    groups = _group_members(names, options, dir_names)
-    if options.include_patchouli:
-        claimed = {n for members in groups.values() for n in members.values()}
-        for key, members in sniffed_groups(
-            zf, names, claimed, translated=options.translated
-        ).items():
-            groups.setdefault(key, members)
-    patchouli_contexts = (
-        _patchouli_contexts_for_archive(zf, budget, names, dir_names)
-        if any(kind == "patchouli" for kind, _mod, _file in groups)
-        else {}
-    )
-    for ident_key, members in groups.items():
-        try:
-            result.items.extend(
-                _items_for_group(
-                    zf,
-                    budget,
-                    ident_key,
-                    members,
-                    options,
-                    patchouli_contexts,
-                    dir_names,
-                )
+
+    def visit_archive(
+        current: zipfile.ZipFile,
+        current_label: str,
+        current_depth: int,
+        _archive_chain: tuple[str, ...],
+        current_budget: _DualBudget,
+    ) -> bool:
+        if current_depth:
+            result.nested_jars += 1
+        names = current.namelist()
+        groups = _group_members(names, options, dir_names)
+        patchouli_contexts: dict[str, PatchouliContext] = {}
+        if options.include_patchouli:
+            claimed = {n for members in groups.values() for n in members.values()}
+            sniff_diagnostics: list[str] = []
+            sniff_result = sniffed_groups_detailed(
+                current,
+                names,
+                claimed,
+                translated=options.translated,
+                diagnostics=sniff_diagnostics,
             )
-        except ZipSizeError as exc:
-            result.error = str(exc)
-            return
-    if not options.scan_nested or depth >= MAX_NESTED_DEPTH:
-        return
-    for name in names:
-        if name.endswith("/") or not name.lower().endswith(".jar"):
-            continue
-        # 翻譯 ZIP 內任何位置的 jar 都掃；一般 jar 只看 jarjar／jars 內嵌目錄
-        if not (options.translated or name.startswith(NESTED_DIRS)):
-            continue
-        try:
-            data = read_limited(zf, name, MAX_FILE_BYTES, budget=budget)
-            with zipfile.ZipFile(io.BytesIO(data)) as nested:
-                result.nested_jars += 1
-                _scan_archive(
-                    nested,
-                    f"{label}!{name}",
-                    options,
-                    dir_names,
-                    result,
-                    depth + 1,
-                    tree,
-                    should_cancel,
+            for key, members in sniff_result.groups.items():
+                groups.setdefault(key, members)
+            if sniff_result.budget_exhausted:
+                result.sniff_incomplete = True
+                result.notes.append(
+                    "Book sniff 讀取預算耗盡，僅保留已確認的項目："
+                    f"{sniff_result.budget_error}"
                 )
-        except ArchiveBudgetError as exc:
-            result.error = str(exc)  # 累計上限：整包視為失敗，不再讀其餘內嵌 jar
-            return
-        except (zipfile.BadZipFile, ZipSizeError, OSError) as exc:
-            result.skipped_nested += 1  # 單一內嵌 jar 損毀或過大：略過它，記錄在結果中
-            result.notes.append(f"略過內嵌 jar {label}!{name}：{_reason(exc)}")
-        if result.error:  # 內層已回報安全上限
-            return
+                result.issues.append(
+                    {
+                        "source_archive": label,
+                        "source_member": current_label,
+                        "kind": "content_sniff",
+                        "status": "pending",
+                        "reason": "sniff_budget_exhausted",
+                        "detail": sniff_result.budget_error,
+                    }
+                )
+            for member in dict.fromkeys(sniff_diagnostics):
+                result.invalid_books.append(f"{current_label}:{member}")
+                result.notes.append(
+                    f"略過無法解析的書籍 JSON：{current_label}:{member}"
+                )
+                result.issues.append(
+                    {
+                        "source_archive": label,
+                        "source_member": (
+                            member
+                            if current_label == label
+                            else f"{current_label}!{member}"
+                        ),
+                        "kind": "patchouli",
+                        "status": "parse_failed",
+                        "reason": "invalid_book_json",
+                        "detail": "書籍格式候選無法解析，未建立虛假 entry",
+                    }
+                )
+            patchouli_contexts = (
+                _patchouli_contexts_for_archive(
+                    current, current_budget, names, dir_names
+                )
+                if any(kind == "patchouli" for kind, _mod, _file in groups)
+                else {}
+            )
+        for ident_key, members in groups.items():
+            try:
+                result.items.extend(
+                    _items_for_group(
+                        current,
+                        current_budget,
+                        ident_key,
+                        members,
+                        options,
+                        patchouli_contexts,
+                        dir_names,
+                    )
+                )
+            except ZipSizeError as exc:
+                result.error = str(exc)
+                return False
+        return not result.error
+
+    def make_child_budget(child_label: str) -> _DualBudget:
+        return _DualBudget(_new_budget(options, child_label), tree, should_cancel)
+
+    def on_nested_error(child_label: str, name: str, exc: BaseException) -> None:
+        result.skipped_nested += 1
+        result.notes.append(f"略過內嵌 jar {child_label}：{_reason(exc)}")
+        result.issues.append(
+            {
+                "source_archive": label,
+                "source_member": child_label,
+                "kind": "nested_archive",
+                "status": "excluded",
+                "reason": "nested_archive_read_failed",
+                "detail": _reason(exc),
+            }
+        )
+
+    def on_nested_truncated(child_label: str, depth: int) -> None:
+        result.truncated_nested += 1
+        result.notes.append(f"內嵌 jar 深度超過上限（depth={depth}）：{child_label}")
+        result.issues.append(
+            {
+                "source_archive": label,
+                "source_member": child_label,
+                "kind": "nested_archive",
+                "status": "excluded",
+                "reason": "nested_archive_depth_limit",
+                "detail": f"depth={depth}",
+            }
+        )
+
+    root_budget = _DualBudget(_new_budget(options, label), tree, should_cancel)
+    try:
+        walk_nested_archives(
+            zf,
+            label,
+            root_budget,
+            visit_archive,
+            budget_factory=make_child_budget,
+            should_cancel=should_cancel,
+            max_depth=MAX_NESTED_DEPTH,
+            on_nested_error=on_nested_error,
+            on_nested_truncated=on_nested_truncated,
+            archive_max_bytes=MAX_FILE_BYTES,
+            scan_nested=options.scan_nested,
+            nested_name_predicate=(
+                (lambda name: name.lower().endswith(".jar"))
+                if options.translated
+                else is_nested_archive_name
+            ),
+        )
+    except ArchiveBudgetError as exc:
+        result.error = str(exc)
 
 
 def scan_jar(
@@ -909,15 +1032,45 @@ def find_jars(folder: str | Path, *, translated: bool = False) -> list[Path]:
     return sorted(found, key=lambda x: x.as_posix().lower())
 
 
+def _source_archive_identity(root: str | Path, archive: str | Path) -> str:
+    """Return a stable source identity relative to the scan root.
+
+    ``JarResult.name`` intentionally stays short for progress messages, but
+    persisted content issues need to distinguish same-named jars in different
+    subdirectories.  A relative POSIX path is stable across platforms and is
+    sufficient to identify the outer archive within one scan context.
+    """
+    root_path = Path(root)
+    archive_path = Path(archive)
+    try:
+        return archive_path.resolve().relative_to(root_path.resolve()).as_posix()
+    except (OSError, ValueError):
+        return archive_path.name
+
+
 def _progress(
     done: int, jars: Sequence[Path], result: JarResult, log: str, level: str = "info"
 ) -> dict[str, Any]:
     """一個 jar 處理完的進度更新；略過內嵌 jar 時附上說明並升為警告。"""
-    if result.skipped_nested and not result.error:
-        log += f"（略過 {result.skipped_nested} 個損毀或過大的內嵌 jar）"
+    if _is_partial_result(result) and not result.error:
+        details = []
+        if result.skipped_nested:
+            details.append(f"略過 {result.skipped_nested} 個損毀或過大的內嵌 jar")
+        if result.truncated_nested:
+            details.append(f"截斷 {result.truncated_nested} 個超過深度上限的內嵌 jar")
+        if result.sniff_incomplete:
+            details.append("Book sniff 讀取預算耗盡，僅保留已確認的項目")
+        log += "（" + "；".join(details) + "）"
         level = "warning"
         log += "".join(f"\n　⚠️ {note}" for note in result.notes)
     return {"progress": done / len(jars), "log": log, "level": level}
+
+
+def _is_partial_result(result: JarResult) -> bool:
+    """是否有任何來源內容未能完整驗證。"""
+    return bool(
+        result.skipped_nested or result.truncated_nested or result.sniff_incomplete
+    )
 
 
 def ingest_counts_text(stats: IngestStats, *, always_changed: bool = False) -> str:
@@ -998,6 +1151,15 @@ def scan_folder_generator(
     jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
     if not jars:
+        if db is not None and not options.dry_run:
+            # An empty completed scan is a valid current snapshot.  Persisting
+            # it clears issues from jars that were removed since the last scan.
+            db.record_scan(
+                options.version,
+                str(folder),
+                report.as_dict(),
+                issues=[],
+            )
         yield {
             "progress": 1.0,
             "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}"
@@ -1052,17 +1214,33 @@ def scan_folder_generator(
                 report.cancelled = True
                 break
             result: JarResult = fut.result()
+            source_archive = _source_archive_identity(folder, _jar_path)
             replay_logs(result.logs)
             if result.cancelled:
                 report.cancelled = True
                 break
             done += 1
+            for issue in result.issues:
+                report.add_issue({**issue, "source_archive": source_archive})
             report.nested_jars += result.nested_jars
             report.skipped_nested += result.skipped_nested
+            report.truncated_nested += result.truncated_nested
+            if _is_partial_result(result):
+                report.partial_jars += 1
             if (
                 result.error
             ):  # 失敗的 archive 不寫入任何資料（避免只匯入一部分卻顯示成功）
                 report.jars_failed.append(result.name)
+                report.add_issue(
+                    {
+                        "source_archive": source_archive,
+                        "source_member": "",
+                        "kind": "archive",
+                        "status": "parse_failed",
+                        "reason": "archive_read_failed",
+                        "detail": result.error,
+                    }
+                )
                 yield _progress(
                     done,
                     jars,
@@ -1097,16 +1275,28 @@ def scan_folder_generator(
         state = (
             "已取消（已處理的檔案已寫入，其餘未處理）" if report.cancelled else "完成"
         )
-        db.record_scan(options.version, str(folder), report.as_dict())
+        db.record_scan(
+            options.version,
+            str(folder),
+            report.as_dict(),
+            issues=report.issues if not report.cancelled else None,
+            replace_issues=not report.cancelled,
+        )
         summary = f"🎉 掃描{state}：{found}；{counts}"
     if report.jars_failed:
         summary += (
             f"　⚠️ 失敗 {len(report.jars_failed)} 個（{'、'.join(report.jars_failed[:5])}"
             f"{'…' if len(report.jars_failed) > 5 else ''}）"
         )
+    if report.partial_jars:
+        summary += f"　⚠️ 部分掃描 {report.partial_jars} 個"
     yield {
         "progress": 1.0,
         "log": summary,
-        "level": "warning" if report.jars_failed or report.cancelled else "info",
+        "level": (
+            "warning"
+            if report.jars_failed or report.partial_jars or report.cancelled
+            else "info"
+        ),
         "report": report,
     }

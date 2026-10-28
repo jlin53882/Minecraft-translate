@@ -174,17 +174,8 @@ class BundlerWidgetsMixin:
                     ),
                     ft.Column(
                         [
-                            kit.section_label(
-                                "其他指定資料夾 / 檔案（從選擇資料夾的下一層開始打包進 ZIP）"
-                            ),
-                            self.extra_folders_view,
-                            kit.button(
-                                "新增資料夾",
-                                "secondary",
-                                icon=ft.Icons.ADD,
-                                size="sm",
-                                on_click=self._pick_extra_folder,
-                            ),
+                            kit.section_label("其他指定來源"),
+                            self.extra_source_controls.content,
                         ],
                         spacing=8,
                     ),

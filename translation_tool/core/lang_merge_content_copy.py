@@ -10,11 +10,25 @@ import os
 import re
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from ..utils.cache_registry import register_cache
 from ..utils.log_unit import log_debug, log_error, log_info, log_warning
 from ..utils.zip_safety import UnsafePathError, safe_join
+from .book_formats import (
+    FORMAT_ETERNAL_STARLIGHT,
+    FORMAT_MODONOMICON,
+    FORMAT_NEUTRAL_PAGES,
+    FORMAT_ORACLE_INDEX,
+    map_neutral_pages_values,
+    resolve_book_format,
+)
+from .guide_translation import (
+    GUIDE_SUPPORT_SUFFIXES,
+    is_guide_directory_segment,
+)
+from .neutral_book_json import load_neutral_book_json
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
 # ----------------------------------------------------------------------
@@ -23,6 +37,26 @@ from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismat
 # ----------------------------------------------------------------------
 _patchouli_eff_cache: dict = {}
 _patchouli_eff_cache_lock = threading.RLock()
+
+
+def _is_guide_support_path(normalized_path: str) -> bool:
+    """Whether a non-text member is an explicitly supported guide asset."""
+
+    parts = normalized_path.replace("\\", "/").split("/")
+    try:
+        assets_index = next(
+            index for index, part in enumerate(parts) if part.casefold() == "assets"
+        )
+    except StopIteration:
+        return False
+    if len(parts) <= assets_index + 3:
+        return False
+    suffix = os.path.splitext(parts[-1])[1].casefold()
+    if suffix not in GUIDE_SUPPORT_SUFFIXES:
+        return False
+    return any(
+        is_guide_directory_segment(part) for part in parts[assets_index + 2 : -1]
+    )
 
 
 def clear_patchouli_eff_cache() -> None:
@@ -273,7 +307,13 @@ def detect_content_wrapper_prefix(all_names: list[str] | None) -> str | None:
     }
     if len(tops) == 1:
         candidate = next(iter(tops)) + "/"
-        if all_names[0].startswith(candidate):
+        # ``assets/`` and ``data/`` are Minecraft roots, not an artificial
+        # archive wrapper.  Stripping either one changes the resource-pack
+        # contract and makes content land under ``other_output/demo`` instead
+        # of ``other_output/assets/demo`` (or bypasses classification).
+        if candidate.casefold() not in {"assets/", "data/"} and all_names[0].startswith(
+            candidate
+        ):
             return candidate
     return None
 
@@ -327,10 +367,17 @@ def process_content_or_copy_file_impl(
     log_debug(f"[Patchouli DEBUG] 原始 input_path = {input_path}")
     log_debug(f"[Patchouli DEBUG] normalized_path(初始) = {normalized_path}")
 
-    assets_idx = normalized_path.find("/assets/")
+    # Select the first path-segment ``assets/``.  Guide support files can
+    # legitimately live below ``ae2guide/assets/``; using a plain substring
+    # search would select that nested directory and discard the module and
+    # guide identity before classification.
+    assets_match = re.search(r"(?:^|/)assets/", normalized_path)
+    assets_idx = assets_match.start() if assets_match else -1
     log_debug(f"[Patchouli DEBUG] assets_idx = {assets_idx}")
     if assets_idx != -1:
-        normalized_path = normalized_path[assets_idx + 1 :]
+        normalized_path = normalized_path[
+            assets_idx if normalized_path[assets_idx] == "a" else assets_idx + 1 :
+        ]
     log_debug(f"[Patchouli DEBUG] normalized_path(裁切後) = {normalized_path}")
 
     # --- v3 新增：zh_cn skip logic (在 early return 判斷之前，先做全局開關檢查) ---
@@ -364,6 +411,119 @@ def process_content_or_copy_file_impl(
             and ("zh_cn.json" in norm_lower or "zh_cn.lang" in norm_lower)
         ):
             return {"success": True, "log": None}
+
+    # Guide documents may reference structures and images stored beside the
+    # Markdown.  They are runtime assets, not translatable prose, so keep them
+    # on the canonical Resource Pack path instead of sending them to
+    # ``other_output`` (which is intentionally excluded from the ZIP).
+    if _is_guide_support_path(normalized_path):
+        source_path = _strip(input_path.replace("\\", "/"))
+        assets_index = source_path.casefold().find("assets/")
+        if assets_index < 0:
+            return {"success": True, "log": None}
+        resource_path = source_path[assets_index:]
+        try:
+            target = safe_join(output_dir, resource_path)
+        except UnsafePathError:
+            log_error(f"拒絕不安全路徑: {resource_path}")
+            return {"success": False, "error": True}
+        raw = reader.read_bytes(input_path)
+        should_write = True
+        if os.path.isfile(target):
+            try:
+                should_write = Path(target).read_bytes() != raw
+            except OSError:
+                should_write = True
+        if should_write:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            write_bytes_atomic_fn(target, raw)
+        return {"success": True, "log": f"[指南附屬資源] 保留原檔: {target}"}
+
+    custom_format = resolve_book_format(normalized_path)
+    custom_resource_path = normalized_path
+    custom_output_root = patchouli_output_dir or output_dir
+    pending_name = merger_cfg.get("pending_folder_name", "待翻譯")
+
+    if custom_format.name == FORMAT_NEUTRAL_PAGES:
+        # Neutral custom books have no en_us/zh_tw directory.  JSON source
+        # belongs in pending so the original English is not bundled; binary
+        # book assets belong in the normal patchouli output and are bundled.
+        load_result = None
+        if os.path.splitext(input_path)[1].lower() == ".json":
+            text = reader.read_text(input_path)
+            try:
+                load_result = load_neutral_book_json(text, normalized_path)
+                source_data = load_result.data
+            except Exception as exc:  # noqa: BLE001 - invalid source is quarantined, never rewritten
+                quarantine_copy_fn(
+                    reader=reader,
+                    rel_path=input_path,
+                    output_dir=output_dir,
+                    reason="自訂書籍 JSON 解析失敗",
+                    extra_text=f"Exception: {type(exc).__name__}\nMessage: {exc!s}\nPath: {input_path}",
+                    errordata_dir=errordata_dir,
+                )
+                log_warning(f"略過無法解析的自訂書籍 JSON: {input_path}: {exc!s}")
+                return {"success": True}
+            transformed = map_neutral_pages_values(
+                source_data,
+                lambda value: recursive_translate_dict_fn(value, rules),
+            )
+            output_bytes = json_module.dumps(
+                transformed, option=json_module.OPT_INDENT_2
+            )
+            target = safe_join(custom_output_root, pending_name, custom_resource_path)
+        else:
+            output_bytes = reader.read_bytes(input_path)
+            target = safe_join(custom_output_root, custom_resource_path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        should_write = True
+        if os.path.isfile(target):
+            try:
+                with open(target, "rb") as existing:
+                    should_write = existing.read() != output_bytes
+            except OSError:
+                should_write = True
+        if should_write:
+            write_bytes_atomic_fn(target, output_bytes)
+        repaired = bool(load_result and load_result.repaired)
+        repair_note = "；已移除已確認的多餘尾端 `]}` 並重新序列化" if repaired else ""
+        if repaired:
+            log_warning(
+                "[自訂書籍] %s 含已確認的多餘尾端 `]}`，已安全正規化輸出",
+                input_path,
+            )
+        return {
+            "success": True,
+            "log": f"[自訂書籍] 保留格式並輸出: {target}{repair_note}",
+        }
+
+    if custom_format.name in {
+        FORMAT_ETERNAL_STARLIGHT,
+        FORMAT_MODONOMICON,
+        FORMAT_ORACLE_INDEX,
+    }:
+        # These formats are deliberately not sent to the generic JSON walker.
+        # Keep the source in the non-bundled diagnostics/output area until a
+        # profile with a verified schema is implemented.
+        target = safe_join(other_output_dir or output_dir, custom_resource_path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        raw = reader.read_bytes(input_path)
+        should_write = True
+        if os.path.isfile(target):
+            try:
+                with open(target, "rb") as existing:
+                    should_write = existing.read() != raw
+            except OSError:
+                should_write = True
+        if should_write:
+            write_bytes_atomic_fn(target, raw)
+        log_warning(
+            "保留未支援的書籍格式，不套用通用 JSON 翻譯：%s（%s）",
+            input_path,
+            custom_format.name,
+        )
+        return {"success": True, "log": f"[未支援書籍] 保留原檔: {target}"}
 
     def get_patchouli_book_root(path: str):
         # 保留原始大小寫（因為 zf.namelist() 可能用原始大小寫）

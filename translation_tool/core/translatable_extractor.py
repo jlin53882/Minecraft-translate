@@ -7,19 +7,24 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
+from translation_tool.core.book_formats import (
+    BOOK_EXCLUDED_DIRS,
+    FORMAT_UNKNOWN,
+    is_neutral_pages_candidate,
+    resolve_book_format,
+)
 from translation_tool.core.lm_config_rules import (
     is_value_translatable,
 )
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.patchouli_semantics import (
     PatchouliContext,
     patchouli_translatable_items,
 )
 from translation_tool.core.text_sniffer import (
-    VANILLA_NON_TEXT_DIRS,
     advancement_texts,
     is_advancement_document,
     lang_non_text_reason,
@@ -27,6 +32,7 @@ from translation_tool.core.text_sniffer import (
     value_shape_reason,
 )
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_warning
 
 _MAX_SNIFF_BYTES = 2 * 1024 * 1024
 
@@ -78,16 +84,23 @@ def _is_book_json_by_content(path: Path, parts: tuple[str, ...]) -> bool:
         parts = parts[1:]
     if len(parts) < 4 or parts[0] not in ("assets", "data"):
         return False
-    if parts[2].lower() in VANILLA_NON_TEXT_DIRS or parts[-1].lower() == "book.json":
+    if parts[2].lower() in BOOK_EXCLUDED_DIRS or parts[-1].lower() == "book.json":
         return False
     if len(parts) == 4 and parts[2] == "lang":
         return False
     try:
         if path.stat().st_size > _MAX_SNIFF_BYTES:
             return False
-        data = json.loads(path.read_bytes())
-    except (OSError, ValueError):
+        data = load_neutral_book_json(
+            path.read_text(encoding="utf-8-sig"), "/".join(parts)
+        ).data
+    except (OSError, TypeError, ValueError) as exc:
+        if is_neutral_pages_candidate("/".join(parts)):
+            log_warning("略過無法解析的自訂書籍 JSON：%s（%s）", path, exc)
         return False
+    format_info = resolve_book_format("/".join(parts), data)
+    if format_info.name != FORMAT_UNKNOWN:
+        return format_info.is_patchouli_compatible
     return looks_like_book_json(data, parts[2:])
 
 
@@ -101,7 +114,17 @@ def find_lang_json(root: Path):
     回傳：
         Path 物件列表
     """
-    return list(root.rglob("assets/*/lang/*.json"))
+    # ``data/<namespace>/lang`` 也是掃描器接受的來源格式；輸出階段會
+    # 將標準語言檔正規化到資源包的 ``assets/<namespace>/lang``。不要在
+    # 這裡把 data 語言檔漏掉，否則一般目錄翻譯入口與 JAR/DB 掃描入口
+    # 會看到不同的候選集合。
+    paths = [
+        *root.rglob("assets/*/lang/*.json"),
+        *root.rglob("assets/*/lang/*.lang"),
+        *root.rglob("data/*/lang/*.json"),
+        *root.rglob("data/*/lang/*.lang"),
+    ]
+    return sorted(set(paths), key=lambda path: path.as_posix().lower())
 
 
 def is_advancement_file(file_path: Path) -> bool:

@@ -91,7 +91,8 @@ def build_lang_file_regex(
         codes = [c for c in codes if c != "zh_cn"]
     codes_str = "|".join(map(re.escape, codes))
     regex = re.compile(
-        rf"(?:assets/([^/]+)/)?lang/({codes_str})\.(json|lang)$", re.IGNORECASE
+        rf"^(?:assets|data)/([^/]+)/lang/({codes_str})\.(json|lang)$",
+        re.IGNORECASE,
     )
     return regex
 
@@ -135,6 +136,7 @@ def _extract_from_jar(
     output_root: str,
     target_regex: re.Pattern,
     all_scan_results: dict[Path, dict[str, str | None]] | None = None,
+    nested_output_name: str | None = None,
 ) -> dict[str, Any]:
     """從 JAR 檔案提取檔案。
 
@@ -145,7 +147,11 @@ def _extract_from_jar(
         all_scan_results: 預先掃描的 JAR 結果（由 caller 傳入）
     """
     return extract_from_jar_impl(
-        jar_path, output_root, target_regex, scan_results=all_scan_results
+        jar_path,
+        output_root,
+        target_regex,
+        scan_results=all_scan_results,
+        nested_output_name=nested_output_name,
     )
 
 
@@ -238,6 +244,7 @@ def _sniff_book_phase(
             lambda name: bool(name_regex.search(name)),
             lang_codes=codes,
             skip_zh_cn=skip_zh_cn,
+            source_root=mods_dir,
         )
     except Exception as exc:  # noqa: BLE001 - 補充階段失敗不影響已提取的檔案
         log_error(f"[Book] 依內容辨識提取失敗：{exc!r}", exc_info=True)

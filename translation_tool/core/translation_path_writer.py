@@ -11,17 +11,42 @@ from pathlib import Path
 from translation_tool.core.translatable_extractor import is_advancement_file
 
 
+def _strip_extraction_wrapper(src: Path) -> Path:
+    """移除提取階段的外層目錄，保留資源包／資料包的實際根路徑。"""
+    parts = src.parts
+    if (
+        len(parts) > 1
+        and parts[0].lower().endswith("_extracted")
+        and parts[1].lower() in {"assets", "data"}
+    ):
+        return Path(*parts[1:])
+    return src
+
+
 def map_lang_output_path(src: Path) -> Path:
     """根據來源路徑自動判定翻譯輸出的目標路徑。
 
     - ``…/lang/en_us.json`` → ``…/lang/zh_tw.json``
+    - ``data/<模組>/lang/*.json`` → ``assets/<模組>/lang/*.json``
+    - ``<模組>_extracted/assets|data/...`` → ``assets|data/...``
     - ``…/patchouli_books/<書>/en_us/…`` → ``…/patchouli_books/<書>/zh_tw/…``
     - 其他手冊資料夾 ``assets/<模組>/<資料夾>/…/en_us/…`` → 同路徑換成 ``zh_tw``
     - Advancement 即使子路徑包含 ``en_us`` 或 ``lang``，仍保留完整來源路徑
     """
+    src = _strip_extraction_wrapper(src)
     if is_advancement_file(src):
         return src
-    if src.name.lower() == "en_us.json" and "lang" in src.parts:
+    if src.suffix.lower() in {".json", ".lang"} and "lang" in src.parts:
+        parts = list(src.parts)
+        if src.stem.lower() not in {"en_us", "zh_cn", "zh_tw"}:
+            return src
+        # data/<namespace>/lang is a valid scan source in mod JARs, but it is
+        # not the final Resource Pack language location. Advancement files
+        # returned above before this branch and therefore keep their data/
+        # path and translate keys intact.
+        if parts and parts[0].lower() in {"data", "resources"}:
+            parts[0] = "assets"
+            return Path(*parts[:-1], "zh_tw.json")
         return src.with_name("zh_tw.json")
     parts = list(src.parts)
     if "patchouli_books" in parts:

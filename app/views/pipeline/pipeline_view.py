@@ -193,7 +193,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
         pack_format: int | None,
         max_pack_format: int | None,
         pack_image_path: str | None,
-        extra_folders: list[str],
+        extra_folders: list[object],
     ):
         """執行打包資源（背景執行）。"""
         self._start_single_step(
@@ -361,6 +361,7 @@ class PipelineView(PipelineWidgetsMixin, ft.Column):
             "translation_db_settings_snapshot": (
                 merge_snapshot.database_settings if merge_snapshot is not None else None
             ),
+            "content_manifest_path": cfg.content_manifest_path,
         }
         return cfg, mode, lang_codes, merge_options
 

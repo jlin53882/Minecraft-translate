@@ -20,6 +20,14 @@ class TestMapLangOutputPath:
 
         assert result.name == "zh_tw.json"
 
+    @pytest.mark.parametrize("filename", ["en_us.lang", "zh_cn.lang", "zh_tw.lang"])
+    def test_legacy_lang_is_normalized_to_resource_pack_json(self, filename):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        assert map_lang_output_path(Path(f"assets/modid/lang/{filename}")) == Path(
+            "assets/modid/lang/zh_tw.json"
+        )
+
     def test_map_non_en_us_file(self):
         """測試非 en_us.json 檔案不變"""
         from translation_tool.core.translation_path_writer import map_lang_output_path
@@ -28,6 +36,42 @@ class TestMapLangOutputPath:
         result = map_lang_output_path(src)
 
         assert result == src
+
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [("en_us.json", "zh_tw.json"), ("zh_tw.json", "zh_tw.json")],
+    )
+    def test_data_language_files_are_written_under_resource_pack_assets(
+        self, filename, expected
+    ):
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        src = Path(f"data/demo/lang/{filename}")
+
+        assert map_lang_output_path(src) == Path(f"assets/demo/lang/{expected}")
+
+    @pytest.mark.parametrize(
+        ("src", "expected"),
+        [
+            (
+                Path("example_1234_extracted/data/demo/lang/en_us.json"),
+                Path("assets/demo/lang/zh_tw.json"),
+            ),
+            (
+                Path("example_1234_extracted/data/demo/advancements/start.json"),
+                Path("data/demo/advancements/start.json"),
+            ),
+            (
+                Path("example_1234_extracted/assets/demo/books/chapters/a.json"),
+                Path("assets/demo/books/chapters/a.json"),
+            ),
+        ],
+    )
+    def test_extracted_wrapper_does_not_leak_into_output_paths(self, src, expected):
+        """提取 wrapper 只供 staging 辨識，不得進入最終輸出。"""
+        from translation_tool.core.translation_path_writer import map_lang_output_path
+
+        assert map_lang_output_path(src) == expected
 
     def test_map_different_case(self):
         """測試不同大小寫的 en_us"""

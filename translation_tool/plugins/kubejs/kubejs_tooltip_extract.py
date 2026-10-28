@@ -8,7 +8,7 @@ import json
 import os
 import re
 import shutil
-import uuid
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -562,8 +562,13 @@ def extract(
     out_root = Path(output_dir or "OUTPUT_DIR_NOT_SET").resolve()
     out_root.parent.mkdir(parents=True, exist_ok=True)
     out_root.mkdir(parents=True, exist_ok=True)
-    stage_root = out_root.parent / f".{out_root.name}.extract-{uuid.uuid4().hex}"
-    stage_root.mkdir(parents=True, exist_ok=False)
+    # The output path can already be deeply nested under ``.pipeline``.  A
+    # sibling staging directory would add another long ``raw.extract-*`` path
+    # and can exceed Windows MAX_PATH before extraction even starts.  The
+    # staged tree is copied into ``out_root`` by ``sync_managed_tree`` after
+    # extraction, so a short per-run temp directory is safe and keeps the
+    # commit semantics unchanged.
+    stage_root = Path(tempfile.mkdtemp(prefix="minecraft-translate-kjs-"))
 
     log_info(f"🚀 開始提取流程 | 來源: {src_root} | 輸出: {out_root}")
 

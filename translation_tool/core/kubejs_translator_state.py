@@ -16,7 +16,10 @@ from typing import Any
 from translation_tool.utils.file_replace import replace_with_retry
 
 STATE_VERSION = 1
-_RUN_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+# New IDs are shorter to keep the deeply nested Windows pipeline paths below
+# MAX_PATH.  Keep accepting the original UUID-hex form so existing snapshots
+# remain readable after an upgrade.
+_RUN_ID_RE = re.compile(r"^(?:[0-9a-f]{20}|[0-9a-f]{32})$")
 _HASH_CHUNK_SIZE = 1024 * 1024
 _OUTPUT_LOCKS: dict[str, threading.RLock] = {}
 _OUTPUT_LOCKS_LOCK = threading.Lock()
@@ -34,7 +37,7 @@ def pipeline_state_root(output_root: Path) -> Path:
 
 
 def new_run_id() -> str:
-    return uuid.uuid4().hex
+    return uuid.uuid4().hex[:20]
 
 
 def _manifest_snapshot_path(

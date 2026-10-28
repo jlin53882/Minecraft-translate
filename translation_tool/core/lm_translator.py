@@ -72,6 +72,7 @@ from translation_tool.core.translation_path_writer import (
     set_by_path,
 )
 from translation_tool.translation_db import DbSettings
+from translation_tool.translation_db.run_progress import RunProgress
 from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cache_manager import (
     get_cache_dict_ref,
@@ -532,6 +533,62 @@ def _write_directory_previews(
     )
 
 
+def _publish_directory_update(
+    update: dict[str, Any],
+    pending_events: list[dict[str, Any]],
+    update_sink: Callable[[dict[str, Any]], None] | None,
+) -> None:
+    """把進度即時送給服務層；沒有 sink 時保留 generator 舊契約。"""
+    if update_sink is None:
+        pending_events.append(update)
+        return
+    try:
+        update_sink(update)
+    except Exception as error:  # noqa: BLE001 - UI sink 不得中斷翻譯
+        log_warning(f"⚠️ 目錄 LM 進度回報失敗（{type(error).__name__}）：{error}")
+
+
+def _directory_progress_update(
+    progress: float,
+    message: str,
+    total: int,
+    run_progress: RunProgress,
+    pending_events: list[dict[str, Any]],
+    update_sink: Callable[[dict[str, Any]], None] | None,
+) -> None:
+    """把 shared loop 的進度轉成流水線 phase 進度與同一套 ETA 行。"""
+    absolute_progress = min(0.2 + 0.8 * progress, 1.0)
+    _publish_directory_update(
+        {"progress": absolute_progress, "log": message}, pending_events, update_sink
+    )
+    processed = min(total, round(progress * total))
+    if run_progress.update(processed):
+        _publish_directory_update(
+            {"progress": absolute_progress, "log": f"⏱ {run_progress.line()}"},
+            pending_events,
+            update_sink,
+        )
+
+
+def _directory_provider_name(lm_cfg: dict[str, Any]) -> str:
+    """回傳目錄 LM 批次事件使用的 provider 顯示名稱。"""
+    return str(lm_cfg.get("provider") or "gemini")
+
+
+def _directory_model_name(lm_cfg: dict[str, Any]) -> str:
+    """回傳目錄 LM 批次事件使用的模型顯示名稱。"""
+    return str(
+        lm_cfg.get("chatgpt_model") or lm_cfg.get("default_model") or "model-pool"
+    )
+
+
+def _record_planned_batches(result: Any, planned_batches: int) -> None:
+    """把開始時的批次估算附加到共用 loop 結果，不改變既有結果型別。"""
+    metrics = getattr(result, "metrics", None)
+    if isinstance(metrics, dict):
+        metrics.setdefault("planned_batches", planned_batches)
+
+
 def _run_directory_translation(
     *,
     remaining: list[dict[str, Any]],
@@ -550,6 +607,9 @@ def _run_directory_translation(
     db_ctx: DirectoryDbContext | None = None,
     db_choice: tuple[bool, str] = (False, ""),
     db_settings_snapshot: DbSettings | None = None,
+    update_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_task_id: str | None = None,
 ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
     """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
     _note_directory_checkpoint(
@@ -619,9 +679,23 @@ def _run_directory_translation(
             },
         )
 
+    planned_batches = _plan_directory_batches(remaining)
+    run_progress = RunProgress(total=len(remaining), planned_batches=planned_batches)
+    _publish_directory_update(
+        {"progress": 0.2, "log": run_progress.start_line()},
+        pending_events,
+        update_sink,
+    )
+
     def on_progress(progress: float, message: str, _eta_sec: float) -> None:
-        absolute_progress = min(0.2 + 0.8 * progress, 1.0)
-        pending_events.append({"progress": absolute_progress, "log": message})
+        _directory_progress_update(
+            progress,
+            message,
+            len(remaining),
+            run_progress,
+            pending_events,
+            update_sink,
+        )
 
     def translate_batch(
         batch: list[dict[str, Any]],
@@ -640,14 +714,6 @@ def _run_directory_translation(
         for item in translated or []:
             finish_guide_item(item)  # 指南段落：還原行內保護、檢查標籤與連結
         return translated, status
-
-    planned_batches = _plan_directory_batches(remaining)
-    pending_events.append(
-        {
-            "progress": 0.2,
-            "log": f"📦 批次規劃｜預計 {planned_batches:,} 批，共 {len(remaining):,} 筆需由 AI 處理",
-        }
-    )
 
     config = load_config()
     lm_cfg = config.get("lm_translator", {}) if isinstance(config, dict) else {}
@@ -673,6 +739,12 @@ def _run_directory_translation(
             on_batch_flushed=on_batch_flushed,
             on_batch_checkpoint=on_batch_checkpoint,
             on_progress=on_progress,
+            on_event=event_sink,
+            task_id=event_task_id,
+            operation="translate",
+            provider=_directory_provider_name(lm_cfg),
+            model=_directory_model_name(lm_cfg),
+            batch_total=planned_batches,
         ),
     )
     if touched_files:
@@ -680,6 +752,7 @@ def _run_directory_translation(
     flush_write_back(db_ctx)
 
     processed = int(result.processed or 0)
+    _record_planned_batches(result, planned_batches)
     if result.status == "DONE" and processed >= total:
         clear_checkpoint()
 
@@ -695,15 +768,38 @@ def _run_directory_translation(
     return result, pending_events, translation_log, processed
 
 
-def _directory_final_message(status: str, processed: int, total: int) -> str:
+def _directory_final_message(
+    status: str,
+    processed: int,
+    total: int,
+    *,
+    planned_batches: int = 0,
+    actual_batches: int = 0,
+) -> str:
     """把 shared loop 終態轉成目錄翻譯對使用者的訊息。"""
+    batch_note = (
+        f"，共送出 {actual_batches:,} 批（開始預估 {planned_batches:,} 批）"
+        if actual_batches > 0 and planned_batches > 0
+        else ""
+    )
     if status == "CANCELLED":
-        return f"⏹ 翻譯已取消，完成 {processed}/{total} 筆"
+        return f"⏹ 翻譯已取消，完成 {processed}/{total} 筆{batch_note}"
     if status in {"FAILED", "ALL_KEYS_EXHAUSTED"}:
-        return f"⚠️ 翻譯中斷，完成 {processed}/{total} 筆，狀態={status}"
+        return f"⚠️ 翻譯中斷，完成 {processed}/{total} 筆{batch_note}，狀態={status}"
     if status == "DONE" and processed >= total:
-        return f"🎉 翻譯完全完成，完成 {processed}/{total} 筆"
-    return f"⚠️ 翻譯未完成，完成 {processed}/{total} 筆，狀態={status}"
+        return f"🎉 翻譯完全完成，完成 {processed}/{total} 筆{batch_note}"
+    return f"⚠️ 翻譯未完成，完成 {processed}/{total} 筆{batch_note}，狀態={status}"
+
+
+def _directory_result_batch_counts(result: Any) -> tuple[int, int]:
+    """讀取 loop 的預估／實際批次，兼容舊版或測試替身結果。"""
+    metrics = getattr(result, "metrics", None)
+    if not isinstance(metrics, dict):
+        return 0, 0
+    return (
+        int(metrics.get("planned_batches", 0) or 0),
+        int(metrics.get("batch_count", 0) or 0),
+    )
 
 
 def _scan_directory_files(root: Path) -> list[Path]:
@@ -756,13 +852,20 @@ def _translate_directory_work(
     db_ctx,
     db_choice,
     frozen_settings,
+    update_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_task_id: str | None = None,
 ):
     """Run the API/cache/checkpoint phase after directory items are prepared."""
     total = len(items_to_translate)
     if total == 0:
         clear_checkpoint()
         log_info("🎉 所有項目皆已從 Cache 恢復，無需翻譯。")
-        yield {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
+        update = {"progress": 1.0, "log": "🎉 所有項目皆已從 Cache 恢復，無需翻譯。"}
+        pending: list[dict[str, Any]] = []
+        _publish_directory_update(update, pending, update_sink)
+        if pending:
+            yield from pending
         return
 
     cache_saving = _cache_saving_enabled()
@@ -783,16 +886,30 @@ def _translate_directory_work(
         db_ctx=db_ctx,
         db_choice=db_choice,
         db_settings_snapshot=frozen_settings,
+        update_sink=update_sink,
+        event_sink=event_sink,
+        event_task_id=event_task_id,
     )
     if pending_events:
         yield from pending_events
 
-    final_message = _directory_final_message(result.status, processed, total)
+    planned_batches, actual_batches = _directory_result_batch_counts(result)
+    final_message = _directory_final_message(
+        result.status,
+        processed,
+        total,
+        planned_batches=planned_batches,
+        actual_batches=actual_batches,
+    )
     log_info(final_message)
-    yield {
+    final_update = {
         "progress": 1.0 if processed >= total else processed / total,
         "log": final_message,
     }
+    if update_sink is None:
+        yield final_update
+    else:
+        _publish_directory_update(final_update, [], update_sink)
 
 
 def _split_db_cache(
@@ -843,11 +960,17 @@ def translate_directory_generator(
     use_translation_db: bool | None = None,
     translation_db_version: str | None = None,
     translation_db_settings_snapshot: DbSettings | None = None,
+    update_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_sink: Callable[[dict[str, Any]], None] | None = None,
+    event_task_id: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
     """編排目錄翻譯各 phase；實際工作由 phase helper 負責。
 
     查詢順序為 **Mod 資料庫 → 翻譯快取 → AI**。``use_translation_db`` /
     ``translation_db_version`` 為 None 時使用設定檔（``translation_db``）的值。
+
+    ``update_sink`` 與 ``event_sink`` 由流水線服務注入時，翻譯中的進度與共用批次
+    telemetry 會即時送出；未注入時仍以 generator yield 保留 CLI／舊 caller 行為。
     """
     dry_run = DEFAULT_DRY_RUN if dry_run is None else dry_run
     validate_api_keys()
@@ -931,4 +1054,7 @@ def translate_directory_generator(
             db_ctx=db_ctx,
             db_choice=db_choice,
             frozen_settings=frozen_settings,
+            update_sink=update_sink,
+            event_sink=event_sink,
+            event_task_id=event_task_id,
         )

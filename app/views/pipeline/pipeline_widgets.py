@@ -5,6 +5,7 @@ import flet as ft
 from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
+from app.views.pipeline.pipeline_config import RESOURCE_PACK_INSTALL_HINT
 
 
 class PipelineWidgetsMixin:
@@ -191,7 +192,7 @@ class PipelineWidgetsMixin:
                     self._step_row(
                         4,
                         "打包資源",
-                        "輸出 pack.mcmeta 與 ZIP，可直接放入 resourcepacks",
+                        f"輸出 pack.mcmeta 與 ZIP；{RESOURCE_PACK_INSTALL_HINT}",
                         ft.Icons.INVENTORY_2,
                         "em",
                         self._on_bundle_click,

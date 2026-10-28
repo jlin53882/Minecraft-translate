@@ -142,7 +142,7 @@ def test_rules() -> bool:
     else:
         ok_all &= result("replace_rules.json 是否存在", False, "檔案不存在")
 
-    # LangItemRow 需 lang_key, en_text, zh_text, assets_root, preview_root, on_value_changed
+    # LangItemRow 顯示英文是由 bind() 更新控制項，而不是保留 en_text 欄位。
     try:
         from app.views.icon_preview_row import LangItemRow
 
@@ -157,7 +157,7 @@ def test_rules() -> bool:
         )
         ok_all &= result(
             "LangItemRow 可建立",
-            row.lang_key == "item.test" and row.en_text == "Test Item",
+            row.lang_key == "item.test" and row.en_field.value == "Test Item",
             f"lang_key={row.lang_key}",
         )
     except Exception as e:  # noqa: BLE001
@@ -194,7 +194,9 @@ def test_cache() -> bool:
                 overview = cache_manager.get_cache_overview()
                 ok_all &= result(
                     "get_cache_overview()",
-                    isinstance(overview, dict) and "lang" in overview,
+                    isinstance(overview, dict)
+                    and isinstance(overview.get("types"), dict)
+                    and "lang" in overview["types"],
                     f"types: {list(overview.keys())}",
                 )
         except Exception as e:  # noqa: BLE001
@@ -299,6 +301,7 @@ def test_lookup() -> bool:
         from translation_tool.utils import cache_manager
         from translation_tool.utils.cache_search_facade import CacheSearchFacade
 
+        facade = None
         try:
             import logging
 
@@ -310,6 +313,7 @@ def test_lookup() -> bool:
                 cache_manager.add_to_cache(
                     "lang", "iron_pickaxe", "Iron Pickaxe", "鐵鎬", mod="test"
                 )
+                cache_manager.rebuild_search_index()
                 facade = CacheSearchFacade(
                     cache_root_getter=lambda: tmp_path / "cache",
                     logger=logging.getLogger("test"),
@@ -317,7 +321,7 @@ def test_lookup() -> bool:
                 ok_all &= result(
                     "CacheSearchFacade 初始化", callable(facade.search_cache)
                 )
-                results = facade.search_cache("diamond")
+                results = facade.search_cache(query="diamond")
                 ok_all &= result(
                     "CacheSearchFacade.search_cache()",
                     bool(results) and "diamond" in str(results).lower(),
@@ -325,6 +329,10 @@ def test_lookup() -> bool:
                 )
         except Exception as e:  # noqa: BLE001
             ok_all &= warn("CacheSearchFacade 搜尋", f"UI 模式限制：{e}")
+        finally:
+            if facade is not None:
+                facade._get_orchestrator().close()
+            cache_manager._get_search_facade()._get_orchestrator().close()
 
     return ok_all
 
@@ -338,11 +346,12 @@ def test_icon_preview() -> bool:
 
     try:
         from translation_tool.core.icon_classifier import classify_no_icon_reason
+        from translation_tool.core.icon_reason import IconRisk
 
         reason, risk = classify_no_icon_reason("item.diamond_sword")
         ok_all &= result(
             "classify_no_icon_reason()",
-            isinstance(reason, str) and bool(reason) and isinstance(risk, str),
+            isinstance(reason, str) and bool(reason) and isinstance(risk, IconRisk),
             f"reason={reason!r}, risk={risk}",
         )
     except Exception as e:  # noqa: BLE001
@@ -517,15 +526,26 @@ def test_extractor() -> bool:
             results = list(
                 preview_extraction_generator_impl(
                     str(MODS_DIR),
-                    mode="sample",
+                    mode="dual",
                     find_jar_files_fn=lambda p: [str(j) for j in sample_jars],
                     book_path_regex=BOOK_PATH_REGEX_DUAL_STRUCTURE,
                 )
             )
+            final_update = next(
+                (
+                    item
+                    for item in reversed(results)
+                    if isinstance(item, dict) and "result" in item
+                ),
+                {},
+            )
+            preview_result = final_update.get("result", {})
             ok_all &= result(
                 "preview_extraction_generator_impl",
-                not any(item.get("error") for item in results),
-                f"產出 {len(results)} 個 update",
+                not any(item.get("error") for item in results if isinstance(item, dict))
+                and not preview_result.get("failed_jars")
+                and not preview_result.get("partial_jars"),
+                f"產出 {len(results)} 個 update；摘要={preview_result}",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("preview_extraction_generator_impl", e)
@@ -670,22 +690,24 @@ def test_kubejs() -> bool:
                 "log added",
             )
 
-            results = list(
-                run_kubejs_pipeline(
-                    input_dir=str(KUBEJS_DIR),
-                    output_dir=str(output_dir),
-                    session=session,
-                    dry_run=True,
-                    step_extract=True,
-                    step_translate=False,
-                    step_inject=False,
-                    write_new_cache=False,
-                )
+            pipeline_result = run_kubejs_pipeline(
+                input_dir=str(KUBEJS_DIR),
+                output_dir=str(output_dir),
+                session=session,
+                dry_run=True,
+                step_extract=True,
+                step_translate=False,
+                step_inject=False,
+                write_new_cache=False,
             )
+            extract_summary = pipeline_result.get("step1", {}).get("extract", {})
             ok_all &= result(
                 "run_kubejs_pipeline extract",
-                not any(item.get("error") for item in results),
-                f"產出 {len(results)} 個 update",
+                isinstance(pipeline_result, dict)
+                and extract_summary.get("errors_count", 1) == 0
+                and pipeline_result.get("output_sync_status") == "synced",
+                f"抽取 {extract_summary.get('extracted_files', 0)} 個檔案、"
+                f"{extract_summary.get('extracted_keys_total', 0)} 個 key",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("run_kubejs_pipeline", e)
@@ -713,25 +735,26 @@ def test_ftb() -> bool:
             from translation_tool.core.ftb_translator import run_ftb_pipeline
 
             session = TaskSession(max_logs=300)
-            results = list(
-                run_ftb_pipeline(
-                    directory_path=str(
-                        ATM10_ROOT
-                    ),  # 傳入 ATM10 根目錄，內部會遞迴找 config/ftbquests/quests
-                    output_dir=str(output_dir),
-                    session=session,
-                    dry_run=True,
-                    step_export=True,
-                    step_clean=True,
-                    step_translate=False,
-                    step_inject=False,
-                    write_new_cache=False,
-                )
+            pipeline_result = run_ftb_pipeline(
+                directory_path=str(
+                    ATM10_ROOT
+                ),  # 傳入 ATM10 根目錄，內部會遞迴找 config/ftbquests/quests
+                output_dir=str(output_dir),
+                session=session,
+                dry_run=True,
+                step_export=True,
+                step_clean=True,
+                step_translate=False,
+                step_inject=False,
+                write_new_cache=False,
             )
+            raw_paths = pipeline_result.get("raw_paths", {})
             ok_all &= result(
                 "run_ftb_pipeline export+clean",
-                not any(item.get("error") for item in results),
-                f"產出 {len(results)} 個 update",
+                isinstance(pipeline_result, dict)
+                and bool(raw_paths.get("written_langs"))
+                and "clean_paths" in pipeline_result,
+                f"語系={raw_paths.get('written_langs', [])}",
             )
         except Exception as e:  # noqa: BLE001
             ok_all &= fail("run_ftb_pipeline", e)

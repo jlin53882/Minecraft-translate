@@ -1,6 +1,6 @@
 # Mod DB View 架構
 
-`ModDbView`（`app/views/moddb_view.py`）維持資料庫連線與頁籤生命週期；`EntriesPanel`（`app/views/moddb/entries_panel.py`）負責條目篩選、編輯與背景刷新。資料庫查詢與寫入經由 `app/services_impl/moddb_service.py`，核心資料存取由 `translation_tool/translation_db/` 提供。
+`ModDbView`（`app/views/moddb_view.py`）維持資料庫連線與頁籤生命週期；`EntriesPanel`（`app/views/moddb/entries_panel.py`）負責條目篩選、編輯與背景刷新。資料庫查詢與寫入經由 `app/services_impl/moddb_service.py`，核心資料存取由 `translation_tool/translation_db/` 提供。資料清理的重複鍵流程由 `duplicate_cleanup_dialog.py` 負責獨立的預覽／套用／復原更新邊界，不把路徑別名合併邏輯塞回條目面板。
 
 ## 查詢快照與分頁
 

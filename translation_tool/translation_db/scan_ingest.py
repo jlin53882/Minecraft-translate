@@ -14,6 +14,7 @@ import sqlite3
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
+from translation_tool.translation_db.identity import canonical_entry_key
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
 
@@ -79,7 +80,7 @@ def ingest_groups(
     for (kind, mod_id), group in groups.items():
         known, have = target.existing(kind, mod_id)
         for item in group:
-            cur = known.get(item.key)
+            cur = _find_existing(known, kind, item)
             is_new = cur is None
             if cur is None:
                 eid = target.add_entry(kind, mod_id, item.key, item.en_us)
@@ -111,6 +112,36 @@ def ingest_groups(
                 else:
                     stats.existing += 1
     return stats
+
+
+def _find_existing(known: Known, kind: str, item: ScanItem) -> tuple[int, str] | None:
+    """先找原鍵，再只在唯一且原文相同的路徑別名中重用條目。
+
+    多個 legacy 別名同時存在時不猜 survivor；讓資料庫清理工具先處理，避免掃描
+    再把翻譯寫到錯誤的條目。
+    """
+    exact = known.get(item.key)
+    if exact is not None:
+        return exact
+    canonical = canonical_entry_key(kind, item.key)
+    matches_by_id = {
+        value[0]: value
+        for key, value in known.items()
+        if key != item.key
+        and canonical_entry_key(kind, key) == canonical
+        and (not item.en_us or not value[1] or _same_text(value[1], item.en_us))
+    }
+    if len(matches_by_id) != 1:
+        return None
+    match = next(iter(matches_by_id.values()))
+    known[item.key] = match
+    return match
+
+
+def _same_text(left: str, right: str) -> bool:
+    return left.replace("\r\n", "\n").replace("\r", "\n") == right.replace(
+        "\r\n", "\n"
+    ).replace("\r", "\n")
 
 
 def _read_existing(

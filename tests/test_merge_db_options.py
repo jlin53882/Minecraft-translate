@@ -145,6 +145,17 @@ def test_invalid_global_version_is_reported_and_never_falls_back(monkeypatch):
     assert state["versions"] == ["1.21.1", "1.20.1"]
 
 
+def test_invalid_database_snapshot_exposes_a_shared_blocking_reason(monkeypatch):
+    _patch(monkeypatch, merge_enabled=True, version="")
+    opts = merge_db_options.MergeDbOptions(lambda: None)
+
+    snapshot = opts.snapshot_for_run()
+
+    assert snapshot.use_db is True
+    assert snapshot.blocking_warning
+    assert "全域未指定版本" in snapshot.blocking_warning
+
+
 def test_page_override_wins_and_survives_global_settings_refresh(monkeypatch):
     state = _patch(monkeypatch, merge_enabled=True, version="1.21.1")
     opts = merge_db_options.MergeDbOptions(lambda: None)

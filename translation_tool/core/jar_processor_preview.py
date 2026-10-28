@@ -21,16 +21,21 @@ import logging
 import os
 import re
 import threading
-import zipfile
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.jar_sniff_extract import (
+    _walk_sniffed_members,
+    _wanted_langs,
+)
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.jar_browser import _scan_single_jar_detailed
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.worker_count import resolve_worker_count
+from translation_tool.utils.zip_safety import ZipReadBudget
 
 log = logging.getLogger(__name__)
 
@@ -44,12 +49,167 @@ def _get_preview_workers() -> int:
     return resolve_worker_count("jar_preview", None)
 
 
+def _preview_patterns(
+    mode: str,
+    target_regex: re.Pattern | None,
+    book_path_regex: re.Pattern | None,
+    lang_regex: re.Pattern | None,
+) -> list[str]:
+    if mode == "dual":
+        return [lang_regex.pattern, book_path_regex.pattern]
+    return [target_regex.pattern]
+
+
+def _is_preview_claimed(
+    name: str,
+    mode: str,
+    target_regex: re.Pattern | None,
+    book_path_regex: re.Pattern | None,
+    lang_regex: re.Pattern | None,
+) -> bool:
+    if mode == "dual":
+        return bool(
+            lang_regex is not None
+            and lang_regex.search(name)
+            or book_path_regex is not None
+            and book_path_regex.search(name)
+        )
+    return bool(target_regex is not None and target_regex.search(name))
+
+
+def _collect_sniffed_preview_matches(
+    jar_path: str,
+    mode: str,
+    target_regex: re.Pattern | None,
+    book_path_regex: re.Pattern | None,
+    lang_regex: re.Pattern | None,
+    lang_codes: list[str] | None,
+    skip_zh_cn: bool,
+) -> tuple[list[tuple[str, int]], Any]:
+    if mode not in ("book", "dual"):
+        return [], None
+
+    matches: list[tuple[str, int]] = []
+
+    def collect(
+        zf,
+        member: str,
+        _kind: str,
+        _archive_chain: tuple[str, ...],
+        _budget: ZipReadBudget,
+    ) -> None:
+        matches.append((member, zf.getinfo(member).file_size))
+
+    def claimed(name: str) -> bool:
+        return _is_preview_claimed(
+            name, mode, target_regex, book_path_regex, lang_regex
+        )
+
+    sniffed_langs = _wanted_langs(
+        lang_codes or ["en_us", "zh_tw", "zh_cn"],
+        skip_zh_cn,
+    )
+    status = _walk_sniffed_members(
+        jar_path,
+        claimed,
+        sniffed_langs,
+        collect,
+    )
+    return matches, status
+
+
+def _preview_error_result(jar_name: str, jar_size: int, details: Any) -> dict[str, Any]:
+    return {
+        "jar": jar_name,
+        "matched_files": [],
+        "lang_matched": [],
+        "book_matched": [],
+        "count": 0,
+        "lang_count": 0,
+        "book_count": 0,
+        "size_mb": jar_size / (1024**2),
+        "error": details.error,
+        "partial": False,
+        "skipped_nested": details.skipped_nested,
+        "truncated_nested": details.truncated_nested,
+        "sniff_incomplete": False,
+    }
+
+
+def _build_preview_result(
+    jar_name: str,
+    jar_size: int,
+    mode: str,
+    book_path_regex: re.Pattern | None,
+    lang_regex: re.Pattern | None,
+    entries: list[Any],
+    sniffed_matches: list[tuple[str, int]],
+    sniff_status: Any,
+    details: Any,
+) -> dict[str, Any]:
+    skipped_nested = details.skipped_nested
+    truncated_nested = details.truncated_nested
+    sniff_incomplete = bool(sniff_status and sniff_status.incomplete)
+    partial = bool(skipped_nested or truncated_nested or sniff_incomplete)
+    status = {
+        "error": None,
+        "partial": partial,
+        "skipped_nested": skipped_nested,
+        "truncated_nested": truncated_nested,
+        "sniff_incomplete": sniff_incomplete,
+    }
+    if mode == "dual":
+        lang_matched = [
+            entry.logical_path
+            for entry in entries
+            if lang_regex.search(entry.logical_path)
+        ]
+        book_matched = [
+            entry.logical_path
+            for entry in entries
+            if book_path_regex.search(entry.logical_path)
+        ]
+        matched_bytes = sum(
+            entry.size
+            for entry in entries
+            if lang_regex.search(entry.logical_path)
+            or book_path_regex.search(entry.logical_path)
+        ) + sum(size for _member, size in sniffed_matches)
+        book_matched.extend(member for member, _size in sniffed_matches)
+        return {
+            "jar": jar_name,
+            "lang_matched": lang_matched,
+            "book_matched": book_matched,
+            "lang_count": len(lang_matched),
+            "book_count": len(book_matched),
+            "size_mb": matched_bytes / (1024**2),
+            "jar_size_mb": jar_size / (1024**2),
+            **status,
+        }
+
+    matched_files = [entry.logical_path for entry in entries]
+    matched_files.extend(member for member, _size in sniffed_matches)
+    matched_bytes = sum(entry.size for entry in entries)
+    matched_bytes += sum(size for _member, size in sniffed_matches)
+    return {
+        "jar": jar_name,
+        "matched_files": matched_files,
+        "count": len(matched_files),
+        "size_mb": matched_bytes / (1024**2),
+        "jar_size_mb": jar_size / (1024**2),
+        **status,
+    }
+
+
 def _scan_single_jar_for_preview(
     jar_path: str,
     mode: str,
     target_regex: re.Pattern | None,
     book_path_regex: re.Pattern | None,
     lang_regex: re.Pattern | None,
+    *,
+    lang_codes: list[str] | None = None,
+    skip_zh_cn: bool = False,
 ) -> dict[str, Any]:
     """在單一 JAR 中執行預覽比對（ThreadPoolExecutor 並行工作函式）。
 
@@ -71,66 +231,42 @@ def _scan_single_jar_for_preview(
     raise_if_cancelled()
     jar_size = os.path.getsize(jar_path)
 
-    matched_bytes = 0
-    try:
-        with zipfile.ZipFile(jar_path, "r") as zf:
-            if mode == "dual":
-                lang_matched = []
-                book_matched = []
-                for member in zf.infolist():
-                    raise_if_cancelled()
-                    if member.is_dir():
-                        continue
-                    normalized_path = member.filename.replace("\\", "/")
-                    matched_lang = lang_regex.search(normalized_path)
-                    matched_book = book_path_regex.search(normalized_path)
-                    if matched_lang:
-                        lang_matched.append(normalized_path)
-                        matched_bytes += member.file_size
-                    if matched_book:
-                        book_matched.append(normalized_path)
-                        matched_bytes += member.file_size
-                return {
-                    "jar": jar_name,
-                    "lang_matched": lang_matched,
-                    "book_matched": book_matched,
-                    "lang_count": len(lang_matched),
-                    "book_count": len(book_matched),
-                    "size_mb": matched_bytes / (1024**2),
-                    "jar_size_mb": jar_size / (1024**2),
-                    "error": None,
-                }
-            else:
-                matched_files = []
-                for member in zf.infolist():
-                    raise_if_cancelled()
-                    if member.is_dir():
-                        continue
-                    normalized_path = member.filename.replace("\\", "/")
-                    if target_regex.search(normalized_path):
-                        matched_files.append(normalized_path)
-                        matched_bytes += member.file_size
-                return {
-                    "jar": jar_name,
-                    "matched_files": matched_files,
-                    "count": len(matched_files),
-                    "size_mb": matched_bytes / (1024**2),
-                    "jar_size_mb": jar_size / (1024**2),
-                    "error": None,
-                }
-    except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
-        log.warning("預覽 %s 時發生錯誤: %s", jar_name, e)
-        return {
-            "jar": jar_name,
-            "matched_files": [],
-            "lang_matched": [],
-            "book_matched": [],
-            "count": 0,
-            "lang_count": 0,
-            "book_count": 0,
-            "size_mb": jar_size / (1024**2),
-            "error": str(e),
-        }
+    patterns = _preview_patterns(mode, target_regex, book_path_regex, lang_regex)
+    details = _scan_single_jar_detailed(
+        Path(jar_path),
+        patterns,
+        budget=ZipReadBudget(label=jar_name),
+    )
+    if details.error:
+        log.warning("預覽 %s 時發生錯誤: %s", jar_name, details.error)
+        return _preview_error_result(jar_name, jar_size, details)
+
+    entries = details.entries
+    sniffed_matches, sniff_status = _collect_sniffed_preview_matches(
+        jar_path,
+        mode,
+        target_regex,
+        book_path_regex,
+        lang_regex,
+        lang_codes,
+        skip_zh_cn,
+    )
+
+    seen_paths = {entry.logical_path for entry in entries}
+    sniffed_matches = [
+        (member, size) for member, size in sniffed_matches if member not in seen_paths
+    ]
+    return _build_preview_result(
+        jar_name,
+        jar_size,
+        mode,
+        book_path_regex,
+        lang_regex,
+        entries,
+        sniffed_matches,
+        sniff_status,
+        details,
+    )
 
 
 class ExtractionSummary:
@@ -229,6 +365,7 @@ def preview_extraction_generator_impl(
     from translation_tool.core.jar_processor import (
         build_book_path_regex,
         build_lang_file_regex,
+        get_lang_codes,
     )
 
     if mode == "lang":
@@ -244,13 +381,15 @@ def preview_extraction_generator_impl(
         yield {"error": f"未知模式: {mode}"}
         return
 
+    resolved_lang_codes = lang_codes if lang_codes is not None else get_lang_codes()
+
     # ---- 多執行緒掃描階段 ----
     workers = _get_preview_workers()
     log.info(
         "[preview] 開始多執行緒預覽掃描，JAR 數量=%d，workers=%d", total_jars, workers
     )
 
-    scan_results: dict[str, dict[str, Any]] = {}
+    scan_results: dict[Path, dict[str, Any]] = {}
     scan_lock = threading.Lock()  # 保護 scan_results 的寫入
     done_count = [0]  # 已完成的 JAR 數量（用 list 包裝以便跨執行緒修改）
 
@@ -262,6 +401,8 @@ def preview_extraction_generator_impl(
             target_regex,
             book_path_regex,
             lang_regex,
+            lang_codes=resolved_lang_codes,
+            skip_zh_cn=skip_zh_cn,
         )
 
     with (
@@ -291,7 +432,9 @@ def preview_extraction_generator_impl(
                 }
 
             with scan_lock:
-                scan_results[result["jar"]] = result
+                # Keep the source path as the identity; basename is display
+                # text only and is not unique in nested mod directories.
+                scan_results[Path(jar_path)] = result
                 done_count[0] += 1
 
             processed = done_count[0]
@@ -309,10 +452,25 @@ def preview_extraction_generator_impl(
     total_files = 0
     total_size_bytes = 0
     failed_jars = []
+    partial_jars = []
 
-    for result in scan_results.values():
+    # Merge in caller order so parallel completion order cannot reorder the
+    # report or make same-named JARs overwrite each other.
+    for jar_path in (Path(path) for path in jar_files):
+        result = scan_results.get(jar_path)
+        if result is None:
+            continue
         if result.get("error"):
             failed_jars.append({"jar": result["jar"], "error": result["error"]})
+        elif result.get("partial"):
+            partial_jars.append(
+                {
+                    "jar": result["jar"],
+                    "skipped_nested": result.get("skipped_nested", 0),
+                    "truncated_nested": result.get("truncated_nested", 0),
+                    "sniff_incomplete": result.get("sniff_incomplete", False),
+                }
+            )
 
         if mode == "dual":
             lang_count = result.get("lang_count", 0)
@@ -355,8 +513,12 @@ def preview_extraction_generator_impl(
             "total_files": total_files,
             "total_size_mb": total_size_bytes / (1024**2),
             "failed_jars": failed_jars,
+            "partial_jars": partial_jars,
         },
-        "log": f"[預覽完成] 找到 {total_files} 個檔案，{len(failed_jars)} 個 JAR 失敗",
+        "log": (
+            f"[預覽完成] 找到 {total_files} 個檔案，"
+            f"{len(failed_jars)} 個 JAR 失敗，{len(partial_jars)} 個 JAR 僅部分完成"
+        ),
     }
 
 

@@ -483,6 +483,16 @@ def _merge_start_merge(ctx, dialog):
         return
 
     snapshot = ctx.merge_db_options.snapshot_for_run()
+    if snapshot.blocking_warning:
+        set_dialog_feedback(
+            ctx.page,
+            ctx.feedback,
+            "⚠️ "
+            + snapshot.blocking_warning
+            + "；請選擇有效版本，或關閉 Mod 資料庫補譯。",
+            C.GOLD,
+        )
+        return
     if not ctx.close_dialog(dialog):
         return
     ctx.run_started = True

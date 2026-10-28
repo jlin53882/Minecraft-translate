@@ -15,15 +15,19 @@
 
 from __future__ import annotations
 
+import json
 import re
 import zipfile
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import raise_if_cancelled
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.nested_archive import walk_nested_archives
 from translation_tool.utils.ui_mirror import ContextThreadPoolExecutor
 from translation_tool.utils.worker_count import resolve_worker_count
 from translation_tool.utils.zip_safety import (
@@ -32,6 +36,60 @@ from translation_tool.utils.zip_safety import (
     ZipSizeError,
     read_limited,
 )
+
+_LANG_RESOURCE_RE = re.compile(
+    r"^(?:assets|data)/[^/]+/lang/[^/]+\.(?:json|lang)$",
+    re.IGNORECASE,
+)
+
+
+def _merge_language_sources(
+    logical_path: str,
+    first: str | None,
+    later: str | None,
+) -> tuple[str | None, bool]:
+    """Union colliding language files without changing first-source precedence.
+
+    An outer JAR and one of its nested JARs can legitimately publish the same
+    canonical ``assets/<modid>/lang/<locale>`` file.  The scan result keeps one
+    canonical entry, so treating the collision as a complete file collision
+    loses every key that exists only in the later source.  Language files are
+    key/value maps and can be safely unioned; other resources must continue to
+    use the existing first-source collision rule.
+
+    ``False`` means the inputs were not safely mergeable (for example invalid
+    JSON or a binary member).  The caller then keeps the historical first
+    source rather than manufacturing a partially parsed language file.
+    """
+    if not _LANG_RESOURCE_RE.fullmatch(logical_path):
+        return first, False
+    if first is None or later is None:
+        return first, False
+
+    if logical_path.casefold().endswith(".json"):
+        try:
+            first_data = json.loads(first)
+            later_data = json.loads(later)
+        except (TypeError, ValueError):
+            return first, False
+        if not isinstance(first_data, dict) or not isinstance(later_data, dict):
+            return first, False
+        merged = dict(first_data)
+        for key, value in later_data.items():
+            merged.setdefault(key, value)
+        return json.dumps(merged, ensure_ascii=False, indent=2), True
+
+    # Legacy .lang is deliberately parsed as key/value text rather than
+    # concatenated: duplicate keys must follow the same first-source rule as
+    # JSON, and continuation/comment handling belongs to the shared codec.
+    from translation_tool.core.lang_codec import dump_lang_text, parse_lang_text
+
+    first_data = parse_lang_text(first)
+    later_data = parse_lang_text(later)
+    merged = dict(first_data)
+    for key, value in later_data.items():
+        merged.setdefault(key, value)
+    return dump_lang_text(merged), True
 
 
 def _get_default_workers() -> int:
@@ -62,14 +120,270 @@ class ScanResults(dict):
         self.budgets: dict[Path, ZipReadBudget] = {}
         self.failed_jars: set[Path] = set()
         self.skipped_jars: set[Path] = set()
+        self.entries: dict[Path, list[ScannedEntry]] = {}
+        self.nested_jars: dict[Path, int] = {}
+        self.skipped_nested: dict[Path, int] = {}
+        self.truncated_nested: dict[Path, int] = {}
+        self.partial_jars: set[Path] = set()
+        self.collision_notes: dict[Path, list[str]] = {}
+        # Direct assets are merged into one shared output tree.  Freeze the
+        # first source in the caller-provided JAR order so extraction workers
+        # cannot make the result depend on completion order.
+        self.asset_winners: dict[str, Path] = {}
+
+
+@dataclass(frozen=True)
+class ScannedEntry:
+    """預掃描找到的資源及其在 outer JAR 內的來源鏈。"""
+
+    logical_path: str
+    member_chain: tuple[str, ...]
+    content: str | None
+    size: int
+    raw_data: bytes | None = None
+
+    @property
+    def is_nested(self) -> bool:
+        return len(self.member_chain) > 1
+
+
+@dataclass
+class _JarScanDetails:
+    content: dict[str, str | None]
+    entries: list[ScannedEntry]
+    nested_jars: int = 0
+    skipped_nested: int = 0
+    truncated_nested: int = 0
+    collision_notes: list[str] | None = None
+    error: str | None = None
+
+
+@dataclass
+class _ScanAccumulator:
+    """Mutable state for one bounded outer-JAR scan."""
+
+    result: dict[str, str | None]
+    entries: list[ScannedEntry]
+    entry_indexes: dict[str, int]
+    collisions: list[str]
+    nested_jars: int = 0
+    skipped_nested: int = 0
+    truncated_nested: int = 0
+
+
+def _read_matching_member(
+    zf: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    *,
+    label: str,
+    name: str,
+    jar_path: Path,
+    skipped_callback: Callable[[Path], None] | None,
+    budget: ZipReadBudget,
+) -> bytes | None:
+    """Read one matched member; an oversized member is skipped in isolation."""
+
+    try:
+        return read_limited(zf, info, budget=budget)
+    except ArchiveBudgetError:
+        raise
+    except ZipSizeError as size_err:
+        if skipped_callback:
+            skipped_callback(jar_path)
+        log_warning(f"[jar_browser] 略過過大檔案 {label}!{name}: {size_err!r}")
+        return None
+
+
+def _record_scan_member(
+    accumulator: _ScanAccumulator,
+    *,
+    name: str,
+    text: str | None,
+    data: bytes,
+    info: zipfile.ZipInfo,
+    archive_chain: tuple[str, ...],
+    label: str,
+) -> None:
+    """Record a matched member, merging duplicate language maps safely."""
+
+    if name in accumulator.result:
+        merged, merged_ok = _merge_language_sources(
+            name,
+            accumulator.result[name],
+            text,
+        )
+        first_index = accumulator.entry_indexes[name]
+        first_entry = accumulator.entries[first_index]
+        note = (
+            f"{label}!{name} 與既有語言來源合併，重複 key 保留先出現的來源"
+            if merged_ok
+            else f"{label}!{name} 與既有來源的 canonical 路徑衝突，保留先出現的來源"
+        )
+        accumulator.collisions.append(note)
+        log_warning("[jar_browser] %s", note)
+        if merged_ok:
+            accumulator.result[name] = merged
+            accumulator.entries[first_index] = ScannedEntry(
+                logical_path=first_entry.logical_path,
+                member_chain=first_entry.member_chain,
+                content=merged,
+                size=first_entry.size + info.file_size,
+            )
+        return
+
+    accumulator.result[name] = text
+    accumulator.entry_indexes[name] = len(accumulator.entries)
+    accumulator.entries.append(
+        ScannedEntry(
+            logical_path=name,
+            member_chain=archive_chain + (name,),
+            content=text,
+            size=info.file_size,
+            # Nested binary resources are already bounded and cached so
+            # extraction does not have to recharge the outer archive budget.
+            raw_data=data if archive_chain and text is None else None,
+        )
+    )
+
+
+def _visit_scan_archive(
+    accumulator: _ScanAccumulator,
+    patterns: list[str | re.Pattern[str]],
+    jar_path: Path,
+    skipped_callback: Callable[[Path], None] | None,
+    zf: zipfile.ZipFile,
+    label: str,
+    depth: int,
+    archive_chain: tuple[str, ...],
+    archive_budget: ZipReadBudget,
+) -> bool:
+    """Visit one archive level and record only matching members."""
+
+    if depth:
+        accumulator.nested_jars += 1
+    for info in zf.infolist():
+        raise_if_cancelled()
+        if info.is_dir():
+            continue
+        name = info.filename.replace("\\", "/")
+        if not any(re.search(pattern, name) for pattern in patterns):
+            continue
+        data = _read_matching_member(
+            zf,
+            info,
+            label=label,
+            name=name,
+            jar_path=jar_path,
+            skipped_callback=skipped_callback,
+            budget=archive_budget,
+        )
+        if data is None:
+            continue
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+        _record_scan_member(
+            accumulator,
+            name=name,
+            text=text,
+            data=data,
+            info=info,
+            archive_chain=archive_chain,
+            label=label,
+        )
+    return True
+
+
+def _on_scan_nested_error(
+    accumulator: _ScanAccumulator, label: str, name: str, exc: BaseException
+) -> None:
+    accumulator.skipped_nested += 1
+    log_warning("[jar_browser] 略過內嵌 jar %s：%s", label, exc)
+
+
+def _on_scan_nested_truncated(
+    accumulator: _ScanAccumulator, label: str, depth: int
+) -> None:
+    accumulator.truncated_nested += 1
+    log_warning(
+        "[jar_browser] nested archive depth limit reached at %s (depth=%s)",
+        label,
+        depth,
+    )
+
+
+def _reuse_scan_budget(budget: ZipReadBudget, _label: str) -> ZipReadBudget:
+    return budget
+
+
+def _merge_cross_jar_language_entries(
+    results: ScanResults,
+    jar_files: Iterable[Path],
+) -> None:
+    """Merge colliding direct language resources in stable JAR order.
+
+    The extracted ``assets/`` tree is shared by all outer JARs, so the
+    historical first-file-wins rule can silently discard keys when two mods
+    publish the same namespace and locale file.  Language resources are
+    structured key/value maps; merge only those files and keep the first
+    value for duplicate keys.  Every other asset keeps the existing
+    first-source ownership rule.
+    """
+    first_entries: dict[str, tuple[Path, int]] = {}
+
+    for jar_path in jar_files:
+        entries = results.entries.get(jar_path, ())
+        for entry_index, entry in enumerate(entries):
+            logical_path = entry.logical_path
+            if (
+                entry.is_nested
+                or not logical_path.startswith("assets/")
+                or not _LANG_RESOURCE_RE.fullmatch(logical_path)
+            ):
+                continue
+
+            first = first_entries.get(logical_path)
+            if first is None:
+                first_entries[logical_path] = (jar_path, entry_index)
+                continue
+
+            first_jar, first_index = first
+            first_entry = results.entries[first_jar][first_index]
+            merged, merged_ok = _merge_language_sources(
+                logical_path,
+                first_entry.content,
+                entry.content,
+            )
+            if not merged_ok:
+                # Invalid or binary language content must not be partially
+                # reconstructed.  The normal asset winner below preserves
+                # the historical first-source behavior for this case.
+                continue
+
+            results.entries[first_jar][first_index] = ScannedEntry(
+                logical_path=first_entry.logical_path,
+                member_chain=first_entry.member_chain,
+                content=merged,
+                size=first_entry.size + entry.size,
+            )
+            if first_jar in results:
+                results[first_jar][logical_path] = merged
+            note = (
+                f"{jar_path.name}!{logical_path} 與 {first_jar.name} 的外層語言來源合併，"
+                "重複 key 保留先出現的來源"
+            )
+            results.collision_notes.setdefault(first_jar, []).append(note)
+            log_warning("[jar_browser] %s", note)
 
 
 def _scan_single_jar(
     jar_path: Path,
-    patterns: list[str],
+    patterns: list[str | re.Pattern[str]],
     budget: ZipReadBudget | None = None,
     failure_callback: Callable[[Path], None] | None = None,
     skipped_callback: Callable[[Path], None] | None = None,
+    scan_nested: bool = True,
 ) -> tuple[Path, dict[str, str | None]]:
     """掃描單一 JAR，符合 pattern 的檔案內容讀取出來。
 
@@ -87,56 +401,91 @@ def _scan_single_jar(
           - 文字檔：UTF-8 解碼後的字串
           - binary 檔案（UTF-8 decode 失敗）：None（由 caller 自行處理）
     """
-    result: dict[str, str | None] = {}
+    details = _scan_single_jar_detailed(
+        jar_path,
+        patterns,
+        budget=budget,
+        failure_callback=failure_callback,
+        skipped_callback=skipped_callback,
+        scan_nested=scan_nested,
+    )
+    return jar_path, details.content
+
+
+def _scan_single_jar_detailed(
+    jar_path: Path,
+    patterns: list[str | re.Pattern[str]],
+    budget: ZipReadBudget | None = None,
+    failure_callback: Callable[[Path], None] | None = None,
+    skipped_callback: Callable[[Path], None] | None = None,
+    scan_nested: bool = True,
+) -> _JarScanDetails:
+    """掃描單一 outer JAR，並保留巢狀資源的來源鏈供抽取階段使用。"""
     if budget is None:
         budget = ZipReadBudget(label=jar_path.name)
+    accumulator = _ScanAccumulator({}, [], {}, [])
+
     try:
         with zipfile.ZipFile(jar_path, "r") as zf:
-            for name in zf.namelist():
-                raise_if_cancelled()
-                for pattern in patterns:
-                    if re.search(pattern, name):
-                        try:
-                            result[name] = read_limited(zf, name, budget=budget).decode(
-                                "utf-8"
-                            )
-                        except ArchiveBudgetError as budget_err:
-                            # 整包累計超限：捨棄這個 JAR 的結果（只讀到一部分會讓後續處理
-                            # 誤以為內容完整），由呼叫端視為「沒有內容」。
-                            log_error(
-                                f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
-                                f"{jar_path.name} - {budget_err!r}"
-                            )
-                            if failure_callback:
-                                failure_callback(jar_path)
-                            return jar_path, {}
-                        except ZipSizeError as size_err:
-                            if skipped_callback:
-                                skipped_callback(jar_path)
-                            log_warning(
-                                f"[jar_browser] 略過過大檔案 {jar_path.name}!{name}: {size_err!r}"
-                            )
-                        except UnicodeDecodeError:
-                            # Binary 檔案（如 .png）：不解碼，設為 None 表示 caller 自行處理
-                            result[name] = None
-                        break  # 一個檔案只讀一次
+            walk_nested_archives(
+                zf,
+                jar_path.name,
+                budget,
+                partial(
+                    _visit_scan_archive,
+                    accumulator,
+                    patterns,
+                    jar_path,
+                    skipped_callback,
+                ),
+                budget_factory=partial(_reuse_scan_budget, budget),
+                on_nested_error=partial(_on_scan_nested_error, accumulator),
+                on_nested_truncated=partial(_on_scan_nested_truncated, accumulator),
+                scan_nested=scan_nested,
+            )
     except zipfile.BadZipFile:
         log_warning(f"[jar_browser] 不是有效的 ZIP/JAR: {jar_path.name}")
         if failure_callback:
             failure_callback(jar_path)
+        return _JarScanDetails(
+            {}, [], collision_notes=accumulator.collisions, error="BadZipFile"
+        )
+    except ArchiveBudgetError as budget_err:
+        # 整包累計超限：捨棄部分結果，避免後續把不完整的 JAR 當成成功。
+        log_error(
+            f"[jar_browser] 略過整個 JAR（累計讀取超過安全上限）: "
+            f"{jar_path.name} - {budget_err!r}"
+        )
+        if failure_callback:
+            failure_callback(jar_path)
+        return _JarScanDetails(
+            {}, [], collision_notes=accumulator.collisions, error=str(budget_err)
+        )
     except Exception as ex:  # noqa: BLE001
         log_error(f"[jar_browser] 讀取失敗: {jar_path.name} - {ex!r}")
         if failure_callback:
             failure_callback(jar_path)
-    return jar_path, result
+        return _JarScanDetails(
+            {}, [], collision_notes=accumulator.collisions, error=str(ex)
+        )
+    return _JarScanDetails(
+        accumulator.result,
+        accumulator.entries,
+        nested_jars=accumulator.nested_jars,
+        skipped_nested=accumulator.skipped_nested,
+        truncated_nested=accumulator.truncated_nested,
+        collision_notes=accumulator.collisions,
+    )
 
 
 def scan_jars(
     jar_dir: Path,
-    patterns: list[str],
+    patterns: list[str | re.Pattern[str]],
     max_workers: int | None = None,
     processed_callback: Callable[[int, int], None] | None = None,
     jar_files: Iterable[Path | str] | None = None,
+    scan_nested: bool = True,
+    budget_factory: Callable[[Path], ZipReadBudget] | None = None,
 ) -> dict[Path, dict[str, str | None]]:
     """平行讀取多個 JAR 內符合 pattern 的檔案內容。
 
@@ -157,6 +506,7 @@ def scan_jars(
             None（預設）維持舊行為：只掃 ``jar_dir`` 頂層的 ``*.jar``。
             提取流程會傳入與 ``find_jar_files`` 相同的清單，讓預掃描與實際處理的
             JAR 一致（issue #111）；此時 ``jar_dir`` 僅作為相容參數，不再用於找檔。
+        scan_nested: 是否遞迴掃描 ``META-INF/jarjar``／``META-INF/jars`` 內嵌 JAR。
 
     回傳：
         dict[Path, dict[str, str | None]]
@@ -195,16 +545,21 @@ def scan_jars(
     # 每個 JAR 一份預算，由「掃描 → 後續提取」共用（見 ScanResults）；
     # JAR 之間不共用，worker 各自只處理自己的 JAR。
     for jar_path in jar_files:
-        results.budgets[jar_path] = ZipReadBudget(label=jar_path.name)
+        results.budgets[jar_path] = (
+            budget_factory(jar_path)
+            if budget_factory is not None
+            else ZipReadBudget(label=jar_path.name)
+        )
 
     def submit_scan(executor, jar_path: Path):
         return executor.submit(
-            _scan_single_jar,
+            _scan_single_jar_detailed,
             jar_path,
             patterns,
             results.budgets[jar_path],
             results.failed_jars.add,
             results.skipped_jars.add,
+            scan_nested,
         )
 
     with ContextThreadPoolExecutor(max_workers=workers) as executor:
@@ -216,13 +571,33 @@ def scan_jars(
             max_in_flight=max(1, workers * 2),
         ) as completed:
             for future, jar_path in completed:
-                jar_path, content = future.result()
+                details = future.result()
+                content = details.content
                 # 跳過沒有匹配檔案且可能為 bad zip 的 JAR（bad zip 會 log warning 並回傳 {}）
                 # 若 JAR 有内容則一定會有至少一筆記錄（即使是 None 的 binary 檔）
                 if content:  # 空 dict 表示沒有任何匹配，或 bad zip 被跳過
                     results[jar_path] = content
+                    results.entries[jar_path] = details.entries
+                results.nested_jars[jar_path] = details.nested_jars
+                results.skipped_nested[jar_path] = details.skipped_nested
+                results.truncated_nested[jar_path] = details.truncated_nested
+                if details.skipped_nested or details.truncated_nested:
+                    results.partial_jars.add(jar_path)
+                if details.collision_notes:
+                    results.collision_notes[jar_path] = details.collision_notes
                 processed += 1
                 if processed_callback:
                     processed_callback(processed, total)
+
+    _merge_cross_jar_language_entries(results, jar_files)
+
+    # Resolve direct assets in stable input order after all workers finish.
+    # Nested entries are written below an outer-JAR-specific directory and do
+    # not collide with this shared assets tree.
+    for jar_path in jar_files:
+        for entry in results.entries.get(jar_path, ()):
+            if entry.is_nested or not entry.logical_path.startswith("assets/"):
+                continue
+            results.asset_winners.setdefault(entry.logical_path, jar_path)
 
     return results

@@ -15,10 +15,23 @@ import types
 import flet as ft
 
 from app.services_impl.pack_format_service import build_pack_mcmeta
-from app.services_impl.pipelines.bundle_service import normalize_output_zip_name
+from app.services_impl.pipelines.bundle_service import (
+    RESOURCE_PACK_MODE,
+    ExtraBundleSource,
+    normalize_output_zip_name,
+)
 from app.services_impl.pipelines.extract_service import open_output_folder
 from app.ui.design import C
 from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feedback
+from app.views.pipeline.extra_bundle_sources import (
+    append_extra_source,
+    build_extra_source_controls,
+    clear_extra_source_controls,
+    read_extra_source_controls,
+    refresh_extra_source_preview,
+    set_extra_source_feedback,
+)
+from app.views.pipeline.pipeline_config import RESOURCE_PACK_INSTALL_HINT
 from app.views.pipeline.pipeline_forms import (
     BundleFormState,
     build_bundle_form,
@@ -169,8 +182,15 @@ def _bundle_build_extra_widgets(ctx) -> None:
         border_color=C.ENCH,
         read_only=True,
     )
-    ctx.extra_folders_view = ft.ListView(height=80, spacing=4, auto_scroll=False)
     ctx.extra_folders = ctx.bundle_form_state.extra_folders
+    ctx.add_extra_folder = functools.partial(_bundle_add_extra_folder, ctx)
+    ctx.extra_source_controls = build_extra_source_controls(
+        on_pick=ctx.add_extra_folder,
+        on_manual_add=lambda e=None: _bundle_add_extra_folder_manually(ctx, e),
+        picker_label="+ 新增資料夾",
+        list_height=110,
+    )
+    ctx.extra_folders_view = ctx.extra_source_controls.source_list
 
     ctx.close_dialog = functools.partial(_bundle_close_dialog, ctx)
 
@@ -183,8 +203,6 @@ def _bundle_build_extra_widgets(ctx) -> None:
     ctx.pick_output_zip = functools.partial(_bundle_pick_output_zip, ctx)
 
     ctx.pick_pack_image = functools.partial(_bundle_pick_pack_image, ctx)
-
-    ctx.add_extra_folder = functools.partial(_bundle_add_extra_folder, ctx)
 
     ctx._refresh_extra_folders = functools.partial(_bundle__refresh_extra_folders, ctx)
 
@@ -221,6 +239,7 @@ def _bundle_build_content(ctx, _version_input):
                 ],
                 wrap=True,
             ),
+            ft.Text(RESOURCE_PACK_INSTALL_HINT, size=10, color=C.MUTED),
         ],
         spacing=8,
     )
@@ -238,15 +257,7 @@ def _bundle_build_content(ctx, _version_input):
     )
     extra_section = ft.Column(
         [
-            ft.Container(
-                content=ctx.extra_folders_view,
-                border=ft.Border.all(1, C.DIM),
-                border_radius=6,
-                padding=4,
-            ),
-            ft.Button(
-                "+ 新增資料夾", icon=ft.Icons.FOLDER_OPEN, on_click=ctx.add_extra_folder
-            ),
+            ctx.extra_source_controls.content,
         ],
         spacing=6,
     )
@@ -370,8 +381,29 @@ def _bundle_pick_pack_image(ctx, e=None):
 def _bundle_add_extra_folder(ctx, e=None):
     async def do_pick():
         result = await ctx.file_picker.get_directory_path()
-        if result and result not in ctx.extra_folders:
-            ctx.extra_folders.append(result)
+        if result:
+            controls = ctx.extra_source_controls
+            mode = controls.mode_field.value or RESOURCE_PACK_MODE
+            if (
+                mode == RESOURCE_PACK_MODE
+                and not (controls.target_field.value or "").strip()
+            ):
+                value: object = result
+            else:
+                value = ExtraBundleSource(
+                    result,
+                    mode=mode,
+                    recursive=bool(controls.recursive_field.value),
+                    target=(controls.target_field.value or "").strip(),
+                )
+            added, message = append_extra_source(
+                ctx.extra_folders, value, allow_unvalidated=True
+            )
+            if not added:
+                set_extra_source_feedback(controls, message, error=True)
+                ctx.page.update()
+                return
+            clear_extra_source_controls(controls)
             ctx._refresh_extra_folders()
             ctx.page.update()
 
@@ -379,26 +411,31 @@ def _bundle_add_extra_folder(ctx, e=None):
 
 
 def _bundle__refresh_extra_folders(ctx):
-    ctx.extra_folders_view.controls.clear()
-    for path in ctx.extra_folders:
-        name = os.path.basename(path)
-        ctx.extra_folders_view.controls.append(
-            ft.Row(
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                controls=[
-                    ft.Text(f"{name}", expand=True, size=12),
-                    ft.IconButton(
-                        icon=ft.Icons.CLOSE,
-                        tooltip="移除",
-                        icon_size=16,
-                        on_click=lambda e, p=path: ctx._remove_extra_folder(p),
-                    ),
-                ],
-            )
-        )
+    refresh_extra_source_preview(
+        ctx.extra_source_controls,
+        ctx.extra_folders,
+        ctx._remove_extra_folder,
+    )
 
 
-def _bundle__remove_extra_folder(ctx, path: str):
+def _bundle_add_extra_folder_manually(ctx, e=None):
+    del e
+    controls = ctx.extra_source_controls
+    try:
+        value = read_extra_source_controls(controls)
+        added, message = append_extra_source(ctx.extra_folders, value)
+    except ValueError as exc:
+        added, message = False, str(exc)
+    if not added:
+        set_extra_source_feedback(controls, message, error=True)
+        ctx.page.update()
+        return
+    clear_extra_source_controls(controls)
+    ctx._refresh_extra_folders()
+    ctx.page.update()
+
+
+def _bundle__remove_extra_folder(ctx, path: object):
     if path in ctx.extra_folders:
         ctx.extra_folders.remove(path)
         ctx._refresh_extra_folders()

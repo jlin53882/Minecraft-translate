@@ -18,6 +18,10 @@ from translation_tool.translation_db import (
     CleanupPlan,
     CleanupPlanChanged,
     CleanupReport,
+    DuplicateMergeBatchInfo,
+    DuplicateMergePlan,
+    DuplicatePlanChanged,
+    DuplicateRevertResult,
     RevertResult,
     TranslationDB,
 )
@@ -28,17 +32,26 @@ __all__ = [
     "CleanupPlan",
     "CleanupPlanChanged",
     "CleanupReport",
+    "DuplicateMergeBatchInfo",
+    "DuplicateMergePlan",
+    "DuplicatePlanChanged",
+    "DuplicateRevertResult",
     "RevertResult",
     "apply_cleanup",
+    "apply_duplicate_cleanup",
     "cleanup_batches",
     "cleanup_overview",
     "cleanup_report_dir",
+    "duplicate_cleanup_batches",
+    "duplicate_cleanup_overview",
     "export_cleanup",
     "last_cleanup_batch",
     "list_cleanup_reports",
     "open_report_folder",
     "preview_cleanup",
+    "preview_duplicate_cleanup",
     "revert_cleanup",
+    "revert_duplicate_cleanup",
 ]
 
 REPORT_DIR_NAME = "cleanup_reports"
@@ -122,3 +135,50 @@ def cleanup_overview(
     candidates, protected = db.cleanup_candidates(version)
     counts = Counter((c.kind, c.category) for c in candidates)
     return dict(counts), sum(protected.values())
+
+
+def duplicate_cleanup_overview(
+    db: TranslationDB,
+    version: str,
+    *,
+    mod_id: str | None = None,
+    kind: str | None = None,
+) -> tuple[int, int, int]:
+    """回傳（候選組數、可安全合併組數、需人工確認組數）。"""
+    candidates = db.duplicate_candidates(version, mod_id=mod_id, kind=kind)
+    safe = sum(group.safe for group in candidates)
+    return len(candidates), safe, len(candidates) - safe
+
+
+def preview_duplicate_cleanup(
+    db: TranslationDB,
+    version: str,
+    *,
+    mod_id: str | None = None,
+    kind: str | None = None,
+) -> DuplicateMergePlan:
+    return db.preview_duplicate_cleanup(version, mod_id=mod_id, kind=kind)
+
+
+def apply_duplicate_cleanup(
+    db: TranslationDB,
+    version: str,
+    token: str,
+    *,
+    mod_id: str | None = None,
+    kind: str | None = None,
+) -> DuplicateMergePlan:
+    return db.apply_duplicate_cleanup(
+        version,
+        token,
+        mod_id=mod_id,
+        kind=kind,
+    )
+
+
+def duplicate_cleanup_batches(db: TranslationDB) -> list[DuplicateMergeBatchInfo]:
+    return db.duplicate_merge_batches()
+
+
+def revert_duplicate_cleanup(db: TranslationDB, batch_id: str) -> DuplicateRevertResult:
+    return db.revert_duplicate_cleanup(batch_id)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 # 確保可以導入翻譯工具模組
@@ -14,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.kubejs import kubejs_tooltip_extract
+from translation_tool.plugins.kubejs import kubejs_tooltip_extract  # noqa: E402
 
 
 def test_resolve_kubejs_root_direct(tmp_path: Path) -> None:
@@ -233,6 +234,36 @@ def test_extract_preserves_literal_tooltip_calls_for_pipeline_injection(
     assert extracted["test.js|minecraft:dirt.0"] == "Event text"
     assert extracted["test.js|scene.1"] == "Scene text"
     assert extracted["test.js|minecraft:stone.tooltip.0"] == "Tooltip text"
+
+
+def test_extract_uses_short_temp_staging_for_deep_pipeline_outputs(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """深層 pipeline 輸出不應因暫存 sibling 路徑而觸發 Windows MAX_PATH。"""
+    kubejs_dir = tmp_path / "kubejs" / "client_scripts"
+    kubejs_dir.mkdir(parents=True)
+    (kubejs_dir / "test.js").write_text(
+        "event.add('minecraft:dirt', Text.of('Event text'))\n",
+        encoding="utf-8",
+    )
+    output_dir = tmp_path / "deep" / "pipeline" / "staging" / "run" / "raw"
+    captured: dict[str, Path] = {}
+    original_sync = kubejs_tooltip_extract.sync_managed_tree
+
+    def capture_sync(stage_root, destination_root, previous_owned):
+        captured["stage_root"] = stage_root
+        return original_sync(stage_root, destination_root, previous_owned)
+
+    monkeypatch.setattr(kubejs_tooltip_extract, "sync_managed_tree", capture_sync)
+
+    result = kubejs_tooltip_extract.extract(
+        source_dir=str(tmp_path / "kubejs"),
+        output_dir=str(output_dir),
+    )
+
+    assert result["errors_count"] == 0
+    assert captured["stage_root"].parent == Path(tempfile.gettempdir()).resolve()
+    assert (output_dir / "client_scripts" / "test.json").is_file()
 
 
 def test_resolve_kubejs_root_case_insensitive(tmp_path: Path) -> None:

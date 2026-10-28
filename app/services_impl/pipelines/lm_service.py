@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import traceback
 from functools import partial
+from typing import Any
 
 from app.services_impl.logging_service import (
     GLOBAL_LOG_LIMITER,
@@ -18,6 +19,7 @@ from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
     mirror_session_log,
 )
+from translation_tool.core.batch_events import format_batch_event_for_log
 from translation_tool.core.lm_translator import (
     translate_directory_generator as lm_translate_gen,
 )
@@ -29,6 +31,32 @@ logger = logging.getLogger(__name__)
 
 def _session_cancel_requested(session) -> bool:
     return bool(getattr(session, "cancel_requested", False))
+
+
+def _consume_lm_update(session, update_dict: dict[str, Any]) -> bool:
+    """把 LM 目錄翻譯的即時更新送進流水線 session。"""
+    filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
+    if filtered is None:
+        return True
+
+    if filtered.get("log"):
+        session.add_log(filtered["log"])
+
+    if "progress" in filtered and filtered["progress"] is not None:
+        session.set_progress(filtered["progress"])
+
+    if filtered.get("error"):
+        session.set_error()
+        return False
+    return True
+
+
+def _consume_lm_event(session, event: dict[str, Any]) -> None:
+    """使用機翻相同的批次事件 formatter 顯示 LM 等待／重試／批次紀錄。"""
+    entry = format_batch_event_for_log(event, default_operation="translate")
+    if entry is not None:
+        level, text = entry
+        mirror_session_log(session, logger, text, level, prefix="[流水線 LM] ")
 
 
 def run_lm_translation_service(
@@ -81,22 +109,14 @@ def run_lm_translation_service(
             use_translation_db=use_translation_db,
             translation_db_version=translation_db_version,
             translation_db_settings_snapshot=translation_db_settings_snapshot,
+            update_sink=lambda update: _consume_lm_update(session, update),
+            event_sink=lambda event: _consume_lm_event(session, event),
+            event_task_id=str(getattr(session, "task_id", "") or ""),
         )
         # cancel_scope：generator 在此執行緒迭代，等待 API 限流時也能被取消打斷
         with cancel_scope(partial(_session_cancel_requested, session)):
             for update_dict in gen:
-                filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
-                if filtered is None:
-                    continue
-
-                if filtered.get("log"):
-                    session.add_log(filtered["log"])
-
-                if "progress" in filtered and filtered["progress"] is not None:
-                    session.set_progress(filtered["progress"])
-
-                if filtered.get("error"):
-                    session.set_error()
+                if not _consume_lm_update(session, update_dict):
                     return
 
         final = GLOBAL_LOG_LIMITER.flush()

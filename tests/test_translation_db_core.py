@@ -195,7 +195,7 @@ def test_history_retention_migration_prunes_existing_database_and_keeps_backup(
     reopened = TranslationDB(path)
     try:
         assert reopened._one("SELECT value FROM meta WHERE key='schema_version'") == (
-            "10",
+            "12",
         )
         assert reopened._one(
             "SELECT COUNT(*) FROM history WHERE entry_id=?", (entry_id,)
@@ -1742,7 +1742,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 10
+    assert SCHEMA_VERSION == 12
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1754,6 +1754,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v8-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v9-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v10-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v11-*.bak"))
     assert db._q(
         "SELECT name FROM sqlite_schema WHERE type='table' "
         "AND name IN ('smart_review_run', 'smart_review_candidate') "
@@ -1862,7 +1863,7 @@ def test_schema_v3_migration_backup_includes_committed_wal_snapshot(tmp_path):
         migrated._conn.execute(
             "SELECT value FROM meta WHERE key='schema_version'"
         ).fetchone()[0]
-        == "10"
+        == "12"
     )
     backups = list(tmp_path.glob("legacy-v3-wal.db.pre-schema-v4-*.bak"))
     assert len(backups) == 1
@@ -2643,6 +2644,30 @@ def test_oversized_nested_jar_is_skipped_but_counted_not_silent(tmp_path, monkey
         not res.error and res.skipped_nested == 2
     )  # 外層內容保留，略過的內嵌 jar 有記錄
     assert {i.mod_id for i in res.items} == {"foo"}
+
+
+def test_book_sniff_budget_exhaustion_is_reported_as_partial(tmp_path, monkeypatch):
+    from translation_tool.translation_db import sniff_groups
+
+    monkeypatch.setattr(sniff_groups, "SNIFF_MAX_MEMBERS", 2)
+    jar = make_jar(
+        tmp_path / "sniff-budget.jar",
+        {
+            "assets/demo/books/chapters/alpha.json": {
+                "pages": [{"type": "text", "summary": "Alpha text"}]
+            },
+            "assets/demo/books/chapters/beta.json": {
+                "pages": [{"type": "text", "summary": "Beta text"}]
+            },
+        },
+    )
+
+    result = scan_jar(jar, ScanOptions("1.21.1"), ())
+
+    assert result.error == ""
+    assert result.sniff_incomplete is True
+    assert result.items
+    assert any("Book sniff" in note for note in result.notes)
 
 
 def test_nested_archives_share_a_tree_wide_budget(tmp_path, monkeypatch):

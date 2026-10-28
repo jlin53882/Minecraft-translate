@@ -8,6 +8,11 @@ from translation_tool.utils.config_manager import (
     load_config,
 )
 
+RESOURCE_PACK_INSTALL_HINT = (
+    "完成後請將 ZIP 放入實際啟動 instance 的 resourcepacks，並在遊戲內啟用；"
+    "流水線不會自動套用。"
+)
+
 
 def _has_files(path: str) -> bool:
     """資料夾存在且至少含有一個檔案。"""
@@ -103,9 +108,15 @@ class PipelineConfig:
         return os.path.join(self.output_dir, "_打包暫存")
 
     @property
+    def content_manifest_path(self):
+        """內容分類與 Resource Pack 打包共用的輸出 provenance manifest。"""
+        return os.path.join(self.output_dir, "translation_content_manifest.json")
+
+    @property
     def bundle_sources(self):
-        """打包來源（優先序由低到高）：合併後的既有譯文 → LLM 新譯文。"""
+        """打包來源（優先序由低到高）：合併資源 → 既有譯文 → LLM 新譯文。"""
         return [
+            self.merge_output_dir,
             os.path.join(self.merge_output_dir, "lang_output"),
             os.path.join(self.merge_output_dir, "patchouli_output"),
             self.translate_output_dir,

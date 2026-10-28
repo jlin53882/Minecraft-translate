@@ -17,9 +17,18 @@ from __future__ import annotations
 import json
 import zipfile
 from collections.abc import Sequence
+from dataclasses import dataclass
 
+from translation_tool.core.book_formats import (
+    BOOK_EXCLUDED_DIRS,
+    FORMAT_NEUTRAL_PAGES,
+    FORMAT_STANDARD_PATCHOULI,
+    UNSUPPORTED_BOOK_FORMATS,
+    is_neutral_pages_candidate,
+    resolve_book_format,
+)
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.text_sniffer import (
-    VANILLA_NON_TEXT_DIRS,
     is_project_doc_name,
     looks_like_advancement,
     looks_like_book_json,
@@ -45,6 +54,19 @@ SNIFF_MAX_BYTES = 48 * 1024 * 1024
 Groups = dict[tuple[str, str, str], dict[str, str]]
 
 
+@dataclass(frozen=True)
+class SniffGroupsResult:
+    """依內容辨識結果及其完整性狀態。
+
+    ``groups`` 可以包含 budget 耗盡前已確認的項目；此時
+    ``budget_exhausted`` 必須被呼叫端傳遞出去，不能把部分結果當成完整掃描。
+    """
+
+    groups: Groups
+    budget_exhausted: bool = False
+    budget_error: str = ""
+
+
 def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str], dict]:
     """``{(模組, 中性路徑): {語系: 成員}}``；只留文字類副檔名的來源語系檔。"""
     found: dict[tuple[str, str], dict[str, str]] = {}
@@ -57,7 +79,7 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
         parts = name.split("/")
         if len(parts) < 4 or parts[0].lower() not in ("assets", "data"):
             continue
-        if parts[2].lower() in VANILLA_NON_TEXT_DIRS:
+        if parts[2].lower() in BOOK_EXCLUDED_DIRS:
             continue
         if low.endswith(".json") and len(parts) == 4 and parts[2] == "lang":
             continue
@@ -68,13 +90,22 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
     return found
 
 
-def _kind_of(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> str | None:
+def _kind_of(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    member: str,
+    *,
+    invalid_members: list[str] | None = None,
+) -> str | None:
     """檔案像什麼：手冊／進度（JSON）或指南（文字）；都不是回傳 None。
 
     文字檔依「這個檔案自己的語系」判斷：英文看停用字，繁中／簡中看中文字數，
     所以翻譯 ZIP 同時有英文與中文指南時，選到哪一份都能辨識。
     單一檔案超過大小上限時視為不是（略過該檔）；整體預算用盡仍拋出 ``ArchiveBudgetError``。
     """
+    path_format = resolve_book_format(member)
+    if path_format.name in UNSUPPORTED_BOOK_FORMATS:
+        return None
     try:
         raw = read_limited(zf, member, budget=budget)
     except ArchiveBudgetError:
@@ -83,11 +114,23 @@ def _kind_of(zf: zipfile.ZipFile, budget: ZipReadBudget, member: str) -> str | N
         return None
     if member.lower().endswith(".json"):
         try:
-            data = json.loads(raw.decode("utf-8-sig"), strict=False)
-        except (UnicodeDecodeError, ValueError):
+            text = raw.decode("utf-8-sig")
+            data = (
+                load_neutral_book_json(text, member).data
+                if is_neutral_pages_candidate(member)
+                else json.loads(text, strict=False)
+            )
+        except (UnicodeDecodeError, ValueError, TypeError):
+            if invalid_members is not None and path_format.name != "unknown":
+                invalid_members.append(member)
             return None
         if looks_like_advancement(data):
             return KIND_ADVANCEMENT
+        format_info = resolve_book_format(member, data)
+        if format_info.name in {FORMAT_STANDARD_PATCHOULI, FORMAT_NEUTRAL_PAGES}:
+            return KIND_PATCHOULI
+        if format_info.name != "unknown":
+            return None
         if looks_like_book_json(data, member.split("/")[2:]):
             return KIND_PATCHOULI
         return None
@@ -119,14 +162,15 @@ def _primary(members: dict[str, str], translated: bool) -> str | None:
     return found
 
 
-def sniffed_groups(
+def sniffed_groups_detailed(
     zf: zipfile.ZipFile,
     names: Sequence[str],
     claimed: set[str],
     *,
     translated: bool = False,
-) -> Groups:
-    """未被資料夾設定認領的手冊／指南檔，依 ``(類型, 模組, 中性路徑)`` 分組。"""
+    diagnostics: list[str] | None = None,
+) -> SniffGroupsResult:
+    """未被資料夾設定認領的手冊／指南檔，並回報掃描是否完整。"""
     by_dir: dict[tuple[str, str, str], list[tuple[str, dict[str, str]]]] = {}
     for (mod_id, neutral), members in _candidates(names, claimed).items():
         source = _primary(members, translated)
@@ -138,6 +182,7 @@ def sniffed_groups(
 
     budget = ZipReadBudget(SNIFF_MAX_BYTES, SNIFF_MAX_MEMBERS, label="sniff")
     groups: Groups = {}
+    budget_error = ""
     try:
         for (mod_id, _directory, ext), files in by_dir.items():
             files.sort()
@@ -147,7 +192,14 @@ def sniffed_groups(
                 (
                     k
                     for _n, m in samples
-                    if (k := _kind_of(zf, budget, _primary(m, translated)))
+                    if (
+                        k := _kind_of(
+                            zf,
+                            budget,
+                            _primary(m, translated),
+                            invalid_members=diagnostics,
+                        )
+                    )
                 ),
                 None,
             )
@@ -158,8 +210,14 @@ def sniffed_groups(
                     continue
                 # 抽樣只決定這個資料夾像什麼；同資料夾的設定檔、中繼資料不能沿用結論
                 try:
-                    own = _kind_of(zf, budget, _primary(members, translated))
-                except ArchiveBudgetError:
+                    own = _kind_of(
+                        zf,
+                        budget,
+                        _primary(members, translated),
+                        invalid_members=diagnostics,
+                    )
+                except ArchiveBudgetError as exc:
+                    budget_error = str(exc)
                     break  # 預算用盡：沒驗證過的檔案不收，保留已驗證的
                 if own is None:
                     continue  # 設定檔、中繼資料不收
@@ -167,6 +225,30 @@ def sniffed_groups(
                 if kind_of_file == KIND_ADVANCEMENT:
                     neutral = _drop_advancement_root(neutral)
                 groups[(kind_of_file, mod_id, neutral)] = members
-    except (ZipSizeError, ArchiveBudgetError):
-        pass  # 預算用盡：保留已判斷的結果，不影響其他匯入
-    return groups
+    except ArchiveBudgetError as exc:
+        budget_error = str(exc)
+    except ZipSizeError:
+        pass  # 單一檔案大小拒絕：保留已判斷的結果
+    return SniffGroupsResult(
+        groups=groups,
+        budget_exhausted=bool(budget_error),
+        budget_error=budget_error,
+    )
+
+
+def sniffed_groups(
+    zf: zipfile.ZipFile,
+    names: Sequence[str],
+    claimed: set[str],
+    *,
+    translated: bool = False,
+    diagnostics: list[str] | None = None,
+) -> Groups:
+    """相容的簡化入口；需要完整性狀態時使用 ``sniffed_groups_detailed``。"""
+    return sniffed_groups_detailed(
+        zf,
+        names,
+        claimed,
+        translated=translated,
+        diagnostics=diagnostics,
+    ).groups

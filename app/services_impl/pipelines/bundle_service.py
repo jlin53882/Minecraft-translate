@@ -10,13 +10,36 @@ import json
 import logging
 import os
 import shutil
+import sqlite3
 import traceback
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
 
 from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
+from translation_tool.core.book_formats import is_neutral_pages_candidate
+from translation_tool.core.bundle_sources import (
+    RAW_ATTACHMENT_MODE,  # noqa: F401 - View 由此取用
+    RESOURCE_PACK_MODE,  # noqa: F401 - View 由此取用
+    ExtraBundleSource,  # noqa: F401 - View 由此取用
+    coerce_extra_bundle_source,  # noqa: F401 - View 由此取用
+    serialize_extra_bundle_sources,  # noqa: F401 - View 由此取用
+    source_identity,  # noqa: F401 - View 由此取用
+)
+from translation_tool.core.guide_translation import (
+    GUIDE_SUFFIXES,
+    guide_support_references,
+    is_guideme_default_locale_alias,
+    normalize_guideme_default_locale_rel,
+    resolve_guide_support_reference,
+    select_guideme_canonical_candidates,
+)
+from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
     bundle_outputs_generator,
     find_source_pack_files,  # noqa: F401 - View 由此取用
+    inspect_extra_bundle_sources,  # noqa: F401 - View 由此取用
     normalize_output_zip_name,  # noqa: F401 - View 由此取用
     preview_pack_mcmeta,  # noqa: F401 - View 由此取用
 )
@@ -25,12 +48,79 @@ from translation_tool.core.pack_mcmeta import (
     pack_description_text,  # noqa: F401 - View 由此取用
 )
 from translation_tool.core.patchouli_compat import find_old_nbt_item_files
+from translation_tool.translation_db import open_db
 
 logger = logging.getLogger(__name__)
 
 # 打包暫存區只收資源包內容；translation_map.json 等報表檔不應進入資源包
 _STAGING_CONTENT_ROOT = "assets"
 _STAGING_SKIP_DIRS = {"待翻譯", "待翻譯整理需翻譯"}
+
+
+@dataclass(frozen=True)
+class ContentIssueSyncResult:
+    """流水線 manifest 同步到 Mod DB 的結果；失敗不應掩蓋已產生的 manifest。"""
+
+    count: int = 0
+    warning: str | None = None
+
+
+@dataclass(frozen=True)
+class _BundleSourceCandidate:
+    """一個 staging 輸出候選及其 GuideME 路徑來源標記。"""
+
+    path: str
+    is_legacy_guideme_alias: bool
+
+
+def sync_pipeline_content_manifest(
+    *,
+    settings,
+    version: str,
+    context: str,
+    manifest_path: str,
+) -> ContentIssueSyncResult:
+    """將 manifest 的非 emitted 紀錄寫入資料庫共用的內容處置表。"""
+    try:
+        payload = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+        records = payload.get("records", [])
+        if not isinstance(records, list):
+            raise TypeError("translation output manifest records 必須是陣列")
+        issues = [
+            record
+            for record in records
+            if isinstance(record, dict) and record.get("status") != "emitted"
+        ]
+    except (OSError, UnicodeError, TypeError, ValueError) as exc:
+        return ContentIssueSyncResult(
+            warning=f"⚠️ 無法把輸出 manifest 同步到 Mod DB：{exc}"
+        )
+
+    db = open_db(settings, create=False, sync_priority=False)
+    if db is None:
+        return ContentIssueSyncResult(
+            warning=(
+                "⚠️ 已產生輸出 manifest，但目前無法開啟 Mod DB；"
+                "非 emitted 內容仍保留在 manifest，未被當成已完成。"
+            )
+        )
+    try:
+        try:
+            count = db.record_content_issues(
+                version,
+                context,
+                issues,
+                origin="pipeline",
+            )
+        except sqlite3.Error as exc:
+            return ContentIssueSyncResult(
+                warning=(
+                    f"⚠️ 輸出 manifest 已保留，但同步非 emitted 內容到 Mod DB 失敗：{exc}"
+                )
+            )
+    finally:
+        db.close()
+    return ContentIssueSyncResult(count=count)
 
 
 def _read_json_dict(path: str) -> dict | None:
@@ -110,30 +200,397 @@ def _canonical_path(rel_path: str, canon: dict[str, str]) -> str:
 
 def _collect_bundle_sources(
     sources: list[str],
-) -> tuple[dict[str, tuple[str, list[str]]], dict[str, str]]:
+) -> tuple[dict[str, tuple[str, list[_BundleSourceCandidate]]], dict[str, str]]:
     """依來源優先序收集各輸出路徑對應的來源檔案。
 
     Returns:
-        (plan, canon)。plan：{路徑比對鍵: (staging 內的標準相對路徑, [來源檔案…（優先序由低到高）])}；
+        (plan, canon)。plan：{路徑比對鍵: (staging 內的標準相對路徑, [來源候選…（優先序由低到高）])}；
         canon：每一層路徑（資料夾與檔案）的標準拼法。
         比對鍵用 ``os.path.normcase``，使 Windows 上僅大小寫不同的路徑視為同一個檔案。
     """
-    plan: dict[str, tuple[str, list[str]]] = {}
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]] = {}
     canon: dict[str, str] = {}
     for source in sources:
         content_root = os.path.join(source, _STAGING_CONTENT_ROOT)
         if not os.path.isdir(content_root):
             continue
         for root, dirs, files in os.walk(content_root):
-            dirs[:] = [d for d in dirs if d not in _STAGING_SKIP_DIRS]
+            # Match output_bundler._walk_files: the first legacy fallback must
+            # not depend on filesystem directory or file creation order.
+            dirs[:] = sorted(d for d in dirs if d not in _STAGING_SKIP_DIRS)
+            files.sort()
             rel_root = os.path.relpath(root, source)
             for name in files:
-                rel_path = _canonical_path(os.path.join(rel_root, name), canon)
+                raw_rel_path = os.path.join(rel_root, name)
+                rel_path = os.fspath(
+                    normalize_guideme_default_locale_rel(Path(raw_rel_path))
+                )
+                rel_path = _canonical_path(rel_path, canon)
                 key = os.path.normcase(rel_path)
                 if key not in plan:
                     plan[key] = (rel_path, [])
-                plan[key][1].append(os.path.join(root, name))
+                plan[key][1].append(
+                    _BundleSourceCandidate(
+                        os.path.join(root, name),
+                        is_guideme_default_locale_alias(Path(raw_rel_path)),
+                    )
+                )
     return plan, canon
+
+
+def _excluded_category(top: str, rel: str) -> str:
+    """分類一個不在 Resource Pack assets 根目錄下的檔案。"""
+    top_lower = top.lower()
+    if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        return "pending"
+    if top_lower == "data":
+        parts = rel.split(os.sep)
+        if any(part.lower() in {"advancement", "advancements"} for part in parts):
+            return "data/advancement"
+        return "data"
+    if top_lower == "other_output":
+        return "other_output"
+    if top_lower in {"待翻譯", "待翻譯整理需翻譯"}:
+        return "pending"
+    return f"非 assets/{top}"
+
+
+def _excluded_warning(source: str, category: str, count: int) -> str:
+    """將排除分類轉成 UI 可直接顯示的警告。"""
+    if category == "data/advancement":
+        return (
+            f"略過 {count} 個 {source}/data/**/advancement(s) 檔案；"
+            "Advancement 不屬於 Resource Pack，literal 文字無法透過目前資源包直接套用，"
+            "如需生效必須另建 Data Pack。"
+        )
+    if category == "data":
+        return (
+            f"略過 {count} 個 {source}/data/ 檔案；Resource Pack staging 不收 data/，"
+            "需要 Data Pack 輸出契約才能套用。"
+        )
+    if category == "other_output":
+        return (
+            f"略過 {count} 個 {source}/other_output/ 未分類檔案；"
+            "不會將 other_output/ 整包塞入 ZIP，請查看輸出 manifest。"
+        )
+    if category == "pending":
+        return f"保留 {count} 個 {source}/待翻譯內容；等待翻譯完成後才會進入 Resource Pack。"
+    return f"略過 {count} 個 {source}/{category} 輸出；Resource Pack staging 只收 assets/。"
+
+
+def _collect_excluded_outputs(sources: list[str]) -> tuple[int, list[str]]:
+    """盤點不屬於 Resource Pack staging 的輸出，並產生可顯示的原因。"""
+    grouped: dict[tuple[str, str], int] = {}
+    excluded = 0
+    nested_sources = {os.path.normcase(os.path.abspath(source)) for source in sources}
+    for source in sources:
+        if not os.path.isdir(source):
+            continue
+        for root, dirs, files in os.walk(source):
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if os.path.normcase(os.path.abspath(os.path.join(root, directory)))
+                not in nested_sources
+            ]
+            rel_root = os.path.relpath(root, source)
+            top = "<root>" if rel_root == "." else rel_root.split(os.sep, 1)[0]
+            top_lower = top.lower()
+            if top_lower == _STAGING_CONTENT_ROOT:
+                dirs[:] = []
+                continue
+            for name in files:
+                excluded += 1
+                rel = os.path.join(rel_root, name)
+                category = _excluded_category(top, rel)
+                key = (source, category)
+                grouped[key] = grouped.get(key, 0) + 1
+    warnings = [
+        _excluded_warning(source, category, count)
+        for (source, category), count in grouped.items()
+    ]
+    return excluded, warnings
+
+
+def _pending_file_status(source_path: str, rel: str) -> tuple[str, str]:
+    """判斷待翻譯檔案是否在送入翻譯前就已經無法解析。"""
+    if not source_path.lower().endswith(".json"):
+        return "pending", "translation_pending"
+    try:
+        text = Path(source_path).read_text(encoding="utf-8-sig")
+        if is_neutral_pages_candidate(rel):
+            load_neutral_book_json(text, rel)
+        else:
+            json.loads(text)
+    except (OSError, UnicodeError, TypeError, ValueError):
+        return "parse_failed", "json_parse_failed_before_translation"
+    return "pending", "translation_pending"
+
+
+def _manifest_status_for_non_asset(
+    top_lower: str, rel: str, source_path: str | None = None
+) -> tuple[str, str]:
+    """Classify one output that is outside the accepted assets staging root."""
+
+    if any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        if source_path is not None:
+            return _pending_file_status(source_path, rel)
+        return "pending", "translation_pending"
+    if top_lower == "errordata_output":
+        return "parse_failed", "quarantined_after_parse_failure"
+    if top_lower == "other_output":
+        return "pending", "other_output_requires_format_classification"
+    if top_lower == "data":
+        if any(
+            part.lower() in {"advancement", "advancements"}
+            for part in rel.split(os.sep)
+        ):
+            return "excluded", "resource_pack_excludes_advancement_data"
+        return "excluded", "resource_pack_excludes_data_root"
+    return "excluded", "resource_pack_accepts_assets_only"
+
+
+def _manifest_status_for_asset(source_path: str, rel: str) -> tuple[str, str]:
+    """分類 assets 內的待處理檔案，辨識翻譯前就已損壞的 JSON。"""
+    if not any(part in _STAGING_SKIP_DIRS for part in Path(rel).parts):
+        return "excluded", "not_in_bundle_plan"
+    return _pending_file_status(source_path, rel)
+
+
+def _manifest_record(
+    source: str, output: str, status: str, reason: str
+) -> dict[str, str]:
+    return {"source": source, "output": output, "status": status, "reason": reason}
+
+
+def _load_content_manifest(
+    classification_path: Path,
+) -> tuple[list[dict[str, str]], set[str], set[str]]:
+    """讀取合併階段的內容分類，並保留來源與輸出索引。"""
+    records: list[dict[str, str]] = []
+    classified_sources: set[str] = set()
+    classified_outputs: set[str] = set()
+    if not classification_path.is_file():
+        return records, classified_sources, classified_outputs
+    try:
+        classification = json.loads(classification_path.read_text(encoding="utf-8"))
+        if not isinstance(classification, dict):
+            raise TypeError("content manifest root must be an object")
+        for record in classification.get("records", []):
+            if not isinstance(record, dict) or not record.get("source"):
+                continue
+            normalized = os.path.normcase(os.path.abspath(str(record["source"])))
+            classified_sources.add(normalized)
+            output = str(record.get("output", "")).replace("\\", "/")
+            if output:
+                classified_outputs.add(os.path.normcase(output.replace("/", os.sep)))
+            records.append(
+                _manifest_record(
+                    str(record["source"]),
+                    output,
+                    str(record.get("status", "pending")),
+                    str(record.get("reason", "classified_content")),
+                )
+            )
+    except (OSError, TypeError, ValueError) as exc:
+        records.append(
+            _manifest_record(
+                classification_path.as_posix(),
+                "",
+                "parse_failed",
+                f"content_manifest_read_failed:{type(exc).__name__}",
+            )
+        )
+    return records, classified_sources, classified_outputs
+
+
+def _append_plan_manifest_records(
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]],
+    classified_outputs: set[str],
+    records: list[dict[str, str]],
+) -> set[str]:
+    """記錄會進入 staging 的 plan，並回傳已計入的來源檔。"""
+    emitted_sources: set[str] = set()
+    for rel_path, candidates in plan.values():
+        source_paths = select_guideme_canonical_candidates(
+            [(candidate.is_legacy_guideme_alias, candidate) for candidate in candidates]
+        )
+        if os.path.normcase(rel_path) in classified_outputs:
+            emitted_sources.update(
+                os.path.normcase(os.path.abspath(candidate.path))
+                for candidate in candidates
+            )
+            continue
+        for candidate in candidates:
+            source_path = candidate.path
+            emitted_sources.add(os.path.normcase(os.path.abspath(source_path)))
+            if candidate not in source_paths:
+                records.append(
+                    _manifest_record(
+                        source_path,
+                        rel_path.replace(os.sep, "/"),
+                        "excluded",
+                        "legacy_guideme_alias_replaced_by_canonical",
+                    )
+                )
+                continue
+            records.append(
+                _manifest_record(
+                    source_path,
+                    rel_path.replace(os.sep, "/"),
+                    "emitted",
+                    "resource_pack_asset",
+                )
+            )
+    return emitted_sources
+
+
+def _append_unplanned_asset_records(
+    source_root: str,
+    rel_root: str,
+    files: list[str],
+    emitted_sources: set[str],
+    classified_sources: set[str],
+    records: list[dict[str, str]],
+) -> None:
+    """記錄 assets/ 底下未進入 plan 的檔案。"""
+    for name in files:
+        source_path = os.path.join(source_root, name)
+        normalized = os.path.normcase(os.path.abspath(source_path))
+        if normalized in emitted_sources or normalized in classified_sources:
+            continue
+        rel = os.path.join(rel_root, name)
+        status, reason = _manifest_status_for_asset(source_path, rel)
+        records.append(
+            _manifest_record(
+                source_path,
+                rel.replace(os.sep, "/"),
+                status,
+                reason,
+            )
+        )
+
+
+def _append_unplanned_source_records(
+    sources: list[str],
+    classified_output_roots: list[str],
+    emitted_sources: set[str],
+    classified_sources: set[str],
+    classified_outputs: set[str],
+    records: list[dict[str, str]],
+) -> None:
+    """記錄所有來源中未進入 Resource Pack plan 的檔案。"""
+    source_roots = {os.path.normcase(os.path.abspath(source)) for source in sources}
+    # A classified output is stored relative to the common merge root.  Do not
+    # assume that the common root is sources[0]: custom callers may reorder the
+    # roots, while the formal pipeline still includes the common root itself.
+    output_roots = [os.path.abspath(root) for root in classified_output_roots]
+
+    def is_classified_output(source_path: str) -> bool:
+        for output_root in output_roots:
+            try:
+                rel_from_root = os.path.relpath(source_path, output_root)
+            except ValueError:
+                continue
+            if os.path.normcase(rel_from_root) in classified_outputs:
+                return True
+        return False
+
+    for source in sources:
+        if not os.path.isdir(source):
+            continue
+        for root, dirs, files in os.walk(source):
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if os.path.normcase(os.path.abspath(os.path.join(root, directory)))
+                not in source_roots
+            ]
+            rel_root = os.path.relpath(root, source)
+            top = "<root>" if rel_root == "." else rel_root.split(os.sep, 1)[0]
+            top_lower = top.lower()
+            if top_lower == _STAGING_CONTENT_ROOT:
+                _append_unplanned_asset_records(
+                    root,
+                    rel_root,
+                    files,
+                    emitted_sources,
+                    classified_sources,
+                    records,
+                )
+                continue
+            for name in files:
+                source_path = os.path.join(root, name)
+                normalized = os.path.normcase(os.path.abspath(source_path))
+                if normalized in emitted_sources or normalized in classified_sources:
+                    continue
+                rel = os.path.join(rel_root, name)
+                if is_classified_output(source_path):
+                    continue
+                status, reason = _manifest_status_for_non_asset(
+                    top_lower, rel, source_path
+                )
+                records.append(_manifest_record(source_path, "", status, reason))
+
+
+def _write_output_manifest(
+    sources: list[str],
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]],
+    staging_dir: str,
+    content_manifest_path: str | None = None,
+    additional_records: list[dict[str, str]] | None = None,
+) -> str:
+    """Write a file-level disposition report outside the Resource Pack ZIP."""
+
+    classification_path = (
+        Path(content_manifest_path)
+        if content_manifest_path is not None
+        else Path(staging_dir).parent / "translation_content_manifest.json"
+    )
+    records, classified_sources, classified_outputs = _load_content_manifest(
+        classification_path
+    )
+    emitted_sources = _append_plan_manifest_records(plan, classified_outputs, records)
+    _append_unplanned_source_records(
+        sources,
+        sources or [staging_dir],
+        emitted_sources,
+        classified_sources,
+        classified_outputs,
+        records,
+    )
+    recorded_outputs = {
+        os.path.normcase(str(record.get("output", "")).replace("/", os.sep))
+        for record in records
+        if record.get("output")
+    }
+    for record in additional_records or []:
+        output = str(record.get("output", ""))
+        output_key = os.path.normcase(output.replace("/", os.sep))
+        if not output or output_key in recorded_outputs:
+            continue
+        records.append(record)
+        recorded_outputs.add(output_key)
+
+    records.sort(key=lambda item: (item["status"], item["source"].casefold()))
+    counts = Counter(record["status"] for record in records)
+    manifest_path = Path(staging_dir).parent / "translation_output_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "resource_pack_boundary": "assets_only",
+                "status_counts": dict(sorted(counts.items())),
+                "records": records,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return str(manifest_path)
 
 
 def _normalize_staging_case(staging_dir: str, canon: dict[str, str]) -> None:
@@ -174,44 +631,25 @@ def _prune_staging(staging_dir: str, expected: set[str]) -> int:
     return removed
 
 
-def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
-    """把多個輸出根目錄的 assets/ 依序疊加到 staging_dir，供打包使用。
-
-    後面的來源優先：同路徑的 JSON 物件逐 key 合併（後者覆蓋前者），
-    其他檔案直接覆蓋。只處理各來源底下的 assets/，並略過待翻譯資料夾。
-
-    staging 是增量更新的：不再整個刪除重建，而是先算出每個輸出檔「應有的內容」，
-    與現有 staging 內容相同就不寫入，最後刪掉不在預期集合內的殘留檔案。結果與完整
-    重建一致；沒有 manifest 或版本標記，每次都由來源重新推導，因此不會有過期狀態，
-    中斷後下一次執行也會收斂到同一結果。內容是否相同只看位元組（不依 mtime）；大小寫不敏感的
-    檔案系統上，僅大小寫不同的既有資料夾與檔案會先改名成來源的拼法。
-
-    Args:
-        sources: 依優先序由低到高排列的來源根目錄（不存在者略過）。
-        staging_dir: 暫存目錄；不存在會建立，內容會被更新成與來源一致。
-
-    Returns:
-        {"copied": int, "merged": int, "written": int, "unchanged": int, "removed": int}
-        ``copied`` / ``merged`` 是處理的來源檔案數（與是否需要寫入無關，呼叫端用來判斷
-        是否有可打包內容）；``written`` / ``unchanged`` 是實際寫入與沿用的輸出檔數；
-        ``removed`` 是刪除的殘留檔案數。
-    """
-    os.makedirs(staging_dir, exist_ok=True)
-
-    plan, canon = _collect_bundle_sources(sources)
-    _normalize_staging_case(staging_dir, canon)
-
+def _materialize_bundle_plan(
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]], staging_dir: str
+) -> tuple[int, int, int, int, set[str]]:
+    """將已解析的輸出 plan 寫入 staging，回傳計數與預期檔案集合。"""
     copied = merged = written = unchanged = 0
     expected: set[str] = set()
-    for key, (rel_path, srcs) in plan.items():
+    for key, (rel_path, candidates) in plan.items():
+        srcs = select_guideme_canonical_candidates(
+            [(candidate.is_legacy_guideme_alias, candidate) for candidate in candidates]
+        )
         dst = os.path.join(staging_dir, rel_path)
         expected.add(key)
 
         # 逐一疊加來源，語意與舊版「依序寫入 staging」相同：JSON 物件與前一份合併，
         # 否則整個覆蓋。state 要嘛是來源檔路徑（原樣複製），要嘛是合併後的 dict。
-        state: str | dict = srcs[0]
+        state: str | dict = srcs[0].path
         copied += 1
-        for src in srcs[1:]:
+        for candidate in srcs[1:]:
+            src = candidate.path
             if src.lower().endswith(".json"):
                 base = state if isinstance(state, dict) else _read_json_dict(state)
                 extra = _read_json_dict(src)
@@ -244,14 +682,249 @@ def build_bundle_staging(sources: list[str], staging_dir: str) -> dict:
             unchanged += 1
         else:
             written += 1
+    return copied, merged, written, unchanged, expected
 
+
+def _safe_staging_path(staging_root: Path, rel: str) -> Path | None:
+    candidate = (staging_root / Path(rel)).resolve()
+    try:
+        candidate.relative_to(staging_root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _mark_staging_expected(expected: set[str], staging_root: Path, path: Path) -> None:
+    expected.add(os.path.normcase(os.path.relpath(path, staging_root)))
+
+
+def _localized_guide_paths(staging_root: Path) -> list[Path]:
+    content_root = staging_root / _STAGING_CONTENT_ROOT
+    if not content_root.is_dir():
+        return []
+    return sorted(
+        path
+        for path in content_root.rglob("*")
+        if path.is_file()
+        and path.suffix.casefold() in GUIDE_SUFFIXES
+        and any(
+            part.casefold() in {"_zh_tw", "zh_tw"}
+            for part in path.relative_to(staging_root).parts
+        )
+    )
+
+
+def _guide_source_paths(guide_rel: Path, locale_index: int) -> list[Path]:
+    parts = list(guide_rel.parts)
+    source_paths = [Path(*parts[:locale_index], *parts[locale_index + 1 :])]
+    for source_locale in ("_en_us", "en_us", "_zh_cn", "zh_cn"):
+        candidate_parts = list(parts)
+        candidate_parts[locale_index] = source_locale
+        candidate = Path(*candidate_parts)
+        if candidate not in source_paths:
+            source_paths.append(candidate)
+    return source_paths
+
+
+def _find_guide_support_source(
+    staging_root: Path, source_paths: list[Path], reference: str
+) -> Path | None:
+    for source_rel in source_paths:
+        source_target = resolve_guide_support_reference(
+            source_rel.as_posix(), reference
+        )
+        if source_target is None:
+            continue
+        candidate = _safe_staging_path(staging_root, source_target)
+        if candidate is not None and candidate.is_file():
+            return candidate
+    return None
+
+
+def _add_guide_warning(
+    warnings: list[str], warning_keys: set[str], key: str, message: str
+) -> None:
+    if key in warning_keys:
+        return
+    warning_keys.add(key)
+    warnings.append(message)
+
+
+def _mirror_guide_reference(
+    staging_root: Path,
+    expected: set[str],
+    guide_rel: Path,
+    source_paths: list[Path],
+    reference: str,
+    warnings: list[str],
+    warning_keys: set[str],
+) -> tuple[int, int, int, dict[str, str] | None]:
+    """Mirror one guide reference and return (mirrored, unchanged, missing)."""
+
+    target_rel = resolve_guide_support_reference(guide_rel.as_posix(), reference)
+    if target_rel is None:
+        return 0, 0, 0, None
+    target_path = _safe_staging_path(staging_root, target_rel)
+    if target_path is None:
+        return 0, 0, 0, None
+
+    source_path = _find_guide_support_source(staging_root, source_paths, reference)
+    if source_path is None:
+        if target_path.is_file():
+            _mark_staging_expected(expected, staging_root, target_path)
+            return 0, 1, 0, None
+        _add_guide_warning(
+            warnings,
+            warning_keys,
+            f"{guide_rel.as_posix()}|{reference}",
+            f"找不到指南引用的支援檔：{guide_rel.as_posix()} -> {reference}",
+        )
+        return 0, 0, 1, None
+
+    _mark_staging_expected(expected, staging_root, target_path)
+    manifest_record = _manifest_record(
+        str(source_path),
+        str(target_rel).replace("\\", "/"),
+        "emitted",
+        "localized_guide_support",
+    )
+    if target_path == source_path or (
+        target_path.is_file() and _same_file_content(str(source_path), str(target_path))
+    ):
+        return 0, 1, 0, manifest_record
+    if target_path.is_file():
+        _add_guide_warning(
+            warnings,
+            warning_keys,
+            f"collision:{target_rel}",
+            f"指南支援檔路徑衝突，保留既有輸出：{target_rel}",
+        )
+        return 0, 0, 0, None
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source_path, target_path)
+    return 1, 0, 0, manifest_record
+
+
+def _mirror_localized_guide_support(
+    staging_dir: str, expected: set[str]
+) -> tuple[int, int, int, list[str], list[dict[str, str]]]:
+    """Mirror explicitly referenced guide assets below each locale root.
+
+    Guide translation changes the path from a neutral or ``en_us`` directory
+    to ``_zh_tw``/``zh_tw`` while deliberately preserving relative references
+    in the document.  A support file such as ``../assets/foo.snbt`` therefore
+    has to exist below the translated locale root as well.  Only files named by
+    a guide are mirrored; this keeps English guide prose out of the resource
+    pack and avoids copying an entire source tree.
+    """
+
+    staging_root = Path(staging_dir).resolve()
+    if not (staging_root / _STAGING_CONTENT_ROOT).is_dir():
+        return 0, 0, 0, [], []
+
+    mirrored = unchanged = missing = 0
+    warnings: list[str] = []
+    warning_keys: set[str] = set()
+    manifest_records: list[dict[str, str]] = []
+    for guide_path in _localized_guide_paths(staging_root):
+        guide_rel = guide_path.relative_to(staging_root)
+        locale_index = next(
+            index
+            for index, part in enumerate(guide_rel.parts)
+            if part.casefold() in {"_zh_tw", "zh_tw"}
+        )
+        source_paths = _guide_source_paths(guide_rel, locale_index)
+        try:
+            text = guide_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError):
+            continue
+        for reference in guide_support_references(text):
+            counts = _mirror_guide_reference(
+                staging_root,
+                expected,
+                guide_rel,
+                source_paths,
+                reference,
+                warnings,
+                warning_keys,
+            )
+            mirrored += counts[0]
+            unchanged += counts[1]
+            missing += counts[2]
+            if counts[3] is not None:
+                manifest_records.append(counts[3])
+    return mirrored, unchanged, missing, warnings, manifest_records
+
+
+def build_bundle_staging(
+    sources: list[str],
+    staging_dir: str,
+    *,
+    content_manifest_path: str | None = None,
+) -> dict:
+    """把多個輸出根目錄的 assets/ 依序疊加到 staging_dir，供打包使用。
+
+    後面的來源優先：同路徑的 JSON 物件逐 key 合併（後者覆蓋前者），
+    其他檔案直接覆蓋。只處理各來源底下的 assets/，並略過待翻譯資料夾。
+
+    staging 是增量更新的：不再整個刪除重建，而是先算出每個輸出檔「應有的內容」，
+    與現有 staging 內容相同就不寫入，最後刪掉不在預期集合內的殘留檔案。結果與完整
+    重建一致；沒有 manifest 或版本標記，每次都由來源重新推導，因此不會有過期狀態，
+    中斷後下一次執行也會收斂到同一結果。內容是否相同只看位元組（不依 mtime）；大小寫不敏感的
+    檔案系統上，僅大小寫不同的既有資料夾與檔案會先改名成來源的拼法。
+
+    Args:
+        sources: 依優先序由低到高排列的來源根目錄（不存在者略過）。
+        staging_dir: 暫存目錄；不存在會建立，內容會被更新成與來源一致。
+
+    Returns:
+        {"copied": int, "merged": int, "written": int, "unchanged": int, "removed": int,
+        "excluded": int, "warnings": list[str]}
+        ``copied`` / ``merged`` 是處理的來源檔案數（與是否需要寫入無關，呼叫端用來判斷
+        是否有可打包內容）；``written`` / ``unchanged`` 是實際寫入與沿用的輸出檔數；
+        ``removed`` 是刪除的殘留檔案數；``excluded`` / ``warnings`` 說明未進入 Resource
+        Pack staging 的其他輸出，特別是不能由資源包直接套用的 Advancement。
+    """
+    os.makedirs(staging_dir, exist_ok=True)
+
+    plan, canon = _collect_bundle_sources(sources)
+    excluded, warnings = _collect_excluded_outputs(sources)
+    _normalize_staging_case(staging_dir, canon)
+
+    copied, merged, written, unchanged, expected = _materialize_bundle_plan(
+        plan, staging_dir
+    )
+    # 先刪掉上一輪不再屬於本輪 plan 的檔案，再解析指南引用。否則舊的
+    # _zh_tw 支援鏡像會被當成現有輸出，遮住來源更新或在來源刪除後被重新鏡像。
     removed = _prune_staging(staging_dir, expected)
+    (
+        guide_support_mirrored,
+        guide_support_unchanged,
+        guide_support_missing,
+        guide_support_warnings,
+        guide_support_manifest_records,
+    ) = _mirror_localized_guide_support(staging_dir, expected)
+    warnings.extend(guide_support_warnings)
+    manifest_path = _write_output_manifest(
+        sources,
+        plan,
+        staging_dir,
+        content_manifest_path,
+        guide_support_manifest_records,
+    )
+    removed += _prune_staging(staging_dir, expected)
     return {
         "copied": copied,
         "merged": merged,
         "written": written,
         "unchanged": unchanged,
         "removed": removed,
+        "excluded": excluded,
+        "warnings": warnings,
+        "guide_support_mirrored": guide_support_mirrored,
+        "guide_support_unchanged": guide_support_unchanged,
+        "guide_support_missing": guide_support_missing,
+        "manifest_path": manifest_path,
     }
 
 
@@ -272,7 +945,7 @@ def run_bundling_service(
     pack_format: int = DEFAULT_PACK_FORMAT,
     max_pack_format: int | None = None,
     pack_image_path: str | None = None,
-    extra_folders: list[str] | None = None,
+    extra_folders: list[object] | None = None,
     force_rebuild: bool = False,
 ):
     """執行此 generator 並逐步回報進度（yield update dict）。"""

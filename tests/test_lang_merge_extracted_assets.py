@@ -433,7 +433,11 @@ class TestMergeExtractedToAssets:
             ext_dir = lang_output_dir / ext_name / "ae2ct" / "lang"
             ext_dir.mkdir(parents=True)
             (ext_dir / "en_us.json").write_text(
-                json.dumps({"k": "v"}, ensure_ascii=False), encoding="utf-8"
+                json.dumps(
+                    {"k": "v" if ext_name.endswith("v1") else "v2"},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
             )
 
         # 用 captureWarnings() 抓 stdlib logging.WARNING
@@ -452,9 +456,19 @@ class TestMergeExtractedToAssets:
         finally:
             logging.getLogger().removeHandler(handler)
 
-        # 應有 log "多個來源"
+        first_source = (
+            lang_output_dir / "ae2ct_extracted_v1" / "ae2ct" / "lang" / "en_us.json"
+        ).as_posix()
+
+        # 應有 log "多個來源"，且包含完整來源路徑，避免同名檔案無法定位。
         assert any("多個來源" in msg and "採第一個" in msg for msg in captured), (
             f"沒有 multi-source warning,實際 log: {captured}"
+        )
+        assert any(first_source in msg for msg in captured), (
+            f"multi-source warning 沒有完整來源路徑,實際 log: {captured}"
+        )
+        assert any("衝突" in msg and first_source in msg for msg in captured), (
+            f"conflict warning 沒有完整來源路徑,實際 log: {captured}"
         )
 
     def test_session_receives_progress_updates(self, tmp_path: Path):
@@ -667,6 +681,25 @@ class TestCleanupSingleModExtracted:
         _cleanup_single_mod_extracted(tmp_path, "ae2ct")
         assert not extracted_dir.exists(), "空的 _extracted 目錄應被刪除"
 
+    def test_cleanup_preserves_non_language_assets_in_target_mod(self, tmp_path: Path):
+        """成功清理語言檔時，不得刪除同一 mod 的 SNBT 或圖片支援檔。"""
+        extracted_dir = tmp_path / "ae2ct_extracted"
+        source = extracted_dir / "ae2ct" / "lang" / "zh_cn.json"
+        source.parent.mkdir(parents=True)
+        source.write_text('{"key": "中文"}', encoding="utf-8")
+        snbt = extracted_dir / "ae2ct" / "assets" / "guide" / "machine.snbt"
+        image = extracted_dir / "ae2ct" / "assets" / "guide" / "machine.png"
+        snbt.parent.mkdir(parents=True)
+        snbt.write_bytes(b"structure")
+        image.write_bytes(b"image")
+
+        assert _cleanup_single_mod_extracted(tmp_path, "ae2ct", [source]) is True
+
+        assert not source.exists()
+        assert snbt.read_bytes() == b"structure"
+        assert image.read_bytes() == b"image"
+        assert extracted_dir.exists()
+
     def test_stage2_cleans_deep_extracted_layout(self, tmp_path: Path):
         """深層 JAR wrapper layout 成功寫入後也要清掉中間目錄。"""
         lang_output_dir = tmp_path / "lang_output"
@@ -687,6 +720,65 @@ class TestCleanupSingleModExtracted:
 
         assert (lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json").exists()
         assert not (lang_output_dir / "aether_extracted").exists()
+
+    def test_stage2_preserves_non_language_assets_in_extracted_layout(
+        self, tmp_path: Path
+    ):
+        """Stage 2 只能清理語言檔，不得清掉同一來源的支援資產。"""
+        lang_output_dir = tmp_path / "lang_output"
+        source = (
+            lang_output_dir
+            / "aether_extracted"
+            / "packs"
+            / "classic_b173"
+            / "assets"
+            / "aether"
+            / "lang"
+            / "zh_cn.json"
+        )
+        source.parent.mkdir(parents=True)
+        source.write_text('{"new_key": "中文"}', encoding="utf-8")
+        other_language = source.with_name("fr_fr.json")
+        other_language.write_text('{"new_key": "français"}', encoding="utf-8")
+        snbt = (
+            lang_output_dir
+            / "aether_extracted"
+            / "packs"
+            / "classic_b173"
+            / "assets"
+            / "aether"
+            / "guide"
+            / "machine.snbt"
+        )
+        image = snbt.with_name("machine.png")
+        snbt.parent.mkdir(parents=True)
+        snbt.write_bytes(b"structure")
+        image.write_bytes(b"image")
+
+        updates = list(merge_extracted_to_assets(lang_output_dir))
+
+        assert updates[-1]["error"] is False
+        assert (lang_output_dir / "assets" / "aether" / "lang" / "zh_tw.json").exists()
+        assert other_language.read_text(encoding="utf-8") == '{"new_key": "français"}'
+        assert snbt.read_bytes() == b"structure"
+        assert image.read_bytes() == b"image"
+        assert (lang_output_dir / "aether_extracted").exists()
+
+    def test_legacy_cleanup_only_removes_empty_extracted_dirs(self, tmp_path: Path):
+        """相容清理 helper 不得刪除仍含支援檔的 extracted 目錄。"""
+        lang_output_dir = tmp_path / "lang_output"
+        empty_extracted = lang_output_dir / "empty_extracted" / "assets"
+        empty_extracted.mkdir(parents=True)
+        retained = lang_output_dir / "retained_extracted" / "assets" / "guide.snbt"
+        retained.parent.mkdir(parents=True)
+        retained.write_bytes(b"structure")
+
+        cleaned = extracted_assets._cleanup_extracted_dirs(lang_output_dir)
+
+        assert cleaned == 1
+        assert not (lang_output_dir / "empty_extracted").exists()
+        assert retained.read_bytes() == b"structure"
+        assert (lang_output_dir / "retained_extracted").exists()
 
     def test_duplicate_keys_are_not_counted_as_new_and_source_is_cleaned(
         self, tmp_path: Path
@@ -890,11 +982,14 @@ class TestCleanupSingleModExtracted:
         source = tmp_path / "demo_extracted" / "demo" / "lang" / "zh_cn.json"
         source.parent.mkdir(parents=True)
         source.write_text('{"key": "中文"}', encoding="utf-8")
-        monkeypatch.setattr(
-            extracted_assets.shutil,
-            "rmtree",
-            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("cleanup failed")),
-        )
+        real_unlink = Path.unlink
+
+        def fail_source_unlink(path, *args, **kwargs):
+            if path == source:
+                raise OSError("cleanup failed")
+            return real_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", fail_source_unlink)
 
         updates = list(merge_extracted_to_assets(tmp_path))
 

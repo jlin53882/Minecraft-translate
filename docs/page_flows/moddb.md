@@ -104,6 +104,10 @@ flowchart TD
 
 資料清理由總覽頁的「資料清理」按鈕開啟 `CleanupDialog`（`cleanup_dialog.py`，服務層 `moddb_cleanup_service.py`）。選擇版本時 `_refresh_overview` 在背景呼叫 `cleanup_overview`，依類型與類別顯示該版本可清理的筆數（只讀，換版本時舊結果作廢）；`_export` 呼叫 `export_cleanup_report` 寫出 JSON 檢查檔，檔名由服務層 `export_cleanup` 取唯一名稱（同一秒匯出兩次、或使用者已編輯過的檔案都不會被覆蓋），內容先寫暫存檔再整個換過去。檢查檔記錄格式 `mod-db-cleanup-v2`、類型（`rule` 或 `protected`）、版本與資料庫身分（`meta.cleanup_db_id`）；格式、類型、版本、身分不符，或 `id` 不是正整數、`id` 重複、`delete` 不是布林值的項目一律拒絕或略過。
 
+**掃描迭代造成的重複鍵**：`CleanupDialog` 的「掃描重複鍵」開啟獨立的 `DuplicateCleanupDialog`。核心只把指南／Patchouli 檔案鍵套用既有語系路徑正規化；同版本、同模組、同類型、同正規化鍵且原文相同的候選才列為可安全合併。翻譯來源內容衝突、原文不同、跨版本或跨模組的項目只列為需人工確認，不會自動合併。掃描匯入時若只有唯一別名且原文相同，也會重用既有條目，避免日後再建立第三筆；已有多個別名時則保持保守，交給清理功能處理。
+
+重複鍵視窗的掃描範圍可明確選擇**遊戲版本、模組與內容類型**（全部、Guide 或 Patchouli）。開啟視窗會先做一次唯讀預覽；切換任一範圍後，舊預覽立即失效，必須按「預覽／重新掃描」才能重新建立可套用計畫。結果以卡片列出狀態、模組／類型、規範化鍵、原文與實際來源路徑；「可安全合併」與「需人工確認」分開標色，人工候選會顯示翻譯衝突或原文不同的原因。預覽 token 同時綁定資料快照與版本／模組／類型範圍，避免把不同範圍誤當成同一份計畫。這樣可以先縮小到單一版本／模組／類型核對，再執行合併，不必從一個扁平清單猜測範圍。
+
 **預覽與刪除的契約**：`_preview` 呼叫 `preview_cleanup`（在 `_read_snapshot` 的一致讀取內重新檢查檔案內標記要刪除的項目），得到的 `CleanupPlan.token` 是檢查檔內容、資料庫身分、版本、類型、可刪條目與各自完整資料狀態的 SHA-256。`_apply` 把這個 token 交給 `apply_cleanup(path, expected_token)`，核心在寫入交易內重新計算同一份計畫，token 不同就丟 `CleanupPlanChanged`、不刪任何東西，要求重新預覽。畫面端在換版本（`_on_version`）、換檢查檔（`_on_report`）、重新整理清單、匯出或刪除後都作廢預覽結果；`_apply` 另外確認預覽時的資料庫、版本（`CleanupPlan.version`）和目前選的檢查檔都沒變。
 
 **每個項目的檢查**（`_item_problem`）：條目存在、版本與類型正確、類型／模組／鍵值與檢查檔一致、原文雜湊相同、目前規則仍判為「不該收」，而且目前類別和檢查檔記錄的類別相同（類別變了要重新匯出）。
@@ -113,6 +117,8 @@ flowchart TD
 **預設 `delete`**：類別在 `STRONG_CATEGORIES`（`multiblock`、`meta_key`、`placeholder`、`lang_key`，看結構就能確定）時，只有人工來源的譯文或歷史含中文才預設 `false`；其他類別（包含指南的 `license`、`name_list`、`key_value`、`code`、`data` 與形狀推測的 `not_text`、`code_value`、`no_letters`、`field_name`）只要任何來源的譯文或歷史含中文就預設 `false` 並加上 `review` 說明，由使用者確認後再改成 `true`。`CleanupReport` 區分 `exported_total`（檢查檔列出的筆數）、`default_selected`（預設刪除）與 `review_required`（待人工確認），畫面三者並列顯示。
 
 刪除（`apply_cleanup`）在單一交易內把整批存進 `cleanup_batch`（含譯文、生效譯文、歷史與沒有外鍵的 `src_change` 原文變更紀錄）再刪除。還原（`_revert`）呼叫 `revert_cleanup`，回傳 `RevertResult`：原編號還沒被用掉就沿用，被用掉就改用新編號並重新對應子表的 `entry_id`；譯文的 `revision` 還原成快照當時的值；生效譯文依目前優先序重算；原位置已有同一條目（重新掃描出來）的項目不覆蓋，保留為待還原並列在 `RevertResult.conflicts`，批次要全部還原才設定 `reverted_at`，進度記在 `meta` 的 `cleanup_restored:<批次>`，可以重試。`CleanupDialog._load_batch_info` 用 `cleanup_batches` 列出所有尚未完全還原的批次（新的在前），`batch_dd` 選哪一批就還原哪一批。
+
+重複鍵合併使用獨立的 `duplicate_merge_batch` 快照，不與刪除垃圾條目的批次混用。預覽 token 包含所有候選、條目狀態與翻譯衝突判定；套用時在同一個 SQLite 交易內重新計算，資料在預覽後變動就拒絕。合併前保存條目、翻譯、生效譯文、歷史與原文變更紀錄；復原前會比對合併後 survivor 的狀態，若使用者已修改就只回報衝突、不覆蓋新資料。這個流程的驗收必須同時核對原文、鍵值、翻譯來源、生效文字、歷史與復原後筆數，不能只看合併後的數量。
 
 人工審核走 `ReviewScopeController`（`review_scope_dialog.py`）：`confirm` 以 `run_read`（`background_read.py`）在背景呼叫 `preview_manual_review`，結果回到畫面執行緒後才顯示影響範圍（又按一次或已換條目時丟棄舊結果）；確認視窗內有「同步審核其他版本」開關，預設沿用編輯面板的同步開關，切換時同樣在背景重算範圍、只更新這個視窗；確定後 `execute` 以 `entry_writes.run_write` 呼叫 `review_manual`。批量審核由 `BulkReviewDialog` 負責：選一個版本、模組與一個「目前生效來源」（模組與來源都可選全部），預設只審核格式檢查通過的條目、不同步其他版本；從條目頁開啟時，會把目前版本、模組與目前生效來源預填到對話框，但不會自動產生預覽或執行，仍須使用者按「產生預覽」。`_preview` 呼叫 `preview_bulk_review` 產生預覽（每頁 50 筆，可逐筆排除），`_confirm` 呼叫 `execute_bulk_review`，完成後可用 `_revert`（`revert_review_batch`）整批還原。來源選「全部來源」時，後端以 `source=None` 涵蓋所選版本／模組的所有目前生效來源。選項改變時舊預覽立即失效；確認時資料庫會重算範圍，與預覽不同就拒絕並要求重新預覽。批量審核或還原完成後，對話框若仍開啟會重新查詢「仍有未審核候選」的模組／來源選項，因此剛完成的模組會立即消失、還原後會立即恢復；外層 EntriesPanel 與其他 Mod DB 頁籤則走共通資料變更失效流程。審核只標示審核狀態，不改變生效來源：編輯面板以 `source_chip`（來源）與 `review_chip`（人工已審核）兩個標籤並列，條目列表與來源譯文列表同樣分開顯示；「審核狀態」篩選與「目前生效來源」篩選互相獨立、可組合。
 

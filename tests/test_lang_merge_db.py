@@ -110,6 +110,121 @@ def test_stage1_fills_pending_from_database(tmp_path, monkeypatch, db_path):
     assert "item.foo.a" in manifest["outputs"]["assets/foo/lang/zh_tw.json"]["entries"]
 
 
+def test_stage1_does_not_apply_database_value_equal_to_english(tmp_path, monkeypatch):
+    """資料庫的 no-op 值不能被資源包當成已完成翻譯。"""
+    db_path = tmp_path / "same-as-source.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.same",
+                "Caravane",
+                "Caravane",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.translated",
+                "Steel Casing",
+                "鋼製外殼",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path)
+
+    inp = tmp_path / "same-as-source-in"
+    _write(
+        inp / "assets" / "foo" / "lang" / "en_us.json",
+        {
+            "item.foo.same": "Caravane",
+            "item.foo.translated": "Steel Casing",
+        },
+    )
+    out = tmp_path / "same-as-source-out"
+    list(merge_zhcn_to_zhtw_from_folder(str(inp), str(out), only_process_lang=True))
+
+    lang_output = out / "lang_output"
+    translated = lang_output / "assets" / "foo" / "lang" / "zh_tw.json"
+    pending = next(lang_output.rglob("en_us.json"))
+    assert json.loads(translated.read_text(encoding="utf-8")) == {
+        "item.foo.translated": "鋼製外殼"
+    }
+    assert json.loads(pending.read_text(encoding="utf-8")) == {
+        "item.foo.same": "Caravane"
+    }
+
+    with merge_db_fill(use_db=True, version="1.21.1") as fill:
+        assert fill is not None
+        provenance: dict[str, dict] = {}
+        final, remaining, hits = fill.fill(
+            "foo",
+            {},
+            {"item.foo.same": "Caravane"},
+            source_provenance_by_key=provenance,
+        )
+        assert final == {}
+        assert remaining == {"item.foo.same": "Caravane"}
+        assert hits == 0
+        assert fill.filled == 0
+        assert fill.skipped_same_as_source == 1
+        assert provenance == {}
+
+
+def test_stage2_keeps_database_noop_in_pending_instead_of_assets(tmp_path, monkeypatch):
+    """Stage 2 也必須把資料庫 no-op 留在待翻譯，不得寫入資源包 assets。"""
+    db_path = tmp_path / "stage2-same-as-source.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.same",
+                "Caravane",
+                "Caravane",
+                source=SRC_MANUAL,
+            ),
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path)
+
+    lang_output = tmp_path / "stage2-output"
+    _write(
+        lang_output
+        / "待翻譯"
+        / "foo_extracted"
+        / "assets"
+        / "foo"
+        / "lang"
+        / "en_us.json",
+        {
+            "item.foo.same": "Caravane",
+        },
+    )
+    list(
+        merge_extracted_to_assets(
+            lang_output,
+            use_translation_db=True,
+            translation_db_version="1.21.1",
+        )
+    )
+
+    target = lang_output / "assets" / "foo" / "lang" / "zh_tw.json"
+    assert not target.exists()
+    pending = next(lang_output.rglob("en_us.json"))
+    assert json.loads(pending.read_text(encoding="utf-8")) == {
+        "item.foo.same": "Caravane"
+    }
+
+
 def test_zip_batch_keeps_database_identity_after_global_path_switch(
     tmp_path, monkeypatch
 ):

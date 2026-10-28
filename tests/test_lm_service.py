@@ -28,7 +28,9 @@ def test_run_lm_translation_service_uses_log_limiter(monkeypatch):
     seen = []
 
     monkeypatch.setattr(lm_service, "ensure_pipeline_logging", lambda: None)
-    monkeypatch.setattr(lm_service.UI_LOG_HANDLER, "set_session", lambda s: seen.append(s))
+    monkeypatch.setattr(
+        lm_service.UI_LOG_HANDLER, "set_session", lambda s: seen.append(s)
+    )
 
     def fake_gen(*args, **kwargs):
         yield {"log": "raw-1", "progress": 0.25}
@@ -101,3 +103,50 @@ def test_run_lm_translation_service_skips_when_limiter_returns_none(monkeypatch)
     assert session.logs == ["filtered:raw-2"]
     assert session.progress == [0.5]
     assert session.calls[-1] == "finish"
+
+
+def test_run_lm_translation_service_streams_progress_and_batch_events(monkeypatch):
+    """流水線 LM 必須在 API 工作期間即時寫入進度與共用批次事件。"""
+    session = _Session()
+    session.task_id = "task-pipeline"
+    mirrored = []
+
+    monkeypatch.setattr(lm_service, "ensure_pipeline_logging", lambda: None)
+    monkeypatch.setattr(lm_service.UI_LOG_HANDLER, "set_session", lambda _s: None)
+    monkeypatch.setattr(
+        lm_service,
+        "mirror_session_log",
+        lambda _session, _logger, text, level="info", **_kwargs: mirrored.append(
+            (level, text)
+        ),
+    )
+    monkeypatch.setattr(lm_service.GLOBAL_LOG_LIMITER, "filter", lambda update: update)
+    monkeypatch.setattr(lm_service.GLOBAL_LOG_LIMITER, "flush", lambda: None)
+
+    def fake_gen(*_args, **kwargs):
+        # This callback executes before the generator yields again, simulating
+        # a long provider request.  The session must already contain the log.
+        kwargs["update_sink"]({"log": "live-progress", "progress": 0.35})
+        kwargs["event_sink"](
+            {
+                "kind": "batch_start",
+                "operation": "translate",
+                "provider": "gemini",
+                "model": "model-pool",
+                "batch_index": 1,
+                "batch_total": 2,
+                "batch_size": 4,
+                "expected_count": 4,
+            }
+        )
+        assert session.logs == ["live-progress"]
+        yield {"log": "after-progress", "progress": 0.5}
+
+    monkeypatch.setattr(lm_service, "lm_translate_gen", fake_gen)
+
+    lm_service.run_lm_translation_service("in", "out", session)
+
+    assert session.logs == ["live-progress", "after-progress"]
+    assert session.progress == [0.35, 0.5]
+    assert mirrored and mirrored[0][0] == "info"
+    assert "[LM 翻譯][批次 1/2]" in mirrored[0][1]

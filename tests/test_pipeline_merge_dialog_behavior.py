@@ -11,8 +11,11 @@ from types import SimpleNamespace
 import flet as ft
 import pytest
 
+from app.views.merge import merge_db_options
+from app.views.moddb import version_picker
 from app.views.pipeline import pipeline_merge_dialog as mod
 from tests.conftest import _make_page, mock_filepicker
+from translation_tool.translation_db import DbSettings
 
 
 def _walk(control):
@@ -66,6 +69,29 @@ class _Env:
         self.snapshots = []
         self.cfg: dict = {}
         self.picker = mock_filepicker()
+        self.db_settings = DbSettings(
+            enabled=True,
+            merge_enabled=True,
+            version="1.21.1",
+            path=str(tmp_path / "test-mod-db.sqlite"),
+        )
+        monkeypatch.setattr(
+            merge_db_options, "load_db_settings", lambda: self.db_settings
+        )
+        monkeypatch.setattr(
+            merge_db_options,
+            "summarize_database",
+            lambda *_args: {
+                "entries": 1,
+                "progress": 100,
+                "versions": ["1.21.1"],
+            },
+        )
+        monkeypatch.setattr(
+            version_picker,
+            "merge_target_version_choices",
+            lambda *_args: ["1.21.1"],
+        )
         monkeypatch.setattr(mod, "load_config", lambda: self.cfg)
 
     def open(self, **kwargs):
@@ -225,6 +251,20 @@ def test_start_accepts_a_new_output_dir_without_creating_it(env, tmp_path):
     _button(dialog, "確定執行").on_click(None)
     assert not (tmp_path / "new" / "out").exists()
     assert not any("輸出目錄" in m for m in env.snacks)
+
+
+def test_start_rejects_database_merge_without_target_version(env):
+    env.db_settings = DbSettings(
+        enabled=True,
+        merge_enabled=True,
+        version="",
+        path=str(env.out / "test-mod-db.sqlite"),
+    )
+    dialog = env.open()
+    _button(dialog, "確定執行").on_click(None)
+    assert dialog.open is True
+    assert env.runs == []
+    assert any("全域未指定版本" in text for text in _texts(dialog))
 
 
 def test_start_rejects_when_no_language_code_selected(env):

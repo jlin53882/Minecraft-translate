@@ -811,7 +811,14 @@ def run_kubejs_pipeline(
                         + 1
                     )
 
-                snapshot_relative = Path("sources") / storage_id / fingerprint / "raw"
+                # Keep the full fingerprint in the source metadata, but use a
+                # bounded directory component for the on-disk snapshot.  The
+                # full run/source layout is already deeply nested; retaining
+                # all 64 SHA-256 characters here makes Windows temporary
+                # manifest writes exceed MAX_PATH.
+                snapshot_relative = (
+                    Path("sources") / storage_id / fingerprint[:20] / "raw"
+                )
                 source_snapshot = staging_root / snapshot_relative
                 can_reuse = (
                     mode == "incremental"

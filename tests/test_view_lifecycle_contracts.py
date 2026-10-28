@@ -382,6 +382,10 @@ def test_merge_worker_exception_ends_the_session_instead_of_hanging(monkeypatch)
     view.folder_path_field.value = "/in"
     view.output_dir_field.value = "/out"
     view.input_mode_group.value = "folder"
+    # This test targets the worker exception boundary, not database-option
+    # admission.  Disable the optional DB merge so a machine-local config with
+    # no selected version cannot return before the worker is launched.
+    view.db_options.switch.value = False
 
     def boom(**kwargs):
         raise RuntimeError("service exploded")

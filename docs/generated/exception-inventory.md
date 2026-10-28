@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **365** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **369** 項；其中 **102** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 327 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 331 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -153,6 +153,11 @@
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary reports unexpected failures |
 | `app/views/moddb/cleanup_dialog.py:CleanupDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._start_scope_options_load.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._preview.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary reports UI error |
+| `app/views/moddb/duplicate_cleanup_dialog.py:DuplicateCleanupDialog._launch` | BLE001 | 已記錄／回報 | restore dialog when worker cannot launch |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to.scroll` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響清單 |
 | `app/views/moddb/entries_panel.py:EntriesPanel._scroll_list_to` | BLE001 | 已記錄／回報 | 排程失敗不影響清單 |
 | `app/views/moddb/entry_selection.py:select_entry.load` | BLE001 | 已記錄／回報 | worker 邊界：回報錯誤並恢復編輯區 |
@@ -234,7 +239,6 @@
 | `translation_tool/core/jar_processor_extract.py:extract_from_jar_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/jar_processor_extract.py:run_extraction_process_impl._scan_in_background` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/jar_processor_extract.py:run_extraction_process_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/jar_processor_preview.py:_scan_single_jar_for_preview` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/jar_processor_preview.py:preview_extraction_generator_impl` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
 | `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_status` | BLE001/S110 | 盡力而為（靜默） | UI 狀態回報失敗不可中斷翻譯 |
@@ -242,6 +246,7 @@
 | `translation_tool/core/lang_merge_content_copy.py:_patchouli_compare` | BLE001 | 盡力而為（靜默） | 讀不出來就無從比對，維持原本流程 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 單一檔案失敗不中斷整批統計，已留 debug 紀錄 |
+| `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | invalid source is quarantined, never rewritten |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -256,9 +261,7 @@
 | `translation_tool/core/lang_merge_content_patchers.py:patch_localized_content_json_impl` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/lang_merge_content_patchers.py:patch_localized_content_json_impl` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/lang_merge_db.py:open_merge_db_fill` | BLE001 | 已記錄／回報 | DB 補譯不可讓正常合併失敗 |
-| `translation_tool/core/lang_merge_extracted_assets.py:_cleanup_single_mod_extracted` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_safe_session_log` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lang_merge_extracted_assets.py:_cleanup_extracted_dirs` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
 | `translation_tool/core/lang_merge_extracted_assets.py:_merge_extracted_to_assets` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
@@ -283,6 +286,7 @@
 | `translation_tool/core/lm_batch_budget.py:_tiktoken_count` | BLE001 | 盡力而為（靜默） | malformed provider text uses local fallback |
 | `translation_tool/core/lm_resume.py:check_resume_feasibility` | BLE001 | 已記錄／回報 | 檢查失敗要回報給使用者，不能讓啟動流程中斷 |
 | `translation_tool/core/lm_translator.py:load_checkpoint` | BLE001 | 已記錄／回報 | 損毀的 checkpoint 視為沒有，但要留下紀錄 |
+| `translation_tool/core/lm_translator.py:_publish_directory_update` | BLE001 | 已記錄／回報 | UI sink 不得中斷翻譯 |
 | `translation_tool/core/lm_translator.py:_scan_directory_files` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_emit_runtime_event` | BLE001 | 已記錄／回報 | telemetry must never break translation |
 | `translation_tool/core/lm_translator_main.py:_payload_error_allows_shrink` | BLE001 | 已記錄／回報 | 判斷本身不能遮蔽原始錯誤 |
@@ -364,7 +368,7 @@
 | `translation_tool/utils/exceptions.py:_resolve_error_log_dir` | BLE001 | 已記錄／回報 | 設定讀不到不可讓錯誤記錄本身失敗 |
 | `translation_tool/utils/exceptions.py:_log_error_to_file` | BLE001 | 已記錄／回報 | 記錄失敗不可中斷主流程 |
 | `translation_tool/utils/jar_browser.py:_get_default_workers` | BLE001/S110 | 盡力而為（靜默） | config 讀取失敗時不 blocking，直接用 fallback |
-| `translation_tool/utils/jar_browser.py:_scan_single_jar` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `translation_tool/utils/jar_browser.py:_scan_single_jar_detailed` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/log_unit.py:_get_caller_logger_name` | BLE001/S110 | 盡力而為（靜默） | logging 自身失敗不可再記錄（會遞迴），退回預設 logger 名稱 |
 | `translation_tool/utils/log_unit.py:_log` | BLE001/S110 | 盡力而為（靜默） | logging 自身失敗不可再記錄（會遞迴），也不可中斷呼叫端 |
 | `translation_tool/utils/log_unit.py:log_exception` | BLE001/S110 | 盡力而為（靜默） | logging 自身失敗不可再記錄（會遞迴），也不可中斷呼叫端 |
