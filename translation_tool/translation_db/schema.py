@@ -1013,8 +1013,7 @@ def _backup_before_entry_origin_migration(
 def _migrate_entry_origin_v13(conn: sqlite3.Connection) -> None:
     """確認 v13 的可回寫來源追蹤表已安裝。"""
     exists = conn.execute(
-        "SELECT 1 FROM sqlite_master "
-        "WHERE type='table' AND name='entry_origin'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entry_origin'"
     ).fetchone()
     if exists is None:
         raise sqlite3.DatabaseError("schema v13 缺少 entry_origin 表")
@@ -1040,8 +1039,7 @@ def _backup_before_source_reference_migration(
 def _migrate_source_reference_v14(conn: sqlite3.Connection) -> None:
     """確認 v14 的跨格式來源引用表已安裝。"""
     exists = conn.execute(
-        "SELECT 1 FROM sqlite_master "
-        "WHERE type='table' AND name='source_reference'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='source_reference'"
     ).fetchone()
     if exists is None:
         raise sqlite3.DatabaseError("schema v14 缺少 source_reference 表")
@@ -1067,8 +1065,7 @@ def _backup_before_entry_origin_scope_migration(
 def _migrate_entry_origin_scope_v15(conn: sqlite3.Connection) -> None:
     """把 ``pack_scope`` 納入 entry_origin 唯一鍵，避免不同模組包互相覆蓋。"""
     exists = conn.execute(
-        "SELECT 1 FROM sqlite_master "
-        "WHERE type='table' AND name='entry_origin'"
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='entry_origin'"
     ).fetchone()
     if exists is None:
         raise sqlite3.DatabaseError("schema v15 缺少 entry_origin 表")

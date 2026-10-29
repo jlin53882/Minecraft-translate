@@ -3317,7 +3317,9 @@ class TranslationDB(
         引用不是翻譯 entry；每次匯入只更新同一個來源快照，並保留
         ``missing``／``ambiguous`` 狀態，避免把未知 key 猜成可翻譯文字。
         """
-        scopes = {reference.pack_scope for reference in references if reference.pack_scope}
+        scopes = {
+            reference.pack_scope for reference in references if reference.pack_scope
+        }
         if pack_scope:
             scopes.add(pack_scope)
         if not scopes:
@@ -3330,10 +3332,7 @@ class TranslationDB(
                 )
             rows: list[tuple[Any, ...]] = []
             for reference in references:
-                where = (
-                    "e.mc_version=? AND e.kind=? AND e.key=? "
-                    "AND eo.pack_scope=?"
-                )
+                where = "e.mc_version=? AND e.kind=? AND e.key=? AND eo.pack_scope=?"
                 params: list[Any] = [
                     version,
                     reference.target_kind,
@@ -3352,7 +3351,11 @@ class TranslationDB(
                 if len(candidates) == 1:
                     status, detail, target_id = "resolved", "", int(candidates[0][0])
                 elif not candidates:
-                    status, detail, target_id = "missing", "找不到同一模組包的語言定義", None
+                    status, detail, target_id = (
+                        "missing",
+                        "找不到同一模組包的語言定義",
+                        None,
+                    )
                 else:
                     status = "ambiguous"
                     detail = f"同一模組包找到 {len(candidates)} 個語言定義"

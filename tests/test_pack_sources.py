@@ -67,7 +67,9 @@ def test_pack_sources_keep_file_identity_and_skip_dynamic_text(tmp_path):
         "client_scripts/b/main.js",
     }
     assert not any("Text.translate" in item.en_us for item in script_items)
-    assert not any(issue["reason"] == "kubejs_lang_reference" for issue in result.issues)
+    assert not any(
+        issue["reason"] == "kubejs_lang_reference" for issue in result.issues
+    )
     assert any(
         item.key == "client_scripts/a/main.js|tooltip:demo:item:1"
         for item in script_items
@@ -88,7 +90,9 @@ def test_pack_sources_keep_file_identity_and_skip_dynamic_text(tmp_path):
         "demo.quest.title",
     ]
     assert len(result.references) == 3
-    assert all(reference.target_mod_id.startswith("demo@") for reference in result.references)
+    assert all(
+        reference.target_mod_id.startswith("demo@") for reference in result.references
+    )
 
 
 def test_moddb_scan_ingests_pack_sources_and_provenance(tmp_path):
@@ -108,9 +112,7 @@ def test_moddb_scan_ingests_pack_sources_and_provenance(tmp_path):
         assert db._one("SELECT COUNT(*) FROM entry_origin")[0] > 0
         kinds = {row[0] for row in db._q("SELECT DISTINCT kind FROM entry", ())}
         assert {"lang", "kubejs_script", "ftb_quests"} <= kinds
-        entry_id = db._one(
-            "SELECT id FROM entry WHERE kind='kubejs_script' LIMIT 1"
-        )[0]
+        entry_id = db._one("SELECT id FROM entry WHERE kind='kubejs_script' LIMIT 1")[0]
         assert db.entry_origins(entry_id)[0].source_path.endswith(".js")
         refs = db.source_references("1.21.1")
         assert len(refs) == 3

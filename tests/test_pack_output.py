@@ -20,13 +20,7 @@ def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Pa
         '{demo.quest.lang.title:"A quest language title"}', encoding="utf-8"
     )
     literal_quest = (
-        tmp_path
-        / "config"
-        / "ftbquests"
-        / "quests"
-        / "chapters"
-        / "a"
-        / "literal.snbt"
+        tmp_path / "config" / "ftbquests" / "quests" / "chapters" / "a" / "literal.snbt"
     )
     literal_quest.write_text(
         '{id:"literal",title:"Literal quest title"}', encoding="utf-8"
@@ -56,25 +50,19 @@ def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Pa
             "SELECT id FROM entry WHERE kind='ftb_quests' "
             "AND key LIKE '%|root.title|id:literal' LIMIT 1"
         )[0]
-        lang_id = db._one(
-            "SELECT id FROM entry WHERE kind='ftb_quest_lang' LIMIT 1"
-        )[0]
+        lang_id = db._one("SELECT id FROM entry WHERE kind='ftb_quest_lang' LIMIT 1")[0]
         db.save_manual(asset_id, "資產翻譯", propagate=False)
         db.save_manual(script_id, "工具提示翻譯", propagate=False)
         db.save_manual(quest_id, "任務標題翻譯", propagate=False)
         db.save_manual(lang_id, "任務語系翻譯", propagate=False)
 
         output = tmp_path.parent / f"{tmp_path.name}-overlay"
-        report = export_pack_overlay(
-            db, tmp_path, "1.21.1", output, pack_scope=scope
-        )
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
         assert report.ok
         assert report.entries_applied >= 4
 
         lang = json.loads(
-            (output / "kubejs/assets/demo/lang/zh_tw.json").read_text(
-                encoding="utf-8"
-            )
+            (output / "kubejs/assets/demo/lang/zh_tw.json").read_text(encoding="utf-8")
         )
         assert lang["item.demo.asset"] == "資產翻譯"
 
@@ -90,9 +78,7 @@ def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Pa
             )
         )
         assert str(quest["title"]) == "任務標題翻譯"
-        assert not (
-            output / "config/ftbquests/quests/chapters/b/chapter.snbt"
-        ).exists()
+        assert not (output / "config/ftbquests/quests/chapters/b/chapter.snbt").exists()
 
         lang_path = output / "config/ftbquests/quests/lang/zh_tw/chapter.snbt"
         with lang_path.open(encoding="utf-8") as stream:
@@ -122,7 +108,9 @@ def test_export_rejects_a_changed_source_before_writing(tmp_path: Path):
         )[0]
         db.save_manual(entry_id, "變更後不可套用", propagate=False)
         source = tmp_path / "kubejs/client_scripts/a/main.js"
-        source.write_text(source.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8")
+        source.write_text(
+            source.read_text(encoding="utf-8") + "\n// changed\n", encoding="utf-8"
+        )
 
         output = tmp_path.parent / f"{tmp_path.name}-overlay"
         try:

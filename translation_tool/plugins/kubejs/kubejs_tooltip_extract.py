@@ -641,13 +641,14 @@ def extract(
                     content = f.read()
 
                 tooltip_ranges = []
-                for tooltip_match in re.finditer(
-                    r"ItemEvents\.tooltip\s*\(", content
-                ):
+                for tooltip_match in re.finditer(r"ItemEvents\.tooltip\s*\(", content):
                     tooltip_body = extract_call_args(content, tooltip_match.end())
                     if tooltip_body is not None:
                         tooltip_ranges.append(
-                            (tooltip_match.end(), tooltip_match.end() + len(tooltip_body))
+                            (
+                                tooltip_match.end(),
+                                tooltip_match.end() + len(tooltip_body),
+                            )
                         )
 
                 # 1. 處理 event.add(...)  ✅改用括號掃描，避免 regex 截斷造成括號/引號警告
@@ -713,9 +714,9 @@ def extract(
                                 # 純字串陣列
                                 for i, txt in enumerate(extract_array_strings(args[1])):
                                     if not should_skip_text(txt, skip_chinese=False):
-                                        extracted[f"{source_file}|{item_id}.{n}.{i}"] = (
-                                            clean_text(txt)
-                                        )
+                                        extracted[
+                                            f"{source_file}|{item_id}.{n}.{i}"
+                                        ] = clean_text(txt)
 
                 # 2. 處理 Ponder 劇情文字 (scene.text)
                 for m in re.finditer(r"scene\.text\s*\((.+?)\)", content, re.DOTALL):

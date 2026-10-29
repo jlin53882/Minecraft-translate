@@ -133,6 +133,8 @@ def _extract_js_call_args(text: str, start: int) -> str | None:
                 return text[start:i]
         i += 1
     return None
+
+
 _LITERAL_EXPR = re.compile(
     r"^(?:Text|Component)\.(?:of|literal|raw|red|green|blue|gold|yellow|gray|grey|white|black|aqua|dark[A-Za-z]+)\s*\(",
     re.IGNORECASE,
@@ -206,7 +208,9 @@ def _pack_scope(root: Path) -> str:
     return f"{root.name or 'pack'}@{digest}"
 
 
-def _issue(path: Path, reason: str, detail: str, *, status: str = "pending") -> dict[str, str]:
+def _issue(
+    path: Path, reason: str, detail: str, *, status: str = "pending"
+) -> dict[str, str]:
     return {
         "source_archive": str(path),
         "source_member": path.name,
@@ -234,20 +238,33 @@ def _iter_files(root: Path, suffixes: tuple[str, ...], result: PackScanResult):
             with os.scandir(current) as entries:
                 children = sorted(entries, key=lambda entry: entry.name.lower())
         except OSError as exc:
-            result.issues.append(_issue(current, "source_read_failed", str(exc), status="parse_failed"))
+            result.issues.append(
+                _issue(current, "source_read_failed", str(exc), status="parse_failed")
+            )
             continue
         for entry in children:
             path = Path(entry.path)
             try:
                 if entry.is_symlink() or _is_reparse_point(path):
-                    result.issues.append(_issue(path, "source_link_skipped", "symbolic link 或 junction 不會被追蹤"))
+                    result.issues.append(
+                        _issue(
+                            path,
+                            "source_link_skipped",
+                            "symbolic link 或 junction 不會被追蹤",
+                        )
+                    )
                     continue
                 if entry.is_dir(follow_symlinks=False):
                     pending.append(path)
-                elif entry.is_file(follow_symlinks=False) and path.suffix.lower() in suffixes:
+                elif (
+                    entry.is_file(follow_symlinks=False)
+                    and path.suffix.lower() in suffixes
+                ):
                     yield path
             except OSError as exc:
-                result.issues.append(_issue(path, "source_read_failed", str(exc), status="parse_failed"))
+                result.issues.append(
+                    _issue(path, "source_read_failed", str(exc), status="parse_failed")
+                )
 
 
 def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
@@ -255,7 +272,9 @@ def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
         raw = path.read_bytes()
         return raw.decode("utf-8-sig"), hashlib.sha256(raw).hexdigest()
     except (OSError, UnicodeDecodeError) as exc:
-        result.issues.append(_issue(path, "source_read_failed", str(exc), status="parse_failed"))
+        result.issues.append(
+            _issue(path, "source_read_failed", str(exc), status="parse_failed")
+        )
         return None
 
 
@@ -471,7 +490,9 @@ def _record_kubejs_reason(
         result.issues.append(_issue(Path(rel), reason, f"selector={selector}"))
 
 
-def _scan_kubejs_lang(root: Path, version: str, scope: str, result: PackScanResult) -> None:
+def _scan_kubejs_lang(
+    root: Path, version: str, scope: str, result: PackScanResult
+) -> None:
     assets = root / "assets"
     for path in _iter_files(assets, (".json",), result) if assets.is_dir() else ():
         parts = path.relative_to(root).parts
@@ -489,10 +510,19 @@ def _scan_kubejs_lang(root: Path, version: str, scope: str, result: PackScanResu
         try:
             values = json.loads(text)
         except json.JSONDecodeError as exc:
-            result.issues.append(_issue(path, "json_parse_failed", str(exc), status="parse_failed"))
+            result.issues.append(
+                _issue(path, "json_parse_failed", str(exc), status="parse_failed")
+            )
             continue
         if not isinstance(values, dict):
-            result.issues.append(_issue(path, "json_root_not_object", "lang JSON 必須是 object", status="parse_failed"))
+            result.issues.append(
+                _issue(
+                    path,
+                    "json_root_not_object",
+                    "lang JSON 必須是 object",
+                    status="parse_failed",
+                )
+            )
             continue
         parts = path.relative_to(root).parts
         namespace = parts[1] if len(parts) > 1 else "kubejs"
@@ -517,8 +547,12 @@ def _scan_kubejs_lang(root: Path, version: str, scope: str, result: PackScanResu
             )
 
 
-def _scan_ftb_quests(root: Path, version: str, scope: str, result: PackScanResult) -> None:
-    locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]] = defaultdict(dict)
+def _scan_ftb_quests(
+    root: Path, version: str, scope: str, result: PackScanResult
+) -> None:
+    locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]] = defaultdict(
+        dict
+    )
     lang_root = root / "lang"
     if lang_root.is_dir():
         for path in _iter_files(lang_root, (".snbt",), result):
@@ -529,7 +563,14 @@ def _scan_ftb_quests(root: Path, version: str, scope: str, result: PackScanResul
             _, digest = loaded
             data = walk_snbt_file(str(path))
             if data is None:
-                result.issues.append(_issue(path, "snbt_parse_failed", "語系 SNBT 無法解析", status="parse_failed"))
+                result.issues.append(
+                    _issue(
+                        path,
+                        "snbt_parse_failed",
+                        "語系 SNBT 無法解析",
+                        status="parse_failed",
+                    )
+                )
                 continue
             locale = _locale_for_lang_file(path, lang_root)
             rel = _lang_relative(path, lang_root, locale)
@@ -545,14 +586,18 @@ def _scan_ftb_quests(root: Path, version: str, scope: str, result: PackScanResul
                 locale_values[(rel, key)][locale] = (value, digest, source_path)
             result.sources_found.append(path.relative_to(root).as_posix())
     for (rel, lang_key), locales in sorted(locale_values.items()):
-        source_entry = locales.get("en_us") or locales.get("zh_cn") or locales.get("zh_tw")
+        source_entry = (
+            locales.get("en_us") or locales.get("zh_cn") or locales.get("zh_tw")
+        )
         if source_entry is None:
             continue
         source, source_digest, source_path = source_entry
         if not source:
             continue
         digest = hashlib.sha256(
-            "|".join(f"{locale}:{value[1]}" for locale, value in sorted(locales.items())).encode()
+            "|".join(
+                f"{locale}:{value[1]}" for locale, value in sorted(locales.items())
+            ).encode()
         ).hexdigest()
         if is_lang_key_ref_like(source):
             _append_references(
@@ -592,7 +637,14 @@ def _scan_ftb_quests(root: Path, version: str, scope: str, result: PackScanResul
         _, digest = loaded
         data = walk_snbt_file(str(path))
         if data is None:
-            result.issues.append(_issue(path, "snbt_parse_failed", "任務 SNBT 無法解析", status="parse_failed"))
+            result.issues.append(
+                _issue(
+                    path,
+                    "snbt_parse_failed",
+                    "任務 SNBT 無法解析",
+                    status="parse_failed",
+                )
+            )
             continue
         rel = path.relative_to(root).as_posix()
         _scan_quest_value(data, rel, version, scope, digest, result, "root")
@@ -614,23 +666,41 @@ def _scan_quest_value(
             field_value = value.get(field_name)
             if isinstance(field_value, snbt.String):
                 _append_quest_item(
-                    str(field_value), rel, selector, field_name, object_id,
-                    version, scope, digest, result,
+                    str(field_value),
+                    rel,
+                    selector,
+                    field_name,
+                    object_id,
+                    version,
+                    scope,
+                    digest,
+                    result,
                 )
             elif isinstance(field_value, List):
                 for index, slot in enumerate(field_value):
                     if isinstance(slot, snbt.String):
                         _append_quest_item(
-                            str(slot), rel, selector, f"{field_name}[{index}]", object_id,
-                            version, scope, digest, result,
+                            str(slot),
+                            rel,
+                            selector,
+                            f"{field_name}[{index}]",
+                            object_id,
+                            version,
+                            scope,
+                            digest,
+                            result,
                         )
         for name, child in value.items():
             if isinstance(child, (Compound, List)):
-                _scan_quest_value(child, rel, version, scope, digest, result, f"{selector}.{name}")
+                _scan_quest_value(
+                    child, rel, version, scope, digest, result, f"{selector}.{name}"
+                )
     elif isinstance(value, List):
         for index, child in enumerate(value):
             if isinstance(child, (Compound, List)):
-                _scan_quest_value(child, rel, version, scope, digest, result, f"{selector}[{index}]")
+                _scan_quest_value(
+                    child, rel, version, scope, digest, result, f"{selector}[{index}]"
+                )
 
 
 def _append_quest_item(
@@ -661,7 +731,9 @@ def _append_quest_item(
         _make_item(
             kind=KIND_FTB_QUESTS,
             mod_id=f"ftbquests@{scope}",
-            key=f"{rel}|{selector}.{field}|id:{object_id}" if object_id else f"{rel}|{selector}.{field}",
+            key=f"{rel}|{selector}.{field}|id:{object_id}"
+            if object_id
+            else f"{rel}|{selector}.{field}",
             text=text,
             rel=rel,
             selector=f"{selector}.{field}",
@@ -682,7 +754,11 @@ def _top_level_lang(root: Compound) -> list[tuple[str, str]]:
             if text and is_extractable_line(text) and not is_lang_key_ref(text):
                 values.append((str(key), text))
         elif isinstance(value, List):
-            slots = [str(item) for item in value if isinstance(item, snbt.String) and is_extractable_line(str(item))]
+            slots = [
+                str(item)
+                for item in value
+                if isinstance(item, snbt.String) and is_extractable_line(str(item))
+            ]
             if slots:
                 values.append((str(key), "\n".join(slots)))
     return values
@@ -700,10 +776,14 @@ def _record_lang_references(
     for key, value in root.items():
         if not any(str(key).endswith(suffix) for suffix in _LANG_SUFFIXES):
             continue
-        values = [str(value)] if isinstance(value, snbt.String) else (
-            [str(item) for item in value if isinstance(item, snbt.String)]
-            if isinstance(value, List)
-            else []
+        values = (
+            [str(value)]
+            if isinstance(value, snbt.String)
+            else (
+                [str(item) for item in value if isinstance(item, snbt.String)]
+                if isinstance(value, List)
+                else []
+            )
         )
         for index, text in enumerate(values):
             _append_references(
@@ -758,8 +838,7 @@ def _locale_for_lang_file(path: Path, root: Path) -> str:
 def _lang_relative(path: Path, root: Path, locale: str) -> str:
     relative = path.relative_to(root).parts
     if relative and (
-        relative[0].lower() == locale
-        or Path(relative[0]).stem.lower() == locale
+        relative[0].lower() == locale or Path(relative[0]).stem.lower() == locale
     ):
         relative = relative[1:]
     return "/".join(relative) or path.name
@@ -798,7 +877,8 @@ def _make_item(
         source_path=rel,
         source_selector=selector,
         source_hash=digest,
-        source_format=source_format or (
+        source_format=source_format
+        or (
             "kubejs-js"
             if kind == KIND_KUBEJS_SCRIPT
             else "ftb-snbt"
@@ -825,17 +905,12 @@ def _resolve_reference_targets(result: PackScanResult) -> None:
     language_items = [
         item
         for item in result.items
-        if item.kind == KIND_LANG
-        and item.source_format in {"lang-json", "kubejs-js"}
+        if item.kind == KIND_LANG and item.source_format in {"lang-json", "kubejs-js"}
     ]
     resolved: list[SourceReference] = []
     for reference in result.references:
         candidates = sorted(
-            {
-                item.mod_id
-                for item in language_items
-                if item.key == reference.target_key
-            }
+            {item.mod_id for item in language_items if item.key == reference.target_key}
         )
         target_mod_id = candidates[0] if len(candidates) == 1 else ""
         resolved.append(replace(reference, target_mod_id=target_mod_id))

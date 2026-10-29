@@ -446,9 +446,7 @@ class ScanPanel(ft.Column):
         self.mode = key
         zip_mode = key == "zip"
         self.path_label.value = (
-            "翻譯 ZIP（檔案或資料夾）"
-            if zip_mode
-            else "mods 資料夾或模組包根目錄"
+            "翻譯 ZIP（檔案或資料夾）" if zip_mode else "mods 資料夾或模組包根目錄"
         )
         self.path_field.hint_text = (
             "請選擇 ZIP 檔，或放有 ZIP 的資料夾"

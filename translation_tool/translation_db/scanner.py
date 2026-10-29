@@ -1215,9 +1215,7 @@ def scan_folder_generator(
             for issue in pack_result.issues:
                 report.add_issue(issue)
             report.stats.add(
-                _ingest_pack_result(
-                    db, preview, pack_result, options.version, convert
-                )
+                _ingest_pack_result(db, preview, pack_result, options.version, convert)
             )
     has_pack_content = bool(
         pack_result.sources_found

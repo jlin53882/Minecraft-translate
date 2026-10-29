@@ -112,7 +112,9 @@ def format_policy_for_items(
         not any(kind is not None for kind in kinds)
         and normalized_profile in {"md", "patch"}
     )
-    has_ftb_route = any(kind in {KIND_FTB_QUESTS, KIND_FTB_QUEST_LANG} for kind in kinds)
+    has_ftb_route = any(
+        kind in {KIND_FTB_QUESTS, KIND_FTB_QUEST_LANG} for kind in kinds
+    )
     has_lang_route = KIND_LANG in kinds or normalized_profile == KIND_LANG
 
     sections = [FORMAT_POLICY_PROMPT]

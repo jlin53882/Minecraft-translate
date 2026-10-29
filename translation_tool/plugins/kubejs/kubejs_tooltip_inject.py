@@ -741,9 +741,7 @@ def inject(
                     )
                     index += 1
                     key = (
-                        stable_key
-                        if stable_key in current_translations
-                        else legacy_key
+                        stable_key if stable_key in current_translations else legacy_key
                     )
                     if key in current_translations:
                         return replace_text_in_text_obj(

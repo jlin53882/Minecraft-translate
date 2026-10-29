@@ -35,9 +35,7 @@ from translation_tool.translation_db.schema import (
 )
 
 _LOCALES = {"en_us", "zh_cn", "zh_tw"}
-_QUEST_FIELD = re.compile(
-    r"(?:^|\.)(title|subtitle|description(?:\[\d+\])?)$"
-)
+_QUEST_FIELD = re.compile(r"(?:^|\.)(title|subtitle|description(?:\[\d+\])?)$")
 _QUEST_ID = re.compile(r"\|id:(.+)$")
 
 
@@ -133,7 +131,14 @@ def export_pack_overlay(
         return report
     except PackOutputError:
         raise
-    except (OSError, UnicodeError, ValueError, RuntimeError, TypeError, KeyError) as exc:
+    except (
+        OSError,
+        UnicodeError,
+        ValueError,
+        RuntimeError,
+        TypeError,
+        KeyError,
+    ) as exc:
         raise PackOutputError(f"輸出 overlay 失敗，未修改來源：{exc}") from exc
     finally:
         shutil.rmtree(stage, ignore_errors=True)
@@ -158,9 +163,7 @@ def _make_plan(
         key = (target.casefold(), _target_selector(item))
         previous = seen.get(key)
         if previous is not None and previous != item.zh_tw:
-            report.conflicts.append(
-                f"目標碰撞：{target} [{_target_selector(item)}]"
-            )
+            report.conflicts.append(f"目標碰撞：{target} [{_target_selector(item)}]")
             continue
         seen[key] = item.zh_tw
         plans.append(_PlannedTranslation(item, target, item.zh_tw))
@@ -243,7 +246,9 @@ def _write_plan(pack_root: Path, stage: Path, plans: list[_PlannedTranslation]) 
             for source_path, values in kubejs_maps.items():
                 target = translated / Path(source_path).with_suffix(".json")
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(json.dumps(values, ensure_ascii=False), encoding="utf-8")
+                target.write_text(
+                    json.dumps(values, ensure_ascii=False), encoding="utf-8"
+                )
             result = inject(
                 str(pack_root / "kubejs"),
                 str(translated),
@@ -283,8 +288,13 @@ def _write_plan(pack_root: Path, stage: Path, plans: list[_PlannedTranslation]) 
 
 def _source_path(pack_root: Path, item: EffectivePackTranslation) -> Path:
     origin = item.origin
-    if origin.source_kind == KIND_FTB_QUESTS or origin.source_kind == KIND_FTB_QUEST_LANG:
-        return _safe_join(pack_root / "config" / "ftbquests" / "quests", origin.source_path)
+    if (
+        origin.source_kind == KIND_FTB_QUESTS
+        or origin.source_kind == KIND_FTB_QUEST_LANG
+    ):
+        return _safe_join(
+            pack_root / "config" / "ftbquests" / "quests", origin.source_path
+        )
     return _safe_join(pack_root / "kubejs", origin.source_path)
 
 
@@ -325,7 +335,9 @@ def _kubejs_lang_target(source_path: str) -> str:
     relative = _safe_relative(source_path)
     parts = list(PurePosixPath(relative).parts)
     if len(parts) < 3 or parts[-2].lower() != "lang":
-        raise PackOutputError(f"KubeJS lang 來源路徑不符合 assets/<namespace>/lang：{source_path}")
+        raise PackOutputError(
+            f"KubeJS lang 來源路徑不符合 assets/<namespace>/lang：{source_path}"
+        )
     parts[-1] = "zh_tw.json"
     return "/".join(parts)
 
