@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import re
+from itertools import islice
 from typing import Any
 
 from translation_tool.core.official_locale import (
@@ -103,6 +104,7 @@ class _LocalContextBuilder:
         params: tuple[Any, ...],
         *,
         order_key,
+        limit: int | None = None,
     ) -> list[tuple]:
         """分別查詢語系 kind，再合併已排序的 index stream。
 
@@ -119,7 +121,10 @@ class _LocalContextBuilder:
             )
             for kind in _LANGUAGE_KINDS
         ]
-        return list(heapq.merge(*streams, key=order_key))
+        merged = heapq.merge(*streams, key=order_key)
+        if limit is None:
+            return list(merged)
+        return list(islice(merged, max(0, limit)))
 
     def _db_context_item(
         self,
@@ -320,6 +325,7 @@ class _LocalContextBuilder:
             "AND trim(f.zh_tw)<>'' ORDER BY e.id LIMIT 5000",
             (mod_id, mc_version),
             order_key=lambda row: int(row[0]),
+            limit=5000,
         )
         remaining = 5000 - len(current_rows)
         other_rows = (
@@ -330,6 +336,7 @@ class _LocalContextBuilder:
                 "AND trim(f.zh_tw)<>'' ORDER BY e.mc_version, e.id LIMIT ?",
                 (mod_id, mc_version, remaining),
                 order_key=lambda row: (str(row[2]), int(row[0])),
+                limit=remaining,
             )
             if remaining
             else []
