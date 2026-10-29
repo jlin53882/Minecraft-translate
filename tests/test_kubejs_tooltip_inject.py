@@ -196,6 +196,7 @@ def _run_inject_fixture(
     tmp_path: Path,
     source_js: str,
     translations: dict[str, str],
+    script_relative: str = "client_scripts/test.js",
 ) -> tuple[dict, Path, Path]:
     """建立單一 client_scripts 注入案例並回傳結果與來源／輸出路徑。
 
@@ -208,12 +209,12 @@ def _run_inject_fixture(
         注入摘要、未修改的原始 JS 路徑與生成的輸出 JS 路徑。
     """
     original_root = tmp_path / "kubejs"
-    source_path = original_root / "client_scripts" / "test.js"
+    source_path = original_root / script_relative
     source_path.parent.mkdir(parents=True)
     source_path.write_text(source_js, encoding="utf-8")
 
     translated_root = tmp_path / "translated"
-    translation_path = translated_root / "client_scripts" / "test.json"
+    translation_path = translated_root / Path(script_relative).with_suffix(".json")
     translation_path.parent.mkdir(parents=True)
     translation_path.write_text(
         json.dumps(translations, ensure_ascii=False), encoding="utf-8"
@@ -223,7 +224,51 @@ def _run_inject_fixture(
     result = kubejs_tooltip_inject.inject(
         str(original_root), str(translated_root), str(output_root)
     )
-    return result, source_path, output_root / "client_scripts" / "test.js"
+    return result, source_path, output_root / script_relative
+
+
+def test_inject_does_not_treat_script_lang_directory_as_lang_json(
+    tmp_path: Path,
+) -> None:
+    """client_scripts/lang/ 仍是 JavaScript 目錄，不可誤寫成 JSON 輸出。"""
+    result, _, output_path = _run_inject_fixture(
+        tmp_path,
+        "event.add('minecraft:dirt', Text.of('Old text'))\n",
+        {"client_scripts/lang/tooltips.js|minecraft:dirt.0": "新工具提示"},
+        script_relative="client_scripts/lang/tooltips.js",
+    )
+
+    assert result["patched_js_files"] == 1
+    assert output_path.read_text(encoding="utf-8") == (
+        "event.add('minecraft:dirt', Text.of(\"新工具提示\"))\n"
+    )
+    assert not (output_path.with_suffix(".json")).exists()
+
+
+def test_inject_patches_legacy_event_add_alongside_clientevents_lang(
+    tmp_path: Path,
+) -> None:
+    """同檔混用 ClientEvents.lang 與舊式 event.add 時，兩者都要回寫。"""
+    source = (
+        "ClientEvents.lang('en_us', event => { "
+        "event.add('demo', 'item.demo.machine', 'Machine'); "
+        "});\n"
+        "event.add('minecraft:dirt', Text.of('Legacy text'));\n"
+    )
+    result, _, output_path = _run_inject_fixture(
+        tmp_path,
+        source,
+        {
+            "client_scripts/test.js|ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine": "機器",
+            "client_scripts/test.js|minecraft:dirt.0": "舊式翻譯",
+        },
+    )
+
+    output = output_path.read_text(encoding="utf-8")
+    assert result["patched_js_files"] == 1
+    assert 'event.add("demo", "item.demo.machine", "機器");' in output
+    assert "舊式翻譯" in output
+    assert "Legacy text" not in output
 
 
 def test_inject_event_add_text_of_writes_nested_translation(tmp_path: Path) -> None:

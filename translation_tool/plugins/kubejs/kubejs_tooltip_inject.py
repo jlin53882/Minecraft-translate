@@ -242,10 +242,26 @@ def _clientevents_lang_ranges(
     return ranges
 
 
-def _has_clientevents_lang_call(content: str) -> bool:
-    """判斷檔案是否含有語系 API，包含目前不支援的動態 locale。"""
+def _clientevents_lang_call_ranges(content: str) -> list[tuple[int, int]]:
+    """回傳所有語系 API 呼叫範圍，包含目前不支援的 locale。"""
+    ranges: list[tuple[int, int]] = []
     code = _mask_js_non_code(content)
-    return re.search(r"\bClientEvents\.lang\s*\(", code) is not None
+    for match in re.finditer(r"\bClientEvents\.lang\s*\(", code):
+        _arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if closing_index is not None:
+            ranges.append((match.start(), closing_index + 1))
+    return ranges
+
+
+def _is_kubejs_lang_json_path(path: Path) -> bool:
+    """判斷是否為標準 KubeJS ``assets/<namespace>/lang/*.json`` 檔案。"""
+    parts = tuple(part.casefold() for part in path.parts)
+    return (
+        len(parts) == 4
+        and parts[0] == "assets"
+        and parts[2] == "lang"
+        and path.suffix.casefold() == ".json"
+    )
 
 
 def _clientevents_lang_locale_at(
@@ -855,7 +871,7 @@ def inject(
             rel = ""
 
         # ---------------- Lang JSON ----------------
-        if "lang" in {part.lower() for part in relative_path.parts}:
+        if _is_kubejs_lang_json_path(script_relative):
             # ✅ 把 LM翻譯後的 lang 結果輸出到 完成（保留相對路徑）
             rel_file = Path(os.path.relpath(json_path, trans_root))
             out_path = out_root / rel_file
@@ -1003,15 +1019,16 @@ def inject(
                 translation_map=translations,
                 used_keys=used_translation_keys,
             )
-        elif not _has_clientevents_lang_call(content):
-            # 保留舊版 event.add fixture 的相容性；同檔的新式 Tooltip
-            # 仍由下方專用 writer 處理，不能讓 legacy fallback 越界改寫它。
-            content = _replace_js_call_arguments(
-                content,
-                "event.add",
-                repl_event_add,
-                excluded_ranges=_itemevents_tooltip_ranges(content),
-            )
+        # 保留舊版 event.add fixture 的相容性；同檔的新式 Lang／Tooltip
+        # 仍由各自專用 writer 處理，不能讓 legacy fallback 越界改寫它們。
+        excluded_ranges = _itemevents_tooltip_ranges(content)
+        excluded_ranges.extend(_clientevents_lang_call_ranges(content))
+        content = _replace_js_call_arguments(
+            content,
+            "event.add",
+            repl_event_add,
+            excluded_ranges=excluded_ranges,
+        )
 
         # ----------------------------
         # 2) Patch Ponder: scene.text(...)
