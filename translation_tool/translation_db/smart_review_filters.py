@@ -377,9 +377,13 @@ class SmartReviewCandidateSelectionMixin:
         entry_source = "entry e"
         if prioritize_named_keys and self._one(
             "SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?",
-            ("idx_smart_review_named_order",),
+            ("idx_smart_review_named_order_v2",),
         ):
-            entry_source = "entry e INDEXED BY idx_smart_review_named_order"
+            # The v2 expression includes kubejs_lang.  Keep the legacy index
+            # for old databases, but do not force it for the wider ORDER BY:
+            # SQLite would need a temporary sort because its CASE expression
+            # no longer matches the query.
+            entry_source = "entry e INDEXED BY idx_smart_review_named_order_v2"
         query_sql = (
             selection.reference_cte
             + "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "

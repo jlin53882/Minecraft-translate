@@ -5237,40 +5237,51 @@ class TranslationDB(
         self, mod_id: str, mc_version: str | None
     ) -> list[list[str]]:
         """載入一次模組與版本候選快照，供重複術語查找。"""
-        clauses = [
-            "e.mod_id = ?",
-            f"e.kind IN ('{KIND_LANG}', '{KIND_KUBEJS_LANG}')",
-            "f.review_status = 'reviewed'",
-            "e.en_us <> ''",
-            "f.zh_tw <> ''",
-            "e.en_us <> f.zh_tw",
-        ]
-        params: list[object] = [mod_id]
-        if mc_version:
-            clauses.append("e.mc_version = ?")
-            params.append(mc_version)
         cache_key = "reviewed_lang_candidates:" + json.dumps(
             [mod_id, mc_version], ensure_ascii=False, separators=(",", ":")
         )
 
         def load() -> list[list[str]]:
-            rows = self._q(
-                f"""
-                SELECT e.key, e.en_us, f.zh_tw
-                FROM entry e
-                JOIN effective f ON f.entry_id = e.id
-                WHERE {" AND ".join(clauses)}
-                ORDER BY e.key, e.id
-                """,
-                params,
+            def load_kind(kind: str) -> list[tuple[int, str, str, str, str]]:
+                clauses = [
+                    "e.mod_id = ?",
+                    "e.kind = ?",
+                    "f.review_status = 'reviewed'",
+                    "e.en_us <> ''",
+                    "f.zh_tw <> ''",
+                    "e.en_us <> f.zh_tw",
+                ]
+                params: list[object] = [mod_id, kind]
+                if mc_version:
+                    clauses.append("e.mc_version = ?")
+                    params.append(mc_version)
+                return self._q(
+                    f"""
+                    SELECT e.id, e.kind, e.key, e.en_us, f.zh_tw
+                    FROM entry e
+                    JOIN effective f ON f.entry_id = e.id
+                    WHERE {" AND ".join(clauses)}
+                    ORDER BY e.key, e.id
+                    """,
+                    params,
+                )
+
+            # An ``IN`` predicate over two kinds makes SQLite merge two index
+            # scans and create a temporary ORDER BY tree.  Each kind has an
+            # index-friendly stream; merge the already ordered streams in
+            # Python so the glossary cache keeps the no-temp-sort contract.
+            rows = heapq.merge(
+                load_kind(KIND_LANG),
+                load_kind(KIND_KUBEJS_LANG),
+                key=lambda row: (str(row[2]), int(row[0])),
             )
             return [
-                list(row)
+                list(row[2:])
                 for row in rows
-                if all(isinstance(value, str) for value in row)
-                and row[1].strip()
-                and row[2].strip()
-                and quality_state(row[1], row[2], kind="lang")[0] == "consistent"
+                if all(isinstance(value, str) for value in row[2:])
+                and row[3].strip()
+                and row[4].strip()
+                and quality_state(row[3], row[4], kind=str(row[1]))[0] == "consistent"
             ]
 
         return self._cached(cache_key, load)
