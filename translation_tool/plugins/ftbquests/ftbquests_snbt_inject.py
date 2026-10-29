@@ -147,6 +147,14 @@ def _write_snbt(path: str, root: Compound) -> None:
         f.write(snbt.dumps(root))
 
 
+def _load_existing_target_or_template(dst_path: str, template: Compound) -> Compound:
+    """讀取既有目標；存在但損壞時拒絕以英文模板覆蓋。"""
+    dst_root = _read_snbt(dst_path)
+    if os.path.exists(dst_path) and dst_root is None:
+        raise ValueError(f"既有目標 SNBT 無法解析，拒絕以英文模板覆蓋：{dst_path}")
+    return template if dst_root is None else dst_root
+
+
 def patch_lang_snbt_file(
     src_path: str,
     dst_path: str,
@@ -173,7 +181,7 @@ def patch_lang_snbt_file(
       - changed_keys: 有實際寫入變更的 keys
     """
     src_root = _read_snbt(src_path)
-    if not src_root:
+    if src_root is None:
         if return_details:
             return (
                 0,
@@ -188,9 +196,7 @@ def patch_lang_snbt_file(
             )
         return 0, 0
 
-    dst_root = _read_snbt(dst_path)
-    if not dst_root:
-        dst_root = src_root
+    dst_root = _load_existing_target_or_template(dst_path, src_root)
 
     changed = 0
     candidates = 0
@@ -297,7 +303,7 @@ def patch_quest_snbt_file(
     """
 
     src_root = _read_snbt(src_path)
-    if not src_root:
+    if src_root is None:
         if return_details:
             return (
                 0,
@@ -312,9 +318,7 @@ def patch_quest_snbt_file(
             )
         return 0, 0
 
-    dst_root = _read_snbt(dst_path)
-    if not dst_root:
-        dst_root = src_root
+    dst_root = _load_existing_target_or_template(dst_path, src_root)
 
     # 新版 extractor 會把 description 的每個 slot 寫成
     # ``id:<ID>|description[<index>]``；舊版 ``id:<ID>|description``

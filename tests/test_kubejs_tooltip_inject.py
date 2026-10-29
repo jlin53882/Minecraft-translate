@@ -373,6 +373,26 @@ def test_inject_itemevents_nested_text_tooltip_writes_back(tmp_path: Path) -> No
     assert source_path.read_text(encoding="utf-8") == source
 
 
+def test_inject_itemevents_direct_string_tooltip_writes_back(tmp_path: Path) -> None:
+    """直接字串 Tooltip 與 scanner 相同 selector，也必須能安全回寫。"""
+    source = (
+        "ItemEvents.tooltip(event => { "
+        "event.add('minecraft:stone', 'Old tooltip'); "
+        "});\n"
+    )
+
+    result, _, output_path = _run_inject_fixture(
+        tmp_path,
+        source,
+        {"client_scripts/test.js|tooltip:minecraft:stone:1": "直接字串翻譯"},
+    )
+
+    output = output_path.read_text(encoding="utf-8")
+    assert result["patched_js_files"] == 1
+    assert "直接字串翻譯" in output
+    assert "Old tooltip" not in output
+
+
 def test_inject_itemevents_does_not_patch_unrelated_add_inside_same_script(
     tmp_path: Path,
 ) -> None:

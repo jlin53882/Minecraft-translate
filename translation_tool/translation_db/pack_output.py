@@ -35,6 +35,8 @@ from translation_tool.translation_db.schema import (
 )
 
 _LOCALES = {"en_us", "zh_cn", "zh_tw"}
+_OUTPUT_OWNERSHIP_MARKER = ".minecraft-translate-overlay.json"
+_OUTPUT_OWNERSHIP_SCHEMA = "minecraft_translate.pack_overlay.v1"
 _QUEST_FIELD = re.compile(r"(?:^|\.)(title|subtitle|description(?:\[\d+\])?)$")
 _QUEST_ID = re.compile(r"\|id:(.+)$")
 _KUBEJS_LANG_SELECTOR = re.compile(
@@ -118,8 +120,8 @@ def export_pack_overlay(
     output = Path(output_root).expanduser().resolve()
     if not root.is_dir():
         raise PackOutputError(f"模組包根目錄不存在：{root}")
-    _validate_output_boundary(root, output)
     scope = pack_scope or pack_scope_for_root(root)
+    _validate_output_destination(root, output, scope)
     report = PackOutputReport(str(scope), str(output), bool(dry_run))
     items = db.effective_pack_translations(version, scope)
     report.entries_considered = len(items)
@@ -135,10 +137,11 @@ def export_pack_overlay(
     stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.stage-", dir=output.parent))
     try:
         report.entries_applied = _write_plan(root, stage, plans, report)
-        report.files_written = sum(1 for path in stage.rglob("*") if path.is_file())
         if not report.ok:
             raise PackOutputError(_format_report_error(report))
-        _publish_stage(stage, output, root)
+        _write_output_ownership_marker(stage, root, scope)
+        report.files_written = sum(1 for path in stage.rglob("*") if path.is_file())
+        _publish_stage(stage, output, root, scope)
         return report
     except PackOutputError:
         raise
@@ -324,14 +327,7 @@ def _write_plan(
                         f"{source_path}:{key} (KubeJS selector 未命中)"
                     )
 
-    for relative_target, values in lang_updates.items():
-        destination = stage / "kubejs" / relative_target
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            json.dumps(values, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-        )
-        applied += len(values)
-        report.entries_verified += len(values)
+    applied += _write_kubejs_lang_updates(pack_root, stage, lang_updates, report)
 
     quests_root = pack_root / "config" / "ftbquests" / "quests"
     for source_path, updates in quest_updates.items():
@@ -373,6 +369,33 @@ def _write_plan(
             report.unapplied.append(
                 f"{source_path}:{key} (lang selector 未命中或型別不符)"
             )
+    return applied
+
+
+def _write_kubejs_lang_updates(
+    pack_root: Path,
+    stage: Path,
+    lang_updates: dict[str, dict[str, str]],
+    report: PackOutputReport,
+) -> int:
+    """以來源既有 zh_tw JSON 為基底寫入本次已驗證的 KubeJS 鍵。"""
+    applied = 0
+    for relative_target, values in lang_updates.items():
+        destination = stage / "kubejs" / relative_target
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        existing_target = _safe_join(pack_root / "kubejs", relative_target)
+        merged_values: dict[str, Any] = {}
+        if existing_target.exists():
+            if not existing_target.is_file():
+                raise PackOutputError(f"KubeJS lang 目標不是檔案：{existing_target}")
+            merged_values = _read_json_object(existing_target)
+        merged_values.update(values)
+        destination.write_text(
+            json.dumps(merged_values, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        applied += len(values)
+        report.entries_verified += len(values)
     return applied
 
 
@@ -474,11 +497,73 @@ def _validate_output_boundary(root: Path, output: Path) -> None:
         raise PackOutputError("輸出目錄不可包含來源模組包")
 
 
-def _publish_stage(stage: Path, output: Path, source_root: Path) -> None:
-    """以完整快照替換輸出目錄，避免保留上一次輸出的幽靈檔案。"""
-    _validate_output_boundary(source_root, output)
-    if output.exists() and not output.is_dir():
+def _read_json_object(path: Path) -> dict[str, Any]:
+    """讀取既有 JSON object；格式錯誤時拒絕重建覆蓋。"""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise PackOutputError(f"既有 KubeJS lang JSON 無法解析：{path}") from exc
+    if not isinstance(value, dict):
+        raise PackOutputError(f"既有 KubeJS lang JSON 必須是 object：{path}")
+    return value
+
+
+def _validate_output_destination(root: Path, output: Path, scope: str) -> None:
+    """確認輸出位置安全，且非空既有目錄屬於本工具管理。"""
+    _validate_output_boundary(root, output)
+    if not output.exists():
+        return
+    if not output.is_dir():
         raise PackOutputError(f"輸出路徑不是資料夾：{output}")
+    try:
+        has_content = any(output.iterdir())
+    except OSError as exc:
+        raise PackOutputError(f"無法檢查輸出目錄：{output}") from exc
+    if not has_content:
+        return
+
+    marker = output / _OUTPUT_OWNERSHIP_MARKER
+    if marker.is_symlink() or not marker.is_file():
+        raise PackOutputError(f"輸出目錄已有未受管內容，拒絕整體替換：{output}")
+    try:
+        metadata = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise PackOutputError(f"輸出目錄 ownership marker 無法解析：{marker}") from exc
+    if not isinstance(metadata, dict):
+        raise PackOutputError(f"輸出目錄 ownership marker 格式錯誤：{marker}")
+    if (
+        metadata.get("schema") != _OUTPUT_OWNERSHIP_SCHEMA
+        or metadata.get("source_root") != str(root)
+        or metadata.get("pack_scope") != scope
+    ):
+        raise PackOutputError(
+            f"輸出目錄 ownership marker 不屬於目前模組包，拒絕整體替換：{output}"
+        )
+
+
+def _write_output_ownership_marker(stage: Path, root: Path, scope: str) -> None:
+    """在成功發布的快照中記錄輸出目錄的管理身分。"""
+    marker = stage / _OUTPUT_OWNERSHIP_MARKER
+    marker.write_text(
+        json.dumps(
+            {
+                "schema": _OUTPUT_OWNERSHIP_SCHEMA,
+                "source_root": str(root),
+                "pack_scope": scope,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _publish_stage(
+    stage: Path, output: Path, source_root: Path, pack_scope: str
+) -> None:
+    """以完整快照替換輸出目錄，避免保留上一次輸出的幽靈檔案。"""
+    _validate_output_destination(source_root, output, pack_scope)
     backup: Path | None = None
     if output.exists():
         backup = output.with_name(f".{output.name}.backup-{uuid.uuid4().hex}")

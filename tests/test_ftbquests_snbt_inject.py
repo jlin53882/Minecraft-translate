@@ -9,12 +9,14 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 # 確保可以導入翻譯工具模組
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.ftbquests import ftbquests_snbt_inject
+from translation_tool.plugins.ftbquests import ftbquests_snbt_inject  # noqa: E402
 
 
 def test_normalize_config_dir(tmp_path: Path) -> None:
@@ -160,3 +162,18 @@ def test_patch_lang_snbt_file_writes_only_template_keys(tmp_path: Path) -> None:
     assert "missing" not in result
     assert details["changed_keys"] == ["title"]
     assert details["missing_in_template"] == ["missing"]
+
+
+def test_patch_lang_snbt_file_rejects_existing_malformed_target(
+    tmp_path: Path,
+) -> None:
+    """既有繁中 SNBT 損壞時不可靜默退回英文模板覆蓋。"""
+    source = tmp_path / "en_us.snbt"
+    output = tmp_path / "zh_tw.snbt"
+    source.write_text('{ title: "English", keep: "English keep" }', encoding="utf-8")
+    output.write_text('{ title: "繁中", broken: }', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="既有目標 SNBT 無法解析"):
+        ftbquests_snbt_inject.patch_lang_snbt_file(
+            str(source), str(output), {"title": "新的繁中"}
+        )

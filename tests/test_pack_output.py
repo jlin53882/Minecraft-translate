@@ -133,6 +133,124 @@ def test_export_rejects_a_changed_source_before_writing(tmp_path: Path):
         db.close()
 
 
+def test_export_rejects_existing_unmanaged_output_directory(tmp_path: Path):
+    """非本工具管理的非空輸出不可被整體替換或刪除。"""
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        output = tmp_path.parent / "unmanaged-overlay"
+        output.mkdir()
+        sentinel = output / "important.txt"
+        sentinel.write_text("must survive", encoding="utf-8")
+
+        with pytest.raises(PackOutputError, match="未受管內容"):
+            export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+
+        assert sentinel.read_text(encoding="utf-8") == "must survive"
+    finally:
+        db.close()
+
+
+def test_export_preserves_existing_kubejs_lang_keys_not_managed_by_db(
+    tmp_path: Path,
+):
+    """KubeJS lang overlay 只覆蓋本次計畫鍵，保留既有未管理翻譯。"""
+    _write_fixture(tmp_path)
+    lang_path = tmp_path / "kubejs/assets/demo/lang/zh_tw.json"
+    lang_path.write_text(
+        json.dumps(
+            {
+                "item.demo.asset": "舊資產翻譯",
+                "item.demo.unmanaged": "保留的既有翻譯",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.key=? AND eo.pack_scope=? LIMIT 1",
+            ("item.demo.asset", scope),
+        )[0]
+        db.save_manual(entry_id, "新的資產翻譯", propagate=False)
+
+        output = tmp_path.parent / "kubejs-preserve-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+        assert report.ok
+        result = json.loads(
+            (output / "kubejs/assets/demo/lang/zh_tw.json").read_text(encoding="utf-8")
+        )
+        assert result == {
+            "item.demo.asset": "新的資產翻譯",
+            "item.demo.unmanaged": "保留的既有翻譯",
+        }
+    finally:
+        db.close()
+
+
+def test_export_round_trip_scans_and_writes_direct_string_tooltip(
+    tmp_path: Path,
+):
+    """直接字串 Tooltip 必須完整通過 scan、DB 與 overlay writer。"""
+    _write_fixture(tmp_path)
+    direct = tmp_path / "kubejs/client_scripts/c/direct.js"
+    direct.parent.mkdir(parents=True)
+    direct.write_text(
+        "ItemEvents.tooltip(event => { "
+        "event.add('demo:direct', 'Direct tooltip'); "
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind='kubejs_script' AND e.key=? AND eo.pack_scope=? LIMIT 1",
+            ("client_scripts/c/direct.js|tooltip:demo:direct:1", scope),
+        )[0]
+        db.save_manual(entry_id, "直接字串工具提示", propagate=False)
+
+        output = tmp_path.parent / "direct-tooltip-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+        assert report.ok
+        result = (output / "kubejs/client_scripts/c/direct.js").read_text(
+            encoding="utf-8"
+        )
+        assert "直接字串工具提示" in result
+        assert "Direct tooltip" not in result
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("target_kind", ["same", "ancestor", "inside"])
 def test_export_rejects_output_boundary_that_can_touch_source(
     tmp_path: Path, target_kind: str

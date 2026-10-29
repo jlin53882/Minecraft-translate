@@ -320,6 +320,29 @@ def _select_kubejs_lang_translation(
     return selected_key, str(translation_map[selected_key])
 
 
+def _select_itemevents_tooltip_translation(
+    source_file: str,
+    item_id: str,
+    tooltip_index: int,
+    tooltip_call_index: int,
+    translation_map: dict[str, str],
+) -> tuple[str, str] | None:
+    """以 scanner 相同的 stable key 優先選取 Tooltip 翻譯。"""
+    stable_key = f"{source_file}|tooltip:{item_id}:{tooltip_call_index}"
+    legacy_key = f"{source_file}|{item_id}.tooltip.{tooltip_index}"
+    selected_key = next(
+        (
+            candidate
+            for candidate in (stable_key, legacy_key)
+            if candidate in translation_map
+        ),
+        None,
+    )
+    if selected_key is None:
+        return None
+    return selected_key, str(translation_map[selected_key])
+
+
 def _append_kubejs_lang_translations(
     content: str,
     *,
@@ -1098,6 +1121,28 @@ def inject(
                 tooltip_call_indices[item_id] += 1
                 tooltip_call_index = tooltip_call_indices[item_id]
 
+                direct_literal = _decode_js_string_literal(tooltip_block.strip())
+                if direct_literal is not None:
+                    selected = _select_itemevents_tooltip_translation(
+                        source_file,
+                        item_id,
+                        index,
+                        tooltip_call_index,
+                        translation_map,
+                    )
+                    if selected is not None:
+                        selected_key, translated = selected
+                        used_keys.add(selected_key)
+                        if translated != direct_literal:
+                            args[1] = json.dumps(translated, ensure_ascii=False)
+                            out.append(".add(" + ", ".join(args) + ")")
+                        else:
+                            out.append(full[match.start() : end_idx + 1])
+                    else:
+                        out.append(full[match.start() : end_idx + 1])
+                    last = end_idx + 1
+                    continue
+
                 def repl_text_call(
                     text_match: re.Match[str],
                     *,
@@ -1109,20 +1154,18 @@ def inject(
                 ) -> str:
                     """替換一個 ItemEvents Tooltip 字串並維持原索引順序。"""
                     nonlocal index
-                    legacy_key = f"{current_file}|{current_item_id}.tooltip.{index}"
-                    stable_key = (
-                        f"{current_file}|tooltip:{current_item_id}:"
-                        f"{current_tooltip_index}"
+                    selected = _select_itemevents_tooltip_translation(
+                        current_file,
+                        current_item_id,
+                        index,
+                        current_tooltip_index,
+                        current_translations,
                     )
                     index += 1
-                    key = (
-                        stable_key if stable_key in current_translations else legacy_key
-                    )
-                    if key in current_translations:
+                    if selected is not None:
+                        key, translated = selected
                         current_used_keys.add(key)
-                        return replace_text_in_text_obj(
-                            text_match.group(0), current_translations[key]
-                        )
+                        return replace_text_in_text_obj(text_match.group(0), translated)
                     return text_match.group(0)
 
                 quote_class = "['" + chr(34) + "]"
