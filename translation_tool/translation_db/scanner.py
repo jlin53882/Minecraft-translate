@@ -164,6 +164,8 @@ class ScanReport:
     pack_sources: int = 0
     pack_references: int = 0
     pack_locale_fallbacks: dict[str, str] = field(default_factory=dict)
+    pack_root: str = ""
+    pack_source_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
@@ -201,6 +203,11 @@ class ScanReport:
             "pack_sources": self.pack_sources,
             "pack_references": self.pack_references,
             "pack_locale_fallbacks": dict(sorted(self.pack_locale_fallbacks.items())),
+            "pack_root": self.pack_root,
+            "pack_source_breakdown": {
+                source: dict(sorted(stats.items()))
+                for source, stats in sorted(self.pack_source_breakdown.items())
+            },
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
             "existing": self.stats.existing,
@@ -1177,6 +1184,88 @@ def _ingest_pack_result(
     return stats
 
 
+_PACK_SOURCE_LABELS = {
+    "kubejs": "KubeJS",
+    "ftb_quests": "FTB Quests",
+}
+_PACK_ISSUE_LOG_LIMIT = 20
+
+
+def _pack_issue_log(issue: Mapping[str, object]) -> str:
+    source = str(
+        issue.get("source_archive") or issue.get("source_member") or "未知來源"
+    )
+    reason = str(issue.get("reason") or "unknown")
+    detail = str(issue.get("detail") or "")
+    suffix = f"：{detail}" if detail else ""
+    return f"⚠️ 模組包來源問題：{source} [{reason}]{suffix}"
+
+
+def _pack_source_updates(
+    result: PackScanResult,
+    ingest_stats: IngestStats,
+    *,
+    dry_run: bool,
+) -> Generator[dict[str, Any], None, None]:
+    """把模組包掃描結果轉成既有 UI／後台共用的階段日誌。"""
+    breakdown = result.source_breakdown()
+    for source, label in _PACK_SOURCE_LABELS.items():
+        if not result.source_directories.get(source):
+            continue
+        stats = breakdown[source]
+        yield {
+            "progress": 0.0,
+            "log": (
+                f"📖 {label}：掃描 {stats['files_seen']:,} 個檔案，"
+                f"讀取成功 {stats['files_read']:,} 個，"
+                f"可用來源 {stats['sources_found']:,} 個，"
+                f"找到 {stats['items_found']:,} 個文字候選，"
+                f"建立 {stats['references_found']:,} 個跨格式引用"
+            ),
+            "level": "info",
+        }
+
+    if result.locale_fallbacks:
+        locales = "、".join(
+            f"{namespace}→{locale}"
+            for namespace, locale in sorted(result.locale_fallbacks.items())
+        )
+        yield {
+            "progress": 0.0,
+            "log": f"🌐 模組包語系：沒有 en_us，使用最多內容語系（{locales}）",
+            "level": "info",
+        }
+
+    for issue in result.issues[:_PACK_ISSUE_LOG_LIMIT]:
+        yield {"progress": 0.0, "log": _pack_issue_log(issue), "level": "warning"}
+    if len(result.issues) > _PACK_ISSUE_LOG_LIMIT:
+        yield {
+            "progress": 0.0,
+            "log": (
+                f"⚠️ 模組包來源另有 {len(result.issues) - _PACK_ISSUE_LOG_LIMIT:,} "
+                "筆問題，完整內容保留在掃描報告與資料庫"
+            ),
+            "level": "warning",
+        }
+
+    yield {
+        "progress": 0.0,
+        "log": (
+            f"📦 模組包來源分析完成：讀取 {result.files_seen:,} 個檔案，"
+            f"找到 {len(result.items):,} 個文字候選，"
+            f"建立 {len(result.references):,} 個跨格式引用，"
+            f"問題 {len(result.issues):,} 筆"
+        ),
+        "level": "warning" if result.issues else "info",
+    }
+    phase = "預覽匯入統計（未寫入）" if dry_run else "匯入資料庫"
+    yield {
+        "progress": 0.0,
+        "log": f"📥 模組包來源{phase}：{ingest_counts_text(ingest_stats, always_changed=True)}",
+        "level": "info",
+    }
+
+
 def scan_folder_generator(
     db: TranslationDB | None,
     folder: str | Path,
@@ -1206,19 +1295,43 @@ def scan_folder_generator(
         else None
     )
     pack_result = PackScanResult()
+    pack_ingest_stats: IngestStats | None = None
+    pack_root_missing = False
     if options.include_pack_content and not options.translated:
         pack_root = discover_pack_root(folder)
-        if pack_root is not None:
+        if pack_root is None:
+            pack_root_missing = True
+            if jars:
+                yield {
+                    "progress": 0.0,
+                    "log": (
+                        "📦 模組包來源：未找到 kubejs 或 "
+                        "config/ftbquests/quests，略過 KubeJS／FTB Quests 分析"
+                    ),
+                    "level": "info",
+                }
+        else:
+            report.pack_root = str(pack_root)
+            yield {
+                "progress": 0.0,
+                "log": f"📦 模組包來源：開始分析 {pack_root}",
+                "level": "info",
+            }
             pack_result = scan_pack_sources(pack_root, options.version)
             report.pack_items_found = len(pack_result.items)
             report.pack_files_seen = pack_result.files_seen
             report.pack_sources = len(pack_result.sources_found)
             report.pack_references = len(pack_result.references)
             report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
+            report.pack_source_breakdown = pack_result.source_breakdown()
             for issue in pack_result.issues:
                 report.add_issue(issue)
-            report.stats.add(
-                _ingest_pack_result(db, preview, pack_result, options.version, convert)
+            pack_ingest_stats = _ingest_pack_result(
+                db, preview, pack_result, options.version, convert
+            )
+            report.stats.add(pack_ingest_stats)
+            yield from _pack_source_updates(
+                pack_result, pack_ingest_stats, dry_run=options.dry_run
             )
     has_pack_content = bool(
         pack_result.sources_found
@@ -1236,10 +1349,18 @@ def scan_folder_generator(
                 report.as_dict(),
                 issues=[],
             )
+        missing_pack_log = (
+            "📦 模組包來源未找到 kubejs 或 config/ftbquests/quests；"
+            if pack_root_missing
+            else ""
+        )
         yield {
             "progress": 1.0,
-            "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}"
-            "（請確認路徑，以及資料夾內是否有檔案）",
+            "log": (
+                f"{missing_pack_log}⚠️ 在 {folder} 找不到任何 "
+                f"{'jar／zip' if options.translated else 'jar'}"
+                "（請確認路徑，以及資料夾內是否有檔案）"
+            ),
             "level": "warning",
             "report": report,
         }
@@ -1254,27 +1375,6 @@ def scan_folder_generator(
             else f"🔍 找到 {len(jars)} 個 jar，版本 {options.version}"
         ),
     }
-    if has_pack_content:
-        fallback_counts = Counter(report.pack_locale_fallbacks.values())
-        fallback_log = ""
-        if fallback_counts:
-            fallback_log = (
-                f"；缺少可用 en_us 的 namespace {len(report.pack_locale_fallbacks):,} 個，"
-                "基準語系："
-                + "、".join(
-                    f"{locale} {count:,} 個"
-                    for locale, count in sorted(fallback_counts.items())
-                )
-            )
-        yield {
-            "progress": 0.0,
-            "log": (
-                f"📦 模組包來源：讀取 {report.pack_sources:,} 個檔案，"
-                f"找到 {report.pack_items_found:,} 個 KubeJS／FTB Quests 文字候選"
-                f"，建立 {report.pack_references:,} 個跨格式引用{fallback_log}"
-            ),
-            "level": "warning" if pack_result.issues else "info",
-        }
 
     done = 0
     buffer = _IngestBuffer(db, options.version, convert)

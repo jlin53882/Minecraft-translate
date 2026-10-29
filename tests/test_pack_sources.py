@@ -126,6 +126,73 @@ def test_moddb_scan_ingests_pack_sources_and_provenance(tmp_path):
         db.close()
 
 
+def test_moddb_pack_scan_emits_source_phases_and_ingest_summary(tmp_path):
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        updates = list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        logs = [update["log"] for update in updates if update.get("log")]
+        report = updates[-1]["report"]
+
+        assert any("📦 模組包來源：開始分析" in log for log in logs)
+        assert any("📖 KubeJS：掃描" in log for log in logs)
+        assert any("📖 FTB Quests：掃描" in log for log in logs)
+        assert any("📦 模組包來源分析完成" in log for log in logs)
+        assert any("📥 模組包來源匯入資料庫" in log for log in logs)
+        assert report.pack_source_breakdown["kubejs"]["files_seen"] > 0
+        assert report.pack_source_breakdown["ftb_quests"]["files_seen"] > 0
+    finally:
+        db.close()
+
+
+def test_moddb_pack_scan_logs_empty_sources_instead_of_only_no_jar(tmp_path):
+    (tmp_path / "kubejs").mkdir()
+    (tmp_path / "config" / "ftbquests" / "quests").mkdir(parents=True)
+
+    updates = list(
+        scan_folder_generator(
+            None,
+            tmp_path,
+            ScanOptions("1.21.1", include_pack_content=True, dry_run=True),
+            workers=1,
+        )
+    )
+    logs = [update["log"] for update in updates if update.get("log")]
+
+    assert any("📦 模組包來源：開始分析" in log for log in logs)
+    assert any("📖 KubeJS：掃描 0 個檔案" in log for log in logs)
+    assert any("📖 FTB Quests：掃描 0 個檔案" in log for log in logs)
+    assert any("📥 模組包來源預覽匯入統計（未寫入）" in log for log in logs)
+    assert any("找不到任何 jar" in log for log in logs)
+
+
+def test_moddb_pack_scan_logs_parse_failure_source_and_reason(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text('{"broken":', encoding="utf-8")
+
+    updates = list(
+        scan_folder_generator(
+            None,
+            tmp_path,
+            ScanOptions("1.21.1", include_pack_content=True, dry_run=True),
+            workers=1,
+        )
+    )
+    logs = [update["log"] for update in updates if update.get("log")]
+    report = updates[-1]["report"]
+
+    assert any("json_parse_failed" in log and "en_us.json" in log for log in logs)
+    assert report.as_dict()["issue_counts"] == {"parse_failed": 1}
+
+
 def test_moddb_can_disable_pack_sources_without_fake_entries(tmp_path):
     _write_fixture(tmp_path)
     db = TranslationDB(tmp_path / "translation.db")

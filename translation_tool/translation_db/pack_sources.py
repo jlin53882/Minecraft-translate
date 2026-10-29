@@ -164,6 +164,45 @@ class PackScanResult:
     files_seen: int = 0
     sources_found: list[str] = field(default_factory=list)
     locale_fallbacks: dict[str, str] = field(default_factory=dict)
+    source_directories: dict[str, bool] = field(default_factory=dict)
+    files_seen_by_source: dict[str, int] = field(default_factory=dict)
+    files_read_by_source: dict[str, int] = field(default_factory=dict)
+    sources_found_by_source: dict[str, int] = field(default_factory=dict)
+
+    def mark_file(self, source: str) -> None:
+        """記錄一個符合該格式的來源檔案（即使之後讀取或解析失敗）。"""
+        self.files_seen += 1
+        self.files_seen_by_source[source] = self.files_seen_by_source.get(source, 0) + 1
+
+    def mark_file_read(self, source: str) -> None:
+        """記錄原始檔案內容成功讀取。"""
+        self.files_read_by_source[source] = self.files_read_by_source.get(source, 0) + 1
+
+    def mark_source(self, source: str, relative_path: str) -> None:
+        """記錄可供後續處理的來源路徑並保留既有總清單。"""
+        self.sources_found.append(relative_path)
+        self.sources_found_by_source[source] = (
+            self.sources_found_by_source.get(source, 0) + 1
+        )
+
+    def source_breakdown(self) -> dict[str, dict[str, int]]:
+        """回傳 UI 與報告共用的 KubeJS／FTB Quests 分組統計。"""
+        groups = {
+            "kubejs": {KIND_KUBEJS_LANG, KIND_KUBEJS_SCRIPT},
+            "ftb_quests": {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS},
+        }
+        breakdown: dict[str, dict[str, int]] = {}
+        for source, kinds in groups.items():
+            breakdown[source] = {
+                "files_seen": self.files_seen_by_source.get(source, 0),
+                "files_read": self.files_read_by_source.get(source, 0),
+                "sources_found": self.sources_found_by_source.get(source, 0),
+                "items_found": sum(item.kind in kinds for item in self.items),
+                "references_found": sum(
+                    reference.source_kind in kinds for reference in self.references
+                ),
+            }
+        return breakdown
 
 
 def discover_pack_root(folder: str | Path) -> Path | None:
@@ -195,9 +234,13 @@ def scan_pack_sources(pack_root: str | Path, version: str) -> PackScanResult:
         return result
     scope = result.pack_scope
     kubejs = root / "kubejs"
+    quests = root / "config" / "ftbquests" / "quests"
+    result.source_directories = {
+        "kubejs": kubejs.is_dir(),
+        "ftb_quests": quests.is_dir(),
+    }
     if kubejs.is_dir():
         _scan_kubejs(kubejs, version, scope, result)
-    quests = root / "config" / "ftbquests" / "quests"
     if quests.is_dir():
         _scan_ftb_quests(quests, version, scope, result)
     _resolve_reference_targets(result)
@@ -297,12 +340,13 @@ def _relative(path: Path, root: Path) -> str:
 
 def _scan_kubejs(root: Path, version: str, scope: str, result: PackScanResult) -> None:
     for path in _iter_files(root, (".js",), result):
-        result.files_seen += 1
+        result.mark_file("kubejs")
         rel = _relative(path, root)
-        result.sources_found.append(rel)
+        result.mark_source("kubejs", rel)
         loaded = _read_text(path, result)
         if loaded is None:
             continue
+        result.mark_file_read("kubejs")
         text, digest = loaded
         _scan_kubejs_script(text, rel, digest, scope, version, result)
     _scan_kubejs_lang(root, version, scope, result)
@@ -603,12 +647,13 @@ def _load_kubejs_lang_file(
 ) -> _KubeJSLangData | None:
     if path in parsed:
         return parsed[path]
+    result.mark_file("kubejs")
     loaded = _read_text(path, result)
     if loaded is None:
         parsed[path] = None
         return None
-    result.files_seen += 1
-    result.sources_found.append(path.relative_to(root).as_posix())
+    result.mark_file_read("kubejs")
+    result.mark_source("kubejs", path.relative_to(root).as_posix())
     text, digest = loaded
     try:
         values = json.loads(text)
@@ -743,10 +788,11 @@ def _scan_ftb_quests(
     lang_root = root / "lang"
     if lang_root.is_dir():
         for path in _iter_files(lang_root, (".snbt",), result):
-            result.files_seen += 1
+            result.mark_file("ftb_quests")
             loaded = _read_text(path, result)
             if loaded is None:
                 continue
+            result.mark_file_read("ftb_quests")
             _, digest = loaded
             data = walk_snbt_file(str(path))
             if data is None:
@@ -771,7 +817,7 @@ def _scan_ftb_quests(
             )
             for key, value in _top_level_lang(data):
                 locale_values[(rel, key)][locale] = (value, digest, source_path)
-            result.sources_found.append(path.relative_to(root).as_posix())
+            result.mark_source("ftb_quests", path.relative_to(root).as_posix())
     for (rel, lang_key), locales in sorted(locale_values.items()):
         source_entry = (
             locales.get("en_us") or locales.get("zh_cn") or locales.get("zh_tw")
@@ -829,10 +875,11 @@ def _scan_ftb_quests(
     for path in _iter_files(root, (".snbt",), result):
         if lang_root in path.parents:
             continue
-        result.files_seen += 1
+        result.mark_file("ftb_quests")
         loaded = _read_text(path, result)
         if loaded is None:
             continue
+        result.mark_file_read("ftb_quests")
         _, digest = loaded
         data = walk_snbt_file(str(path))
         if data is None:
@@ -847,7 +894,7 @@ def _scan_ftb_quests(
             continue
         rel = path.relative_to(root).as_posix()
         _scan_quest_value(data, rel, version, scope, digest, result, "root")
-        result.sources_found.append(rel)
+        result.mark_source("ftb_quests", rel)
 
 
 def _scan_quest_value(

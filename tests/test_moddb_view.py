@@ -126,6 +126,33 @@ def test_scan_service_writes_database_and_reports_summary(db_path, tmp_path):
     db.close()
 
 
+def test_scan_service_mirrors_pack_source_phase_logs(db_path, tmp_path):
+    kubejs = tmp_path / "kubejs" / "client_scripts"
+    kubejs.mkdir(parents=True)
+    (kubejs / "lang.js").write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('item.demo', 'Demo item');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    quests = tmp_path / "config" / "ftbquests" / "quests"
+    quests.mkdir(parents=True)
+    (quests / "chapter.snbt").write_text(
+        '{id:"demo",title:"A quest"}', encoding="utf-8"
+    )
+
+    session = TaskSession()
+    moddb_service.run_moddb_scan_service(
+        str(tmp_path), moddb_service.ScanOptions("1.21.1"), session
+    )
+    logs = "\n".join(entry.text for entry in session.snapshot()["logs"])
+
+    assert "📖 KubeJS：掃描" in logs
+    assert "📖 FTB Quests：掃描" in logs
+    assert "📦 模組包來源分析完成" in logs
+    assert "📥 模組包來源匯入資料庫" in logs
+
+
 def test_scan_service_cancelled_session_is_reported(db_path, tmp_path):
     make_jar(
         tmp_path / "mods" / "foo.jar",
