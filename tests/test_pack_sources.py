@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from translation_tool.plugins.kubejs.kubejs_tooltip_inject import inject
 from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.pack_sources import scan_pack_sources
 from translation_tool.translation_db.repository import TranslationDB
@@ -178,3 +179,75 @@ def test_entry_origins_keep_same_source_identity_across_pack_scopes(tmp_path):
         }
     finally:
         db.close()
+
+
+def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n"
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '機器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.key == "item.demo.machine"]
+
+    assert {(item.en_us, item.zh_tw) for item in items} == {
+        ("Machine", ""),
+        ("", "機器"),
+    }
+    assert any("ClientEvents.lang[zh_tw]" in item.source_selector for item in items)
+
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {"client_scripts/lang.js|lang:item.demo.machine": "機器翻譯"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+    summary = inject(
+        str(tmp_path / "kubejs"), str(tmp_path / "translated"), str(output)
+    )
+    assert summary["missing_translation_keys"] == []
+    assert summary["applied_translation_keys"] == [
+        "client_scripts/lang.js|lang:item.demo.machine"
+    ]
+    assert "'demo', 'item.demo.machine', \"機器翻譯\"" in (
+        output / "client_scripts/lang.js"
+    ).read_text(encoding="utf-8")
+
+
+def test_ftb_single_file_locale_identity_is_shared(tmp_path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.snbt").write_text('{quest.title:"English title"}', encoding="utf-8")
+    (lang / "zh_cn.snbt").write_text('{quest.title:"簡體標題"}', encoding="utf-8")
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+    assert len(items) == 1
+    assert items[0].key.startswith("__root__.snbt|lang:quest.title")
+    assert items[0].source_path == "lang/en_us.snbt"
+
+
+def test_ftb_component_json_is_not_sent_as_plain_text(tmp_path):
+    quests = tmp_path / "config" / "ftbquests" / "quests"
+    quests.mkdir(parents=True)
+    (quests / "chapter.snbt").write_text(
+        '{id:"component",title:"{\\"text\\":\\"Warning\\",\\"color\\":\\"red\\"}"}',
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    assert not result.items
+    assert any(
+        issue["reason"] == "ftb_component_json_unsupported" for issue in result.issues
+    )

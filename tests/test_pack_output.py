@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 import ftb_snbt_lib as snbt
+import pytest
 
 from tests.test_pack_sources import _write_fixture
-from translation_tool.translation_db.pack_output import export_pack_overlay
-from translation_tool.translation_db.pack_sources import scan_pack_sources
+from translation_tool.translation_db.models import ScanItem
+from translation_tool.translation_db.pack_output import (
+    PackOutputError,
+    export_pack_overlay,
+)
+from translation_tool.translation_db.pack_sources import (
+    pack_scope_for_root,
+    scan_pack_sources,
+)
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 
@@ -120,5 +129,128 @@ def test_export_rejects_a_changed_source_before_writing(tmp_path: Path):
         else:
             raise AssertionError("changed source must reject output")
         assert not output.exists()
+    finally:
+        db.close()
+
+
+def test_export_rejects_conflicting_hashes_for_same_source(tmp_path: Path):
+    source = tmp_path / "kubejs" / "client_scripts" / "main.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ItemEvents.tooltip(event => { event.add('demo:item', Text.of('Text')); });\n",
+        encoding="utf-8",
+    )
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    scope = pack_scope_for_root(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    "kubejs_script",
+                    f"kubejs@{scope}",
+                    "same.key",
+                    "Text",
+                    source_path="client_scripts/main.js",
+                    source_selector="tooltip[0]",
+                    source_hash=digest,
+                    source_format="kubejs-js",
+                    pack_scope=scope,
+                ),
+                ScanItem(
+                    "kubejs_script",
+                    f"kubejs@{scope}",
+                    "same.key",
+                    "Text",
+                    source_path="client_scripts/main.js",
+                    source_selector="tooltip[1]",
+                    source_hash="stale-hash",
+                    source_format="kubejs-js",
+                    pack_scope=scope,
+                ),
+            ],
+        )
+        entry_id = db._one("SELECT id FROM entry WHERE key='same.key'")[0]
+        db.save_manual(entry_id, "翻譯", propagate=False)
+        with pytest.raises(PackOutputError, match="來源 hash 不一致"):
+            export_pack_overlay(
+                db,
+                tmp_path,
+                "1.21.1",
+                tmp_path.parent / "conflict-overlay",
+                pack_scope=scope,
+            )
+    finally:
+        db.close()
+
+
+def test_export_rejects_unmatched_kubejs_selector_without_publishing(tmp_path: Path):
+    source = tmp_path / "kubejs" / "client_scripts" / "main.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ItemEvents.tooltip(event => { event.add('demo:item', Text.of('Text')); });\n",
+        encoding="utf-8",
+    )
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    scope = pack_scope_for_root(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    output = tmp_path.parent / "unmatched-overlay"
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    "kubejs_script",
+                    f"kubejs@{scope}",
+                    "not-in-source",
+                    "Text",
+                    source_path="client_scripts/main.js",
+                    source_selector="missing",
+                    source_hash=digest,
+                    source_format="kubejs-js",
+                    pack_scope=scope,
+                )
+            ],
+        )
+        entry_id = db._one("SELECT id FROM entry WHERE key='not-in-source'")[0]
+        db.save_manual(entry_id, "不應靜默輸出", propagate=False)
+        with pytest.raises(PackOutputError, match="KubeJS selector 未命中"):
+            export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+        assert not output.exists()
+    finally:
+        db.close()
+
+
+def test_export_maps_single_file_ftb_locale_to_zh_tw(tmp_path: Path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.snbt").write_text('{quest.title:"English title"}', encoding="utf-8")
+    (lang / "zh_cn.snbt").write_text('{quest.title:"簡體標題"}', encoding="utf-8")
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind='ftb_quest_lang' AND eo.pack_scope=? LIMIT 1",
+            (scope,),
+        )[0]
+        db.save_manual(entry_id, "繁體標題", propagate=False)
+        output = tmp_path.parent / "single-file-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+        assert report.ok
+        assert report.entries_verified == 1
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw.snbt").open(encoding="utf-8")
+        )
+        assert str(translated["quest.title"]) == "繁體標題"
     finally:
         db.close()

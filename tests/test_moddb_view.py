@@ -1457,7 +1457,7 @@ def test_scan_requires_version_and_folder(db_path):
     assert panel.status_chip.label.value == "請先選擇或輸入遊戲版本"
     panel.version_field.value = "1.21.1"
     panel.start_clicked()
-    assert panel.status_chip.label.value == "請先選擇 mods 資料夾"
+    assert panel.status_chip.label.value == "請先選擇 mods 資料夾或模組包根目錄"
 
 
 def test_scan_runs_and_reports_counts(db_path, tmp_path, monkeypatch):

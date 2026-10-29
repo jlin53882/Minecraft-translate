@@ -13,6 +13,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from translation_tool.core.kubejs_translator_state import atomic_write_bytes
+from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
+    parse_client_lang_add,
+)
 from translation_tool.utils.log_unit import log_error, log_info
 
 
@@ -322,6 +325,157 @@ def clean_text(s: str) -> str:
     return str(s).replace("\\n", "\n").strip()
 
 
+def _replace_tooltip_text_calls(
+    expression: str,
+    *,
+    source_file: str,
+    item_id: str,
+    occurrence: int,
+    translation_map: dict[str, str],
+    used_keys: set[str],
+) -> str:
+    """替換 tooltip 陣列中的 Text 元件，並回報實際命中的 selector。"""
+    index = 0
+
+    def replace_call(match: re.Match[str]) -> str:
+        nonlocal index
+        key = f"{source_file}|{item_id}.{occurrence}.{index}"
+        index += 1
+        if key not in translation_map:
+            return match.group(0)
+        used_keys.add(key)
+        return replace_text_in_text_obj(match.group(0), translation_map[key])
+
+    quote_class = "['" + chr(34) + "]"
+    pattern = rf"Text\.\w+\s*\(\s*{quote_class}.*?{quote_class}\s*\)"
+    return re.sub(pattern, replace_call, expression, flags=re.DOTALL)
+
+
+def _patch_event_add_two_args(
+    args: list[str],
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    counters: defaultdict[str, int],
+    used_keys: set[str],
+) -> tuple[list[str], bool]:
+    """處理兩參數 tooltip／ClientEvents.lang 呼叫。"""
+    item_id = strip_quotes(args[0])
+    occurrence = counters[item_id]
+    counters[item_id] += 1
+    new_args = list(args)
+    lang_key = _decode_js_string_literal(args[0])
+    lang_value = _decode_js_string_literal(args[1])
+    stable_lang_key = f"{source_file}|lang:{lang_key}" if lang_key else ""
+    if stable_lang_key in translation_map and lang_value is not None:
+        used_keys.add(stable_lang_key)
+        translated = translation_map[stable_lang_key]
+        if lang_value != translated:
+            new_args[1] = json.dumps(translated, ensure_ascii=False)
+            return new_args, True
+        return new_args, False
+
+    key = f"{source_file}|{item_id}.{occurrence}"
+    if args[1].strip().startswith("Text.") and key in translation_map:
+        used_keys.add(key)
+        replacement = replace_text_in_text_obj(args[1], translation_map[key])
+        if replacement != args[1]:
+            new_args[1] = replacement
+            return new_args, True
+        return new_args, False
+
+    if not args[1].strip().startswith("["):
+        return new_args, False
+    if "Text." in args[1]:
+        replacement = _replace_tooltip_text_calls(
+            args[1],
+            source_file=source_file,
+            item_id=item_id,
+            occurrence=occurrence,
+            translation_map=translation_map,
+            used_keys=used_keys,
+        )
+    else:
+        old_values = extract_array_strings(args[1])
+        new_values = list(old_values)
+        for index, old_value in enumerate(old_values):
+            key = f"{source_file}|{item_id}.{occurrence}.{index}"
+            if key in translation_map:
+                used_keys.add(key)
+                new_values[index] = translation_map[key]
+        replacement = replace_array(args[1], new_values)
+    if replacement == args[1]:
+        return new_args, False
+    new_args[1] = replacement
+    return new_args, True
+
+
+def _patch_event_add_three_args(
+    args: list[str],
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    used_keys: set[str],
+) -> tuple[list[str], bool]:
+    """處理 ``event.add(namespace, key, value)`` 語系呼叫。"""
+    parsed = parse_client_lang_add(args)
+    if parsed is None:
+        return args, False
+    _namespace, key_expr, value_expr = parsed
+    lang_key = _decode_js_string_literal(key_expr)
+    lang_value = _decode_js_string_literal(value_expr)
+    stable_key = f"{source_file}|lang:{lang_key}" if lang_key else ""
+    if stable_key not in translation_map or lang_value is None:
+        return args, False
+    used_keys.add(stable_key)
+    translated = translation_map[stable_key]
+    if translated == lang_value:
+        return args, False
+    new_args = list(args)
+    new_args[2] = json.dumps(translated, ensure_ascii=False)
+    return new_args, True
+
+
+def _patch_event_add_args(
+    arg_str: str,
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    counters: defaultdict[str, int],
+    used_keys: set[str],
+    auto_id: int,
+) -> tuple[str, int]:
+    """依參數數量分派 event.add，回傳新引數與下一個 auto ordinal。"""
+    args = split_js_args(arg_str)
+    if len(args) == 1:
+        key = f"{source_file}|auto.{auto_id}"
+        new_args = list(args)
+        if key in translation_map:
+            used_keys.add(key)
+            translated = translation_map[key]
+            if _decode_js_string_literal(args[0]) != translated:
+                new_args[0] = json.dumps(translated, ensure_ascii=False)
+        return (", ".join(new_args) if new_args != args else arg_str), auto_id + 1
+    if len(args) == 2:
+        new_args, changed = _patch_event_add_two_args(
+            args,
+            source_file=source_file,
+            translation_map=translation_map,
+            counters=counters,
+            used_keys=used_keys,
+        )
+    elif len(args) == 3:
+        new_args, changed = _patch_event_add_three_args(
+            args,
+            source_file=source_file,
+            translation_map=translation_map,
+            used_keys=used_keys,
+        )
+    else:
+        return arg_str, auto_id
+    return (", ".join(new_args) if changed else arg_str), auto_id
+
+
 # ---------------- 主流程 ----------------
 
 
@@ -399,6 +553,8 @@ def inject(
 
     patched_js_files = 0
     wrote_lang_files = 0
+    applied_translation_keys: set[str] = set()
+    missing_translation_keys: set[str] = set()
 
     for json_path in json_files:
         file = os.path.basename(json_path)
@@ -453,6 +609,7 @@ def inject(
             for key, value in incoming.items():
                 if key not in merged or key in pending_keys:
                     merged[key] = value
+            applied_translation_keys.update(str(key) for key in incoming)
             payload = (json.dumps(merged, ensure_ascii=False, indent=2) + "\n").encode(
                 "utf-8"
             )
@@ -489,6 +646,14 @@ def inject(
 
         if not js_path.exists():
             # 找不到原始 js 就跳過（但也算進 progress）
+            try:
+                missing_values = json.loads(
+                    Path(json_path).read_text(encoding="utf-8-sig")
+                )
+            except (OSError, json.JSONDecodeError):
+                missing_values = {}
+            if isinstance(missing_values, dict):
+                missing_translation_keys.update(str(key) for key in missing_values)
             if session:
                 log_info(f"⏭️ 找不到原始 JS，略過：{js_path}")
             done += 1
@@ -507,6 +672,8 @@ def inject(
 
         with open(json_path, "r", encoding="utf-8") as f:
             translations = json.load(f)
+        if not isinstance(translations, dict):
+            raise TypeError(f"翻譯腳本不是 JSON object：{json_path}")
 
         # ✅ 改成整檔處理（避免跨行 / chain call / scene.text 插不回）
         with open(js_path, "r", encoding="utf-8") as f:
@@ -515,6 +682,8 @@ def inject(
 
         id_counters = defaultdict(int)
         auto_id = 1  # ✅ 必須跟 extractor 一樣從 1 開始，先跑 event.add，再跑 scene.text，最後跑 ItemEvents
+        source_translation_keys = {str(key) for key in translations}
+        used_translation_keys: set[str] = set()
 
         # ----------------------------
         # 1) Patch event.add(...)
@@ -525,98 +694,19 @@ def inject(
             source_file: str = original_js,
             translation_map: dict = translations,
             counters: defaultdict[str, int] = id_counters,
+            used_keys: set[str] = used_translation_keys,
         ) -> str:
             """只在 event.add 引數實際改變時回傳重建後的引數。"""
             nonlocal auto_id
-            args = split_js_args(arg_str)
-            new_args = list(args)
-            changed = False
-
-            # 單參數 -> auto.N
-            if len(args) == 1:
-                key = f"{source_file}|auto.{auto_id}"
-                if key in translation_map:
-                    translated = translation_map[key]
-                    if _decode_js_string_literal(args[0]) != translated:
-                        replacement = json.dumps(translated, ensure_ascii=False)
-                        new_args[0] = replacement
-                        changed = True
-                auto_id += 1
-
-            # ID + tooltip（檔案|item_id.n 或檔案|item_id.n.idx）
-            elif len(args) == 2:
-                item_id = strip_quotes(args[0])
-                number = counters[item_id]
-                counters[item_id] += 1
-
-                # ModDB 的 ClientEvents.lang 條目使用來源檔案 + lang key
-                # 作為穩定身分；先處理它，避免共用的 event.add wrapper
-                # 退回全檔 ordinal。未命中時仍保留舊版 tooltip 行為。
-                lang_key = _decode_js_string_literal(args[0].strip())
-                lang_value = _decode_js_string_literal(args[1].strip())
-                stable_lang_key = (
-                    f"{source_file}|lang:{lang_key}" if lang_key is not None else ""
-                )
-                if (
-                    stable_lang_key
-                    and stable_lang_key in translation_map
-                    and lang_value is not None
-                ):
-                    translated = translation_map[stable_lang_key]
-                    if lang_value != translated:
-                        new_args[1] = json.dumps(translated, ensure_ascii=False)
-                        changed = True
-                elif args[1].strip().startswith("Text."):
-                    key = f"{source_file}|{item_id}.{number}"
-                    if key in translation_map:
-                        replacement = replace_text_in_text_obj(
-                            args[1], translation_map[key]
-                        )
-                        if replacement != args[1]:
-                            new_args[1] = replacement
-                            changed = True
-
-                elif args[1].strip().startswith("["):
-                    if "Text." in args[1]:
-                        index = 0
-
-                        def repl_text(match: re.Match[str]) -> str:
-                            """依序替換 tooltip 陣列中的 Text 字串。"""
-                            nonlocal index
-                            key = f"{source_file}|{item_id}.{number}.{index}"
-                            index += 1
-                            if key in translation_map:
-                                return replace_text_in_text_obj(
-                                    match.group(0), translation_map[key]
-                                )
-                            return match.group(0)
-
-                        quote_class = "['" + chr(34) + "]"
-                        text_call_pattern = (
-                            rf"Text\.\w+\s*\(\s*{quote_class}.*?{quote_class}\s*\)"
-                        )
-                        replacement = re.sub(
-                            text_call_pattern,
-                            repl_text,
-                            args[1],
-                            flags=re.DOTALL,
-                        )
-                    else:
-                        old_values = extract_array_strings(args[1])
-                        new_values = [
-                            translation_map.get(
-                                f"{source_file}|{item_id}.{number}.{index}",
-                                old_value,
-                            )
-                            for index, old_value in enumerate(old_values)
-                        ]
-                        replacement = replace_array(args[1], new_values)
-
-                    if replacement != args[1]:
-                        new_args[1] = replacement
-                        changed = True
-
-            return ", ".join(new_args) if changed else arg_str
+            replacement, auto_id = _patch_event_add_args(
+                arg_str,
+                source_file=source_file,
+                translation_map=translation_map,
+                counters=counters,
+                used_keys=used_keys,
+                auto_id=auto_id,
+            )
+            return replacement
 
         content = _replace_js_call_arguments(content, "event.add", repl_event_add)
 
@@ -632,6 +722,7 @@ def inject(
             source_file: str = original_js,
             translation_map: dict = translations,
             counter: list[int] = scene_counter,
+            used_keys: set[str] = used_translation_keys,
         ) -> str:
             """只在 scene.text 文字實際改變時回傳重建後的引數。"""
             nonlocal auto_id
@@ -662,6 +753,7 @@ def inject(
                 legacy_key = f"{source_file}|scene.{auto_id}"
                 key = stable_key if stable_key in translation_map else legacy_key
                 if key in translation_map:
+                    used_keys.add(key)
                     new_text = translation_map[key]
                     if raw_text_expr.startswith("Text."):
                         replacement = replace_text_in_text_obj(args[1], new_text)
@@ -685,6 +777,7 @@ def inject(
             *,
             source_file: str = original_js,
             translation_map: dict = translations,
+            used_keys: set[str] = used_translation_keys,
         ) -> str:
             """修補 ItemEvents Tooltip，無變更時保留呼叫原始文字。"""
             out = []
@@ -731,6 +824,7 @@ def inject(
                     current_item_id: str = item_id,
                     current_tooltip_index: int = tooltip_call_index,
                     current_translations: dict = translation_map,
+                    current_used_keys: set[str] = used_keys,
                 ) -> str:
                     """替換一個 ItemEvents Tooltip 字串並維持原索引順序。"""
                     nonlocal index
@@ -744,6 +838,7 @@ def inject(
                         stable_key if stable_key in current_translations else legacy_key
                     )
                     if key in current_translations:
+                        current_used_keys.add(key)
                         return replace_text_in_text_obj(
                             text_match.group(0), current_translations[key]
                         )
@@ -786,6 +881,9 @@ def inject(
             if session:
                 log_info(f"✔ Patched {out_path}")
 
+        applied_translation_keys.update(used_translation_keys)
+        missing_translation_keys.update(source_translation_keys - used_translation_keys)
+
         done += 1
         if session:
             p = progress_base + (done / total) * progress_span
@@ -814,6 +912,8 @@ def inject(
         "final_output_dir": str(out_root),
         "patched_js_files": patched_js_files,
         "wrote_lang_files": wrote_lang_files,
+        "applied_translation_keys": sorted(applied_translation_keys),
+        "missing_translation_keys": sorted(missing_translation_keys),
     }
 
 

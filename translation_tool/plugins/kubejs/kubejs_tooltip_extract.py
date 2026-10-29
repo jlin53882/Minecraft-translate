@@ -181,6 +181,20 @@ def split_js_args(s: str) -> list[str]:
     return args
 
 
+def parse_client_lang_add(parts: list[str]) -> tuple[str | None, str, str] | None:
+    """解析 ``ClientEvents.lang`` 的兩參數與三參數 ``event.add`` 契約。
+
+    KubeJS 同時存在 ``add(key, value)`` 與
+    ``add(namespace, key, value)`` 形式。兩個掃描／回寫入口必須使用同一個
+    key/value 位置，否則資料庫會收進錯誤的 key，輸出時也無法定位原始欄位。
+    """
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    return None
+
+
 def extract_array_strings(arr: str) -> list[str]:
     """
     使用正則表達式從字串中提取所有被引號包圍的內容。

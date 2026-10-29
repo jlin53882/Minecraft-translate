@@ -29,6 +29,7 @@ from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
 )
 from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
     extract_js_string_call,
+    parse_client_lang_add,
     split_js_args,
 )
 from translation_tool.translation_db.models import ScanItem, SourceReference
@@ -49,6 +50,7 @@ _REFERENCE = re.compile(r"\{([^{}]+)\}")
 _TRANSLATE_EXPR = re.compile(
     r"^(?:Text|Component)\.(?:translate|translatable)\s*\(", re.IGNORECASE
 )
+_KUBEJS_LANG_LOCALES = {"en_us", "zh_cn", "zh_tw"}
 
 
 def _mask_js_non_code(text: str) -> str:
@@ -336,6 +338,9 @@ def _scan_kubejs_event(
     tooltip_occurrences: defaultdict[str, int],
 ) -> int:
     """掃描一個 KubeJS event callback，回傳語系事件的累計序號。"""
+    lang_locale = _kubejs_lang_locale(event_name, args, rel, result)
+    if event_name == "ClientEvents.lang" and lang_locale is None:
+        return lang_occurrence
     args_code = _mask_js_non_code(args)
     for match in _EVENT_ADD.finditer(args_code):
         call_args = _extract_js_call_args(args, match.end())
@@ -347,7 +352,14 @@ def _scan_kubejs_event(
         if event_name == "ClientEvents.lang":
             lang_occurrence += 1
             _append_kubejs_lang_item(
-                parts, rel, digest, scope, version, result, lang_occurrence
+                parts,
+                lang_locale or "en_us",
+                rel,
+                digest,
+                scope,
+                version,
+                result,
+                lang_occurrence,
             )
         else:
             _append_kubejs_tooltip_item(
@@ -358,6 +370,7 @@ def _scan_kubejs_event(
 
 def _append_kubejs_lang_item(
     parts: list[str],
+    locale: str,
     rel: str,
     digest: str,
     scope: str,
@@ -365,8 +378,12 @@ def _append_kubejs_lang_item(
     result: PackScanResult,
     occurrence: int,
 ) -> None:
-    key = _literal(parts[0])
-    value = _literal(parts[1])
+    parsed = parse_client_lang_add(parts)
+    if parsed is None:
+        return
+    _namespace, key_expr, value_expr = parsed
+    key = _literal(key_expr)
+    value = _literal(value_expr)
     if not key or value is None:
         return
     result.items.append(
@@ -378,13 +395,55 @@ def _append_kubejs_lang_item(
             key=key,
             text=value,
             rel=rel,
-            selector=f"ClientEvents.lang.event.add[{occurrence}]|{key}",
+            selector=f"ClientEvents.lang[{locale}].event.add[{occurrence}]|{key}",
             digest=digest,
             scope=scope,
             version=version,
             source_format="kubejs-js",
+            translated_locale=locale,
         )
     )
+
+
+def _kubejs_lang_locale(
+    event_name: str,
+    args: str,
+    rel: str,
+    result: PackScanResult,
+) -> str | None:
+    """讀取 ``ClientEvents.lang`` 的語系；未知語系不猜測成英文。"""
+    if event_name != "ClientEvents.lang":
+        return "en_us"
+    outer_parts = split_js_args(args)
+    if not outer_parts:
+        result.issues.append(
+            _issue(Path(rel), "kubejs_lang_locale_missing", "缺少 lang locale")
+        )
+        return None
+    first = _literal(outer_parts[0])
+    if first is None:
+        # 舊版 API 可省略 locale，第一個參數直接是 callback。
+        if "=>" in outer_parts[0] or outer_parts[0].strip().startswith("function"):
+            return "en_us"
+        result.issues.append(
+            _issue(
+                Path(rel),
+                "kubejs_lang_locale_dynamic",
+                "ClientEvents.lang 的 locale 不是靜態字串",
+            )
+        )
+        return None
+    locale = first.lower()
+    if locale not in _KUBEJS_LANG_LOCALES:
+        result.issues.append(
+            _issue(
+                Path(rel),
+                "kubejs_lang_locale_unsupported",
+                f"locale={locale}",
+            )
+        )
+        return None
+    return locale
 
 
 def _append_kubejs_tooltip_item(
@@ -714,6 +773,15 @@ def _append_quest_item(
     digest: str,
     result: PackScanResult,
 ) -> None:
+    if _looks_like_component_json(text):
+        result.issues.append(
+            _issue(
+                Path(rel),
+                "ftb_component_json_unsupported",
+                f"selector={selector}.{field}",
+            )
+        )
+        return
     if is_lang_key_ref_like(text):
         _append_references(
             result,
@@ -742,6 +810,49 @@ def _append_quest_item(
             version=version,
         )
     )
+
+
+def _looks_like_component_json(text: str) -> bool:
+    """判斷 FTB literal 是否為 Minecraft Component JSON。
+
+    Component 需要保留 JSON 結構才能在遊戲中正確套用；目前 writer 只支援
+    SNBT literal 字串，因此先明確列為 unsupported，避免把整段 JSON 送進 LM
+    後破壞格式。普通的 JSON-like 說明文字不會因為解析失敗而被排除。
+    """
+    candidate = text.strip()
+    if not candidate.startswith(("{", "[")):
+        return False
+    try:
+        value = json.loads(candidate)
+    except json.JSONDecodeError:
+        return False
+    if isinstance(value, dict):
+        return bool(
+            set(value).intersection(
+                {
+                    "text",
+                    "translate",
+                    "with",
+                    "extra",
+                    "score",
+                    "selector",
+                    "keybind",
+                    "nbt",
+                    "interpret",
+                    "color",
+                    "bold",
+                    "italic",
+                    "underlined",
+                    "strikethrough",
+                    "obfuscated",
+                    "clickEvent",
+                    "hoverEvent",
+                }
+            )
+        )
+    if isinstance(value, list):
+        return any(isinstance(item, (dict, list)) for item in value)
+    return False
 
 
 def _top_level_lang(root: Compound) -> list[tuple[str, str]]:
@@ -841,7 +952,15 @@ def _lang_relative(path: Path, root: Path, locale: str) -> str:
         relative[0].lower() == locale or Path(relative[0]).stem.lower() == locale
     ):
         relative = relative[1:]
-    return "/".join(relative) or path.name
+    # FTB Quests 也支援 lang/en_us.snbt 這種單檔語系；各 locale 必須共用
+    # 同一個 canonical identity，否則 en_us 與 zh_cn/zh_tw 無法合併。
+    if not relative or (
+        len(relative) == 1 and Path(relative[0]).stem.lower() == locale
+    ):
+        return "__root__.snbt"
+    if Path(relative[-1]).stem.lower() == locale:
+        return "/".join((*relative[:-1], "__root__.snbt"))
+    return "/".join(relative)
 
 
 def _make_item(
@@ -907,11 +1026,12 @@ def _resolve_reference_targets(result: PackScanResult) -> None:
         for item in result.items
         if item.kind == KIND_LANG and item.source_format in {"lang-json", "kubejs-js"}
     ]
+    targets_by_key: defaultdict[str, set[str]] = defaultdict(set)
+    for item in language_items:
+        targets_by_key[item.key].add(item.mod_id)
     resolved: list[SourceReference] = []
     for reference in result.references:
-        candidates = sorted(
-            {item.mod_id for item in language_items if item.key == reference.target_key}
-        )
+        candidates = sorted(targets_by_key.get(reference.target_key, ()))
         target_mod_id = candidates[0] if len(candidates) == 1 else ""
         resolved.append(replace(reference, target_mod_id=target_mod_id))
     result.references = resolved
