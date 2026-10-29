@@ -201,13 +201,18 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
         ("Machine", ""),
         ("", "機器"),
     }
-    assert any("ClientEvents.lang[zh_tw]" in item.source_selector for item in items)
+    assert any(
+        "ClientEvents.lang[zh_tw][demo]" in item.source_selector for item in items
+    )
+    assert {item.mod_id for item in items} == {"demo@" + result.pack_scope}
 
     translated = tmp_path / "translated" / "client_scripts" / "lang.json"
     translated.parent.mkdir(parents=True)
     translated.write_text(
         json.dumps(
-            {"client_scripts/lang.js|lang:item.demo.machine": "機器翻譯"},
+            {
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine": "機器翻譯"
+            },
             ensure_ascii=False,
         ),
         encoding="utf-8",
@@ -218,11 +223,82 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
     )
     assert summary["missing_translation_keys"] == []
     assert summary["applied_translation_keys"] == [
-        "client_scripts/lang.js|lang:item.demo.machine"
+        "client_scripts/lang.js|ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine"
     ]
-    assert "'demo', 'item.demo.machine', \"機器翻譯\"" in (
-        output / "client_scripts/lang.js"
-    ).read_text(encoding="utf-8")
+    output_text = (output / "client_scripts/lang.js").read_text(encoding="utf-8")
+    assert "'demo', 'item.demo.machine', 'Machine'" in output_text
+    assert 'event.add("demo", "item.demo.machine", "機器翻譯");' in output_text
+
+
+def test_kubejs_lang_writer_keeps_other_api_calls_untouched(tmp_path):
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "// event.add('demo_a', 'item.same', 'comment');\n"
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo_a', 'item.same', 'A');\n"
+        "  event.add('demo_b', 'item.same', 'B');\n"
+        "});\n"
+        "SomeRegistry.add('demo_a', 'item.same', 'Registry text');\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo_a].event.add[1]|item.same": "甲",
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo_b].event.add[2]|item.same": "乙",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "output"
+    summary = inject(
+        str(tmp_path / "kubejs"), str(tmp_path / "translated"), str(output)
+    )
+    output_text = (output / "client_scripts/lang.js").read_text(encoding="utf-8")
+
+    assert summary["missing_translation_keys"] == []
+    assert "Registry text" in output_text
+    assert "comment" in output_text
+    assert 'event.add("demo_a", "item.same", "甲");' in output_text
+    assert 'event.add("demo_b", "item.same", "乙");' in output_text
+
+
+def test_kubejs_lang_writer_does_not_fallback_for_unsupported_locale(tmp_path):
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('de_de', event => {\n"
+        "  event.add('demo', 'item.same', 'German');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {"client_scripts/lang.js|lang:item.same": "不應套用"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    output = tmp_path / "output"
+    summary = inject(
+        str(tmp_path / "kubejs"), str(tmp_path / "translated"), str(output)
+    )
+    output_text = (output / "client_scripts/lang.js").read_text(encoding="utf-8")
+
+    assert summary["applied_translation_keys"] == []
+    assert summary["missing_translation_keys"] == [
+        "client_scripts/lang.js|lang:item.same"
+    ]
+    assert "German" in output_text
+    assert "不應套用" not in output_text
 
 
 def test_ftb_single_file_locale_identity_is_shared(tmp_path):
@@ -251,3 +327,24 @@ def test_ftb_component_json_is_not_sent_as_plain_text(tmp_path):
     assert any(
         issue["reason"] == "ftb_component_json_unsupported" for issue in result.issues
     )
+
+
+def test_kubejs_lang_namespace_is_part_of_identity(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo_a', 'item.same', 'A');\n"
+        "  event.add('demo_b', 'item.same', 'B');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.key == "item.same"]
+
+    assert {(item.mod_id, item.en_us) for item in items} == {
+        (f"demo_a@{result.pack_scope}", "A"),
+        (f"demo_b@{result.pack_scope}", "B"),
+    }
+    assert len({item.source_selector for item in items}) == 2

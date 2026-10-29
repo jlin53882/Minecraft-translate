@@ -37,6 +37,10 @@ from translation_tool.translation_db.schema import (
 _LOCALES = {"en_us", "zh_cn", "zh_tw"}
 _QUEST_FIELD = re.compile(r"(?:^|\.)(title|subtitle|description(?:\[\d+\])?)$")
 _QUEST_ID = re.compile(r"\|id:(.+)$")
+_KUBEJS_LANG_SELECTOR = re.compile(
+    r"^ClientEvents\.lang\[(?P<locale>[^\]]+)\]"
+    r"(?:\[(?P<namespace>[^\]]+)\])?\.event\.add\["
+)
 
 
 class PackOutputError(RuntimeError):
@@ -162,6 +166,15 @@ def _make_plan(
     for item in items:
         if not item.zh_tw.strip() or item.zh_tw == item.en_us:
             continue
+        # KubeJS 的 effective translation 會同時帶入同一 entry 的 en_us／
+        # zh_tw origins。輸出必須以英文定義作為來源，從 zh_tw origin 重複
+        # 產生計畫會讓 writer 把既有語系當成新的來源事件。
+        if (
+            item.origin.source_kind == KIND_LANG
+            and item.origin.format_profile == "kubejs-js"
+            and _kubejs_lang_locale(item.origin.selector) not in {None, "en_us"}
+        ):
+            continue
         target = _target_for(item)
         if target is None:
             report.unsupported.append(
@@ -198,8 +211,15 @@ def _target_selector(item: EffectivePackTranslation) -> str:
     if origin.source_kind == KIND_LANG and origin.format_profile == "lang-json":
         return _lang_key(item.key)
     if origin.source_kind == KIND_LANG and origin.format_profile == "kubejs-js":
-        return f"{origin.source_path}|lang:{item.key}"
+        # selector 包含 locale、namespace 與 occurrence；writer 必須使用
+        # 同一個 selector，不能只用 key 對整個 JS 做模糊替換。
+        return f"{origin.source_path}|{origin.selector}"
     return item.key
+
+
+def _kubejs_lang_locale(selector: str) -> str | None:
+    match = _KUBEJS_LANG_SELECTOR.match(selector)
+    return match.group("locale").lower() if match else None
 
 
 def _validate_sources(
@@ -336,7 +356,13 @@ def _write_plan(
         target_path = _ftb_lang_target(source_path)
         dst = stage / "config" / "ftbquests" / "quests" / target_path
         dst.parent.mkdir(parents=True, exist_ok=True)
-        if not dst.exists():
+        # 既有 zh_tw 檔案可能含有沒有進入本次 ModDB 計畫的鍵；若一律
+        # 由 en_us 建立 stage，部署 overlay 時會靜默刪掉那些既有內容。
+        # 以目標語系檔作為基底，只覆蓋明確命中的 selector。
+        existing_target = _safe_join(quests_root, target_path)
+        if existing_target.is_file():
+            shutil.copy2(existing_target, dst)
+        else:
             shutil.copy2(src, dst)
         _changed, _candidates, details = patch_lang_snbt_file(
             str(src), str(dst), updates, return_details=True

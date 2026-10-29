@@ -24,6 +24,11 @@ from translation_tool.utils.log_unit import (
     log_warning,
 )
 
+# KubeJS 2001 的兩參數 LangEventJS.add(key, value) 會使用預設
+# ``minecraft`` namespace。三參數形式必須由呼叫端明確提供 namespace；掃描器
+# 與 writer 共用這個常數，避免兩邊各自猜測身分。
+KUBEJS_DEFAULT_LANG_NAMESPACE = "minecraft"
+
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """

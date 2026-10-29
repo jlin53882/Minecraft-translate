@@ -14,6 +14,7 @@ from pathlib import Path
 
 from translation_tool.core.kubejs_translator_state import atomic_write_bytes
 from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
+    KUBEJS_DEFAULT_LANG_NAMESPACE,
     parse_client_lang_add,
 )
 from translation_tool.utils.log_unit import log_error, log_info
@@ -55,6 +56,59 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
             break
 
     return str(best) if best else str(base)
+
+
+def _mask_js_non_code(text: str) -> str:
+    """以等長空白遮蔽字串與註解，避免 writer 命中假呼叫。"""
+    out = list(text)
+    state: str | None = None
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        next_char = text[index + 1] if index + 1 < len(text) else ""
+        if state in {"'", chr(34), "`"}:
+            out[index] = "\n" if char == "\n" else " "
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == state:
+                state = None
+            index += 1
+            continue
+        if state == "line":
+            out[index] = "\n" if char == "\n" else " "
+            if char == "\n":
+                state = None
+            index += 1
+            continue
+        if state == "block":
+            out[index] = "\n" if char == "\n" else " "
+            if char == "*" and next_char == "/":
+                out[index + 1] = " "
+                index += 2
+                state = None
+            else:
+                index += 1
+            continue
+        if char in ("'", chr(34), "`"):
+            state = char
+            out[index] = " "
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            out[index] = out[index + 1] = " "
+            index += 2
+            state = "line"
+            continue
+        if char == "/" and next_char == "*":
+            out[index] = out[index + 1] = " "
+            index += 2
+            state = "block"
+            continue
+        index += 1
+    return "".join(out)
 
 
 def _extract_call_args_with_end(
@@ -110,12 +164,15 @@ def _replace_js_call_arguments(
     Returns:
         僅替換指定呼叫引數後的完整 JavaScript 內容。
     """
+    # 只在程式碼區搜尋；否則註解或字串中的 ``event.add(...)`` 也會被
+    # 當成可回寫的語法節點。
+    code = _mask_js_non_code(content)
     pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
     output: list[str] = []
     cursor = 0
     search_from = 0
     while True:
-        match = pattern.search(content, search_from)
+        match = pattern.search(code, search_from)
         if match is None:
             break
         arguments, closing_index = _extract_call_args_with_end(content, match.end())
@@ -146,11 +203,209 @@ def _itemevents_tooltip_ranges(content: str) -> list[tuple[int, int]]:
     呼叫端仍可使用 legacy fallback，維持既有腳本格式相容性。
     """
     ranges: list[tuple[int, int]] = []
-    for match in re.finditer(r"\bItemEvents\.tooltip\s*\(", content):
+    code = _mask_js_non_code(content)
+    for match in re.finditer(r"\bItemEvents\.tooltip\s*\(", code):
         _arguments, closing_index = _extract_call_args_with_end(content, match.end())
         if closing_index is not None:
             ranges.append((match.start(), closing_index + 1))
     return ranges
+
+
+def _clientevents_lang_ranges(
+    content: str,
+) -> list[tuple[int, int, str]]:
+    """回傳可安全辨識的 ``ClientEvents.lang`` 呼叫範圍與 locale。"""
+    ranges: list[tuple[int, int, str]] = []
+    code = _mask_js_non_code(content)
+    for match in re.finditer(r"\bClientEvents\.lang\s*\(", code):
+        arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if arguments is None or closing_index is None:
+            continue
+        parts = split_js_args(arguments)
+        if not parts:
+            continue
+        locale = _decode_js_string_literal(parts[0])
+        if locale is None and (
+            "=>" in parts[0] or parts[0].strip().startswith("function")
+        ):
+            locale = "en_us"
+        if locale is None or locale.lower() not in {"en_us", "zh_cn", "zh_tw"}:
+            continue
+        ranges.append((match.start(), closing_index + 1, locale.lower()))
+    return ranges
+
+
+def _has_clientevents_lang_call(content: str) -> bool:
+    """判斷檔案是否含有語系 API，包含目前不支援的動態 locale。"""
+    code = _mask_js_non_code(content)
+    return re.search(r"\bClientEvents\.lang\s*\(", code) is not None
+
+
+def _clientevents_lang_locale_at(
+    ranges: list[tuple[int, int, str]], position: int
+) -> str | None:
+    """回傳位置所在的語系事件；位置不在支援範圍時回傳 ``None``。"""
+    for start, end, locale in ranges:
+        if start <= position < end:
+            return locale
+    return None
+
+
+def _parse_kubejs_lang_call(
+    content: str, match: re.Match[str], locale: str
+) -> tuple[str, str, str, list[str], int, bool, str] | None:
+    """解析一個已位於 ``ClientEvents.lang`` 範圍內的 ``event.add``。"""
+    arguments, closing_index = _extract_call_args_with_end(content, match.end())
+    if arguments is None or closing_index is None:
+        return None
+    parts = split_js_args(arguments)
+    parsed = parse_client_lang_add(parts)
+    if parsed is None:
+        return None
+    namespace_expr, key_expr, value_expr = parsed
+    namespace = KUBEJS_DEFAULT_LANG_NAMESPACE
+    if namespace_expr is not None:
+        namespace = _decode_js_string_literal(namespace_expr)
+        if not namespace:
+            return None
+    key = _decode_js_string_literal(key_expr)
+    current_value = _decode_js_string_literal(value_expr)
+    if not key or current_value is None:
+        return None
+    return (
+        locale,
+        namespace,
+        key,
+        parts,
+        closing_index,
+        namespace_expr is not None,
+        current_value,
+    )
+
+
+def _select_kubejs_lang_translation(
+    source_file: str,
+    locale: str,
+    namespace: str,
+    key: str,
+    occurrence: int,
+    translation_map: dict[str, str],
+) -> tuple[str, str] | None:
+    """以新 selector 優先、legacy selector 相容地選一筆翻譯。"""
+    stable_key = (
+        f"{source_file}|ClientEvents.lang[{locale}][{namespace}]"
+        f".event.add[{occurrence}]|{key}"
+    )
+    legacy_selector = (
+        f"{source_file}|ClientEvents.lang[{locale}].event.add[{occurrence}]|{key}"
+    )
+    legacy_key = f"{source_file}|lang:{key}"
+    selected_key = next(
+        (
+            candidate
+            for candidate in (stable_key, legacy_selector, legacy_key)
+            if candidate in translation_map
+        ),
+        None,
+    )
+    if selected_key is None:
+        return None
+    return selected_key, str(translation_map[selected_key])
+
+
+def _append_kubejs_lang_translations(
+    content: str,
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    used_keys: set[str],
+) -> str:
+    """以 locale-aware 方式輸出 KubeJS LangEventJS 翻譯。
+
+    英文來源事件永遠保持原樣；翻譯會追加成 ``zh_tw`` 事件。若來源本身
+    已是 ``zh_tw``，只在同一個精確 selector 上更新 value。這避免把英文
+    腳本誤當成繁中輸出，也避免對檔案中其他 API 的 ``event.add`` 做全文替換。
+    """
+    ranges = _clientevents_lang_ranges(content)
+    if not ranges:
+        return content
+
+    code = _mask_js_non_code(content)
+    pattern = re.compile(r"\bevent\.add\s*\(")
+    output: list[str] = []
+    cursor = 0
+    occurrence = 0
+    additions: list[tuple[str, str, str, bool]] = []
+
+    for match in pattern.finditer(code):
+        locale = _clientevents_lang_locale_at(ranges, match.start())
+        if locale is None:
+            continue
+        candidate = _parse_kubejs_lang_call(content, match, locale)
+        if candidate is None:
+            continue
+        (
+            locale,
+            namespace,
+            key,
+            parts,
+            closing_index,
+            explicit_namespace,
+            current_value,
+        ) = candidate
+
+        occurrence += 1
+        selected = _select_kubejs_lang_translation(
+            source_file,
+            locale,
+            namespace,
+            key,
+            occurrence,
+            translation_map,
+        )
+        if selected is None:
+            continue
+
+        selected_key, translated = selected
+        used_keys.add(selected_key)
+        if locale == "en_us":
+            additions.append((namespace, key, translated, explicit_namespace))
+            continue
+        if locale != "zh_tw" or translated == current_value:
+            continue
+
+        new_parts = list(parts)
+        value_index = 2 if explicit_namespace else 1
+        new_parts[value_index] = json.dumps(translated, ensure_ascii=False)
+        output.append(content[cursor : match.start()])
+        output.append(content[match.start() : match.end()])
+        output.append(", ".join(new_parts))
+        output.append(")")
+        cursor = closing_index + 1
+
+    output.append(content[cursor:])
+    result = "".join(output)
+    if not additions:
+        return result
+
+    lines = [
+        "",
+        "// Minecraft-translate generated zh_tw language overlay",
+        "ClientEvents.lang('zh_tw', event => {",
+    ]
+    for namespace, key, value, explicit_namespace in additions:
+        encoded_key = json.dumps(key, ensure_ascii=False)
+        encoded_value = json.dumps(value, ensure_ascii=False)
+        if explicit_namespace:
+            encoded_namespace = json.dumps(namespace, ensure_ascii=False)
+            lines.append(
+                f"  event.add({encoded_namespace}, {encoded_key}, {encoded_value});"
+            )
+        else:
+            lines.append(f"  event.add({encoded_key}, {encoded_value});")
+    lines.extend(["});", ""])
+    separator = "" if result.endswith("\n") else "\n"
+    return result + separator + "\n".join(lines)
 
 
 # ---------------- 工具 ----------------
@@ -708,7 +963,22 @@ def inject(
             )
             return replacement
 
-        content = _replace_js_call_arguments(content, "event.add", repl_event_add)
+        lang_ranges = _clientevents_lang_ranges(content)
+        if lang_ranges:
+            # ClientEvents.lang 的英文定義不可直接覆蓋；helper 會依 locale、
+            # namespace 與 occurrence 產生精確的 zh_tw overlay。
+            content = _append_kubejs_lang_translations(
+                content,
+                source_file=original_js,
+                translation_map=translations,
+                used_keys=used_translation_keys,
+            )
+        elif not _itemevents_tooltip_ranges(
+            content
+        ) and not _has_clientevents_lang_call(content):
+            # 沒有可辨識的新式 API 時保留舊版 event.add fixture 的相容性。
+            # 有明確 wrapper 的檔案則不走全文 fallback，避免改到非目標 API。
+            content = _replace_js_call_arguments(content, "event.add", repl_event_add)
 
         # ----------------------------
         # 2) Patch Ponder: scene.text(...)
@@ -788,7 +1058,8 @@ def inject(
             strict_context = bool(tooltip_ranges)
             tooltip_call_indices: defaultdict[str, int] = defaultdict(int)
 
-            for match in re.finditer(r"\.add\s*\(", full):
+            code = _mask_js_non_code(full)
+            for match in re.finditer(r"\.add\s*\(", code):
                 if strict_context and not any(
                     start <= match.start() < end for start, end in tooltip_ranges
                 ):

@@ -254,3 +254,44 @@ def test_export_maps_single_file_ftb_locale_to_zh_tw(tmp_path: Path):
         assert str(translated["quest.title"]) == "繁體標題"
     finally:
         db.close()
+
+
+def test_export_preserves_existing_ftb_zh_tw_keys_not_managed_by_db(tmp_path: Path):
+    quests = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    quests.mkdir(parents=True)
+    (quests / "en_us.snbt").write_text(
+        '{quest.title:"English title"}', encoding="utf-8"
+    )
+    (quests / "zh_tw.snbt").write_text(
+        '{quest.title:"舊繁中標題",unmanaged.key:"既有未管理內容"}',
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind='ftb_quest_lang' AND e.key LIKE '%quest.title' "
+            "AND eo.pack_scope=? LIMIT 1",
+            (scope,),
+        )[0]
+        db.save_manual(entry_id, "新的繁中標題", propagate=False)
+
+        output = tmp_path.parent / "ftb-preserve-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+        assert report.ok
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw.snbt").open(encoding="utf-8")
+        )
+        assert str(translated["quest.title"]) == "新的繁中標題"
+        assert str(translated["unmanaged.key"]) == "既有未管理內容"
+    finally:
+        db.close()

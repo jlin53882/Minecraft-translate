@@ -28,6 +28,7 @@ from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     walk_snbt_file,
 )
 from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
+    KUBEJS_DEFAULT_LANG_NAMESPACE,
     extract_js_string_call,
     parse_client_lang_add,
     split_js_args,
@@ -381,7 +382,19 @@ def _append_kubejs_lang_item(
     parsed = parse_client_lang_add(parts)
     if parsed is None:
         return
-    _namespace, key_expr, value_expr = parsed
+    namespace_expr, key_expr, value_expr = parsed
+    namespace = KUBEJS_DEFAULT_LANG_NAMESPACE
+    if namespace_expr is not None:
+        namespace = _literal(namespace_expr)
+        if not namespace:
+            result.issues.append(
+                _issue(
+                    Path(rel),
+                    "kubejs_lang_namespace_dynamic",
+                    "ClientEvents.lang 的 namespace 不是靜態字串",
+                )
+            )
+            return
     key = _literal(key_expr)
     value = _literal(value_expr)
     if not key or value is None:
@@ -389,13 +402,16 @@ def _append_kubejs_lang_item(
     result.items.append(
         _make_item(
             kind=KIND_LANG,
-            # ClientEvents.lang may use a default namespace.  The exact key is
-            # stable; pack scope supplies the source identity.
-            mod_id=f"kubejs@{scope}",
+            # namespace 是 KubeJS LangEventJS 的資料身分；不能只用 key，
+            # 否則同一檔案的不同 namespace 會在 ModDB 合併成同一筆。
+            mod_id=f"{namespace}@{scope}",
             key=key,
             text=value,
             rel=rel,
-            selector=f"ClientEvents.lang[{locale}].event.add[{occurrence}]|{key}",
+            selector=(
+                f"ClientEvents.lang[{locale}][{namespace}]"
+                f".event.add[{occurrence}]|{key}"
+            ),
             digest=digest,
             scope=scope,
             version=version,
@@ -680,7 +696,19 @@ def _scan_ftb_quests(
                 digest=source_digest,
                 scope=scope,
                 version=version,
-                translated_locale="zh_tw" if "zh_tw" in locales else "",
+                # When en_us is present it is the source text and zh_tw/zh_cn
+                # are companion translations.  Mark a translated locale only
+                # for a locale-only file; otherwise _make_item would clear the
+                # English source while keeping the existing translation.
+                translated_locale=(
+                    ""
+                    if "en_us" in locales
+                    else "zh_tw"
+                    if "zh_tw" in locales
+                    else "zh_cn"
+                    if "zh_cn" in locales
+                    else ""
+                ),
                 zh_cn=locales.get("zh_cn", ("", ""))[0],
                 zh_tw=locales.get("zh_tw", ("", ""))[0],
                 source_format="ftb-snbt-lang",
