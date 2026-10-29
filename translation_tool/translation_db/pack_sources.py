@@ -30,6 +30,7 @@ from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
 from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
     KUBEJS_DEFAULT_LANG_NAMESPACE,
     extract_js_string_call,
+    is_client_lang_add_shape,
     parse_client_lang_add,
     split_js_args,
 )
@@ -348,7 +349,7 @@ def _scan_kubejs_event(
         if not call_args:
             continue
         parts = split_js_args(call_args)
-        if len(parts) < 2:
+        if not is_client_lang_add_shape(parts):
             continue
         if event_name == "ClientEvents.lang":
             lang_occurrence += 1

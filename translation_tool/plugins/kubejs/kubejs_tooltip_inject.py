@@ -15,6 +15,7 @@ from pathlib import Path
 from translation_tool.core.kubejs_translator_state import atomic_write_bytes
 from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
     KUBEJS_DEFAULT_LANG_NAMESPACE,
+    is_client_lang_add_shape,
     parse_client_lang_add,
 )
 from translation_tool.utils.log_unit import log_error, log_info
@@ -387,6 +388,12 @@ def _append_kubejs_lang_translations(
         locale = _clientevents_lang_locale_at(ranges, match.start())
         if locale is None:
             continue
+        arguments, _ = _extract_call_args_with_end(content, match.end())
+        if arguments is None or not is_client_lang_add_shape(split_js_args(arguments)):
+            continue
+        # 與 scanner 保持相同契約：即使值是動態表達式，這個 event.add
+        # 仍會消耗 occurrence；只有後續解析成功時才有可套用的翻譯。
+        occurrence += 1
         candidate = _parse_kubejs_lang_call(content, match, locale)
         if candidate is None:
             continue
@@ -400,7 +407,6 @@ def _append_kubejs_lang_translations(
             current_value,
         ) = candidate
 
-        occurrence += 1
         selected = _select_kubejs_lang_translation(
             source_file,
             locale,

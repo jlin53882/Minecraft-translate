@@ -200,6 +200,16 @@ def parse_client_lang_add(parts: list[str]) -> tuple[str | None, str, str] | Non
     return None
 
 
+def is_client_lang_add_shape(parts: list[str]) -> bool:
+    """判斷 ``ClientEvents.lang`` 的 occurrence 是否應消耗序號。
+
+    Scanner 與 writer 必須先對每一個具備至少兩個引數的 ``event.add``
+    消耗相同序號，再各自判斷值是否為可翻譯的靜態字串。否則前面的動態
+    引數會被 scanner 計數、writer 略過，導致後續合法項目的 selector 錯位。
+    """
+    return len(parts) >= 2
+
+
 def extract_array_strings(arr: str) -> list[str]:
     """
     使用正則表達式從字串中提取所有被引號包圍的內容。

@@ -230,6 +230,45 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
     assert 'event.add("demo", "item.demo.machine", "機器翻譯");' in output_text
 
 
+def test_kubejs_lang_dynamic_value_keeps_scan_and_writer_occurrence_aligned(
+    tmp_path,
+):
+    """動態值不可翻譯時，後續靜態值仍須沿用 scanner 的 occurrence。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('item.demo.dynamic', computeTitle());\n"
+        "  event.add('item.demo.machine', 'Advanced Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    item = next(item for item in result.items if item.key == "item.demo.machine")
+    assert item.source_selector.endswith(
+        "ClientEvents.lang[en_us][minecraft].event.add[2]|item.demo.machine"
+    )
+    translation_key = f"{item.source_path}|{item.source_selector}"
+
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps({translation_key: "進階機器"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    output = tmp_path / "output"
+    summary = inject(
+        str(tmp_path / "kubejs"), str(tmp_path / "translated"), str(output)
+    )
+
+    output_text = (output / "client_scripts" / "lang.js").read_text(encoding="utf-8")
+    assert summary["missing_translation_keys"] == []
+    assert summary["applied_translation_keys"] == [translation_key]
+    assert "computeTitle()" in output_text
+    assert 'event.add("item.demo.machine", "進階機器");' in output_text
+
+
 def test_kubejs_lang_writer_keeps_other_api_calls_untouched(tmp_path):
     source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
     source.parent.mkdir(parents=True)
