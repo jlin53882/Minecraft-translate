@@ -387,3 +387,68 @@ def test_kubejs_lang_namespace_is_part_of_identity(tmp_path):
         (f"demo_b@{result.pack_scope}", "B"),
     }
     assert len({item.source_selector for item in items}) == 2
+
+
+def test_kubejs_lang_uses_most_populated_locale_only_without_en_us(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "pt_br.json").write_text(
+        json.dumps({"a": "Portuguese A", "b": "Portuguese B"}),
+        encoding="utf-8",
+    )
+    (lang / "ru_ru.json").write_text(
+        json.dumps({"a": "Russian A"}),
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.source_format == "lang-json"]
+
+    assert result.locale_fallbacks == {"demo": "pt_br"}
+    assert {(item.key, item.en_us) for item in items} == {
+        ("a", "Portuguese A"),
+        ("b", "Portuguese B"),
+    }
+
+
+def test_kubejs_lang_prefers_pt_br_on_a_fallback_tie(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "pt_br.json").write_text(json.dumps({"a": "Portuguese"}), encoding="utf-8")
+    (lang / "ru_ru.json").write_text(json.dumps({"a": "Russian"}), encoding="utf-8")
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    assert result.locale_fallbacks == {"demo": "pt_br"}
+    assert [
+        item.en_us for item in result.items if item.source_format == "lang-json"
+    ] == ["Portuguese"]
+
+
+def test_kubejs_lang_keeps_en_us_as_source_when_other_locale_is_larger(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({"a": "English"}), encoding="utf-8")
+    (lang / "pt_br.json").write_text(
+        json.dumps({"a": "Portuguese", "b": "Extra"}),
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.source_format == "lang-json"]
+
+    assert result.locale_fallbacks == {}
+    assert {(item.key, item.en_us) for item in items} == {("a", "English")}
+
+
+def test_kubejs_lang_uses_fallback_when_en_us_is_empty(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(json.dumps({}), encoding="utf-8")
+    (lang / "pt_br.json").write_text(json.dumps({"a": "Portuguese"}), encoding="utf-8")
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.source_format == "lang-json"]
+
+    assert result.locale_fallbacks == {"demo": "pt_br"}
+    assert {(item.key, item.en_us) for item in items} == {("a", "Portuguese")}

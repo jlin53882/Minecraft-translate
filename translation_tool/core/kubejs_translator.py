@@ -407,7 +407,6 @@ def _aggregate_source_snapshots(
             language = (
                 path.stem.lower()
                 if "lang" in {part.lower() for part in relative.parts}
-                and path.stem.lower() in {"en_us", "zh_cn", "zh_tw"}
                 else None
             )
             for key, value in incoming.items():
@@ -497,8 +496,6 @@ def _collect_source_provenance(
             if "lang" not in {part.lower() for part in relative.parts}:
                 continue
             language = path.stem.lower()
-            if language not in {"en_us", "zh_cn", "zh_tw"}:
-                continue
             try:
                 data = orjson.loads(path.read_bytes())
             except (OSError, orjson.JSONDecodeError) as exc:

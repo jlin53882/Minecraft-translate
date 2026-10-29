@@ -27,6 +27,12 @@ from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     is_tag_condition_text,
     walk_snbt_file,
 )
+from translation_tool.plugins.kubejs.kubejs_lang_selection import (
+    count_language_values,
+    normalize_locale,
+    select_source_locale,
+    selected_locales,
+)
 from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
     KUBEJS_DEFAULT_LANG_NAMESPACE,
     extract_js_string_call,
@@ -155,6 +161,7 @@ class PackScanResult:
     issues: list[dict[str, str]] = field(default_factory=list)
     files_seen: int = 0
     sources_found: list[str] = field(default_factory=list)
+    locale_fallbacks: dict[str, str] = field(default_factory=dict)
 
 
 def discover_pack_root(folder: str | Path) -> Path | None:
@@ -570,16 +577,26 @@ def _scan_kubejs_lang(
     root: Path, version: str, scope: str, result: PackScanResult
 ) -> None:
     assets = root / "assets"
+    files_by_namespace: defaultdict[str, defaultdict[str, list[Path]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for path in _iter_files(assets, (".json",), result) if assets.is_dir() else ():
         parts = path.relative_to(root).parts
         if len(parts) < 4 or parts[-2] != "lang":
             continue
-        locale = path.stem.lower()
-        if locale not in {"en_us", "zh_tw", "zh_cn"}:
-            continue
+        namespace = parts[1] if len(parts) > 1 else "kubejs"
+        locale = normalize_locale(path.stem)
+        files_by_namespace[namespace][locale].append(path)
+
+    parsed: dict[Path, tuple[str, str, dict[str, object]] | None] = {}
+
+    def load(path: Path) -> tuple[str, str, dict[str, object]] | None:
+        if path in parsed:
+            return parsed[path]
         loaded = _read_text(path, result)
         if loaded is None:
-            continue
+            parsed[path] = None
+            return None
         result.files_seen += 1
         result.sources_found.append(path.relative_to(root).as_posix())
         text, digest = loaded
@@ -589,7 +606,8 @@ def _scan_kubejs_lang(
             result.issues.append(
                 _issue(path, "json_parse_failed", str(exc), status="parse_failed")
             )
-            continue
+            parsed[path] = None
+            return None
         if not isinstance(values, dict):
             result.issues.append(
                 _issue(
@@ -599,28 +617,60 @@ def _scan_kubejs_lang(
                     status="parse_failed",
                 )
             )
-            continue
-        parts = path.relative_to(root).parts
-        namespace = parts[1] if len(parts) > 1 else "kubejs"
-        for key, value in values.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                continue
-            result.items.append(
-                _make_item(
-                    kind=KIND_LANG,
-                    # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
-                    # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
-                    mod_id=f"{namespace}@{scope}",
-                    key=key,
-                    text=value,
-                    rel=path.relative_to(root).as_posix(),
-                    selector=f"lang:{locale}:{key}",
-                    digest=digest,
-                    scope=scope,
-                    version=version,
-                    translated_locale=locale,
+            parsed[path] = None
+            return None
+        parsed[path] = (text, digest, values)
+        return parsed[path]
+
+    for namespace, locale_paths in sorted(files_by_namespace.items()):
+        # First inspect en_us.  Other locales are parsed only when a usable
+        # en_us source is absent, preserving the old fast path for normal mods.
+        en_count = sum(
+            count_language_values(loaded[2])
+            for path in locale_paths.get("en_us", [])
+            if (loaded := load(path)) is not None
+        )
+        locale_counts: dict[str, int] = {"en_us": en_count}
+        source_locale = select_source_locale(locale_counts)
+        if source_locale != "en_us":
+            locale_counts = {}
+            for locale, paths in locale_paths.items():
+                locale_counts[locale] = sum(
+                    count_language_values(loaded[2])
+                    for path in paths
+                    if (loaded := load(path)) is not None
                 )
-            )
+            source_locale = select_source_locale(locale_counts)
+            if source_locale and source_locale != "en_us":
+                result.locale_fallbacks[namespace] = source_locale
+
+        locales = selected_locales(set(locale_paths), source_locale)
+        for locale in sorted(locales):
+            for path in locale_paths.get(locale, []):
+                loaded = load(path)
+                if loaded is None:
+                    continue
+                _, digest, values = loaded
+                rel = path.relative_to(root).as_posix()
+                for key, value in values.items():
+                    if not isinstance(key, str) or not isinstance(value, str):
+                        continue
+                    result.items.append(
+                        _make_item(
+                            kind=KIND_LANG,
+                            # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
+                            # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
+                            mod_id=f"{namespace}@{scope}",
+                            key=key,
+                            text=value,
+                            rel=rel,
+                            selector=f"lang:{locale}:{key}",
+                            digest=digest,
+                            scope=scope,
+                            version=version,
+                            translated_locale=locale,
+                        )
+                    )
 
 
 def _scan_ftb_quests(

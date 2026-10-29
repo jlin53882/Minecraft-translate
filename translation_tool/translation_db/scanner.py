@@ -163,6 +163,7 @@ class ScanReport:
     pack_files_seen: int = 0
     pack_sources: int = 0
     pack_references: int = 0
+    pack_locale_fallbacks: dict[str, str] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
@@ -199,6 +200,7 @@ class ScanReport:
             "pack_files_seen": self.pack_files_seen,
             "pack_sources": self.pack_sources,
             "pack_references": self.pack_references,
+            "pack_locale_fallbacks": dict(sorted(self.pack_locale_fallbacks.items())),
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
             "existing": self.stats.existing,
@@ -1212,6 +1214,7 @@ def scan_folder_generator(
             report.pack_files_seen = pack_result.files_seen
             report.pack_sources = len(pack_result.sources_found)
             report.pack_references = len(pack_result.references)
+            report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
             for issue in pack_result.issues:
                 report.add_issue(issue)
             report.stats.add(
@@ -1252,12 +1255,23 @@ def scan_folder_generator(
         ),
     }
     if has_pack_content:
+        fallback_counts = Counter(report.pack_locale_fallbacks.values())
+        fallback_log = ""
+        if fallback_counts:
+            fallback_log = (
+                f"；缺少可用 en_us 的 namespace {len(report.pack_locale_fallbacks):,} 個，"
+                "基準語系："
+                + "、".join(
+                    f"{locale} {count:,} 個"
+                    for locale, count in sorted(fallback_counts.items())
+                )
+            )
         yield {
             "progress": 0.0,
             "log": (
                 f"📦 模組包來源：讀取 {report.pack_sources:,} 個檔案，"
                 f"找到 {report.pack_items_found:,} 個 KubeJS／FTB Quests 文字候選"
-                f"，建立 {report.pack_references:,} 個跨格式引用"
+                f"，建立 {report.pack_references:,} 個跨格式引用{fallback_log}"
             ),
             "level": "warning" if pack_result.issues else "info",
         }
