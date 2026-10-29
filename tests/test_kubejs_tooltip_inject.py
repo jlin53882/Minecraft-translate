@@ -398,6 +398,31 @@ def test_inject_itemevents_does_not_patch_unrelated_add_inside_same_script(
     assert "新工具提示" in output
 
 
+def test_inject_patches_legacy_event_add_alongside_itemevents_tooltip(
+    tmp_path: Path,
+) -> None:
+    """同檔混用舊式 event.add 與 Tooltip 時，兩種來源都要可回寫。"""
+    source = (
+        "event.add('minecraft:dirt', Text.of('Legacy text'));\n"
+        "ItemEvents.tooltip(event => { "
+        "event.add('minecraft:stone', Text.of('Tooltip text')); "
+        "});\n"
+    )
+    result, _, output_path = _run_inject_fixture(
+        tmp_path,
+        source,
+        {
+            "client_scripts/test.js|minecraft:dirt.0": "舊式翻譯",
+            "client_scripts/test.js|minecraft:stone.tooltip.0": "工具提示翻譯",
+        },
+    )
+
+    output = output_path.read_text(encoding="utf-8")
+    assert result["patched_js_files"] == 1
+    assert "舊式翻譯" in output
+    assert "工具提示翻譯" in output
+
+
 def test_inject_itemevents_accepts_pack_scanner_stable_key(tmp_path: Path) -> None:
     """ModDB pack scanner 的 key 可直接交給既有安全回寫器。"""
     source = (

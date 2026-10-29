@@ -133,6 +133,40 @@ def test_export_rejects_a_changed_source_before_writing(tmp_path: Path):
         db.close()
 
 
+@pytest.mark.parametrize("target_kind", ["same", "ancestor", "inside"])
+def test_export_rejects_output_boundary_that_can_touch_source(
+    tmp_path: Path, target_kind: str
+):
+    pack_root = tmp_path / "pack"
+    _write_fixture(pack_root)
+    sentinel = tmp_path / "keep.txt"
+    sentinel.write_bytes(b"do not delete")
+    source = pack_root / "kubejs" / "client_scripts" / "a" / "main.js"
+    source_bytes = source.read_bytes()
+    db = TranslationDB(pack_root / "translation.db")
+    try:
+        if target_kind == "same":
+            output = pack_root
+        elif target_kind == "ancestor":
+            output = tmp_path
+        else:
+            output = pack_root / "overlay"
+
+        with pytest.raises(PackOutputError, match="輸出目錄不可"):
+            export_pack_overlay(
+                db,
+                pack_root,
+                "1.21.1",
+                output,
+                pack_scope=pack_scope_for_root(pack_root),
+            )
+
+        assert source.read_bytes() == source_bytes
+        assert sentinel.read_bytes() == b"do not delete"
+    finally:
+        db.close()
+
+
 def test_export_rejects_conflicting_hashes_for_same_source(tmp_path: Path):
     source = tmp_path / "kubejs" / "client_scripts" / "main.js"
     source.parent.mkdir(parents=True)

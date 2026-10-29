@@ -118,8 +118,7 @@ def export_pack_overlay(
     output = Path(output_root).expanduser().resolve()
     if not root.is_dir():
         raise PackOutputError(f"模組包根目錄不存在：{root}")
-    if output == root or root in output.parents:
-        raise PackOutputError("輸出目錄不可位於來源模組包內")
+    _validate_output_boundary(root, output)
     scope = pack_scope or pack_scope_for_root(root)
     report = PackOutputReport(str(scope), str(output), bool(dry_run))
     items = db.effective_pack_translations(version, scope)
@@ -139,7 +138,7 @@ def export_pack_overlay(
         report.files_written = sum(1 for path in stage.rglob("*") if path.is_file())
         if not report.ok:
             raise PackOutputError(_format_report_error(report))
-        _publish_stage(stage, output)
+        _publish_stage(stage, output, root)
         return report
     except PackOutputError:
         raise
@@ -465,8 +464,19 @@ def _ftb_lang_target(source_path: str) -> str:
     return "/".join(parts)
 
 
-def _publish_stage(stage: Path, output: Path) -> None:
+def _validate_output_boundary(root: Path, output: Path) -> None:
+    """拒絕會讓發布流程碰到來源的輸出位置。"""
+    if output == root:
+        raise PackOutputError("輸出目錄不可與來源模組包相同")
+    if root in output.parents:
+        raise PackOutputError("輸出目錄不可位於來源模組包內")
+    if output in root.parents:
+        raise PackOutputError("輸出目錄不可包含來源模組包")
+
+
+def _publish_stage(stage: Path, output: Path, source_root: Path) -> None:
     """以完整快照替換輸出目錄，避免保留上一次輸出的幽靈檔案。"""
+    _validate_output_boundary(source_root, output)
     if output.exists() and not output.is_dir():
         raise PackOutputError(f"輸出路徑不是資料夾：{output}")
     backup: Path | None = None

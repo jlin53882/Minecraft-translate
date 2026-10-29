@@ -153,6 +153,8 @@ def _replace_js_call_arguments(
     content: str,
     function_name: str,
     replace_args: Callable[[str], str],
+    *,
+    excluded_ranges: list[tuple[int, int]] | None = None,
 ) -> str:
     """以平衡括號邊界替換具名 JavaScript 呼叫的引數。
 
@@ -175,6 +177,11 @@ def _replace_js_call_arguments(
         match = pattern.search(code, search_from)
         if match is None:
             break
+        if excluded_ranges and any(
+            start <= match.start() < end for start, end in excluded_ranges
+        ):
+            search_from = match.end()
+            continue
         arguments, closing_index = _extract_call_args_with_end(content, match.end())
         if arguments is None or closing_index is None:
             output.append(content[cursor:])
@@ -973,12 +980,15 @@ def inject(
                 translation_map=translations,
                 used_keys=used_translation_keys,
             )
-        elif not _itemevents_tooltip_ranges(
-            content
-        ) and not _has_clientevents_lang_call(content):
-            # 沒有可辨識的新式 API 時保留舊版 event.add fixture 的相容性。
-            # 有明確 wrapper 的檔案則不走全文 fallback，避免改到非目標 API。
-            content = _replace_js_call_arguments(content, "event.add", repl_event_add)
+        elif not _has_clientevents_lang_call(content):
+            # 保留舊版 event.add fixture 的相容性；同檔的新式 Tooltip
+            # 仍由下方專用 writer 處理，不能讓 legacy fallback 越界改寫它。
+            content = _replace_js_call_arguments(
+                content,
+                "event.add",
+                repl_event_add,
+                excluded_ranges=_itemevents_tooltip_ranges(content),
+            )
 
         # ----------------------------
         # 2) Patch Ponder: scene.text(...)
