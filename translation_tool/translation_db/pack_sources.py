@@ -13,6 +13,7 @@ import json
 import os
 import re
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -573,104 +574,163 @@ def _record_kubejs_reason(
         result.issues.append(_issue(Path(rel), reason, f"selector={selector}"))
 
 
-def _scan_kubejs_lang(
-    root: Path, version: str, scope: str, result: PackScanResult
-) -> None:
-    assets = root / "assets"
+_KubeJSLangData = tuple[str, str, dict[str, object]]
+
+
+def _collect_kubejs_lang_paths(
+    root: Path, result: PackScanResult
+) -> defaultdict[str, defaultdict[str, list[Path]]]:
     files_by_namespace: defaultdict[str, defaultdict[str, list[Path]]] = defaultdict(
         lambda: defaultdict(list)
     )
-    for path in _iter_files(assets, (".json",), result) if assets.is_dir() else ():
+    assets = root / "assets"
+    paths = _iter_files(assets, (".json",), result) if assets.is_dir() else ()
+    for path in paths:
         parts = path.relative_to(root).parts
         if len(parts) < 4 or parts[-2] != "lang":
             continue
         namespace = parts[1] if len(parts) > 1 else "kubejs"
-        locale = normalize_locale(path.stem)
-        files_by_namespace[namespace][locale].append(path)
+        files_by_namespace[namespace][normalize_locale(path.stem)].append(path)
+    return files_by_namespace
 
-    parsed: dict[Path, tuple[str, str, dict[str, object]] | None] = {}
 
-    def load(path: Path) -> tuple[str, str, dict[str, object]] | None:
-        if path in parsed:
-            return parsed[path]
-        loaded = _read_text(path, result)
-        if loaded is None:
-            parsed[path] = None
-            return None
-        result.files_seen += 1
-        result.sources_found.append(path.relative_to(root).as_posix())
-        text, digest = loaded
-        try:
-            values = json.loads(text)
-        except json.JSONDecodeError as exc:
-            result.issues.append(
-                _issue(path, "json_parse_failed", str(exc), status="parse_failed")
-            )
-            parsed[path] = None
-            return None
-        if not isinstance(values, dict):
-            result.issues.append(
-                _issue(
-                    path,
-                    "json_root_not_object",
-                    "lang JSON 必須是 object",
-                    status="parse_failed",
-                )
-            )
-            parsed[path] = None
-            return None
-        parsed[path] = (text, digest, values)
+def _load_kubejs_lang_file(
+    root: Path,
+    path: Path,
+    result: PackScanResult,
+    parsed: dict[Path, _KubeJSLangData | None],
+) -> _KubeJSLangData | None:
+    if path in parsed:
         return parsed[path]
-
-    for namespace, locale_paths in sorted(files_by_namespace.items()):
-        # First inspect en_us.  Other locales are parsed only when a usable
-        # en_us source is absent, preserving the old fast path for normal mods.
-        en_count = sum(
-            count_language_values(loaded[2])
-            for path in locale_paths.get("en_us", [])
-            if (loaded := load(path)) is not None
+    loaded = _read_text(path, result)
+    if loaded is None:
+        parsed[path] = None
+        return None
+    result.files_seen += 1
+    result.sources_found.append(path.relative_to(root).as_posix())
+    text, digest = loaded
+    try:
+        values = json.loads(text)
+    except json.JSONDecodeError as exc:
+        result.issues.append(
+            _issue(path, "json_parse_failed", str(exc), status="parse_failed")
         )
-        locale_counts: dict[str, int] = {"en_us": en_count}
-        source_locale = select_source_locale(locale_counts)
-        if source_locale != "en_us":
-            locale_counts = {}
-            for locale, paths in locale_paths.items():
-                locale_counts[locale] = sum(
-                    count_language_values(loaded[2])
-                    for path in paths
-                    if (loaded := load(path)) is not None
-                )
-            source_locale = select_source_locale(locale_counts)
-            if source_locale and source_locale != "en_us":
-                result.locale_fallbacks[namespace] = source_locale
+        parsed[path] = None
+        return None
+    if not isinstance(values, dict):
+        result.issues.append(
+            _issue(
+                path,
+                "json_root_not_object",
+                "lang JSON 必須是 object",
+                status="parse_failed",
+            )
+        )
+        parsed[path] = None
+        return None
+    parsed[path] = (text, digest, values)
+    return parsed[path]
 
-        locales = selected_locales(set(locale_paths), source_locale)
-        for locale in sorted(locales):
-            for path in locale_paths.get(locale, []):
-                loaded = load(path)
-                if loaded is None:
+
+def _kubejs_lang_counts(
+    root: Path,
+    locale_paths: Mapping[str, list[Path]],
+    result: PackScanResult,
+    parsed: dict[Path, _KubeJSLangData | None],
+) -> dict[str, int]:
+    return {
+        locale: sum(
+            count_language_values(loaded[2])
+            for path in paths
+            if (loaded := _load_kubejs_lang_file(root, path, result, parsed))
+            is not None
+        )
+        for locale, paths in locale_paths.items()
+    }
+
+
+def _select_kubejs_lang_source(
+    root: Path,
+    locale_paths: Mapping[str, list[Path]],
+    result: PackScanResult,
+    parsed: dict[Path, _KubeJSLangData | None],
+) -> str | None:
+    # Parse only en_us first.  Other locales are loaded only for a fallback.
+    source_locale = select_source_locale(
+        {
+            "en_us": _kubejs_lang_counts(
+                root,
+                {"en_us": locale_paths.get("en_us", [])},
+                result,
+                parsed,
+            ).get("en_us", 0)
+        }
+    )
+    if source_locale == "en_us":
+        return source_locale
+    return select_source_locale(_kubejs_lang_counts(root, locale_paths, result, parsed))
+
+
+def _append_kubejs_lang_items(
+    root: Path,
+    namespace: str,
+    locale_paths: defaultdict[str, list[Path]],
+    source_locale: str | None,
+    version: str,
+    scope: str,
+    result: PackScanResult,
+    parsed: dict[Path, _KubeJSLangData | None],
+) -> None:
+    locales = selected_locales(set(locale_paths), source_locale)
+    for locale in sorted(locales):
+        for path in locale_paths.get(locale, []):
+            loaded = _load_kubejs_lang_file(root, path, result, parsed)
+            if loaded is None:
+                continue
+            _, digest, values = loaded
+            rel = path.relative_to(root).as_posix()
+            for key, value in values.items():
+                if not isinstance(key, str) or not isinstance(value, str):
                     continue
-                _, digest, values = loaded
-                rel = path.relative_to(root).as_posix()
-                for key, value in values.items():
-                    if not isinstance(key, str) or not isinstance(value, str):
-                        continue
-                    result.items.append(
-                        _make_item(
-                            kind=KIND_LANG,
-                            # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
-                            # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
-                            mod_id=f"{namespace}@{scope}",
-                            key=key,
-                            text=value,
-                            rel=rel,
-                            selector=f"lang:{locale}:{key}",
-                            digest=digest,
-                            scope=scope,
-                            version=version,
-                            translated_locale=locale,
-                        )
+                result.items.append(
+                    _make_item(
+                        kind=KIND_LANG,
+                        # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
+                        # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
+                        mod_id=f"{namespace}@{scope}",
+                        key=key,
+                        text=value,
+                        rel=rel,
+                        selector=f"lang:{locale}:{key}",
+                        digest=digest,
+                        scope=scope,
+                        version=version,
+                        # A zh_cn/zh_tw file selected as the fallback source is
+                        # the source snapshot, not an already translated value.
+                        translated_locale=locale if locale != source_locale else "",
                     )
+                )
+
+
+def _scan_kubejs_lang(
+    root: Path, version: str, scope: str, result: PackScanResult
+) -> None:
+    files_by_namespace = _collect_kubejs_lang_paths(root, result)
+    parsed: dict[Path, _KubeJSLangData | None] = {}
+    for namespace, locale_paths in sorted(files_by_namespace.items()):
+        source_locale = _select_kubejs_lang_source(root, locale_paths, result, parsed)
+        if source_locale and source_locale != "en_us":
+            result.locale_fallbacks[namespace] = source_locale
+        _append_kubejs_lang_items(
+            root,
+            namespace,
+            locale_paths,
+            source_locale,
+            version,
+            scope,
+            result,
+            parsed,
+        )
 
 
 def _scan_ftb_quests(

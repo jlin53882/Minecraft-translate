@@ -452,3 +452,44 @@ def test_kubejs_lang_uses_fallback_when_en_us_is_empty(tmp_path):
 
     assert result.locale_fallbacks == {"demo": "pt_br"}
     assert {(item.key, item.en_us) for item in items} == {("a", "Portuguese")}
+
+
+def test_kubejs_lang_uses_chinese_fallback_as_the_source_snapshot(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"a": "簡體來源", "b": "另一個來源"}), encoding="utf-8"
+    )
+    (lang / "ru_ru.json").write_text(json.dumps({"a": "Russian"}), encoding="utf-8")
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.source_format == "lang-json"]
+
+    assert result.locale_fallbacks == {"demo": "zh_cn"}
+    assert {(item.key, item.en_us, item.zh_cn) for item in items} == {
+        ("a", "簡體來源", ""),
+        ("b", "另一個來源", ""),
+    }
+
+
+def test_moddb_ingest_keeps_chinese_fallback_as_original_text(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "zh_tw.json").write_text(
+        json.dumps({"item.demo": "繁中來源"}), encoding="utf-8"
+    )
+
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        row = db._one("SELECT en_us FROM entry WHERE kind='lang' AND key='item.demo'")
+        assert row == ("繁中來源",)
+    finally:
+        db.close()
