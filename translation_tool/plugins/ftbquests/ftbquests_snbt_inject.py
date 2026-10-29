@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from collections import defaultdict
 from typing import Any
@@ -285,12 +286,14 @@ def patch_quest_snbt_file(
 ) -> tuple[int, int] | tuple[int, int, dict[str, Any]]:
     """
     專門 patch quest 本體 SNBT：
-    - updates 的 key 形式通常是：
+    - updates 的 key 形式支援：
         "id:<ID>|title"
         "id:<ID>|subtitle"
         "id:<ID>|description"
-      value 可能是 str 或 list[str]（extractor 會把 list join 成 \\n，但保留相容）
-    - 遞迴掃整棵 SNBT，找到符合 id 的 Compound 後更新欄位
+        "id:<ID>|description[<slot>]"
+      value 可能是 str 或 list[str]。帶 slot 的 key 只會更新同一個原始
+      description ordinal；不帶 slot 的舊格式仍保留相容性。
+    - 遞迴掃整棵 SNBT；同一檔案若有重複 ID，拒絕猜測回寫目標。
     """
 
     src_root = _read_snbt(src_path)
@@ -313,7 +316,10 @@ def patch_quest_snbt_file(
     if not dst_root:
         dst_root = src_root
 
-    want: dict[tuple[str, str], Any] = {}  # (id, kind) -> val
+    # 新版 extractor 會把 description 的每個 slot 寫成
+    # ``id:<ID>|description[<index>]``；舊版 ``id:<ID>|description``
+    # 仍保留相容性，供既有輸出檔使用。
+    want: dict[tuple[str, str, int | None], Any] = {}
     skipped: list[str] = []
 
     for k, v in updates.items():
@@ -325,18 +331,45 @@ def patch_quest_snbt_file(
             continue
         # k = "id:xxxx|title"
         if k.startswith("id:") and "|" in k:
-            left, kind = k.split("|", 1)
+            left, field = k.split("|", 1)
             qid = left[3:]
-            want[(qid, kind)] = v
+            match = re.fullmatch(r"(title|subtitle|description)(?:\[(\d+)\])?", field)
+            if match is None:
+                skipped.append(k)
+                continue
+            kind = match.group(1)
+            index = int(match.group(2)) if match.group(2) is not None else None
+            want[(qid, kind, index)] = v
         else:
             # 沒有 id 的 key（理論上 quest 本體不該用到），先跳過
             skipped.append(k)
+
+    want_by_quest: dict[str, list[tuple[str, int | None, Any]]] = defaultdict(list)
+    for (qid, kind, index), value in want.items():
+        want_by_quest[qid].append((kind, index, value))
 
     changed = 0
     candidates = 0
     changed_keys: list[str] = []
     unchanged_keys: list[str] = []
     missing: list[str] = []
+
+    id_occurrences: defaultdict[str, int] = defaultdict(int)
+
+    def _count_ids(node):
+        if isinstance(node, Compound):
+            id_val = node.get("id")
+            if isinstance(id_val, snbt.String):
+                id_occurrences[str(id_val)] += 1
+            for sub in node.values():
+                if isinstance(sub, (Compound, SnbtList)):
+                    _count_ids(sub)
+        elif isinstance(node, SnbtList):
+            for item in node:
+                if isinstance(item, (Compound, SnbtList)):
+                    _count_ids(item)
+
+    _count_ids(dst_root)
 
     def _coerce_to_list(new_val: Any) -> list[str] | None:
         """將輸入值強制轉換為字串列表；若為列表則篩選出字串，若為字串則依換行符分割。"""
@@ -347,7 +380,13 @@ def patch_quest_snbt_file(
             return new_val.split("\n")
         return None
 
-    def _apply_field(obj: Compound, kind: str, new_val: Any, tag_key: str):
+    def _apply_field(
+        obj: Compound,
+        kind: str,
+        slot_index: int | None,
+        new_val: Any,
+        tag_key: str,
+    ):
         """應用翻譯到欄位。"""
         nonlocal changed, candidates
 
@@ -355,7 +394,33 @@ def patch_quest_snbt_file(
             skipped.append(tag_key)
             return
 
-        old = obj.get(kind)
+        field_value = obj.get(kind)
+        if field_value is None:
+            missing.append(tag_key)
+            return
+
+        # 新版 slot-level key 必須對應原始 List 的同一個 ordinal；
+        # 不接受把單筆譯文猜測套到另一個 slot。
+        if slot_index is not None:
+            if not isinstance(field_value, SnbtList) or not (
+                0 <= slot_index < len(field_value)
+            ):
+                missing.append(tag_key)
+                return
+            old_slot = field_value[slot_index]
+            if not isinstance(old_slot, snbt.String) or not isinstance(new_val, str):
+                skipped.append(tag_key)
+                return
+            candidates += 1
+            if str(old_slot) == new_val:
+                unchanged_keys.append(tag_key)
+                return
+            field_value[slot_index] = snbt.String(new_val)
+            changed += 1
+            changed_keys.append(tag_key)
+            return
+
+        old = field_value
         if old is None:
             missing.append(tag_key)
             return
@@ -402,10 +467,24 @@ def patch_quest_snbt_file(
             if isinstance(id_val, snbt.String):
                 qid = str(id_val)
 
-                for kind in ("title", "subtitle", "description"):
-                    key = (qid, kind)
-                    if key in want:
-                        _apply_field(node, kind, want[key], f"id:{qid}|{kind}")
+                if qid in want_by_quest:
+                    if id_occurrences[qid] != 1:
+                        skipped.extend(
+                            (
+                                f"id:{qid}|{kind}"
+                                if slot_index is None
+                                else f"id:{qid}|{kind}[{slot_index}]"
+                            )
+                            for kind, slot_index, _new_val in want_by_quest[qid]
+                        )
+                    else:
+                        for kind, slot_index, new_val in want_by_quest[qid]:
+                            label = (
+                                f"id:{qid}|{kind}"
+                                if slot_index is None
+                                else f"id:{qid}|{kind}[{slot_index}]"
+                            )
+                            _apply_field(node, kind, slot_index, new_val, label)
 
             for sub in node.values():
                 if isinstance(sub, (Compound, SnbtList)):
@@ -505,17 +584,18 @@ def inject_ftbquests_quests_from_zh_tw_json(
                 missing_source_files += 1
                 continue
 
-            # 若同名檔有多個：你可以選擇全部 patch（推薦先全部 patch，至少不漏）
+            # 舊版輸出只帶 basename 時，遇到同名檔不能猜測目標；
+            # 新版 extractor 會保留相對路徑，這個分支只負責安全拒絕 legacy 歧義。
             if len(hits) > 1:
                 log_warning(
-                    "⚠️ quests 下找到多個同名檔 %s，將全部套用更新（count=%d）",
-                    rel_file,
-                    len(hits),
+                    f"⚠️ quests 下找到多個同名檔 {rel_file}，"
+                    f"拒絕猜測目標（count={len(hits)}）；請重新抽取以保留相對路徑"
                 )
-
-            for h in hits:
-                rel = os.path.relpath(h, in_quests)
-                targets.append((h, os.path.join(out_quests, rel)))
+                missing_source_files += 1
+                continue
+            h = hits[0]
+            rel = os.path.relpath(h, in_quests)
+            targets.append((h, os.path.join(out_quests, rel)))
 
         # 對所有命中的檔案做 patch
         for src_path2, dst_path2 in targets:

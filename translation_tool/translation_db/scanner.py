@@ -56,6 +56,11 @@ from translation_tool.translation_db.identity import (
     patchouli_dir_names,
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
+from translation_tool.translation_db.pack_sources import (
+    PackScanResult,
+    discover_pack_root,
+    scan_pack_sources,
+)
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scan_ingest import (
     PreviewIngestTarget,
@@ -112,6 +117,7 @@ class ScanOptions:
     clean_english: bool = True  # 關閉＝放寬文字篩選，但仍排除結構值
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
+    include_pack_content: bool = True  # instance 根目錄下的 KubeJS／FTB Quests
 
 
 @dataclass
@@ -153,6 +159,10 @@ class ScanReport:
     truncated_nested: int = 0
     partial_jars: int = 0
     items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
+    pack_items_found: int = 0
+    pack_files_seen: int = 0
+    pack_sources: int = 0
+    pack_references: int = 0
     stats: IngestStats = field(default_factory=IngestStats)
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
@@ -185,6 +195,10 @@ class ScanReport:
             "truncated_nested": self.truncated_nested,
             "partial_jars": self.partial_jars,
             "items_found": self.items_found,
+            "pack_items_found": self.pack_items_found,
+            "pack_files_seen": self.pack_files_seen,
+            "pack_sources": self.pack_sources,
+            "pack_references": self.pack_references,
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
             "existing": self.stats.existing,
@@ -1133,6 +1147,34 @@ def _flush(
         yield _progress(done, jars, result, _ingest_log(result, stats))
 
 
+def _ingest_pack_result(
+    db: TranslationDB | None,
+    preview: PreviewIngestTarget | None,
+    result: PackScanResult,
+    version: str,
+    convert: Callable[[str], str] | None,
+) -> IngestStats:
+    """以與 jar 相同的分類規則匯入模組包文字。"""
+    if preview is not None:
+        # 預覽不能改動來源引用索引；條目分類仍與正式匯入相同。
+        if not result.items:
+            return IngestStats()
+        return preview_ingest_many(preview, [result.items], convert)[0]
+    if db is None:
+        raise ValueError("模組包來源需要資料庫才能寫入")
+    stats = (
+        db.ingest_many(version, [result.items], convert)[0]
+        if result.items
+        else IngestStats()
+    )
+    db.record_source_references(
+        version,
+        result.references,
+        pack_scope=result.pack_scope,
+    )
+    return stats
+
+
 def scan_folder_generator(
     db: TranslationDB | None,
     folder: str | Path,
@@ -1150,7 +1192,40 @@ def scan_folder_generator(
         raise ValueError("需要資料庫才能寫入掃描結果")
     jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
-    if not jars:
+    options = replace(options, rules=load_rules() if options.apply_rules else [])
+    convert = make_converter(options.rules) if options.convert_cn else None
+    preview = (
+        (
+            db.scan_preview_target(options.version)
+            if db is not None
+            else PreviewIngestTarget(None, options.version)
+        )
+        if options.dry_run
+        else None
+    )
+    pack_result = PackScanResult()
+    if options.include_pack_content and not options.translated:
+        pack_root = discover_pack_root(folder)
+        if pack_root is not None:
+            pack_result = scan_pack_sources(pack_root, options.version)
+            report.pack_items_found = len(pack_result.items)
+            report.pack_files_seen = pack_result.files_seen
+            report.pack_sources = len(pack_result.sources_found)
+            report.pack_references = len(pack_result.references)
+            for issue in pack_result.issues:
+                report.add_issue(issue)
+            report.stats.add(
+                _ingest_pack_result(
+                    db, preview, pack_result, options.version, convert
+                )
+            )
+    has_pack_content = bool(
+        pack_result.sources_found
+        or pack_result.items
+        or pack_result.references
+        or pack_result.issues
+    )
+    if not jars and not has_pack_content:
         if db is not None and not options.dry_run:
             # An empty completed scan is a valid current snapshot.  Persisting
             # it clears issues from jars that were removed since the last scan.
@@ -1169,8 +1244,6 @@ def scan_folder_generator(
         }
         return
 
-    options = replace(options, rules=load_rules() if options.apply_rules else [])
-    convert = make_converter(options.rules) if options.convert_cn else None
     dirs = patchouli_dir_names()
     yield {
         "progress": 0.0,
@@ -1180,19 +1253,19 @@ def scan_folder_generator(
             else f"🔍 找到 {len(jars)} 個 jar，版本 {options.version}"
         ),
     }
+    if has_pack_content:
+        yield {
+            "progress": 0.0,
+            "log": (
+                f"📦 模組包來源：讀取 {report.pack_sources:,} 個檔案，"
+                f"找到 {report.pack_items_found:,} 個 KubeJS／FTB Quests 文字候選"
+                f"，建立 {report.pack_references:,} 個跨格式引用"
+            ),
+            "level": "warning" if pack_result.issues else "info",
+        }
 
     done = 0
     buffer = _IngestBuffer(db, options.version, convert)
-    # 預覽用與實際寫入相同的分類規則，只是不寫入（見 scan_ingest）；沒有資料庫時一定是預覽
-    preview = (
-        (
-            db.scan_preview_target(options.version)
-            if db is not None
-            else PreviewIngestTarget(None, options.version)
-        )
-        if options.dry_run
-        else None
-    )
 
     with (
         scan_executor(

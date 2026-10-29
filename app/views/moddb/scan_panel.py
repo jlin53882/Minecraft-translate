@@ -133,9 +133,9 @@ class ScanPanel(ft.Column):
             "jar",
             self._on_mode,
         )
-        self.path_label = kit.section_label("mods 資料夾")
+        self.path_label = kit.section_label("mods 資料夾或模組包根目錄")
         self.path_field = kit.text_field(
-            hint="請選擇 mods 資料夾",
+            hint="可選 mods 資料夾或整個模組包根目錄",
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
@@ -189,6 +189,13 @@ class ScanPanel(ft.Column):
             True,
             divider=False,
         )
+        self.pack_row = kit.SwitchRow(
+            "包含 KubeJS／FTB Quests",
+            "從模組包根目錄掃描 kubejs 與 config/ftbquests/quests；"
+            "只收靜態可定位文字，不執行 JS，也不把任務檔直接當成 Resource Pack",
+            True,
+            divider=False,
+        )
         self.options_card = kit.section_card(
             "2　選擇匯入來源與選項",
             ft.Column(
@@ -209,17 +216,7 @@ class ScanPanel(ft.Column):
                     ),
                     self.source_dd,
                     self.mode_note,
-                    ft.Column(
-                        [
-                            self.clean_row,
-                            self.nested_row,
-                            self.jar_tr_row,
-                            self.cn_row,
-                            self.rules_row,
-                            self.book_row,
-                        ],
-                        spacing=0,
-                    ),
+                    self._build_scan_option_rows(),
                     kit.hint_text(
                         "已存在的條目一律跳過（只新增、不覆蓋）；原文已變動者會另外回報。"
                         "先預覽用相同規則統計各項數字，但不寫入。"
@@ -229,6 +226,21 @@ class ScanPanel(ft.Column):
             ),
             icon=ft.Icons.FOLDER_OPEN,
             tone="gold",
+        )
+
+    def _build_scan_option_rows(self) -> ft.Column:
+        """建立可切換的掃描選項；新增格式選項集中在這裡維護。"""
+        return ft.Column(
+            [
+                self.clean_row,
+                self.nested_row,
+                self.jar_tr_row,
+                self.cn_row,
+                self.rules_row,
+                self.book_row,
+                self.pack_row,
+            ],
+            spacing=0,
         )
 
     def _build_run_card(self) -> None:
@@ -434,16 +446,21 @@ class ScanPanel(ft.Column):
         self.mode = key
         zip_mode = key == "zip"
         self.path_label.value = (
-            "翻譯 ZIP（檔案或資料夾）" if zip_mode else "mods 資料夾"
+            "翻譯 ZIP（檔案或資料夾）"
+            if zip_mode
+            else "mods 資料夾或模組包根目錄"
         )
         self.path_field.hint_text = (
-            "請選擇 ZIP 檔，或放有 ZIP 的資料夾" if zip_mode else "請選擇 mods 資料夾"
+            "請選擇 ZIP 檔，或放有 ZIP 的資料夾"
+            if zip_mode
+            else "可選 mods 資料夾或整個模組包根目錄"
         )
         self.zip_pick_btn.visible = zip_mode
         self.source_dd.visible = zip_mode
         self.mode_note.visible = zip_mode
         self.jar_tr_row.visible = not zip_mode
         self.rules_row.visible = not zip_mode
+        self.pack_row.visible = not zip_mode
         self.start_btn.content = self._start_label()
         self._safe_update()
 
@@ -465,6 +482,7 @@ class ScanPanel(ft.Column):
             clean_english=self.clean_row.value,
             translated=translated,
             translation_source=int(self.source_dd.value or SRC_CUSTOM),
+            include_pack_content=not translated and self.pack_row.value,
         )
 
     def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:
@@ -482,7 +500,7 @@ class ScanPanel(ft.Column):
             self._set_status(
                 "請先選擇 ZIP 檔或資料夾"
                 if self.mode == "zip"
-                else "請先選擇 mods 資料夾",
+                else "請先選擇 mods 資料夾或模組包根目錄",
                 "red",
             )
             self._safe_update()

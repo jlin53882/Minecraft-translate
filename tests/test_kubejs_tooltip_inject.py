@@ -6,14 +6,8 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-# 確保可以導入翻譯工具模組
-ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT))
-
-# 測試模組
 from translation_tool.plugins.kubejs import kubejs_tooltip_inject
 
 
@@ -123,7 +117,7 @@ def test_inject_basic_flow(tmp_path: Path) -> None:
     translated_file = trans_root / "client_scripts" / "test.json"
     translated_file.parent.mkdir(parents=True)
     translated_file.write_text(
-        json.dumps({"test.js|scene.1": "泥土"}, ensure_ascii=False),
+        json.dumps({"client_scripts/test.js|scene.1": "泥土"}, ensure_ascii=False),
         encoding="utf-8",
     )
     out_root = tmp_path / "output"
@@ -239,7 +233,7 @@ def test_inject_event_add_text_of_writes_nested_translation(tmp_path: Path) -> N
     result, source_path, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|minecraft:dirt.0": "新譯文"},
+        {"client_scripts/test.js|minecraft:dirt.0": "新譯文"},
     )
 
     assert result["patched_js_files"] == 1
@@ -254,7 +248,7 @@ def test_inject_event_add_nested_text_call_writes_translation(tmp_path: Path) ->
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|minecraft:dirt.0": "新譯文"},
+        {"client_scripts/test.js|minecraft:dirt.0": "新譯文"},
     )
 
     assert result["patched_js_files"] == 1
@@ -270,7 +264,7 @@ def test_inject_event_add_plain_string_keeps_writeback_support(tmp_path: Path) -
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|auto.1": "新文字"},
+        {"client_scripts/test.js|auto.1": "新文字"},
     )
 
     assert result["patched_js_files"] == 1
@@ -285,7 +279,7 @@ def test_inject_event_add_escapes_translated_text_literal(tmp_path: Path) -> Non
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|minecraft:dirt.0": translated},
+        {"client_scripts/test.js|minecraft:dirt.0": translated},
     )
 
     expected_literal = json.dumps(translated, ensure_ascii=False)
@@ -314,7 +308,7 @@ def test_inject_already_translated_text_is_not_counted_as_patch(tmp_path: Path) 
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|minecraft:dirt.0": "Already translated"},
+        {"client_scripts/test.js|minecraft:dirt.0": "Already translated"},
     )
 
     assert output_path.read_text(encoding="utf-8") == source
@@ -330,7 +324,7 @@ def test_inject_scene_text_nested_text_of_uses_balanced_call_writeback(
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|scene.1": "場景譯文"},
+        {"client_scripts/test.js|scene.1": "場景譯文"},
     )
 
     assert result["patched_js_files"] == 1
@@ -347,7 +341,7 @@ def test_inject_event_add_array_escapes_translated_string(tmp_path: Path) -> Non
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|minecraft:dirt.0.0": translated},
+        {"client_scripts/test.js|minecraft:dirt.0.0": translated},
     )
 
     expected_array = json.dumps([translated], ensure_ascii=False)
@@ -369,7 +363,7 @@ def test_inject_itemevents_nested_text_tooltip_writes_back(tmp_path: Path) -> No
     result, source_path, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|minecraft:dirt.tooltip.0": translated},
+        {"client_scripts/test.js|minecraft:dirt.tooltip.0": translated},
     )
 
     assert result["patched_js_files"] == 1
@@ -379,6 +373,49 @@ def test_inject_itemevents_nested_text_tooltip_writes_back(tmp_path: Path) -> No
     assert source_path.read_text(encoding="utf-8") == source
 
 
+def test_inject_itemevents_does_not_patch_unrelated_add_inside_same_script(
+    tmp_path: Path,
+) -> None:
+    """有 Tooltip wrapper 時，其他 API 的 ``.add`` 不可被誤當候選。"""
+    source = (
+        "SomeRegistry.add('registry', Text.of('Do not change'));\n"
+        "ItemEvents.tooltip(event => { "
+        "event.add('minecraft:dirt', Text.of('Old tooltip')); "
+        "});\n"
+    )
+
+    result, _, output_path = _run_inject_fixture(
+        tmp_path,
+        source,
+        {
+            "client_scripts/test.js|minecraft:dirt.tooltip.0": "新工具提示",
+        },
+    )
+
+    output = output_path.read_text(encoding="utf-8")
+    assert result["patched_js_files"] == 1
+    assert "Do not change" in output
+    assert "新工具提示" in output
+
+
+def test_inject_itemevents_accepts_pack_scanner_stable_key(tmp_path: Path) -> None:
+    """ModDB pack scanner 的 key 可直接交給既有安全回寫器。"""
+    source = (
+        "ItemEvents.tooltip(event => { "
+        "event.add('minecraft:dirt', Text.of('Old tooltip')); "
+        "});\n"
+    )
+
+    result, _, output_path = _run_inject_fixture(
+        tmp_path,
+        source,
+        {"client_scripts/test.js|tooltip:minecraft:dirt:1": "穩定鍵工具提示"},
+    )
+
+    assert result["patched_js_files"] == 1
+    assert "穩定鍵工具提示" in output_path.read_text(encoding="utf-8")
+
+
 def test_inject_already_translated_plain_event_add_is_noop(tmp_path: Path) -> None:
     """單參數原文已等於譯文時保持原格式且不報為 patched。"""
     source = "event.add('Already translated')\n"
@@ -386,7 +423,7 @@ def test_inject_already_translated_plain_event_add_is_noop(tmp_path: Path) -> No
     result, _, output_path = _run_inject_fixture(
         tmp_path,
         source,
-        {"test.js|auto.1": "Already translated"},
+        {"client_scripts/test.js|auto.1": "Already translated"},
     )
 
     assert output_path.read_text(encoding="utf-8") == source

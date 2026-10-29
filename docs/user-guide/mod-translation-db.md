@@ -182,7 +182,34 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 - 進度（`data/<模組>/advancement(s)/…`）：已完成從抽取、資料庫身分／鍵值、翻譯命中與寫回到 JSON round-trip 的閉環（類型 `advancement`）。`display.title`／`display.description` 支援根字串、`{"text": …}`、陣列，以及巢狀 `fallback`、`with[]`、`extra[]` 的 literal 文字；`{"translate": "鍵"}` 仍由語言檔負責，`translate` key、selector／score／NBT、樣式與 click／hover 事件都不會送給 AI 或被 writer 改寫。寫回使用 Advancement 專用結構白名單，不接受任意 JSON 路徑；文件結構不完整或路徑不再存在時會拒絕寫入，不會產生半成品輸出。`display.title.text`／`display.description.text` 若只是欄位名稱（例如 `Description`）仍依清理規則排除。鍵值不含 `advancement`／`advancements` 資料夾，跨版本是同一個鍵。
 - 書本根目錄的 `book.json` 不匯入：Patchouli 官方文件說明 `book.json` 必須放在原位，資源包能否覆寫它沒有確認。
 
-Patchouli 與 lang 走同一個流程，只是身分不同。FTB Quests / KubeJS / Markdown 不使用資料庫。
+Patchouli、lang、KubeJS 靜態文字與 FTB Quests 任務文字共用同一個掃描／預覽／匯入流程，
+但仍以不同 `kind` 保存，避免把不可直接放進 Resource Pack 的來源混在 lang。掃描頁選取
+mods 資料夾或模組包根目錄時，預設也會讀取 `kubejs/**/*.js` 與
+`config/ftbquests/quests/**/*.snbt`；只解析可靜態定位的 literal 文字，不執行 JavaScript。
+KubeJS `ClientEvents.lang` 與 `kubejs/assets/<namespace>/lang/*.json` 以 `lang` 匯入，
+tooltip／scene literal 使用 `kubejs_script`，FTB Quests 任務本體與語系分別使用
+`ftb_quests`／`ftb_quest_lang`。每筆新來源另存相對路徑、selector、hash 與 pack scope，
+供來源檢視與格式專用 writer 回寫；動態 Component、語言 key 參考、無法解析的 SNBT/JSON
+只記錄為 pending／parse_failed，不會假裝成可翻譯條目。FTB 任務輸出仍由 FTB 專用流程
+寫回 config，KubeJS 腳本文字仍由 KubeJS overlay 寫回，Resource Pack 不會錯誤承擔這些檔案。
+
+### KubeJS／FTB Quests 的翻譯輸出
+
+資料庫掃描只負責建立可追溯的條目，不會直接改寫模組包。要產生可部署的
+KubeJS／FTB Quests overlay，輸出器會先依 `pack_scope`、來源相對路徑與
+SHA-256 驗證目前來源仍是掃描時的檔案；來源遺失、內容變動、格式不支援或目標
+發生衝突時，整次輸出拒絕，不會留下部分結果。輸出採完整快照替換，避免舊檔案
+殘留在新結果中。
+
+- KubeJS 腳本與 `kubejs/assets/<namespace>/lang/*.json` 輸出到獨立的 `kubejs/`
+  overlay；腳本只改寫掃描到的靜態文字，動態 JavaScript 不會被猜測或執行。
+- FTB Quests 任務本體與任務語系輸出到獨立的 `config/ftbquests/quests/` overlay；
+  語系目標會使用 `zh_tw`，任務 SNBT 則保留原始相對目錄結構。
+- 這些 overlay 不是 Resource Pack，不能直接塞進 `assets/` 或資源包 ZIP；部署時
+  必須依模組包的 config／kubejs 結構合併。Resource Pack 仍只處理它原本支援的
+  `pack.mcmeta`、`pack.png` 與 `assets/` 內容。
+- `entry_origin` 的來源路徑、selector、hash、格式 profile 與模組包 scope 是
+  回寫契約的一部分；若同一份資料庫掃描多個實例，同名 key 也不會互相覆蓋。
 
 ### 資料清理（總覽頁「資料清理」）
 

@@ -135,6 +135,21 @@ def _replace_js_call_arguments(
     return "".join(output)
 
 
+def _itemevents_tooltip_ranges(content: str) -> list[tuple[int, int]]:
+    """回傳 ``ItemEvents.tooltip(...)`` 的完整來源範圍。
+
+    新版掃描只把 Tooltip callback 內的 ``event.add`` 視為候選；回寫也
+    必須使用相同的 API 邊界。若舊版翻譯輸出沒有任何 Tooltip wrapper，
+    呼叫端仍可使用 legacy fallback，維持既有腳本格式相容性。
+    """
+    ranges: list[tuple[int, int]] = []
+    for match in re.finditer(r"\bItemEvents\.tooltip\s*\(", content):
+        _arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if closing_index is not None:
+            ranges.append((match.start(), closing_index + 1))
+    return ranges
+
+
 # ---------------- 工具 ----------------
 
 
@@ -454,7 +469,9 @@ def inject(
             continue
 
         # ---------------- KubeJS Tooltips ----------------
-        original_js = to_js_name(file)
+        # 翻譯鍵以 KubeJS 根目錄下的相對路徑建立；只用 basename 會讓
+        # client_scripts/a/main.js 與 client_scripts/b/main.js 互相覆蓋。
+        original_js = script_relative.with_suffix(".js").as_posix()
         if source_id is not None:
             source_root_value = source_roots.get(source_id)
             if source_root_value is None:
@@ -532,7 +549,24 @@ def inject(
                 number = counters[item_id]
                 counters[item_id] += 1
 
-                if args[1].strip().startswith("Text."):
+                # ModDB 的 ClientEvents.lang 條目使用來源檔案 + lang key
+                # 作為穩定身分；先處理它，避免共用的 event.add wrapper
+                # 退回全檔 ordinal。未命中時仍保留舊版 tooltip 行為。
+                lang_key = _decode_js_string_literal(args[0].strip())
+                lang_value = _decode_js_string_literal(args[1].strip())
+                stable_lang_key = (
+                    f"{source_file}|lang:{lang_key}" if lang_key is not None else ""
+                )
+                if (
+                    stable_lang_key
+                    and stable_lang_key in translation_map
+                    and lang_value is not None
+                ):
+                    translated = translation_map[stable_lang_key]
+                    if lang_value != translated:
+                        new_args[1] = json.dumps(translated, ensure_ascii=False)
+                        changed = True
+                elif args[1].strip().startswith("Text."):
                     key = f"{source_file}|{item_id}.{number}"
                     if key in translation_map:
                         replacement = replace_text_in_text_obj(
@@ -590,11 +624,14 @@ def inject(
         # 2) Patch Ponder: scene.text(...)
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
+        scene_counter = [0]
+
         def repl_scene_text(
             arg_str: str,
             *,
             source_file: str = original_js,
             translation_map: dict = translations,
+            counter: list[int] = scene_counter,
         ) -> str:
             """只在 scene.text 文字實際改變時回傳重建後的引數。"""
             nonlocal auto_id
@@ -620,7 +657,10 @@ def inject(
 
             changed = False
             if clean_text(text_candidate):
-                key = f"{source_file}|scene.{auto_id}"
+                counter[0] += 1
+                stable_key = f"{source_file}|scene:{counter[0]}"
+                legacy_key = f"{source_file}|scene.{auto_id}"
+                key = stable_key if stable_key in translation_map else legacy_key
                 if key in translation_map:
                     new_text = translation_map[key]
                     if raw_text_expr.startswith("Text."):
@@ -649,8 +689,17 @@ def inject(
             """修補 ItemEvents Tooltip，無變更時保留呼叫原始文字。"""
             out = []
             last = 0
+            tooltip_ranges = _itemevents_tooltip_ranges(full)
+            # 舊版 extractor 允許未包在 ItemEvents.tooltip callback 的
+            # event.add；只有在來源確實有新式 wrapper 時才套用嚴格邊界。
+            strict_context = bool(tooltip_ranges)
+            tooltip_call_indices: defaultdict[str, int] = defaultdict(int)
 
             for match in re.finditer(r"\.add\s*\(", full):
+                if strict_context and not any(
+                    start <= match.start() < end for start, end in tooltip_ranges
+                ):
+                    continue
                 args_str, end_idx = _extract_call_args_with_end(full, match.end())
                 if args_str is None or end_idx is None:
                     continue
@@ -672,18 +721,30 @@ def inject(
 
                 tooltip_block = args[1]
                 index = 0
+                tooltip_call_indices[item_id] += 1
+                tooltip_call_index = tooltip_call_indices[item_id]
 
                 def repl_text_call(
                     text_match: re.Match[str],
                     *,
                     current_file: str = source_file,
                     current_item_id: str = item_id,
+                    current_tooltip_index: int = tooltip_call_index,
                     current_translations: dict = translation_map,
                 ) -> str:
                     """替換一個 ItemEvents Tooltip 字串並維持原索引順序。"""
                     nonlocal index
-                    key = f"{current_file}|{current_item_id}.tooltip.{index}"
+                    legacy_key = f"{current_file}|{current_item_id}.tooltip.{index}"
+                    stable_key = (
+                        f"{current_file}|tooltip:{current_item_id}:"
+                        f"{current_tooltip_index}"
+                    )
                     index += 1
+                    key = (
+                        stable_key
+                        if stable_key in current_translations
+                        else legacy_key
+                    )
                     if key in current_translations:
                         return replace_text_in_text_obj(
                             text_match.group(0), current_translations[key]

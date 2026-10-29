@@ -21,12 +21,15 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 15
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
 KIND_GUIDE = "guide"  # 指南（.md／.txt 文字檔，依段落切成條目）
 KIND_ADVANCEMENT = "advancement"  # 進度的顯示文字（data/<模組>/advancement(s)/）
+KIND_KUBEJS_SCRIPT = "kubejs_script"  # KubeJS 靜態可定位的 literal 文字
+KIND_FTB_QUESTS = "ftb_quests"  # FTB Quests 任務本體的 literal 欄位
+KIND_FTB_QUEST_LANG = "ftb_quest_lang"  # FTB Quests 語系 SNBT
 
 # DB kind → translation cache bucket. The LM prompt is selected from this
 # bucket, so all producers of DB-backed translation items must use this map.
@@ -35,6 +38,12 @@ _CACHE_TYPE_BY_KIND = {
     KIND_PATCHOULI: KIND_PATCHOULI,
     KIND_GUIDE: "md",
     KIND_ADVANCEMENT: KIND_PATCHOULI,
+    # Keep the existing plugin-specific cache/profile contracts.  Mapping
+    # these entries to generic lang/patchouli would make ModDB translation use
+    # the wrong prompt, batch budget, and cache namespace.
+    KIND_KUBEJS_SCRIPT: "kubejs",
+    KIND_FTB_QUESTS: "ftbquests",
+    KIND_FTB_QUEST_LANG: "ftbquests",
 }
 
 
@@ -237,6 +246,52 @@ CREATE INDEX IF NOT EXISTS idx_content_issue_context
     ON content_issue (mc_version, context, origin, id DESC);
 CREATE INDEX IF NOT EXISTS idx_content_issue_status
     ON content_issue (status, created_at DESC);
+
+-- 可安全回寫來源的精確身分；一個 entry 可由多個 pack／來源引用，
+-- 但每個來源檔案與 selector 只保留一份 metadata。
+CREATE TABLE IF NOT EXISTS entry_origin (
+    id             INTEGER PRIMARY KEY,
+    entry_id       INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+    pack_scope     TEXT NOT NULL DEFAULT '',
+    source_kind    TEXT NOT NULL,
+    source_path    TEXT NOT NULL,
+    selector       TEXT NOT NULL,
+    source_hash    TEXT NOT NULL DEFAULT '',
+    format_profile TEXT NOT NULL DEFAULT '',
+    created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (entry_id, pack_scope, source_kind, source_path, selector)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_origin_entry ON entry_origin (entry_id);
+CREATE INDEX IF NOT EXISTS idx_entry_origin_scope
+    ON entry_origin (pack_scope, source_kind, source_path);
+
+-- 跨格式引用（例如 FTB Quests 的 {my_pack.quest.start}）不建立重複 entry；
+-- 只保存來源位置、目標 key 與目前可否解析到語言定義。
+CREATE TABLE IF NOT EXISTS source_reference (
+    id              INTEGER PRIMARY KEY,
+    mc_version      TEXT NOT NULL,
+    pack_scope      TEXT NOT NULL DEFAULT '',
+    source_kind     TEXT NOT NULL,
+    source_path     TEXT NOT NULL,
+    selector        TEXT NOT NULL,
+    target_kind     TEXT NOT NULL DEFAULT 'lang',
+    target_mod_id   TEXT NOT NULL DEFAULT '',
+    target_key      TEXT NOT NULL,
+    target_locale   TEXT NOT NULL DEFAULT 'en_us',
+    status          TEXT NOT NULL DEFAULT 'pending',
+    detail          TEXT NOT NULL DEFAULT '',
+    target_entry_id INTEGER REFERENCES entry (id) ON DELETE SET NULL,
+    source_hash     TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (
+        mc_version, pack_scope, source_kind, source_path, selector,
+        target_kind, target_mod_id, target_key, target_locale
+    )
+);
+CREATE INDEX IF NOT EXISTS idx_source_reference_scope
+    ON source_reference (pack_scope, source_kind, source_path);
+CREATE INDEX IF NOT EXISTS idx_source_reference_target
+    ON source_reference (target_kind, target_mod_id, target_key, status);
 """
 
 
@@ -351,6 +406,12 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_content_issue_migration(conn)
     if next_version == 12:
         return _backup_before_duplicate_merge_migration(conn)
+    if next_version == 13:
+        return _backup_before_entry_origin_migration(conn)
+    if next_version == 14:
+        return _backup_before_source_reference_migration(conn)
+    if next_version == 15:
+        return _backup_before_entry_origin_scope_migration(conn)
     return None
 
 
@@ -396,6 +457,12 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_content_issue_v11(conn)
     elif next_version == 12:
         _migrate_duplicate_merge_v12(conn)
+    elif next_version == 13:
+        _migrate_entry_origin_v13(conn)
+    elif next_version == 14:
+        _migrate_source_reference_v14(conn)
+    elif next_version == 15:
+        _migrate_entry_origin_scope_v15(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -924,6 +991,124 @@ def _migrate_duplicate_merge_v12(conn: sqlite3.Connection) -> None:
     ).fetchone()
     if exists is None:
         raise sqlite3.DatabaseError("schema v12 缺少 duplicate_merge_batch 表")
+
+
+def _backup_before_entry_origin_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在加入來源追蹤表前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v13-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_entry_origin_v13(conn: sqlite3.Connection) -> None:
+    """確認 v13 的可回寫來源追蹤表已安裝。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type='table' AND name='entry_origin'"
+    ).fetchone()
+    if exists is None:
+        raise sqlite3.DatabaseError("schema v13 缺少 entry_origin 表")
+
+
+def _backup_before_source_reference_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在加入跨格式引用索引前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v14-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_source_reference_v14(conn: sqlite3.Connection) -> None:
+    """確認 v14 的跨格式來源引用表已安裝。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type='table' AND name='source_reference'"
+    ).fetchone()
+    if exists is None:
+        raise sqlite3.DatabaseError("schema v14 缺少 source_reference 表")
+
+
+def _backup_before_entry_origin_scope_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在修正來源範圍唯一鍵前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v15-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_entry_origin_scope_v15(conn: sqlite3.Connection) -> None:
+    """把 ``pack_scope`` 納入 entry_origin 唯一鍵，避免不同模組包互相覆蓋。"""
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type='table' AND name='entry_origin'"
+    ).fetchone()
+    if exists is None:
+        raise sqlite3.DatabaseError("schema v15 缺少 entry_origin 表")
+
+    conn.execute("DROP INDEX IF EXISTS idx_entry_origin_entry")
+    conn.execute("DROP INDEX IF EXISTS idx_entry_origin_scope")
+    conn.execute("ALTER TABLE entry_origin RENAME TO entry_origin_v14")
+    conn.execute(
+        """
+        CREATE TABLE entry_origin (
+            id             INTEGER PRIMARY KEY,
+            entry_id       INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+            pack_scope     TEXT NOT NULL DEFAULT '',
+            source_kind    TEXT NOT NULL,
+            source_path    TEXT NOT NULL,
+            selector       TEXT NOT NULL,
+            source_hash    TEXT NOT NULL DEFAULT '',
+            format_profile TEXT NOT NULL DEFAULT '',
+            created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (entry_id, pack_scope, source_kind, source_path, selector)
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO entry_origin (
+            id, entry_id, pack_scope, source_kind, source_path, selector,
+            source_hash, format_profile, created_at
+        )
+        SELECT id, entry_id, pack_scope, source_kind, source_path, selector,
+               source_hash, format_profile, created_at
+        FROM entry_origin_v14
+        """
+    )
+    conn.execute("DROP TABLE entry_origin_v14")
+    conn.execute("CREATE INDEX idx_entry_origin_entry ON entry_origin (entry_id)")
+    conn.execute(
+        "CREATE INDEX idx_entry_origin_scope "
+        "ON entry_origin (pack_scope, source_kind, source_path)"
+    )
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
