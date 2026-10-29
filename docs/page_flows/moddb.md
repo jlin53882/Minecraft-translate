@@ -71,8 +71,9 @@ Quests」會透過共用的 pack source scanner 讀取 `kubejs` 與
 `config/ftbquests/quests`，並沿用 `scan_ingest.py` 的預覽／實際匯入分類。腳本只做
 靜態字串辨識，沒有 JavaScript 執行；每筆來源以相對路徑與 selector 保存於
 `entry_origin`，因此同名檔案不會互相覆蓋。動態文字、語言 key 參考與解析失敗會進入
-內容處置紀錄，不會產生假條目。`ftb_quests` 與 `kubejs_script` 不會被當作 Resource
-Pack lang；回寫分別交給既有 FTB config 與 KubeJS script pipeline。
+內容處置紀錄，不會產生假條目。`kubejs_lang`、`ftb_quest_lang`、`ftb_quests` 與
+`kubejs_script` 不會被當作一般 Resource Pack lang；回寫分別交給 KubeJS Lang、FTB
+config 與 KubeJS script pipeline。
 
 取消掃描時 `cancel_clicked` 只呼叫 `session.request_cancel()`，等待目前處理中的檔案停止。
 

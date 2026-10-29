@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from translation_tool.translation_db.models import SmartReviewSnapshot
-from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.schema import (
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
+    SRC_MANUAL,
+)
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
@@ -182,7 +186,7 @@ def _build_smart_review_selection(
     order_prefix = ""
     if prioritize_named_keys:
         order_prefix = (
-            "CASE WHEN e.kind='lang' AND ("
+            f"CASE WHEN e.kind IN ('{KIND_LANG}', '{KIND_KUBEJS_LANG}') AND ("
             "e.key LIKE 'item.%' OR e.key LIKE 'block.%' OR "
             "e.key LIKE 'entity.%' OR e.key LIKE 'biome.%' OR "
             "e.key LIKE 'effect.%' OR e.key LIKE 'fluid.%' OR "

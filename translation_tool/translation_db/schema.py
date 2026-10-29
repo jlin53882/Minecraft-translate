@@ -28,6 +28,7 @@ KIND_PATCHOULI = "patchouli"
 KIND_GUIDE = "guide"  # 指南（.md／.txt 文字檔，依段落切成條目）
 KIND_ADVANCEMENT = "advancement"  # 進度的顯示文字（data/<模組>/advancement(s)/）
 KIND_KUBEJS_SCRIPT = "kubejs_script"  # KubeJS 靜態可定位的 literal 文字
+KIND_KUBEJS_LANG = "kubejs_lang"  # KubeJS Lang JSON／ClientEvents.lang 語系
 KIND_FTB_QUESTS = "ftb_quests"  # FTB Quests 任務本體的 literal 欄位
 KIND_FTB_QUEST_LANG = "ftb_quest_lang"  # FTB Quests 語系 SNBT
 
@@ -42,6 +43,7 @@ _CACHE_TYPE_BY_KIND = {
     # these entries to generic lang/patchouli would make ModDB translation use
     # the wrong prompt, batch budget, and cache namespace.
     KIND_KUBEJS_SCRIPT: "kubejs",
+    KIND_KUBEJS_LANG: "kubejs",
     KIND_FTB_QUESTS: "ftbquests",
     KIND_FTB_QUEST_LANG: "ftbquests",
 }
@@ -812,6 +814,20 @@ _SMART_REVIEW_DDL = (
     CREATE INDEX IF NOT EXISTS idx_smart_review_named_order
         ON entry (
             (CASE WHEN kind='lang' AND (
+                key LIKE 'item.%' OR key LIKE 'block.%' OR
+                key LIKE 'entity.%' OR key LIKE 'biome.%' OR
+                key LIKE 'effect.%' OR key LIKE 'fluid.%' OR
+                key LIKE 'enchantment.%' OR key LIKE 'dimension.%' OR
+                key LIKE 'painting.%' OR key LIKE 'trim_pattern.%' OR
+                key LIKE 'instrument.%' OR key LIKE 'banner.%'
+            ) THEN 0 ELSE 1 END),
+            mc_version, mod_id, kind, key, id
+        )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_smart_review_named_order_v2
+        ON entry (
+            (CASE WHEN kind IN ('lang', 'kubejs_lang') AND (
                 key LIKE 'item.%' OR key LIKE 'block.%' OR
                 key LIKE 'entity.%' OR key LIKE 'biome.%' OR
                 key LIKE 'effect.%' OR key LIKE 'fluid.%' OR

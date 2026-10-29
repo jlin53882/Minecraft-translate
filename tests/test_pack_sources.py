@@ -112,7 +112,11 @@ def test_moddb_scan_ingests_pack_sources_and_provenance(tmp_path):
         assert report.pack_items_found > 0
         assert db._one("SELECT COUNT(*) FROM entry_origin")[0] > 0
         kinds = {row[0] for row in db._q("SELECT DISTINCT kind FROM entry", ())}
-        assert {"lang", "kubejs_script", "ftb_quests"} <= kinds
+        assert {
+            "kubejs_lang",
+            "kubejs_script",
+            "ftb_quests",
+        } <= kinds
         entry_id = db._one("SELECT id FROM entry WHERE kind='kubejs_script' LIMIT 1")[0]
         assert db.entry_origins(entry_id)[0].source_path.endswith(".js")
         refs = db.source_references("1.21.1")
@@ -201,6 +205,7 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
         ("Machine", ""),
         ("", "機器"),
     }
+    assert {item.kind for item in items} == {"kubejs_lang"}
     assert any(
         "ClientEvents.lang[zh_tw][demo]" in item.source_selector for item in items
     )
@@ -489,7 +494,9 @@ def test_moddb_ingest_keeps_chinese_fallback_as_original_text(tmp_path):
                 workers=1,
             )
         )
-        row = db._one("SELECT en_us FROM entry WHERE kind='lang' AND key='item.demo'")
+        row = db._one(
+            "SELECT en_us FROM entry WHERE kind='kubejs_lang' AND key='item.demo'"
+        )
         assert row == ("繁中來源",)
     finally:
         db.close()

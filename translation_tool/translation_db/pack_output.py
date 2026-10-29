@@ -30,6 +30,7 @@ from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUEST_LANG,
     KIND_FTB_QUESTS,
+    KIND_KUBEJS_LANG,
     KIND_KUBEJS_SCRIPT,
     KIND_LANG,
 )
@@ -43,6 +44,7 @@ _KUBEJS_LANG_SELECTOR = re.compile(
     r"^ClientEvents\.lang\[(?P<locale>[^\]]+)\]"
     r"(?:\[(?P<namespace>[^\]]+)\])?\.event\.add\["
 )
+_KUBEJS_LANG_KINDS = frozenset({KIND_LANG, KIND_KUBEJS_LANG})
 
 
 class PackOutputError(RuntimeError):
@@ -171,11 +173,9 @@ def _make_plan(
         # KubeJS 的 effective translation 會同時帶入同一 entry 的 en_us／
         # zh_tw origins。輸出必須以英文定義作為來源，從 zh_tw origin 重複
         # 產生計畫會讓 writer 把既有語系當成新的來源事件。
-        if (
-            item.origin.source_kind == KIND_LANG
-            and item.origin.format_profile == "kubejs-js"
-            and _kubejs_lang_locale(item.origin.selector) not in {None, "en_us"}
-        ):
+        if _is_kubejs_js_origin(item.origin) and _kubejs_lang_locale(
+            item.origin.selector
+        ) not in {None, "en_us"}:
             continue
         target = _target_for(item)
         if target is None:
@@ -197,9 +197,9 @@ def _target_for(item: EffectivePackTranslation) -> str | None:
     origin = item.origin
     if origin.source_kind == KIND_KUBEJS_SCRIPT:
         return f"kubejs-script/{origin.source_path}"
-    if origin.source_kind == KIND_LANG and origin.format_profile == "kubejs-js":
+    if _is_kubejs_js_origin(origin):
         return f"kubejs-script/{origin.source_path}"
-    if origin.source_kind == KIND_LANG and origin.format_profile == "lang-json":
+    if _is_kubejs_json_origin(origin):
         return _kubejs_lang_target(origin.source_path)
     if origin.source_kind == KIND_FTB_QUESTS:
         return f"ftb-quest/{origin.source_path}"
@@ -210,13 +210,29 @@ def _target_for(item: EffectivePackTranslation) -> str | None:
 
 def _target_selector(item: EffectivePackTranslation) -> str:
     origin = item.origin
-    if origin.source_kind == KIND_LANG and origin.format_profile == "lang-json":
+    if _is_kubejs_json_origin(origin):
         return _lang_key(item.key)
-    if origin.source_kind == KIND_LANG and origin.format_profile == "kubejs-js":
+    if _is_kubejs_js_origin(origin):
         # selector 包含 locale、namespace 與 occurrence；writer 必須使用
         # 同一個 selector，不能只用 key 對整個 JS 做模糊替換。
         return f"{origin.source_path}|{origin.selector}"
     return item.key
+
+
+def _is_kubejs_lang_origin(origin) -> bool:
+    """判斷 KubeJS 語系來源，並相容 PR #220 早期寫入的 ``lang`` rows。"""
+    return origin.source_kind in _KUBEJS_LANG_KINDS and origin.format_profile in {
+        "lang-json",
+        "kubejs-js",
+    }
+
+
+def _is_kubejs_json_origin(origin) -> bool:
+    return _is_kubejs_lang_origin(origin) and origin.format_profile == "lang-json"
+
+
+def _is_kubejs_js_origin(origin) -> bool:
+    return _is_kubejs_lang_origin(origin) and origin.format_profile == "kubejs-js"
 
 
 def _kubejs_lang_locale(selector: str) -> str | None:
@@ -277,12 +293,10 @@ def _write_plan(
     for plan in plans:
         item = plan.item
         origin = item.origin
-        if origin.source_kind == KIND_KUBEJS_SCRIPT or (
-            origin.source_kind == KIND_LANG and origin.format_profile == "kubejs-js"
-        ):
+        if origin.source_kind == KIND_KUBEJS_SCRIPT or _is_kubejs_js_origin(origin):
             key = _target_selector(item)
             kubejs_maps[origin.source_path][key] = plan.value
-        elif origin.source_kind == KIND_LANG:
+        elif _is_kubejs_json_origin(origin):
             lang_updates[plan.target][_lang_key(item.key)] = plan.value
         elif origin.source_kind == KIND_FTB_QUESTS:
             update_key = _quest_update_key(item)

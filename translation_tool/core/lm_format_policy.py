@@ -13,6 +13,7 @@ from translation_tool.core.guide_format import format_spec
 # ``translation_db`` imports: that package eagerly imports its repository and
 # quality modules, which would create a cycle through the shared LM budget.
 KIND_LANG = "lang"
+KIND_KUBEJS_LANG = "kubejs_lang"
 KIND_GUIDE = "guide"
 KIND_PATCHOULI = "patchouli"
 KIND_FTB_QUESTS = "ftb_quests"
@@ -115,7 +116,9 @@ def format_policy_for_items(
     has_ftb_route = any(
         kind in {KIND_FTB_QUESTS, KIND_FTB_QUEST_LANG} for kind in kinds
     )
-    has_lang_route = KIND_LANG in kinds or normalized_profile == KIND_LANG
+    has_lang_route = any(kind in {KIND_LANG, KIND_KUBEJS_LANG} for kind in kinds) or (
+        normalized_profile in {KIND_LANG, KIND_KUBEJS_LANG}
+    )
 
     sections = [FORMAT_POLICY_PROMPT]
     if has_guide_route:
@@ -214,6 +217,7 @@ def estimate_format_spec_tokens(item: dict[str, Any], estimate_text_tokens) -> f
 
 __all__ = [
     "FORMAT_POLICY_PROMPT",
+    "KIND_KUBEJS_LANG",
     "KIND_LANG",
     "LANG_SEMANTIC_FORMAT_POLICY_PROMPT",
     "PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT",

@@ -28,6 +28,7 @@ from translation_tool.translation_db.quality import (
 
 def test_registered_kinds_keep_cache_and_newline_policies_explicit():
     assert format_kind_policy("lang").cache_type == "lang"
+    assert format_kind_policy("kubejs_lang").cache_type == "kubejs"
     assert format_kind_policy("guide").cache_type == "patchouli"
     assert format_kind_policy("patchouli").newline_policy == "soft"
     advancement = format_kind_policy("advancement")

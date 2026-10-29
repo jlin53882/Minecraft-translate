@@ -21,7 +21,11 @@ from translation_tool.core.terminology_model import (
     from_official_match,
 )
 from translation_tool.translation_db.quality import quality_state
-from translation_tool.translation_db.schema import SRC_JAR_TW
+from translation_tool.translation_db.schema import (
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
+    SRC_JAR_TW,
+)
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
 
 _REVIEWED_ENTRY_COLUMNS = (
@@ -29,6 +33,7 @@ _REVIEWED_ENTRY_COLUMNS = (
     "f.zh_tw, f.source, f.review_status, f.revision "
     "FROM entry e JOIN translation f ON f.entry_id=e.id "
 )
+_LANGUAGE_KINDS_SQL = f"e.kind IN ('{KIND_LANG}', '{KIND_KUBEJS_LANG}')"
 
 
 class _LocalContextBuilder:
@@ -262,7 +267,7 @@ class _LocalContextBuilder:
         current = self._cached_rows(
             "glossary_target_current_rows",
             _REVIEWED_ENTRY_COLUMNS
-            + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version=? "
+            + f"WHERE {_LANGUAGE_KINDS_SQL} AND e.mod_id=? AND e.mc_version=? "
             "AND e.en_us IN (" + placeholders + ") "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
             "ORDER BY e.id LIMIT 96",
@@ -271,7 +276,7 @@ class _LocalContextBuilder:
         other = self._cached_rows(
             "glossary_target_other_rows",
             _REVIEWED_ENTRY_COLUMNS
-            + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version<>? "
+            + f"WHERE {_LANGUAGE_KINDS_SQL} AND e.mod_id=? AND e.mc_version<>? "
             "AND e.en_us IN (" + placeholders + ") "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
             "ORDER BY e.mc_version, e.id LIMIT 96",
@@ -285,7 +290,7 @@ class _LocalContextBuilder:
         current_rows = self._cached_rows(
             "glossary_current_rows",
             _REVIEWED_ENTRY_COLUMNS
-            + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version=? "
+            + f"WHERE {_LANGUAGE_KINDS_SQL} AND e.mod_id=? AND e.mc_version=? "
             "AND f.review_status='reviewed' AND e.en_us<>'' "
             "AND trim(f.zh_tw)<>'' ORDER BY e.id LIMIT 5000",
             (mod_id, mc_version),
@@ -295,7 +300,7 @@ class _LocalContextBuilder:
             self._cached_rows(
                 "glossary_other_rows",
                 _REVIEWED_ENTRY_COLUMNS
-                + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version<>? "
+                + f"WHERE {_LANGUAGE_KINDS_SQL} AND e.mod_id=? AND e.mc_version<>? "
                 "AND f.review_status='reviewed' AND e.en_us<>'' "
                 "AND trim(f.zh_tw)<>'' ORDER BY e.mc_version, e.id LIMIT ?",
                 (mod_id, mc_version, remaining),

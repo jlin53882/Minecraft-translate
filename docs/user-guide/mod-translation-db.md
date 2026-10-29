@@ -183,11 +183,12 @@ Mod DB 批次機翻預設只處理沒有生效譯文的條目，並透過 `write
 - 書本根目錄的 `book.json` 不匯入：Patchouli 官方文件說明 `book.json` 必須放在原位，資源包能否覆寫它沒有確認。
 
 Patchouli、lang、KubeJS 靜態文字與 FTB Quests 任務文字共用同一個掃描／預覽／匯入流程，
-但仍以不同 `kind` 保存，避免把不可直接放進 Resource Pack 的來源混在 lang。掃描頁選取
+但仍以不同 `kind` 保存，避免把不可直接放進 Resource Pack 的來源混在一般 lang。掃描頁選取
 mods 資料夾或模組包根目錄時，預設也會讀取 `kubejs/**/*.js` 與
 `config/ftbquests/quests/**/*.snbt`；只解析可靜態定位的 literal 文字，不執行 JavaScript。
-KubeJS `ClientEvents.lang` 與 `kubejs/assets/<namespace>/lang/*.json` 以 `lang` 匯入，
-tooltip／scene literal 使用 `kubejs_script`，FTB Quests 任務本體與語系分別使用
+KubeJS `ClientEvents.lang` 與 `kubejs/assets/<namespace>/lang/*.json` 使用獨立的
+`kubejs_lang` 匯入；一般模組 JAR 的 `assets/<namespace>/lang/*.json` 仍使用 `lang`。
+KubeJS tooltip／scene literal 使用 `kubejs_script`，FTB Quests 任務本體與語系分別使用
 `ftb_quests`／`ftb_quest_lang`。每筆新來源另存相對路徑、selector、hash 與 pack scope，
 供來源檢視與格式專用 writer 回寫；動態 Component、語言 key 參考、無法解析的 SNBT/JSON
 只記錄為 pending／parse_failed，不會假裝成可翻譯條目。FTB 任務輸出仍由 FTB 專用流程

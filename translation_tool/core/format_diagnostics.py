@@ -410,6 +410,16 @@ _POLICIES: dict[str, FormatKindPolicy] = {
             analyzer_name="token",
         )
     ),
+    "kubejs_lang": _normalize_policy(
+        FormatKindPolicy(
+            "kubejs_lang",
+            "kubejs",
+            "kubejs",
+            _analyze_token_format,
+            "hard",
+            analyzer_name="token",
+        )
+    ),
     "ftb_quests": _normalize_policy(
         FormatKindPolicy(
             "ftb_quests",

@@ -100,6 +100,8 @@ from translation_tool.translation_db.schema import (
     KIND_FTB_QUEST_LANG,
     KIND_FTB_QUESTS,
     KIND_GUIDE,
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
     KIND_PATCHOULI,
     SRC_AI,
     SRC_AI_REPAIR,
@@ -5237,7 +5239,7 @@ class TranslationDB(
         """載入一次模組與版本候選快照，供重複術語查找。"""
         clauses = [
             "e.mod_id = ?",
-            "e.kind = 'lang'",
+            f"e.kind IN ('{KIND_LANG}', '{KIND_KUBEJS_LANG}')",
             "f.review_status = 'reviewed'",
             "e.en_us <> ''",
             "f.zh_tw <> ''",

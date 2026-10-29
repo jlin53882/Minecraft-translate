@@ -45,6 +45,7 @@ from translation_tool.translation_db.models import ScanItem, SourceReference
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUEST_LANG,
     KIND_FTB_QUESTS,
+    KIND_KUBEJS_LANG,
     KIND_KUBEJS_SCRIPT,
     KIND_LANG,
     SRC_CUSTOM,
@@ -410,7 +411,7 @@ def _append_kubejs_lang_item(
         return
     result.items.append(
         _make_item(
-            kind=KIND_LANG,
+            kind=KIND_KUBEJS_LANG,
             # namespace 是 KubeJS LangEventJS 的資料身分；不能只用 key，
             # 否則同一檔案的不同 namespace 會在 ModDB 合併成同一筆。
             mod_id=f"{namespace}@{scope}",
@@ -694,7 +695,7 @@ def _append_kubejs_lang_items(
                     continue
                 result.items.append(
                     _make_item(
-                        kind=KIND_LANG,
+                        kind=KIND_KUBEJS_LANG,
                         # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
                         # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
                         mod_id=f"{namespace}@{scope}",
@@ -1163,16 +1164,29 @@ def _resolve_reference_targets(result: PackScanResult) -> None:
     language_items = [
         item
         for item in result.items
-        if item.kind == KIND_LANG and item.source_format in {"lang-json", "kubejs-js"}
+        if item.kind in {KIND_LANG, KIND_KUBEJS_LANG}
+        and item.source_format in {"lang-json", "kubejs-js"}
     ]
-    targets_by_key: defaultdict[str, set[str]] = defaultdict(set)
+    targets_by_key: defaultdict[str, set[tuple[str, str]]] = defaultdict(set)
     for item in language_items:
-        targets_by_key[item.key].add(item.mod_id)
+        targets_by_key[item.key].add((item.kind, item.mod_id))
     resolved: list[SourceReference] = []
     for reference in result.references:
-        candidates = sorted(targets_by_key.get(reference.target_key, ()))
-        target_mod_id = candidates[0] if len(candidates) == 1 else ""
-        resolved.append(replace(reference, target_mod_id=target_mod_id))
+        pairs = sorted(targets_by_key.get(reference.target_key, ()))
+        kinds = {kind for kind, _mod_id in pairs}
+        mod_ids = {mod_id for _kind, mod_id in pairs}
+        target_kind = reference.target_kind
+        if len(pairs) == 1:
+            target_kind = pairs[0][0]
+        elif len(kinds) == 1:
+            target_kind = next(iter(kinds))
+        resolved.append(
+            replace(
+                reference,
+                target_kind=target_kind,
+                target_mod_id=next(iter(mod_ids)) if len(mod_ids) == 1 else "",
+            )
+        )
     result.references = resolved
 
 

@@ -51,6 +51,7 @@ from translation_tool.core.text_sniffer import (
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
     KIND_GUIDE,
+    KIND_KUBEJS_LANG,
     KIND_LANG,
     KIND_PATCHOULI,
     SRC_MANUAL,
@@ -83,7 +84,8 @@ CLEANUP_CATEGORIES: dict[str, str] = {
 # 看結構就能確定不是文字的類別：已有 jar／第三方中文譯文時仍預設刪除；
 # 其他類別是看內容形狀推測的，只要有中文譯文或中文歷史就預設不刪，要人工確認
 STRONG_CATEGORIES = frozenset({"multiblock", "meta_key", "placeholder", "lang_key"})
-_CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, KIND_LANG)
+_LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG)
+_CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, *_LANGUAGE_KINDS)
 
 
 def entry_cleanup_category(
@@ -100,7 +102,7 @@ def entry_cleanup_category(
     語言檔條目沒有原文（翻譯 ZIP 先建立的）時，改用鍵與 ``zh_text``（目前譯文）判斷。
     """
     if not en_us or not en_us.strip():
-        if kind != KIND_LANG:
+        if kind not in _LANGUAGE_KINDS:
             return None  # 其他類型沒有原文就沒有可判斷的內容
         en_us = zh_text
         if not en_us.strip():
@@ -113,11 +115,11 @@ def entry_cleanup_category(
         if conservative:
             return _patchouli_conservative_category(key, en_us)
         return _patchouli_category(key, en_us)
-    if kind in (KIND_LANG, KIND_ADVANCEMENT):
+    if kind in (*_LANGUAGE_KINDS, KIND_ADVANCEMENT):
         # 語言檔與進度只用不看內容語意的保守規則（小寫單字如 ``on``／``off`` 是正常譯文）
         if is_placeholder_text(en_us):
             return "placeholder"
-        if kind == KIND_LANG and (reason := lang_non_text_reason(key, en_us)):
+        if kind in _LANGUAGE_KINDS and (reason := lang_non_text_reason(key, en_us)):
             return reason
         if reason := value_shape_reason(en_us):
             return reason
