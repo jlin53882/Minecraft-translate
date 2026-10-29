@@ -592,7 +592,7 @@ def test_reviewed_lang_glossary_matches_terms_inside_source_sentences(db):
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
 
 
-def test_reviewed_lang_glossary_loads_scoped_candidates_once(db, monkeypatch):
+def test_reviewed_lang_glossary_loads_each_language_kind_once(db, monkeypatch):
     db.ingest(
         "1.21.1",
         [ScanItem(KIND_LANG, "foo", "pressure", "Pressure Chamber", "壓力室")],
@@ -612,10 +612,13 @@ def test_reviewed_lang_glossary_loads_scoped_candidates_once(db, monkeypatch):
     assert db.reviewed_lang_glossary(
         "foo", "1.21.1", ("The Pressure Chamber processes air.",)
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
-    assert len(calls) == 1
-    assert "LIMIT ? OFFSET ?" not in calls[0]
-    assert "instr(" not in calls[0]
-    assert "lower(" not in calls[0]
+    # lang 與 kubejs_lang 各自保留可用索引的 ORDER BY stream，再於 Python 合併。
+    # 不要把這裡改回單一 IN 查詢，否則 SQLite 會建立暫存排序樹。
+    assert len(calls) == 2
+    assert all("e.kind = ?" in sql for sql in calls)
+    assert all("LIMIT ? OFFSET ?" not in sql for sql in calls)
+    assert all("instr(" not in sql for sql in calls)
+    assert all("lower(" not in sql for sql in calls)
 
 
 def test_reviewed_lang_glossary_matches_unicode_casefold_terms(db):
