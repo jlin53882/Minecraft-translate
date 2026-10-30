@@ -25,6 +25,11 @@ from app.views.extractor.extract_summary import (
 )
 from app.views.extractor.extractor_dialog_helpers import format_size
 from app.views.extractor.extractor_state import PreviewState
+from app.views.pipeline.pipeline_forms import (
+    build_pipeline_dialog,
+    build_pipeline_dialog_title,
+    dialog_button,
+)
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
 from translation_tool.utils.ui_mirror import in_new_task, new_task_id
@@ -149,45 +154,45 @@ def _preview_bind_handlers(ctx) -> None:
     ctx.start_scan = functools.partial(_preview_start_scan, ctx)
 
     # ========== 建立對話框 ==========
-    ctx.start_button = ft.Button(
+    ctx.start_button = dialog_button(
         "開始預覽",
         icon=ft.Icons.SEARCH,
         on_click=lambda e: ctx.start_scan(),
+        role="primary",
+    )
+    ctx.cancel_button = dialog_button(
+        "取消",
+        on_click=lambda e: _preview_cancel(ctx),
+        icon=ft.Icons.CLOSE,
     )
 
 
 def _preview_build_dialog(ctx, dialog_width) -> None:
-    """預覽對話框本體。"""
+    """建立與其他流水線共用的預覽對話框外框。"""
 
-    ctx.preview_dialog = ft.AlertDialog(
-        modal=False,
-        title=ft.Row(
-            [
-                ft.Icon(ft.Icons.SEARCH, size=24, color=C.DIA),
-                ft.Text(
-                    f"預覽 - {ctx.mode.upper()}", size=18, weight=ft.FontWeight.BOLD
-                ),
-            ]
-        ),
-        content=ft.Container(
-            content=ft.Column(
-                [
-                    ctx.info_text,
-                    ft.Divider(),
-                    ft.Row(
-                        [ctx.status_text, ctx.progress_pct],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    ),
-                    ctx.progress_bar,
-                    # log_view 已是 LogView widget（自帶深色容器 + 圓角）
-                    ctx.log_view,
-                ],
-                spacing=10,
+    content = ft.Column(
+        [
+            ctx.info_text,
+            ft.Divider(),
+            ft.Row(
+                [ctx.status_text, ctx.progress_pct],
+                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             ),
-            width=dialog_width,
-            height=500,
-        ),
-        actions=[ctx.start_button],
+            ctx.progress_bar,
+            # log_view 已是 LogView widget（自帶深色容器 + 圓角）
+            ctx.log_view,
+        ],
+        spacing=10,
+    )
+    ctx.preview_body = ft.Container(content=content, width=dialog_width)
+    ctx.preview_dialog = build_pipeline_dialog(
+        ctx.page,
+        title=f"預覽 - {ctx.mode.upper()}",
+        icon=ft.Icons.SEARCH,
+        tone="dia",
+        modal=False,
+        content=ctx.preview_body,
+        actions=[ctx.cancel_button, ctx.start_button],
     )
 
     # 2026-07-12 user 建議:預覽 dialog 防呆安全網(與主 dialog 的 on_dialog_dismiss 對稱設計)。
@@ -229,6 +234,17 @@ def _preview_add_log(
         dedupe=forwarded,
         task=task,
     )
+
+
+def _preview_cancel(ctx) -> None:
+    """統一預覽對話框的取消行為：閒置時關閉，掃描中先請求取消。"""
+    if ctx.state["running"]:
+        ctx.state["cancelled"] = True
+        ctx.cancel_button.disabled = True
+        ctx.status_text.value = "正在取消..."
+        ctx.page.update()
+        return
+    ctx.page.pop_dialog()
 
 
 def _preview_result_controls(ctx, result: dict) -> list:
@@ -330,30 +346,28 @@ def _preview_show_result_dialog(ctx, result):
     log_info(
         "[PREVIEW] show_result_dialog: mutating preview_dialog in-place (single-dialog mode)"
     )
-    ctx.preview_dialog.title = ft.Row(
-        [
-            ft.Icon(ft.Icons.CHECK_CIRCLE, size=24, color=C.EM),
-            ft.Text(
-                f"提取預覽 - {ctx.mode.upper()}", size=18, weight=ft.FontWeight.BOLD
-            ),
-        ]
+    ctx.preview_dialog.title = build_pipeline_dialog_title(
+        f"提取預覽 - {ctx.mode.upper()}",
+        icon=ft.Icons.CHECK_CIRCLE,
+        tone="em",
     )
-    ctx.preview_dialog.content = ft.Container(
-        content=ft.Column(controls, spacing=8, scroll=ft.ScrollMode.AUTO),
-        width=600,
-        height=500,
+    ctx.preview_body.content = ft.Column(
+        controls,
+        spacing=8,
+        scroll=ft.ScrollMode.AUTO,
     )
     ctx.preview_dialog.actions = [
-        ft.TextButton(
+        dialog_button(
             "取消",
             on_click=lambda e: (
                 log_info("[PREVIEW] 取消 CALLED → pop_dialog (single)"),
                 ctx.page.pop_dialog(),  # 只有一個 dialog,pop 一次就夠
             ),
         ),
-        ft.Button(
+        dialog_button(
             "確認執行",
             icon=ft.Icons.CHECK,
+            role="primary",
             on_click=functools.partial(_preview_start_extraction, ctx),
         ),
     ]
@@ -449,6 +463,9 @@ async def _preview_ui_poller(ctx):
     final_result = ctx.preview_state.result
     final_error = ctx.preview_state.error
     ctx.start_button.disabled = False
+    cancel_button = getattr(ctx, "cancel_button", None)
+    if cancel_button is not None:
+        cancel_button.disabled = False
     ctx.state["running"] = False
 
     cancelled = ctx.state["cancelled"]
@@ -511,6 +528,7 @@ def _preview_start_scan(ctx):
 
     # 重置 UI
     ctx.log_view.clear()
+    ctx.cancel_button.disabled = False
     ctx.progress_bar.value = 0
     ctx.progress_pct.value = "0%"
     ctx.status_text.value = "正在掃描..."

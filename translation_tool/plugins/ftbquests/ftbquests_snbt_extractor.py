@@ -61,8 +61,8 @@ def is_extractable_line(s: str) -> bool:
 def merge_translated_lines(template: list[Any], parts: list[str]) -> list[str]:
     """把翻譯後的各行放回模板清單中「可抽取」的位置，其餘行（空行、圖片、換頁、引用）原樣保留。
 
-    ``parts`` 行數與可抽取行數相同時一對一對應；譯文行數較多時多出的行接在最後一個
-    可抽取行之後，較少時其餘可抽取行不輸出。
+    ``parts`` 行數必須與可抽取行數相同；不一致時保留原模板，避免翻譯服務的
+    換行差異意外刪除空白、圖片或頁面結構。
     """
     slots = [
         i
@@ -72,19 +72,11 @@ def merge_translated_lines(template: list[Any], parts: list[str]) -> list[str]:
     merged: list[str] = [str(e) for e in template]
     if not slots:
         return merged
+    if len(parts) != len(slots):
+        return merged
     for slot, part in zip(slots, parts):
         merged[slot] = part
-    extra = parts[len(slots) :]
-    drop = set(slots[len(parts) :])
-    last = slots[-1]
-    result: list[str] = []
-    for i, line in enumerate(merged):
-        if i in drop:
-            continue
-        result.append(line)
-        if i == last:
-            result.extend(extra)
-    return result
+    return merged
 
 
 TAG_CONDITION_PATTERN = re.compile(
@@ -169,17 +161,24 @@ def extract_quest_file(filename: str, root: Compound) -> dict:
 
         # List[String]
         elif isinstance(val, List):
-            parts = []
-            for e in val:
-                if isinstance(e, snbt.String):
-                    s = str(e)
-                    if is_extractable_line(s):
-                        parts.append(s)
-                else:
-                    # 非字串就跳過（保守）
-                    pass
-            if parts:
-                text = "\n".join(parts)
+            # 描述陣列的每一個 slot 都是獨立的回寫單位。舊版把可翻譯
+            # 行 join 成一段，翻譯後只要換行數不同就可能錯位；新格式由
+            # ``_emit_list_slots`` 以原始 index 輸出，注入器可精確更新。
+            id_val = obj.get("id")
+            id_prefix = f"id:{id_val!s}|" if isinstance(id_val, snbt.String) else ""
+            for index, element in enumerate(val):
+                if not isinstance(element, snbt.String):
+                    continue
+                slot = str(element)
+                if (
+                    not is_extractable_line(slot)
+                    or is_tag_condition_text(slot)
+                    or is_lang_key_ref(slot)
+                    or is_lang_key_ref_like(slot)
+                ):
+                    continue
+                out[f"{filename}|{id_prefix}{field}[{index}]"] = slot
+            return
 
         if not text:
             return
@@ -288,8 +287,9 @@ def process_quest_folder(quests_root: str) -> dict:
                             fp = os.path.join(subdir, file)
                             data = walk_snbt_file(fp)
                             if data:
+                                relative = os.path.relpath(fp, path).replace("\\", "/")
                                 final_output[lang_code]["lang"].update(
-                                    extract_lang_file(file, data)
+                                    extract_lang_file(relative, data)
                                 )
 
             # lang/en_us.snbt
@@ -324,9 +324,8 @@ def process_quest_folder(quests_root: str) -> dict:
             if not data:
                 continue
 
-            extracted = extract_quest_file(file, data)
-            # rel_path = os.path.relpath(fp, quests_root).replace("\\", "/")
-            # extracted = extract_quest_file(rel_path, data)
+            rel_path = os.path.relpath(fp, quests_root).replace("\\", "/")
+            extracted = extract_quest_file(rel_path, data)
 
             for lang in target_langs:
                 ensure_lang(final_output, lang)

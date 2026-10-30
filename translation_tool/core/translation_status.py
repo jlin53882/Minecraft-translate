@@ -27,15 +27,21 @@ def normalized_translation_status(result: Any) -> str | None:
     return normalized or None
 
 
-def translation_stop_reason(result: Any) -> str | None:
-    """回傳阻止後續注入的原因；只有明確 ``DONE`` 會回傳 ``None``。"""
+def translation_stop_reason(result: Any, *, allow_dry_run: bool = False) -> str | None:
+    """回傳阻止後續注入的原因；只有明確 ``DONE`` 會回傳 ``None``。
+
+    ``dry_run`` 預設仍是阻止正式注入的原因，供各翻譯器的回寫流程維持
+    fail-closed 行為。需要描述「唯讀預覽是否成功」的編排器可以明確傳入
+    ``allow_dry_run=True``，此時只跳過 dry-run 本身的阻擋，仍會檢查取消、
+    失敗、不完整或未知狀態。
+    """
     status = normalized_translation_status(result)
     dry_run = (
         bool(result.get("dry_run"))
         if isinstance(result, Mapping)
         else bool(getattr(result, "dry_run", False))
     )
-    if dry_run:
+    if dry_run and not allow_dry_run:
         return "dry_run"
     cancelled = (
         bool(result.get("cancelled"))

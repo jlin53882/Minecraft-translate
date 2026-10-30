@@ -26,6 +26,10 @@ from app.ui.status_chip import set_chip_status
 from app.views._log import LogView
 from app.views.config.config_actions import load_config_into_view
 from app.views.merge.merge_widgets import MergeWidgetsMixin
+from app.views.pipeline.pipeline_forms import (
+    build_pipeline_dialog,
+    dialog_button,
+)
 from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_error, log_info, log_warning
@@ -411,6 +415,7 @@ class MergeView(MergeWidgetsMixin, ft.Column):
             return
 
         self.session.start()
+        self.log_card.visible = True
         source_desc = (
             f"資料夾 {self.folder_path_field.value}"
             if input_mode == "folder"
@@ -581,21 +586,31 @@ class MergeView(MergeWidgetsMixin, ft.Column):
         content = self._merge_summary_content(
             f_zips, failed_block, output_block, s_zips, unit, errored
         )
-        dialog = ft.AlertDialog(
-            modal=True,
-            title=ft.Text(
-                "合併失敗"
-                if failed
-                else "合併完成（有失敗項目）"
-                if f_zips or errored
-                else "合併完成"
-            ),
-            content=ft.Container(content=content, width=520),
+        summary_title = (
+            "合併失敗"
+            if failed
+            else "合併完成（有失敗項目）"
+            if f_zips or errored
+            else "合併完成"
+        )
+        dialog = build_pipeline_dialog(
+            self.page,
+            title=summary_title,
+            icon=ft.Icons.MERGE_TYPE,
+            tone="ench" if not failed else "gold",
+            content=content,
             actions=[
-                ft.TextButton(
-                    "開啟輸出資料夾", on_click=lambda e: self._open_output_folder()
+                dialog_button(
+                    "開啟輸出資料夾",
+                    on_click=lambda e: self._open_output_folder(),
+                    icon=ft.Icons.FOLDER_OPEN,
+                    role="preview",
                 ),
-                ft.TextButton("關閉", on_click=lambda e: self._close_dialog_overlay()),
+                dialog_button(
+                    "關閉",
+                    on_click=lambda e: self._close_dialog_overlay(),
+                    icon=ft.Icons.CLOSE,
+                ),
             ],
         )
 

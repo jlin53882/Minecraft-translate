@@ -7,7 +7,9 @@ Minecraft 在地化術語。證據只來自本地資料庫與內建官方語系�
 
 from __future__ import annotations
 
+import heapq
 import re
+from itertools import islice
 from typing import Any
 
 from translation_tool.core.official_locale import (
@@ -21,7 +23,11 @@ from translation_tool.core.terminology_model import (
     from_official_match,
 )
 from translation_tool.translation_db.quality import quality_state
-from translation_tool.translation_db.schema import SRC_JAR_TW
+from translation_tool.translation_db.schema import (
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
+    SRC_JAR_TW,
+)
 from translation_tool.utils.text_matching import contains_term, term_canonical_key
 
 _REVIEWED_ENTRY_COLUMNS = (
@@ -29,6 +35,7 @@ _REVIEWED_ENTRY_COLUMNS = (
     "f.zh_tw, f.source, f.review_status, f.revision "
     "FROM entry e JOIN translation f ON f.entry_id=e.id "
 )
+_LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG)
 
 
 class _LocalContextBuilder:
@@ -89,6 +96,35 @@ class _LocalContextBuilder:
         if params not in bucket:
             bucket[params] = self.db._q(sql, params)
         return bucket[params]
+
+    def _language_rows(
+        self,
+        cache_name: str,
+        where_sql: str,
+        params: tuple[Any, ...],
+        *,
+        order_key,
+        limit: int | None = None,
+    ) -> list[tuple]:
+        """分別查詢語系 kind，再合併已排序的 index stream。
+
+        ``kind IN (...)`` 會讓 SQLite 為跨 kind 的 ORDER BY 建立暫存樹；
+        每個 kind 都有相同的索引前綴，因此分兩條有序 stream 合併可保留
+        `smart_review` 的 no-temp-sort 契約，也讓未來新增語系 kind 時只需
+        擴充 `_LANGUAGE_KINDS`。
+        """
+        streams = [
+            self._cached_rows(
+                cache_name,
+                _REVIEWED_ENTRY_COLUMNS + "WHERE e.kind=? AND " + where_sql,
+                (kind, *params),
+            )
+            for kind in _LANGUAGE_KINDS
+        ]
+        merged = heapq.merge(*streams, key=order_key)
+        if limit is None:
+            return list(merged)
+        return list(islice(merged, max(0, limit)))
 
     def _db_context_item(
         self,
@@ -259,46 +295,48 @@ class _LocalContextBuilder:
         placeholders = ",".join("?" for _ in lookup_phrases)
         # 分成目前版本與其他版本兩段查詢，讓 glossary_order 索引直接
         # 提供 LIMIT 前的順序；不要用 CASE 排序把整批候選放進暫存 B-tree。
-        current = self._cached_rows(
+        current = self._language_rows(
             "glossary_target_current_rows",
-            _REVIEWED_ENTRY_COLUMNS
-            + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version=? "
+            "e.mod_id=? AND e.mc_version=? "
             "AND e.en_us IN (" + placeholders + ") "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
             "ORDER BY e.id LIMIT 96",
             (mod_id, mc_version, *lookup_phrases),
+            order_key=lambda row: int(row[0]),
         )
-        other = self._cached_rows(
+        other = self._language_rows(
             "glossary_target_other_rows",
-            _REVIEWED_ENTRY_COLUMNS
-            + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version<>? "
+            "e.mod_id=? AND e.mc_version<>? "
             "AND e.en_us IN (" + placeholders + ") "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
             "ORDER BY e.mc_version, e.id LIMIT 96",
             (mod_id, mc_version, *lookup_phrases),
+            order_key=lambda row: (str(row[2]), int(row[0])),
         )
         return current + other
 
     def _bulk_glossary_rows(self) -> tuple[tuple, ...]:
         """取得同模組／版本共用的 bulk glossary（最多 5,000 列，已去重）。"""
         mod_id, mc_version = self.mod_id, self.mc_version
-        current_rows = self._cached_rows(
+        current_rows = self._language_rows(
             "glossary_current_rows",
-            _REVIEWED_ENTRY_COLUMNS
-            + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version=? "
+            "e.mod_id=? AND e.mc_version=? "
             "AND f.review_status='reviewed' AND e.en_us<>'' "
             "AND trim(f.zh_tw)<>'' ORDER BY e.id LIMIT 5000",
             (mod_id, mc_version),
+            order_key=lambda row: int(row[0]),
+            limit=5000,
         )
         remaining = 5000 - len(current_rows)
         other_rows = (
-            self._cached_rows(
+            self._language_rows(
                 "glossary_other_rows",
-                _REVIEWED_ENTRY_COLUMNS
-                + "WHERE e.kind='lang' AND e.mod_id=? AND e.mc_version<>? "
+                "e.mod_id=? AND e.mc_version<>? "
                 "AND f.review_status='reviewed' AND e.en_us<>'' "
                 "AND trim(f.zh_tw)<>'' ORDER BY e.mc_version, e.id LIMIT ?",
                 (mod_id, mc_version, remaining),
+                order_key=lambda row: (str(row[2]), int(row[0])),
+                limit=remaining,
             )
             if remaining
             else []

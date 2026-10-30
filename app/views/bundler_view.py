@@ -450,6 +450,7 @@ class BundlerView(BundlerWidgetsMixin, ft.Column):
 
         self._bundling_running = True
         self.start_button.disabled = True
+        self.log_card.visible = True
         self.progress_bar.visible = True
         self.progress_bar.value = 0
         self.log_view.clear()

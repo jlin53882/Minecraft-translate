@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **367** 項；其中 **98** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **369** 項；其中 **98** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 329 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 331 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -43,6 +43,7 @@
 | `app/services_impl/moddb_smart_review_service.py:_apply_moddb_smart_review_legacy_batch` | BLE001 | 已記錄／回報 | one bad candidate must not stop the batch |
 | `app/services_impl/moddb_translate_service.py:_flush_buffer` | BLE001 | 已記錄／回報 | 持久化失敗需重試並回報 |
 | `app/services_impl/moddb_translate_service.py:run_moddb_translate_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session |
+| `app/services_impl/pack_pipeline_service.py:run_kubejs_ftb_pipeline_service` | BLE001 | 已記錄／回報 | 任務邊界必須回報並終止 |
 | `app/services_impl/pipelines/_task_runner.py:run_callable_task` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/bundle_service.py:run_bundling_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/extract_service.py:run_lang_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -126,6 +127,7 @@
 | `app/views/icon_preview_row.py:_ensure_icon_size` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/icon_preview_view.py:IconPreviewView._on_load_clicked` | BLE001 | 已記錄／回報 | 排程失敗時需結束 owner 並回報 UI |
 | `app/views/icon_preview_view.py:IconPreviewView._handle_cached_source_error` | BLE001 | 已記錄／回報 | 頁面關閉等排程失敗只記錄並重設旗標，下次載入會再重建 |
+| `app/views/kubejs_ftb_pipeline_view.py:KubejsFtbPipelineView._poll` | BLE001 | 已記錄／回報 | UI 卸載時停止輪詢並保留任務結果 |
 | `app/views/lm_view.py:LMView.refresh_key_stat` | BLE001 | UI／畫面保護 | 讀不到設定時只是不顯示 |
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |

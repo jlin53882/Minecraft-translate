@@ -51,9 +51,11 @@ from translation_tool.translation_db.models import (
     BatchReplaceResult,
     BatchReplaceSkipped,
     BatchRevertResult,
+    EffectivePackTranslation,
     EffectiveSourceStat,
     EntryDetail,
     EntryFilter,
+    EntryOrigin,
     EntryRow,
     HistoryRow,
     Impact,
@@ -65,6 +67,7 @@ from translation_tool.translation_db.models import (
     SameSourceAIEntry,
     SameTextRow,
     ScanItem,
+    SourceReference,
     SrcChangeRow,
     TimeFilter,
     TranslationRow,
@@ -94,7 +97,11 @@ from translation_tool.translation_db.schema import (
     DB_NEWER,
     DEFAULT_PRIORITY,
     KEEP_REVIEW_FLAG,
+    KIND_FTB_QUEST_LANG,
+    KIND_FTB_QUESTS,
     KIND_GUIDE,
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
     KIND_PATCHOULI,
     SRC_AI,
     SRC_AI_REPAIR,
@@ -699,6 +706,29 @@ class TranslationDB(
     def scan_preview_target(self, version: str) -> PreviewIngestTarget:
         """掃描預覽用的分類目標：只讀這個資料庫，分類規則與 :meth:`ingest_many` 相同。"""
         return PreviewIngestTarget(lambda sql, params: self._q(sql, params), version)
+
+    def pack_origin_hashes(
+        self, version: str, pack_scope: str
+    ) -> dict[tuple[str, str, str, str], frozenset[str]]:
+        """回傳指定模組包已同步來源的 hash。
+
+        增量同步只會略過 ``kind``、模組身分、相對路徑與 selector 都相同，
+        且來源 hash 仍相同的條目。以 hash set 表示同一 selector 若資料庫歷史
+        上存在多個來源版本，避免錯把不一致的來源當成已同步。
+        """
+        rows = self._q(
+            "SELECT e.kind, e.mod_id, eo.source_path, eo.selector, eo.source_hash "
+            "FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.mc_version=? AND eo.pack_scope=?",
+            (version, pack_scope),
+        )
+        hashes: dict[tuple[str, str, str, str], set[str]] = {}
+        for kind, mod_id, source_path, selector, source_hash in rows:
+            if not source_hash:
+                continue
+            key = (str(kind), str(mod_id), str(source_path), str(selector))
+            hashes.setdefault(key, set()).add(str(source_hash))
+        return {key: frozenset(values) for key, values in hashes.items()}
 
     @staticmethod
     def _content_issue_row(
@@ -2113,7 +2143,10 @@ class TranslationDB(
                 for column in ("e.en_us", "f.zh_tw")
             )
             # Guide／Patchouli 的結構標記不一定含格式符號，所以整批列入候選
-            structured_kinds = f"('{KIND_GUIDE}', '{KIND_PATCHOULI}')"
+            structured_kinds = (
+                f"('{KIND_GUIDE}', '{KIND_PATCHOULI}', "
+                f"'{KIND_FTB_QUESTS}', '{KIND_FTB_QUEST_LANG}')"
+            )
             return f"{has_text} AND (({token_like}) OR e.kind IN {structured_kinds})"
         return "1"
 
@@ -3231,6 +3264,222 @@ class TranslationDB(
         )
         return self._row(r) if r else None
 
+    def entry_origins(self, entry_id: int) -> list[EntryOrigin]:
+        """回傳條目的精確來源；供預覽、清理與格式專用 writer 使用。"""
+        return [
+            EntryOrigin(
+                pack_scope=pack_scope,
+                source_kind=source_kind,
+                source_path=source_path,
+                selector=selector,
+                source_hash=source_hash,
+                format_profile=format_profile,
+            )
+            for (
+                pack_scope,
+                source_kind,
+                source_path,
+                selector,
+                source_hash,
+                format_profile,
+            ) in self._q(
+                "SELECT pack_scope, source_kind, source_path, selector, "
+                "source_hash, format_profile FROM entry_origin "
+                "WHERE entry_id=? ORDER BY source_path, selector",
+                (entry_id,),
+            )
+        ]
+
+    def effective_pack_translations(
+        self, version: str, pack_scope: str
+    ) -> list[EffectivePackTranslation]:
+        """讀取指定模組包可安全交給格式 writer 的生效譯文。
+
+        這個查詢把 entry、effective 與 entry_origin 一次取出，避免輸出大量
+        KubeJS／FTB 條目時逐筆呼叫 ``get_entry`` 形成 N+1 查詢。來源 writer
+        仍需依格式檢查 selector、hash 與部署路徑；本方法只提供可追溯資料。
+        """
+        rows = self._q(
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, "
+            "eo.pack_scope, eo.source_kind, eo.source_path, eo.selector, "
+            "eo.source_hash, eo.format_profile "
+            "FROM entry e JOIN effective f ON f.entry_id=e.id "
+            "JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.mc_version=? AND eo.pack_scope=? "
+            "AND e.en_us<>'' AND f.zh_tw<>'' "
+            "ORDER BY eo.source_kind, eo.source_path, eo.selector, e.id",
+            (version, pack_scope),
+        )
+        return [
+            EffectivePackTranslation(
+                entry_id=int(row[0]),
+                kind=row[1],
+                mod_id=row[2],
+                key=row[3],
+                en_us=row[4],
+                zh_tw=row[5],
+                origin=EntryOrigin(
+                    pack_scope=row[6],
+                    source_kind=row[7],
+                    source_path=row[8],
+                    selector=row[9],
+                    source_hash=row[10],
+                    format_profile=row[11],
+                ),
+            )
+            for row in rows
+        ]
+
+    def record_source_references(
+        self,
+        version: str,
+        references: Sequence[SourceReference],
+        *,
+        pack_scope: str | None = None,
+    ) -> int:
+        """寫入跨格式引用並以目前 DB 內容解析其目標狀態。
+
+        引用不是翻譯 entry；每次匯入只更新同一個來源快照，並保留
+        ``missing``／``ambiguous`` 狀態，避免把未知 key 猜成可翻譯文字。
+        """
+        scopes = {
+            reference.pack_scope for reference in references if reference.pack_scope
+        }
+        if pack_scope:
+            scopes.add(pack_scope)
+        if not scopes:
+            return 0
+        with self._tx() as conn:
+            for scope in scopes:
+                conn.execute(
+                    "DELETE FROM source_reference WHERE mc_version=? AND pack_scope=?",
+                    (version, scope),
+                )
+            rows: list[tuple[Any, ...]] = []
+            for reference in references:
+                where = "e.mc_version=? AND e.kind=? AND e.key=? AND eo.pack_scope=?"
+                params: list[Any] = [
+                    version,
+                    reference.target_kind,
+                    reference.target_key,
+                    reference.pack_scope,
+                ]
+                if reference.target_mod_id:
+                    where += " AND e.mod_id=?"
+                    params.append(reference.target_mod_id)
+                candidates = conn.execute(
+                    "SELECT DISTINCT e.id FROM entry e "
+                    "JOIN entry_origin eo ON eo.entry_id=e.id "
+                    f"WHERE {where}",
+                    params,
+                ).fetchall()
+                if len(candidates) == 1:
+                    status, detail, target_id = "resolved", "", int(candidates[0][0])
+                elif not candidates:
+                    status, detail, target_id = (
+                        "missing",
+                        "找不到同一模組包的語言定義",
+                        None,
+                    )
+                else:
+                    status = "ambiguous"
+                    detail = f"同一模組包找到 {len(candidates)} 個語言定義"
+                    target_id = None
+                rows.append(
+                    (
+                        version,
+                        reference.pack_scope,
+                        reference.source_kind,
+                        reference.source_path,
+                        reference.selector,
+                        reference.target_kind,
+                        reference.target_mod_id,
+                        reference.target_key,
+                        reference.target_locale,
+                        status,
+                        detail,
+                        target_id,
+                        reference.source_hash,
+                    )
+                )
+            conn.executemany(
+                "INSERT INTO source_reference ("
+                "mc_version, pack_scope, source_kind, source_path, selector, "
+                "target_kind, target_mod_id, target_key, target_locale, status, "
+                "detail, target_entry_id, source_hash"
+                ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(mc_version, pack_scope, source_kind, source_path, "
+                "selector, target_kind, target_mod_id, target_key, target_locale) "
+                "DO UPDATE SET status=excluded.status, detail=excluded.detail, "
+                "target_entry_id=excluded.target_entry_id, source_hash=excluded.source_hash",
+                rows,
+            )
+        return len(rows)
+
+    def source_references(
+        self, version: str | None = None, *, pack_scope: str | None = None
+    ) -> list[SourceReference]:
+        """回傳跨格式引用索引，供來源檢視與輸出前驗證使用。"""
+        conditions: list[str] = []
+        params: list[Any] = []
+        if version is not None:
+            conditions.append("mc_version=?")
+            params.append(version)
+        if pack_scope is not None:
+            conditions.append("pack_scope=?")
+            params.append(pack_scope)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        return [
+            SourceReference(
+                pack_scope=row[1],
+                source_kind=row[2],
+                source_path=row[3],
+                selector=row[4],
+                target_kind=row[5],
+                target_mod_id=row[6],
+                target_key=row[7],
+                target_locale=row[8],
+                status=row[9],
+                detail=row[10],
+                target_entry_id=row[11],
+                source_hash=row[12],
+            )
+            for row in self._q(
+                "SELECT id, pack_scope, source_kind, source_path, selector, "
+                "target_kind, target_mod_id, target_key, target_locale, status, "
+                "detail, target_entry_id, source_hash FROM source_reference"
+                + where
+                + " ORDER BY source_path, selector",
+                tuple(params),
+            )
+        ]
+
+    def entry_references(self, entry_id: int) -> list[SourceReference]:
+        """回傳指向指定語言定義的來源引用。"""
+        return [
+            SourceReference(
+                pack_scope=row[1],
+                source_kind=row[2],
+                source_path=row[3],
+                selector=row[4],
+                target_kind=row[5],
+                target_mod_id=row[6],
+                target_key=row[7],
+                target_locale=row[8],
+                status=row[9],
+                detail=row[10],
+                target_entry_id=row[11],
+                source_hash=row[12],
+            )
+            for row in self._q(
+                "SELECT id, pack_scope, source_kind, source_path, selector, "
+                "target_kind, target_mod_id, target_key, target_locale, status, "
+                "detail, target_entry_id, source_hash FROM source_reference "
+                "WHERE target_entry_id=? ORDER BY source_path, selector",
+                (entry_id,),
+            )
+        ]
+
     def entry_detail(
         self, entry_id: int, *, text_limit: int = 200
     ) -> EntryDetail | None:
@@ -3239,6 +3488,8 @@ class TranslationDB(
         if entry is None:
             return None
         detail = EntryDetail(entry=entry)
+        detail.origins = self.entry_origins(entry_id)
+        detail.references = self.entry_references(entry_id)
         translation_review = translation_review_sql(
             "translation", self.has_review_state
         )
@@ -4860,7 +5111,10 @@ class TranslationDB(
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}'))",
+            (
+                f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}', "
+                f"'{KIND_FTB_QUESTS}', '{KIND_FTB_QUEST_LANG}'))"
+            ),
         ]
         params: list = [version]
         if mod_ids:
@@ -4921,7 +5175,10 @@ class TranslationDB(
             "e.mc_version=?",
             "e.en_us<>''",
             "t.zh_tw<>''",
-            f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}'))",
+            (
+                f"(({token_chars}) OR e.kind IN ('{KIND_GUIDE}', '{KIND_PATCHOULI}', "
+                f"'{KIND_FTB_QUESTS}', '{KIND_FTB_QUEST_LANG}'))"
+            ),
         ]
         params: list = [version]
         if mod_ids:
@@ -5003,40 +5260,51 @@ class TranslationDB(
         self, mod_id: str, mc_version: str | None
     ) -> list[list[str]]:
         """載入一次模組與版本候選快照，供重複術語查找。"""
-        clauses = [
-            "e.mod_id = ?",
-            "e.kind = 'lang'",
-            "f.review_status = 'reviewed'",
-            "e.en_us <> ''",
-            "f.zh_tw <> ''",
-            "e.en_us <> f.zh_tw",
-        ]
-        params: list[object] = [mod_id]
-        if mc_version:
-            clauses.append("e.mc_version = ?")
-            params.append(mc_version)
         cache_key = "reviewed_lang_candidates:" + json.dumps(
             [mod_id, mc_version], ensure_ascii=False, separators=(",", ":")
         )
 
         def load() -> list[list[str]]:
-            rows = self._q(
-                f"""
-                SELECT e.key, e.en_us, f.zh_tw
-                FROM entry e
-                JOIN effective f ON f.entry_id = e.id
-                WHERE {" AND ".join(clauses)}
-                ORDER BY e.key, e.id
-                """,
-                params,
+            def load_kind(kind: str) -> list[tuple[int, str, str, str, str]]:
+                clauses = [
+                    "e.mod_id = ?",
+                    "e.kind = ?",
+                    "f.review_status = 'reviewed'",
+                    "e.en_us <> ''",
+                    "f.zh_tw <> ''",
+                    "e.en_us <> f.zh_tw",
+                ]
+                params: list[object] = [mod_id, kind]
+                if mc_version:
+                    clauses.append("e.mc_version = ?")
+                    params.append(mc_version)
+                return self._q(
+                    f"""
+                    SELECT e.id, e.kind, e.key, e.en_us, f.zh_tw
+                    FROM entry e
+                    JOIN effective f ON f.entry_id = e.id
+                    WHERE {" AND ".join(clauses)}
+                    ORDER BY e.key, e.id
+                    """,
+                    params,
+                )
+
+            # An ``IN`` predicate over two kinds makes SQLite merge two index
+            # scans and create a temporary ORDER BY tree.  Each kind has an
+            # index-friendly stream; merge the already ordered streams in
+            # Python so the glossary cache keeps the no-temp-sort contract.
+            rows = heapq.merge(
+                load_kind(KIND_LANG),
+                load_kind(KIND_KUBEJS_LANG),
+                key=lambda row: (str(row[2]), int(row[0])),
             )
             return [
-                list(row)
+                list(row[2:])
                 for row in rows
-                if all(isinstance(value, str) for value in row)
-                and row[1].strip()
-                and row[2].strip()
-                and quality_state(row[1], row[2], kind="lang")[0] == "consistent"
+                if all(isinstance(value, str) for value in row[2:])
+                and row[3].strip()
+                and row[4].strip()
+                and quality_state(row[3], row[4], kind=str(row[1]))[0] == "consistent"
             ]
 
         return self._cached(cache_key, load)

@@ -29,8 +29,8 @@ from app.views.merge.merge_db_options import MergeDbOptions
 from app.views.pipeline.pipeline_forms import (
     MergeFormState,
     build_merge_form,
+    build_pipeline_dialog,
     dialog_button,
-    dialog_content,
     dialog_text_field,
 )
 from translation_tool.utils.config_manager import load_config
@@ -100,10 +100,12 @@ def open_merge_dialog(
     content = _merge_build_content(ctx)
 
     # 保留標題、內容間距與固定操作列所需的垂直空間。
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("🔍 語系比對設定"),
-        content=dialog_content(page, content),
+    dialog = build_pipeline_dialog(
+        page,
+        title="語系比對設定",
+        icon=ft.Icons.CALL_MERGE,
+        tone="ench",
+        content=content,
         actions=[
             dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
             dialog_button(
@@ -235,11 +237,16 @@ def _merge_bind_handlers(ctx) -> None:
         content=ft.Row(
             [
                 ctx.merge_folder_field,
-                ft.Button(
-                    "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_folder_input
+                dialog_button(
+                    "選擇資料夾",
+                    icon=ft.Icons.FOLDER,
+                    on_click=ctx.pick_folder_input,
+                    role="preview",
                 ),
-                ft.Button(
-                    "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_folder_input
+                dialog_button(
+                    "瀏覽",
+                    icon=ft.Icons.SEARCH,
+                    on_click=ctx.browse_folder_input,
                 ),
             ]
         ),
@@ -259,8 +266,11 @@ def _merge_build_zip_row(ctx) -> None:
                     padding=5,
                     expand=True,
                 ),
-                ft.Button(
-                    "選擇 ZIP", icon=ft.Icons.FILE_OPEN, on_click=ctx.pick_zip_input
+                dialog_button(
+                    "選擇 ZIP",
+                    icon=ft.Icons.FILE_OPEN,
+                    on_click=ctx.pick_zip_input,
+                    role="preview",
                 ),
             ],
             spacing=4,
@@ -280,13 +290,16 @@ def _merge_build_content(ctx):
             ft.Row(
                 [
                     ctx.merge_output_dir_field,
-                    ft.Button(
+                    dialog_button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
                         on_click=ctx.pick_output_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_output_dir,
                     ),
                 ],
                 wrap=True,

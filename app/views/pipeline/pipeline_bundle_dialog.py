@@ -35,9 +35,9 @@ from app.views.pipeline.pipeline_config import RESOURCE_PACK_INSTALL_HINT
 from app.views.pipeline.pipeline_forms import (
     BundleFormState,
     build_bundle_form,
+    build_pipeline_dialog,
     build_version_input,
     dialog_button,
-    dialog_content,
     dialog_dimensions,
     dialog_text_field,
 )
@@ -81,10 +81,12 @@ def open_bundle_dialog(
     _bundle_build_extra_widgets(ctx)
     content = _bundle_build_content(ctx, version_input)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("📦 打包資源設定"),
-        content=dialog_content(page, content),
+    dialog = build_pipeline_dialog(
+        page,
+        title="打包資源設定",
+        icon=ft.Icons.INVENTORY_2_OUTLINED,
+        tone="gold",
+        content=content,
         actions=[
             dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
             dialog_button(
@@ -220,11 +222,16 @@ def _bundle_build_content(ctx, _version_input):
             ft.Row(
                 [
                     ctx.bundle_input_field,
-                    ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_input_dir
+                    dialog_button(
+                        "選擇資料夾",
+                        icon=ft.Icons.FOLDER,
+                        on_click=ctx.pick_input_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_input_dir,
                     ),
                 ],
                 wrap=True,
@@ -233,8 +240,11 @@ def _bundle_build_content(ctx, _version_input):
             ft.Row(
                 [
                     ctx.bundle_output_zip_field,
-                    ft.Button(
-                        "選擇儲存位置", icon=ft.Icons.SAVE, on_click=ctx.pick_output_zip
+                    dialog_button(
+                        "選擇儲存位置",
+                        icon=ft.Icons.SAVE,
+                        on_click=ctx.pick_output_zip,
+                        role="preview",
                     ),
                 ],
                 wrap=True,
@@ -246,7 +256,12 @@ def _bundle_build_content(ctx, _version_input):
     image_row = ft.Row(
         [
             ctx.pack_image_field,
-            ft.Button("選擇檔案...", icon=ft.Icons.IMAGE, on_click=ctx.pick_pack_image),
+            dialog_button(
+                "選擇檔案...",
+                icon=ft.Icons.IMAGE,
+                on_click=ctx.pick_pack_image,
+                role="preview",
+            ),
             dialog_button(
                 "移除",
                 lambda _event: _bundle_clear_pack_image(ctx),

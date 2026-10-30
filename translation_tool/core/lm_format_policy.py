@@ -13,9 +13,14 @@ from translation_tool.core.guide_format import format_spec
 # ``translation_db`` imports: that package eagerly imports its repository and
 # quality modules, which would create a cycle through the shared LM budget.
 KIND_LANG = "lang"
+KIND_KUBEJS_LANG = "kubejs_lang"
 KIND_GUIDE = "guide"
 KIND_PATCHOULI = "patchouli"
-STRUCTURED_KINDS = frozenset({KIND_GUIDE, KIND_PATCHOULI})
+KIND_FTB_QUESTS = "ftb_quests"
+KIND_FTB_QUEST_LANG = "ftb_quest_lang"
+STRUCTURED_KINDS = frozenset(
+    {KIND_GUIDE, KIND_PATCHOULI, KIND_FTB_QUESTS, KIND_FTB_QUEST_LANG}
+)
 
 # These are the exact legacy lines emitted by the previous config schema.  The
 # normalizer is intentionally line-scoped so a user's larger custom paragraph
@@ -43,6 +48,13 @@ STRUCTURED_FORMAT_POLICY_PROMPT = r"""【Guide/Patchouli 結構補充契約】
 - <ItemLink ... /> 的標籤名稱、屬性名稱、id、冒號、括號與斜線必須原樣保留。
 - <link;分類;顯示文字> 與 <link;分類;顯示文字;start> 的「顯示文字」要翻譯；其餘欄位（link、分類、start）與欄位之間的分號必須原樣保留，顯示文字本身的內容與標點可以翻譯。
 - 除 <link> 的顯示文字外，只翻譯 Patchouli 標籤以外的人類語言文字。
+"""
+
+FTB_FORMAT_POLICY_PROMPT = r"""【FTB Quests 結構補充契約】
+- 每個任務／語系 description slot 是獨立項目；不可合併、拆分或重新排序陣列元素。
+- ``{@pagebreak}``、``{image:...}``、``{translation.key}``、資源 ID 與其他 FTB 結構標記必須原樣保留。
+- ``{translation.key}`` 是語言鍵引用，不可當成人類語言翻譯；JSON Component 的 translate／with／樣式欄位也必須保留。
+- 不確定的 Rich Text、Component 或動態內容應保留原文並標記待處理，不可猜測改寫。
 """
 
 PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT = r"""【Patchouli 語意換行契約】
@@ -97,17 +109,24 @@ def format_policy_for_items(
     values = list(items)
     kinds = {kind_for_item(item) for item in values}
     normalized_profile = str(profile or "").lower()
-    has_structured_route = any(structured_kind(kind) for kind in kinds) or (
+    has_guide_route = any(kind in {KIND_GUIDE, KIND_PATCHOULI} for kind in kinds) or (
         not any(kind is not None for kind in kinds)
         and normalized_profile in {"md", "patch"}
     )
-    has_lang_route = KIND_LANG in kinds or normalized_profile == KIND_LANG
+    has_ftb_route = any(
+        kind in {KIND_FTB_QUESTS, KIND_FTB_QUEST_LANG} for kind in kinds
+    )
+    has_lang_route = any(kind in {KIND_LANG, KIND_KUBEJS_LANG} for kind in kinds) or (
+        normalized_profile in {KIND_LANG, KIND_KUBEJS_LANG}
+    )
 
     sections = [FORMAT_POLICY_PROMPT]
-    if has_structured_route:
+    if has_guide_route:
         sections.extend(
             [STRUCTURED_FORMAT_POLICY_PROMPT, PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT]
         )
+    if has_ftb_route:
+        sections.append(FTB_FORMAT_POLICY_PROMPT)
     if has_lang_route:
         sections.append(LANG_SEMANTIC_FORMAT_POLICY_PROMPT)
     return "\n".join(sections)
@@ -198,6 +217,7 @@ def estimate_format_spec_tokens(item: dict[str, Any], estimate_text_tokens) -> f
 
 __all__ = [
     "FORMAT_POLICY_PROMPT",
+    "KIND_KUBEJS_LANG",
     "KIND_LANG",
     "LANG_SEMANTIC_FORMAT_POLICY_PROMPT",
     "PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT",

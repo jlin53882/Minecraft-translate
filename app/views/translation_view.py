@@ -8,12 +8,17 @@ import threading  # noqa: F401
 
 import flet as ft
 
-from app.ui import design, kit
+from app.ui import kit
 from app.ui.design import C
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView
+from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_log_card,
+    build_pipeline_status_card,
+    build_pipeline_workbench,
+)
 from app.views.translation.translation_actions import (
     resume_ui_timer,
     run_ftb,
@@ -73,24 +78,15 @@ class TranslationView(ft.Column):
         tab_content = self._init_translation_state_and_tabs(file_picker, page)
         right_panel = self._build_translation_status_and_right_panel(tab_content)
 
-        body = ft.Row(
-            [
-                ft.Container(expand=3, content=self.tabs),
-                ft.Container(expand=2, content=right_panel),
-            ],
-            expand=True,
-            spacing=16,
+        self.workbench_view = build_pipeline_workbench(
+            title="任務翻譯工具",
+            subtitle="處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件；左側設定流程，右側查看狀態與 Log。",
+            icon=ft.Icons.TRANSLATE,
+            tone="ench",
+            left_controls=[self.tabs],
+            right_controls=[right_panel],
         )
-
-        self.controls = [
-            kit.page_header(
-                "任務翻譯工具",
-                "處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選",
-                icon=ft.Icons.TRANSLATE,
-                tone="ench",
-            ),
-            body,
-        ]
+        self.controls = [self.workbench_view]
 
     def _init_translation_state_and_tabs(self, file_picker, page):
         """任務翻譯頁的狀態與分頁。"""
@@ -114,8 +110,10 @@ class TranslationView(ft.Column):
             on_click=lambda e: self._on_cancel(),
         )
         self.cancel_button.disabled = True
-        # 環形進度；.value 介面與 ft.ProgressBar 相同，actions 層不需要改
-        self.progress = kit.ProgressRing(0, size=96, stroke=9, tone="em", sub="進度")
+        self.cancel_button.visible = False
+        # 共用水平進度條；.value 介面與 ft.ProgressBar 相同，actions 層不需要改
+        self.progress = kit.progress_bar(0, "em", height=8)
+        self.progress_status = ft.Text("等待任務啟動...", size=12, color=C.MUTED)
         # 統一的 LogView widget（取代裸 ListView + 寫死 hex 容器）
         # tail 模式與既有的「最後 N 筆整批重建」行為一致
         self.log_view = LogView(
@@ -147,7 +145,18 @@ class TranslationView(ft.Column):
             ],
             expand=True,
         )
-        tab_content = ft.Column([tab_bar, tab_view], expand=True, spacing=12)
+        tab_selector = kit.section_card(
+            "翻譯來源",
+            tab_bar,
+            icon=ft.Icons.TRANSLATE,
+            tone="ench",
+            padding=ft.Padding.symmetric(horizontal=8, vertical=4),
+        )
+        tab_content = ft.Column(
+            [tab_selector, tab_view],
+            expand=True,
+            spacing=12,
+        )
         return tab_content
 
     def _build_translation_status_and_right_panel(self, tab_content):
@@ -166,49 +175,37 @@ class TranslationView(ft.Column):
         self.run_md_translation_service = run_md_translation_service
         self.TaskSession = TaskSession
 
-        status_card = ft.Container(
-            padding=ft.Padding.symmetric(horizontal=18, vertical=16),
-            bgcolor=C.PANEL,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=design.RADIUS_CARD,
-            content=ft.Row(
-                [
-                    self.progress,
-                    ft.Column(
-                        [
-                            ft.Text("執行狀態", size=12, color=C.DIM),
-                            self.status_chip,
-                            self.cancel_button,
-                        ],
-                        spacing=8,
-                        tight=True,
-                        expand=True,
-                    ),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        status_card = build_pipeline_status_card(
+            progress=self.progress,
+            progress_status=self.progress_status,
+            status_chip=self.status_chip,
+            cancel=self.cancel_button,
+            title="執行狀態",
+            icon=ft.Icons.TRANSLATE,
+            tone="gold",
+            hint=kit.hint_text(
+                "翻譯工作會沿用目前分頁的步驟設定；取消只在批次檢查點生效。"
             ),
         )
-        right_panel = ft.Column(
-            [
-                status_card,
-                kit.section_card(
-                    "執行日誌",
-                    self.log_view,
-                    icon=ft.Icons.TERMINAL,
-                    tone="gold",
-                    expand=True,
-                    actions=[
-                        ft.IconButton(
-                            icon=ft.Icons.DELETE_OUTLINE,
-                            icon_size=18,
-                            icon_color=C.MUTED,
-                            tooltip="清空日誌",
-                            on_click=lambda e: self._clear_logs(),
-                        )
-                    ],
-                ),
+        self.log_panel = build_pipeline_log_card(
+            self.log_view,
+            title="執行日誌",
+            icon=ft.Icons.TERMINAL,
+            tone="gold",
+            expand=True,
+            actions=[
+                ft.IconButton(
+                    icon=ft.Icons.DELETE_OUTLINE,
+                    icon_size=18,
+                    icon_color=C.MUTED,
+                    tooltip="清空日誌",
+                    on_click=lambda e: self._clear_logs(),
+                )
             ],
+        )
+        self.log_panel.visible = False
+        right_panel = ft.Column(
+            [status_card, self.log_panel],
             expand=True,
             spacing=16,
         )
@@ -356,6 +353,8 @@ class TranslationView(ft.Column):
 
     def _start_ui_timer(self):
         """啟動 UI 更新計時器"""
+        self.log_panel.visible = True
+        self.cancel_button.visible = True
         self.cancel_button.disabled = False
         return start_translation_ui_timer(self)
 
@@ -378,6 +377,7 @@ class TranslationView(ft.Column):
     def _set_status(self, text: str, tone: str = "neutral"):
         """更新狀態晶片的文字與顏色（``tone`` 為色組名稱，也接受舊背景色）。"""
         set_chip_status(self.status_chip, text, tone)
+        self.progress_status.value = text
         self.page.update()
 
     def _apply_status_style(self, tone: str):
@@ -394,6 +394,7 @@ class TranslationView(ft.Column):
         取代原本的裸 controls.append + manual truncate 邏輯。
         LogView 內部已有 show_levels 過濾、max_lines 截斷、等寬字與等級顏色。
         """
+        self.log_panel.visible = True
         self.log_view.add(line, level="system", dedupe=False)
 
     def _clear_logs(self):
@@ -406,6 +407,7 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     def _reset_ftb_inputs(self):
         """重置 FTB 翻譯的所有輸入欄位"""
+        self.cancel_button.visible = False
         self.ftb_in_dir.value = ""
         self.ftb_out_dir.value = ""
         self.ftb_step_export.value = True
@@ -421,6 +423,7 @@ class TranslationView(ft.Column):
 
     def _reset_kjs_inputs(self):
         """重置 KubeJS 翻譯的所有輸入欄位"""
+        self.cancel_button.visible = False
         self.kjs_in_dir.value = ""
         self.kjs_source_mode.value = "fresh"
         self.kjs_out_dir.value = ""
@@ -436,6 +439,7 @@ class TranslationView(ft.Column):
 
     def _reset_md_inputs(self):
         """重置 Markdown 翻譯的所有輸入欄位"""
+        self.cancel_button.visible = False
         self.md_in_dir.value = ""
         self.md_out_dir.value = ""
         self.md_step_extract.value = True

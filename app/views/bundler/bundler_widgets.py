@@ -5,6 +5,11 @@ import flet as ft
 from app.services_impl.pack_format_service import QUICK_VERSIONS
 from app.ui import design, kit
 from app.ui.design import C
+from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_log_card,
+    build_pipeline_status_card,
+    build_pipeline_workbench,
+)
 
 
 class BundlerWidgetsMixin:
@@ -15,52 +20,35 @@ class BundlerWidgetsMixin:
         info_card = self._build_bundler_info_card(version_section)
         paths_card = self._build_bundler_paths_card()
         mcmeta_card, preview_card, start_button = self._build_bundler_preview_cards()
-        run_card = ft.Container(
-            padding=ft.Padding.symmetric(horizontal=18, vertical=14),
-            bgcolor=C.PANEL,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=design.RADIUS_CARD,
-            content=ft.Row(
-                [
-                    ft.Column(
-                        [self.status_text, self.progress_bar],
-                        spacing=8,
-                        tight=True,
-                        expand=True,
-                    ),
-                    start_button,
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
+        run_card = build_pipeline_status_card(
+            progress=self.progress_bar,
+            progress_status=self.status_text,
+            title="執行狀態",
+            icon=ft.Icons.INVENTORY_2_OUTLINED,
+            tone="gold",
+            hint=kit.hint_text("完成後會產生包含 pack.mcmeta 的資源包 ZIP。"),
         )
-        log_card = kit.section_card(
-            "打包日誌",
-            ft.Container(content=self.log_view, height=200),
+        log_card = build_pipeline_log_card(
+            self.log_view,
+            title="打包日誌",
             icon=ft.Icons.RECEIPT_LONG,
             tone="gold",
+            height=200,
             collapsible=True,
         )
+        log_card.visible = False
+        self.log_card = log_card
 
-        self.controls = [
-            kit.page_header(
-                "資源包打包",
-                "將翻譯結果打包成可直接使用的資源包 ZIP，自動產生 pack.mcmeta 與 pack.png",
-                icon=ft.Icons.INVENTORY_2_OUTLINED,
-                tone="gold",
-            ),
-            ft.Row(
-                [
-                    ft.Column([info_card, paths_card], spacing=16, expand=6),
-                    ft.Column(
-                        [preview_card, mcmeta_card, run_card], spacing=16, expand=5
-                    ),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-            log_card,
-        ]
+        self.workbench_view = build_pipeline_workbench(
+            title="資源包打包",
+            subtitle="將翻譯結果打包成可直接使用的資源包 ZIP，自動產生 pack.mcmeta 與 pack.png",
+            icon=ft.Icons.INVENTORY_2_OUTLINED,
+            tone="gold",
+            left_controls=[info_card, paths_card, preview_card, mcmeta_card],
+            right_controls=[run_card, log_card],
+            actions=[start_button],
+        )
+        self.controls = [self.workbench_view]
         self._update_preview()
 
     def _build_bundler_version_section(self):

@@ -13,6 +13,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 from translation_tool.core.kubejs_translator_state import atomic_write_bytes
+from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
+    KUBEJS_DEFAULT_LANG_NAMESPACE,
+    is_client_lang_add_shape,
+    parse_client_lang_add,
+)
 from translation_tool.utils.log_unit import log_error, log_info
 
 
@@ -52,6 +57,59 @@ def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
             break
 
     return str(best) if best else str(base)
+
+
+def _mask_js_non_code(text: str) -> str:
+    """以等長空白遮蔽字串與註解，避免 writer 命中假呼叫。"""
+    out = list(text)
+    state: str | None = None
+    escaped = False
+    index = 0
+    while index < len(text):
+        char = text[index]
+        next_char = text[index + 1] if index + 1 < len(text) else ""
+        if state in {"'", chr(34), "`"}:
+            out[index] = "\n" if char == "\n" else " "
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == state:
+                state = None
+            index += 1
+            continue
+        if state == "line":
+            out[index] = "\n" if char == "\n" else " "
+            if char == "\n":
+                state = None
+            index += 1
+            continue
+        if state == "block":
+            out[index] = "\n" if char == "\n" else " "
+            if char == "*" and next_char == "/":
+                out[index + 1] = " "
+                index += 2
+                state = None
+            else:
+                index += 1
+            continue
+        if char in ("'", chr(34), "`"):
+            state = char
+            out[index] = " "
+            index += 1
+            continue
+        if char == "/" and next_char == "/":
+            out[index] = out[index + 1] = " "
+            index += 2
+            state = "line"
+            continue
+        if char == "/" and next_char == "*":
+            out[index] = out[index + 1] = " "
+            index += 2
+            state = "block"
+            continue
+        index += 1
+    return "".join(out)
 
 
 def _extract_call_args_with_end(
@@ -96,6 +154,8 @@ def _replace_js_call_arguments(
     content: str,
     function_name: str,
     replace_args: Callable[[str], str],
+    *,
+    excluded_ranges: list[tuple[int, int]] | None = None,
 ) -> str:
     """以平衡括號邊界替換具名 JavaScript 呼叫的引數。
 
@@ -107,14 +167,22 @@ def _replace_js_call_arguments(
     Returns:
         僅替換指定呼叫引數後的完整 JavaScript 內容。
     """
+    # 只在程式碼區搜尋；否則註解或字串中的 ``event.add(...)`` 也會被
+    # 當成可回寫的語法節點。
+    code = _mask_js_non_code(content)
     pattern = re.compile(rf"\b{re.escape(function_name)}\s*\(")
     output: list[str] = []
     cursor = 0
     search_from = 0
     while True:
-        match = pattern.search(content, search_from)
+        match = pattern.search(code, search_from)
         if match is None:
             break
+        if excluded_ranges and any(
+            start <= match.start() < end for start, end in excluded_ranges
+        ):
+            search_from = match.end()
+            continue
         arguments, closing_index = _extract_call_args_with_end(content, match.end())
         if arguments is None or closing_index is None:
             output.append(content[cursor:])
@@ -133,6 +201,263 @@ def _replace_js_call_arguments(
 
     output.append(content[cursor:])
     return "".join(output)
+
+
+def _itemevents_tooltip_ranges(content: str) -> list[tuple[int, int]]:
+    """回傳 ``ItemEvents.tooltip(...)`` 的完整來源範圍。
+
+    新版掃描只把 Tooltip callback 內的 ``event.add`` 視為候選；回寫也
+    必須使用相同的 API 邊界。若舊版翻譯輸出沒有任何 Tooltip wrapper，
+    呼叫端仍可使用 legacy fallback，維持既有腳本格式相容性。
+    """
+    ranges: list[tuple[int, int]] = []
+    code = _mask_js_non_code(content)
+    for match in re.finditer(r"\bItemEvents\.tooltip\s*\(", code):
+        _arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if closing_index is not None:
+            ranges.append((match.start(), closing_index + 1))
+    return ranges
+
+
+def _clientevents_lang_ranges(
+    content: str,
+) -> list[tuple[int, int, str]]:
+    """回傳可安全辨識的 ``ClientEvents.lang`` 呼叫範圍與 locale。"""
+    ranges: list[tuple[int, int, str]] = []
+    code = _mask_js_non_code(content)
+    for match in re.finditer(r"\bClientEvents\.lang\s*\(", code):
+        arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if arguments is None or closing_index is None:
+            continue
+        parts = split_js_args(arguments)
+        if not parts:
+            continue
+        locale = _decode_js_string_literal(parts[0])
+        if locale is None and (
+            "=>" in parts[0] or parts[0].strip().startswith("function")
+        ):
+            locale = "en_us"
+        if locale is None or locale.lower() not in {"en_us", "zh_cn", "zh_tw"}:
+            continue
+        ranges.append((match.start(), closing_index + 1, locale.lower()))
+    return ranges
+
+
+def _clientevents_lang_call_ranges(content: str) -> list[tuple[int, int]]:
+    """回傳所有語系 API 呼叫範圍，包含目前不支援的 locale。"""
+    ranges: list[tuple[int, int]] = []
+    code = _mask_js_non_code(content)
+    for match in re.finditer(r"\bClientEvents\.lang\s*\(", code):
+        _arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if closing_index is not None:
+            ranges.append((match.start(), closing_index + 1))
+    return ranges
+
+
+def _is_kubejs_lang_json_path(path: Path) -> bool:
+    """判斷是否為標準 KubeJS ``assets/<namespace>/lang/*.json`` 檔案。"""
+    parts = tuple(part.casefold() for part in path.parts)
+    return (
+        len(parts) == 4
+        and parts[0] == "assets"
+        and parts[2] == "lang"
+        and path.suffix.casefold() == ".json"
+    )
+
+
+def _clientevents_lang_locale_at(
+    ranges: list[tuple[int, int, str]], position: int
+) -> str | None:
+    """回傳位置所在的語系事件；位置不在支援範圍時回傳 ``None``。"""
+    for start, end, locale in ranges:
+        if start <= position < end:
+            return locale
+    return None
+
+
+def _parse_kubejs_lang_call(
+    content: str, match: re.Match[str], locale: str
+) -> tuple[str, str, str, list[str], int, bool, str] | None:
+    """解析一個已位於 ``ClientEvents.lang`` 範圍內的 ``event.add``。"""
+    arguments, closing_index = _extract_call_args_with_end(content, match.end())
+    if arguments is None or closing_index is None:
+        return None
+    parts = split_js_args(arguments)
+    parsed = parse_client_lang_add(parts)
+    if parsed is None:
+        return None
+    namespace_expr, key_expr, value_expr = parsed
+    namespace = KUBEJS_DEFAULT_LANG_NAMESPACE
+    if namespace_expr is not None:
+        namespace = _decode_js_string_literal(namespace_expr)
+        if not namespace:
+            return None
+    key = _decode_js_string_literal(key_expr)
+    current_value = _decode_js_string_literal(value_expr)
+    if not key or current_value is None:
+        return None
+    return (
+        locale,
+        namespace,
+        key,
+        parts,
+        closing_index,
+        namespace_expr is not None,
+        current_value,
+    )
+
+
+def _select_kubejs_lang_translation(
+    source_file: str,
+    locale: str,
+    namespace: str,
+    key: str,
+    occurrence: int,
+    translation_map: dict[str, str],
+) -> tuple[str, str] | None:
+    """以新 selector 優先、legacy selector 相容地選一筆翻譯。"""
+    stable_key = (
+        f"{source_file}|ClientEvents.lang[{locale}][{namespace}]"
+        f".event.add[{occurrence}]|{key}"
+    )
+    legacy_selector = (
+        f"{source_file}|ClientEvents.lang[{locale}].event.add[{occurrence}]|{key}"
+    )
+    legacy_key = f"{source_file}|lang:{key}"
+    selected_key = next(
+        (
+            candidate
+            for candidate in (stable_key, legacy_selector, legacy_key)
+            if candidate in translation_map
+        ),
+        None,
+    )
+    if selected_key is None:
+        return None
+    return selected_key, str(translation_map[selected_key])
+
+
+def _select_itemevents_tooltip_translation(
+    source_file: str,
+    item_id: str,
+    tooltip_index: int,
+    tooltip_call_index: int,
+    translation_map: dict[str, str],
+) -> tuple[str, str] | None:
+    """以 scanner 相同的 stable key 優先選取 Tooltip 翻譯。"""
+    stable_key = f"{source_file}|tooltip:{item_id}:{tooltip_call_index}"
+    legacy_key = f"{source_file}|{item_id}.tooltip.{tooltip_index}"
+    selected_key = next(
+        (
+            candidate
+            for candidate in (stable_key, legacy_key)
+            if candidate in translation_map
+        ),
+        None,
+    )
+    if selected_key is None:
+        return None
+    return selected_key, str(translation_map[selected_key])
+
+
+def _append_kubejs_lang_translations(
+    content: str,
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    used_keys: set[str],
+) -> str:
+    """以 locale-aware 方式輸出 KubeJS LangEventJS 翻譯。
+
+    英文來源事件永遠保持原樣；翻譯會追加成 ``zh_tw`` 事件。若來源本身
+    已是 ``zh_tw``，只在同一個精確 selector 上更新 value。這避免把英文
+    腳本誤當成繁中輸出，也避免對檔案中其他 API 的 ``event.add`` 做全文替換。
+    """
+    ranges = _clientevents_lang_ranges(content)
+    if not ranges:
+        return content
+
+    code = _mask_js_non_code(content)
+    pattern = re.compile(r"\bevent\.add\s*\(")
+    output: list[str] = []
+    cursor = 0
+    occurrence = 0
+    additions: list[tuple[str, str, str, bool]] = []
+
+    for match in pattern.finditer(code):
+        locale = _clientevents_lang_locale_at(ranges, match.start())
+        if locale is None:
+            continue
+        arguments, _ = _extract_call_args_with_end(content, match.end())
+        if arguments is None or not is_client_lang_add_shape(split_js_args(arguments)):
+            continue
+        # 與 scanner 保持相同契約：即使值是動態表達式，這個 event.add
+        # 仍會消耗 occurrence；只有後續解析成功時才有可套用的翻譯。
+        occurrence += 1
+        candidate = _parse_kubejs_lang_call(content, match, locale)
+        if candidate is None:
+            continue
+        (
+            locale,
+            namespace,
+            key,
+            parts,
+            closing_index,
+            explicit_namespace,
+            current_value,
+        ) = candidate
+
+        selected = _select_kubejs_lang_translation(
+            source_file,
+            locale,
+            namespace,
+            key,
+            occurrence,
+            translation_map,
+        )
+        if selected is None:
+            continue
+
+        selected_key, translated = selected
+        used_keys.add(selected_key)
+        if locale == "en_us":
+            additions.append((namespace, key, translated, explicit_namespace))
+            continue
+        if locale != "zh_tw" or translated == current_value:
+            continue
+
+        new_parts = list(parts)
+        value_index = 2 if explicit_namespace else 1
+        new_parts[value_index] = json.dumps(translated, ensure_ascii=False)
+        output.append(content[cursor : match.start()])
+        output.append(content[match.start() : match.end()])
+        output.append(", ".join(new_parts))
+        output.append(")")
+        cursor = closing_index + 1
+
+    output.append(content[cursor:])
+    result = "".join(output)
+    if not additions:
+        return result
+
+    lines = [
+        "",
+        "// Minecraft-translate generated zh_tw language overlay",
+        "ClientEvents.lang('zh_tw', event => {",
+    ]
+    for namespace, key, value, explicit_namespace in additions:
+        encoded_key = json.dumps(key, ensure_ascii=False)
+        encoded_value = json.dumps(value, ensure_ascii=False)
+        if explicit_namespace:
+            encoded_namespace = json.dumps(namespace, ensure_ascii=False)
+            lines.append(
+                f"  event.add({encoded_namespace}, {encoded_key}, {encoded_value});"
+            )
+        else:
+            lines.append(f"  event.add({encoded_key}, {encoded_value});")
+    lines.extend(["});", ""])
+    separator = "" if result.endswith("\n") else "\n"
+    return result + separator + "\n".join(lines)
 
 
 # ---------------- 工具 ----------------
@@ -307,6 +632,157 @@ def clean_text(s: str) -> str:
     return str(s).replace("\\n", "\n").strip()
 
 
+def _replace_tooltip_text_calls(
+    expression: str,
+    *,
+    source_file: str,
+    item_id: str,
+    occurrence: int,
+    translation_map: dict[str, str],
+    used_keys: set[str],
+) -> str:
+    """替換 tooltip 陣列中的 Text 元件，並回報實際命中的 selector。"""
+    index = 0
+
+    def replace_call(match: re.Match[str]) -> str:
+        nonlocal index
+        key = f"{source_file}|{item_id}.{occurrence}.{index}"
+        index += 1
+        if key not in translation_map:
+            return match.group(0)
+        used_keys.add(key)
+        return replace_text_in_text_obj(match.group(0), translation_map[key])
+
+    quote_class = "['" + chr(34) + "]"
+    pattern = rf"Text\.\w+\s*\(\s*{quote_class}.*?{quote_class}\s*\)"
+    return re.sub(pattern, replace_call, expression, flags=re.DOTALL)
+
+
+def _patch_event_add_two_args(
+    args: list[str],
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    counters: defaultdict[str, int],
+    used_keys: set[str],
+) -> tuple[list[str], bool]:
+    """處理兩參數 tooltip／ClientEvents.lang 呼叫。"""
+    item_id = strip_quotes(args[0])
+    occurrence = counters[item_id]
+    counters[item_id] += 1
+    new_args = list(args)
+    lang_key = _decode_js_string_literal(args[0])
+    lang_value = _decode_js_string_literal(args[1])
+    stable_lang_key = f"{source_file}|lang:{lang_key}" if lang_key else ""
+    if stable_lang_key in translation_map and lang_value is not None:
+        used_keys.add(stable_lang_key)
+        translated = translation_map[stable_lang_key]
+        if lang_value != translated:
+            new_args[1] = json.dumps(translated, ensure_ascii=False)
+            return new_args, True
+        return new_args, False
+
+    key = f"{source_file}|{item_id}.{occurrence}"
+    if args[1].strip().startswith("Text.") and key in translation_map:
+        used_keys.add(key)
+        replacement = replace_text_in_text_obj(args[1], translation_map[key])
+        if replacement != args[1]:
+            new_args[1] = replacement
+            return new_args, True
+        return new_args, False
+
+    if not args[1].strip().startswith("["):
+        return new_args, False
+    if "Text." in args[1]:
+        replacement = _replace_tooltip_text_calls(
+            args[1],
+            source_file=source_file,
+            item_id=item_id,
+            occurrence=occurrence,
+            translation_map=translation_map,
+            used_keys=used_keys,
+        )
+    else:
+        old_values = extract_array_strings(args[1])
+        new_values = list(old_values)
+        for index, old_value in enumerate(old_values):
+            key = f"{source_file}|{item_id}.{occurrence}.{index}"
+            if key in translation_map:
+                used_keys.add(key)
+                new_values[index] = translation_map[key]
+        replacement = replace_array(args[1], new_values)
+    if replacement == args[1]:
+        return new_args, False
+    new_args[1] = replacement
+    return new_args, True
+
+
+def _patch_event_add_three_args(
+    args: list[str],
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    used_keys: set[str],
+) -> tuple[list[str], bool]:
+    """處理 ``event.add(namespace, key, value)`` 語系呼叫。"""
+    parsed = parse_client_lang_add(args)
+    if parsed is None:
+        return args, False
+    _namespace, key_expr, value_expr = parsed
+    lang_key = _decode_js_string_literal(key_expr)
+    lang_value = _decode_js_string_literal(value_expr)
+    stable_key = f"{source_file}|lang:{lang_key}" if lang_key else ""
+    if stable_key not in translation_map or lang_value is None:
+        return args, False
+    used_keys.add(stable_key)
+    translated = translation_map[stable_key]
+    if translated == lang_value:
+        return args, False
+    new_args = list(args)
+    new_args[2] = json.dumps(translated, ensure_ascii=False)
+    return new_args, True
+
+
+def _patch_event_add_args(
+    arg_str: str,
+    *,
+    source_file: str,
+    translation_map: dict[str, str],
+    counters: defaultdict[str, int],
+    used_keys: set[str],
+    auto_id: int,
+) -> tuple[str, int]:
+    """依參數數量分派 event.add，回傳新引數與下一個 auto ordinal。"""
+    args = split_js_args(arg_str)
+    if len(args) == 1:
+        key = f"{source_file}|auto.{auto_id}"
+        new_args = list(args)
+        if key in translation_map:
+            used_keys.add(key)
+            translated = translation_map[key]
+            if _decode_js_string_literal(args[0]) != translated:
+                new_args[0] = json.dumps(translated, ensure_ascii=False)
+        return (", ".join(new_args) if new_args != args else arg_str), auto_id + 1
+    if len(args) == 2:
+        new_args, changed = _patch_event_add_two_args(
+            args,
+            source_file=source_file,
+            translation_map=translation_map,
+            counters=counters,
+            used_keys=used_keys,
+        )
+    elif len(args) == 3:
+        new_args, changed = _patch_event_add_three_args(
+            args,
+            source_file=source_file,
+            translation_map=translation_map,
+            used_keys=used_keys,
+        )
+    else:
+        return arg_str, auto_id
+    return (", ".join(new_args) if changed else arg_str), auto_id
+
+
 # ---------------- 主流程 ----------------
 
 
@@ -384,6 +860,8 @@ def inject(
 
     patched_js_files = 0
     wrote_lang_files = 0
+    applied_translation_keys: set[str] = set()
+    missing_translation_keys: set[str] = set()
 
     for json_path in json_files:
         file = os.path.basename(json_path)
@@ -399,7 +877,7 @@ def inject(
             rel = ""
 
         # ---------------- Lang JSON ----------------
-        if "lang" in {part.lower() for part in relative_path.parts}:
+        if _is_kubejs_lang_json_path(script_relative):
             # ✅ 把 LM翻譯後的 lang 結果輸出到 完成（保留相對路徑）
             rel_file = Path(os.path.relpath(json_path, trans_root))
             out_path = out_root / rel_file
@@ -438,6 +916,7 @@ def inject(
             for key, value in incoming.items():
                 if key not in merged or key in pending_keys:
                     merged[key] = value
+            applied_translation_keys.update(str(key) for key in incoming)
             payload = (json.dumps(merged, ensure_ascii=False, indent=2) + "\n").encode(
                 "utf-8"
             )
@@ -454,7 +933,9 @@ def inject(
             continue
 
         # ---------------- KubeJS Tooltips ----------------
-        original_js = to_js_name(file)
+        # 翻譯鍵以 KubeJS 根目錄下的相對路徑建立；只用 basename 會讓
+        # client_scripts/a/main.js 與 client_scripts/b/main.js 互相覆蓋。
+        original_js = script_relative.with_suffix(".js").as_posix()
         if source_id is not None:
             source_root_value = source_roots.get(source_id)
             if source_root_value is None:
@@ -472,6 +953,14 @@ def inject(
 
         if not js_path.exists():
             # 找不到原始 js 就跳過（但也算進 progress）
+            try:
+                missing_values = json.loads(
+                    Path(json_path).read_text(encoding="utf-8-sig")
+                )
+            except (OSError, json.JSONDecodeError):
+                missing_values = {}
+            if isinstance(missing_values, dict):
+                missing_translation_keys.update(str(key) for key in missing_values)
             if session:
                 log_info(f"⏭️ 找不到原始 JS，略過：{js_path}")
             done += 1
@@ -490,6 +979,8 @@ def inject(
 
         with open(json_path, "r", encoding="utf-8") as f:
             translations = json.load(f)
+        if not isinstance(translations, dict):
+            raise TypeError(f"翻譯腳本不是 JSON object：{json_path}")
 
         # ✅ 改成整檔處理（避免跨行 / chain call / scene.text 插不回）
         with open(js_path, "r", encoding="utf-8") as f:
@@ -498,6 +989,8 @@ def inject(
 
         id_counters = defaultdict(int)
         auto_id = 1  # ✅ 必須跟 extractor 一樣從 1 開始，先跑 event.add，再跑 scene.text，最後跑 ItemEvents
+        source_translation_keys = {str(key) for key in translations}
+        used_translation_keys: set[str] = set()
 
         # ----------------------------
         # 1) Patch event.add(...)
@@ -508,93 +1001,54 @@ def inject(
             source_file: str = original_js,
             translation_map: dict = translations,
             counters: defaultdict[str, int] = id_counters,
+            used_keys: set[str] = used_translation_keys,
         ) -> str:
             """只在 event.add 引數實際改變時回傳重建後的引數。"""
             nonlocal auto_id
-            args = split_js_args(arg_str)
-            new_args = list(args)
-            changed = False
+            replacement, auto_id = _patch_event_add_args(
+                arg_str,
+                source_file=source_file,
+                translation_map=translation_map,
+                counters=counters,
+                used_keys=used_keys,
+                auto_id=auto_id,
+            )
+            return replacement
 
-            # 單參數 -> auto.N
-            if len(args) == 1:
-                key = f"{source_file}|auto.{auto_id}"
-                if key in translation_map:
-                    translated = translation_map[key]
-                    if _decode_js_string_literal(args[0]) != translated:
-                        replacement = json.dumps(translated, ensure_ascii=False)
-                        new_args[0] = replacement
-                        changed = True
-                auto_id += 1
-
-            # ID + tooltip（檔案|item_id.n 或檔案|item_id.n.idx）
-            elif len(args) == 2:
-                item_id = strip_quotes(args[0])
-                number = counters[item_id]
-                counters[item_id] += 1
-
-                if args[1].strip().startswith("Text."):
-                    key = f"{source_file}|{item_id}.{number}"
-                    if key in translation_map:
-                        replacement = replace_text_in_text_obj(
-                            args[1], translation_map[key]
-                        )
-                        if replacement != args[1]:
-                            new_args[1] = replacement
-                            changed = True
-
-                elif args[1].strip().startswith("["):
-                    if "Text." in args[1]:
-                        index = 0
-
-                        def repl_text(match: re.Match[str]) -> str:
-                            """依序替換 tooltip 陣列中的 Text 字串。"""
-                            nonlocal index
-                            key = f"{source_file}|{item_id}.{number}.{index}"
-                            index += 1
-                            if key in translation_map:
-                                return replace_text_in_text_obj(
-                                    match.group(0), translation_map[key]
-                                )
-                            return match.group(0)
-
-                        quote_class = "['" + chr(34) + "]"
-                        text_call_pattern = (
-                            rf"Text\.\w+\s*\(\s*{quote_class}.*?{quote_class}\s*\)"
-                        )
-                        replacement = re.sub(
-                            text_call_pattern,
-                            repl_text,
-                            args[1],
-                            flags=re.DOTALL,
-                        )
-                    else:
-                        old_values = extract_array_strings(args[1])
-                        new_values = [
-                            translation_map.get(
-                                f"{source_file}|{item_id}.{number}.{index}",
-                                old_value,
-                            )
-                            for index, old_value in enumerate(old_values)
-                        ]
-                        replacement = replace_array(args[1], new_values)
-
-                    if replacement != args[1]:
-                        new_args[1] = replacement
-                        changed = True
-
-            return ", ".join(new_args) if changed else arg_str
-
-        content = _replace_js_call_arguments(content, "event.add", repl_event_add)
+        lang_ranges = _clientevents_lang_ranges(content)
+        if lang_ranges:
+            # ClientEvents.lang 的英文定義不可直接覆蓋；helper 會依 locale、
+            # namespace 與 occurrence 產生精確的 zh_tw overlay。
+            content = _append_kubejs_lang_translations(
+                content,
+                source_file=original_js,
+                translation_map=translations,
+                used_keys=used_translation_keys,
+            )
+        # 保留舊版 event.add fixture 的相容性；同檔的新式 Lang／Tooltip
+        # 仍由各自專用 writer 處理，不能讓 legacy fallback 越界改寫它們。
+        excluded_ranges = _itemevents_tooltip_ranges(content)
+        excluded_ranges.extend(_clientevents_lang_call_ranges(content))
+        content = _replace_js_call_arguments(
+            content,
+            "event.add",
+            repl_event_add,
+            excluded_ranges=excluded_ranges,
+        )
 
         # ----------------------------
         # 2) Patch Ponder: scene.text(...)
         #    key: file|scene.{auto_id}  (✅ 接續 event.add 用掉的 auto_id)
         # ----------------------------
+        scene_counter = [0]
+
         def repl_scene_text(
             arg_str: str,
             *,
             source_file: str = original_js,
             translation_map: dict = translations,
+            counter: list[int] = scene_counter,
+            used_keys: set[str] = used_translation_keys,
         ) -> str:
             """只在 scene.text 文字實際改變時回傳重建後的引數。"""
             nonlocal auto_id
@@ -620,8 +1074,12 @@ def inject(
 
             changed = False
             if clean_text(text_candidate):
-                key = f"{source_file}|scene.{auto_id}"
+                counter[0] += 1
+                stable_key = f"{source_file}|scene:{counter[0]}"
+                legacy_key = f"{source_file}|scene.{auto_id}"
+                key = stable_key if stable_key in translation_map else legacy_key
                 if key in translation_map:
+                    used_keys.add(key)
                     new_text = translation_map[key]
                     if raw_text_expr.startswith("Text."):
                         replacement = replace_text_in_text_obj(args[1], new_text)
@@ -645,12 +1103,23 @@ def inject(
             *,
             source_file: str = original_js,
             translation_map: dict = translations,
+            used_keys: set[str] = used_translation_keys,
         ) -> str:
             """修補 ItemEvents Tooltip，無變更時保留呼叫原始文字。"""
             out = []
             last = 0
+            tooltip_ranges = _itemevents_tooltip_ranges(full)
+            # 舊版 extractor 允許未包在 ItemEvents.tooltip callback 的
+            # event.add；只有在來源確實有新式 wrapper 時才套用嚴格邊界。
+            strict_context = bool(tooltip_ranges)
+            tooltip_call_indices: defaultdict[str, int] = defaultdict(int)
 
-            for match in re.finditer(r"\.add\s*\(", full):
+            code = _mask_js_non_code(full)
+            for match in re.finditer(r"\.add\s*\(", code):
+                if strict_context and not any(
+                    start <= match.start() < end for start, end in tooltip_ranges
+                ):
+                    continue
                 args_str, end_idx = _extract_call_args_with_end(full, match.end())
                 if args_str is None or end_idx is None:
                     continue
@@ -672,22 +1141,54 @@ def inject(
 
                 tooltip_block = args[1]
                 index = 0
+                tooltip_call_indices[item_id] += 1
+                tooltip_call_index = tooltip_call_indices[item_id]
+
+                direct_literal = _decode_js_string_literal(tooltip_block.strip())
+                if direct_literal is not None:
+                    selected = _select_itemevents_tooltip_translation(
+                        source_file,
+                        item_id,
+                        index,
+                        tooltip_call_index,
+                        translation_map,
+                    )
+                    if selected is not None:
+                        selected_key, translated = selected
+                        used_keys.add(selected_key)
+                        if translated != direct_literal:
+                            args[1] = json.dumps(translated, ensure_ascii=False)
+                            out.append(".add(" + ", ".join(args) + ")")
+                        else:
+                            out.append(full[match.start() : end_idx + 1])
+                    else:
+                        out.append(full[match.start() : end_idx + 1])
+                    last = end_idx + 1
+                    continue
 
                 def repl_text_call(
                     text_match: re.Match[str],
                     *,
                     current_file: str = source_file,
                     current_item_id: str = item_id,
+                    current_tooltip_index: int = tooltip_call_index,
                     current_translations: dict = translation_map,
+                    current_used_keys: set[str] = used_keys,
                 ) -> str:
                     """替換一個 ItemEvents Tooltip 字串並維持原索引順序。"""
                     nonlocal index
-                    key = f"{current_file}|{current_item_id}.tooltip.{index}"
+                    selected = _select_itemevents_tooltip_translation(
+                        current_file,
+                        current_item_id,
+                        index,
+                        current_tooltip_index,
+                        current_translations,
+                    )
                     index += 1
-                    if key in current_translations:
-                        return replace_text_in_text_obj(
-                            text_match.group(0), current_translations[key]
-                        )
+                    if selected is not None:
+                        key, translated = selected
+                        current_used_keys.add(key)
+                        return replace_text_in_text_obj(text_match.group(0), translated)
                     return text_match.group(0)
 
                 quote_class = "['" + chr(34) + "]"
@@ -727,6 +1228,9 @@ def inject(
             if session:
                 log_info(f"✔ Patched {out_path}")
 
+        applied_translation_keys.update(used_translation_keys)
+        missing_translation_keys.update(source_translation_keys - used_translation_keys)
+
         done += 1
         if session:
             p = progress_base + (done / total) * progress_span
@@ -755,6 +1259,8 @@ def inject(
         "final_output_dir": str(out_root),
         "patched_js_files": patched_js_files,
         "wrote_lang_files": wrote_lang_files,
+        "applied_translation_keys": sorted(applied_translation_keys),
+        "missing_translation_keys": sorted(missing_translation_keys),
     }
 
 

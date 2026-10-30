@@ -1,6 +1,7 @@
 """app/views/pipeline/pipeline_view.py 單元測試（Characterization Tests）。
 
 驗證 PipelineView、PipelineConfig、PipelineStepChip、PipelineProgressPanel 的 UI 狀態與行為。
+進度面板的實際步驟列必須沿用共用 PipelineStepRow。
 """
 
 import os
@@ -18,6 +19,14 @@ from app.views.pipeline.pipeline_progress import (
     PipelineStepChip,
 )
 from app.views.pipeline.pipeline_view import PipelineView
+from app.views.pipeline.pipeline_workbench import (
+    PipelineActionSpec,
+    PipelineStepRow,
+    PipelineStepSpec,
+    build_pipeline_status_card,
+    build_pipeline_step_row,
+    build_pipeline_workbench,
+)
 from tests.conftest import mock_filepicker, mock_page
 
 # -----------------------------------------------------------------------------
@@ -241,6 +250,7 @@ def test_pipeline_progress_panel_initial_state():
     panel = PipelineProgressPanel(page)
 
     assert len(panel.steps) == 4
+    assert all(isinstance(step, PipelineStepRow) for step in panel.steps)
     assert all(s.status == "waiting" for s in panel.steps)
     assert panel.current_step is None
     assert not panel.container.visible
@@ -400,6 +410,97 @@ def test_pipeline_view_progress_panel_hidden_initially(monkeypatch):
     view = PipelineView(page, mock_filepicker())
 
     assert view.progress_panel.container.visible is False
+
+
+def test_pipeline_progress_panel_exclusively_toggles_idle_status_card():
+    """執行中只保留一張狀態卡，完成／隱藏後恢復初始狀態卡。"""
+    page = mock_page()
+    panel = PipelineProgressPanel(page)
+    idle_card = build_pipeline_status_card(
+        progress=ft.ProgressBar(value=0),
+        progress_status=ft.Text("尚未開始"),
+        title="執行狀態",
+        icon=ft.Icons.TIMELINE,
+        tone="gold",
+    )
+    panel.attach_idle_status_card(idle_card)
+
+    assert idle_card.visible is True
+    assert panel.container.visible is False
+
+    panel.start()
+    assert idle_card.visible is False
+    assert panel.container.visible is True
+
+    panel.hide()
+    assert idle_card.visible is True
+    assert panel.container.visible is False
+
+
+def test_pipeline_workbench_uses_responsive_two_column_contract():
+    """窄版 Web 上下排列，寬版 Web 維持設定／狀態左右欄。"""
+    workbench = build_pipeline_workbench(
+        title="測試工作台",
+        subtitle="測試",
+        icon=ft.Icons.INFO_OUTLINE,
+        tone="em",
+        left_controls=[ft.Text("左")],
+        right_controls=[ft.Text("右")],
+    )
+    layout = workbench.controls[1]
+    assert isinstance(layout, ft.ResponsiveRow)
+    columns = layout.controls
+    assert [column.col for column in columns] == [
+        {"xs": 12, "md": 5},
+        {"xs": 12, "md": 7},
+    ]
+
+
+def test_pipeline_step_row_wraps_actions_on_narrow_layouts():
+    """步驟列的狀態與多個操作在窄版 Web 必須可換行。"""
+    row = build_pipeline_step_row(
+        PipelineStepSpec(
+            number=1,
+            title="提取",
+            description="掃描來源",
+            icon=ft.Icons.FOLDER_OUTLINED,
+            tone="blue",
+            on_click=lambda _event: None,
+            extra_actions=(
+                PipelineActionSpec(
+                    label="預覽",
+                    on_click=lambda _event: None,
+                ),
+            ),
+        )
+    )
+
+    layout = row.content
+    assert isinstance(layout, ft.ResponsiveRow)
+    assert [column.col for column in layout.controls] == [
+        {"xs": 12, "md": 7},
+        {"xs": 12, "md": 5},
+    ]
+    trailing = layout.controls[1].content
+    assert isinstance(trailing, ft.Row)
+    assert trailing.wrap is True
+    action_group = trailing.controls[-1]
+    assert isinstance(action_group, ft.Row)
+    assert action_group.wrap is True
+
+
+def test_pipeline_status_card_keeps_icon_in_shared_header_only():
+    """狀態卡不在內容列重複繪製另一個圖示。"""
+    card = build_pipeline_status_card(
+        progress=ft.ProgressBar(value=0),
+        progress_status=ft.Text("尚未開始"),
+    )
+
+    body = card.body.content
+    assert isinstance(body, ft.Column)
+    status_row = body.controls[0]
+    assert isinstance(status_row, ft.Row)
+    assert len(status_row.controls) == 1
 
 
 def test_pipeline_view_lang_code_checks_empty_initially(monkeypatch):

@@ -38,8 +38,8 @@ from app.views.extractor.extractor_state import PreviewState
 from app.views.pipeline.pipeline_forms import (
     ExtractFormState,
     build_extract_form,
+    build_pipeline_dialog,
     dialog_button,
-    dialog_content,
     dialog_dimensions,
     dialog_text_field,
 )
@@ -79,16 +79,19 @@ def open_extract_dialog(
         run_started=False,
         preview_active=False,
         preview_dialog=None,
+        preview_body=None,
         preview_cancel_event=None,
     )
     ctx.feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
     _extract_init_state_and_fields(ctx, input_path, output_path)
     content = _extract_build_content(ctx)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("📦 抽取資源設定"),
-        content=dialog_content(page, content),
+    dialog = build_pipeline_dialog(
+        page,
+        title="抽取資源設定",
+        icon=ft.Icons.UNARCHIVE,
+        tone="dia",
+        content=content,
         actions=[
             dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
             dialog_button(
@@ -167,11 +170,16 @@ def _extract_build_content(ctx):
             ft.Row(
                 [
                     ctx.mods_field,
-                    ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_mods_dir
+                    dialog_button(
+                        "選擇資料夾",
+                        on_click=ctx.pick_mods_dir,
+                        icon=ft.Icons.FOLDER,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_mods_dir
+                    dialog_button(
+                        "瀏覽",
+                        on_click=ctx.browse_mods_dir,
+                        icon=ft.Icons.SEARCH,
                     ),
                 ],
                 wrap=True,
@@ -180,13 +188,16 @@ def _extract_build_content(ctx):
             ft.Row(
                 [
                     ctx.output_field,
-                    ft.Button(
+                    dialog_button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
                         on_click=ctx.pick_output_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_output_dir,
                     ),
                 ],
                 wrap=True,
@@ -391,17 +402,19 @@ def _extract_preview_apply_final(
     ctx, preview_dialog, preview_state, mode, width
 ) -> None:
     """（event loop 上）把預覽結果或錯誤套用到對話框。"""
+    if ctx.preview_body is None:
+        return
     if preview_state.error:
-        preview_dialog.content = ft.Container(
+        ctx.preview_body.content = ft.Container(
             content=ft.Text(f"❌ 錯誤：{preview_state.error}", color=C.RED),
             width=width,
         )
     else:
-        preview_dialog.content = _extract_preview_result_content(
+        ctx.preview_body.content = _extract_preview_result_content(
             preview_state.result or {}, mode, width
         )
     preview_dialog.actions = [
-        ft.TextButton(
+        dialog_button(
             "確定",
             on_click=lambda e: _extract_close_preview_dialog(ctx, preview_dialog),
         )
@@ -423,7 +436,9 @@ async def _extract_preview_poll(
         ):
             continue
         pct = int(preview_state.progress * 100)
-        preview_dialog.content = ft.Container(
+        if ctx.preview_body is None:
+            return
+        ctx.preview_body.content = ft.Container(
             content=ft.Text(
                 f"預覽掃描中...（{preview_state.current}/{preview_state.total}）{pct}%"
             ),
@@ -494,15 +509,18 @@ def _extract_launch_preview(ctx, mods, mode, selected_codes, preview_dialog_widt
         )
         return
 
-    preview_dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("預覽結果"),
-        content=ft.Container(
-            content=ft.Text("正在搜尋 JAR..."),
-            width=preview_dialog_width,
-        ),
+    preview_body = ft.Container(
+        content=ft.Text("正在搜尋 JAR..."),
+        width=preview_dialog_width,
+    )
+    preview_dialog = build_pipeline_dialog(
+        ctx.page,
+        title="預覽結果",
+        icon=ft.Icons.PREVIEW,
+        tone="dia",
+        content=preview_body,
         actions=[
-            ft.TextButton(
+            dialog_button(
                 "取消",
                 on_click=lambda e: _extract_close_preview_dialog(
                     ctx, preview_dialog, cancel_event
@@ -512,6 +530,7 @@ def _extract_launch_preview(ctx, mods, mode, selected_codes, preview_dialog_widt
     )
 
     ctx.preview_dialog = preview_dialog
+    ctx.preview_body = preview_body
     original_dismiss = preview_dialog.on_dismiss
 
     def on_preview_dismiss(event) -> None:

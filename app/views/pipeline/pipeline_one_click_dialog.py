@@ -55,9 +55,9 @@ from app.views.pipeline.pipeline_forms import (
     build_bundle_form,
     build_extract_form,
     build_merge_form,
+    build_pipeline_dialog,
     build_translate_form,
     dialog_button,
-    dialog_content,
     dialog_dimensions,
 )
 from app.views.pipeline.pipeline_one_click_bundle_widgets import (
@@ -467,10 +467,11 @@ def _one_click_pack_image_row(ctx, pack_image_field) -> ft.Row:
     return ft.Row(
         [
             pack_image_field,
-            ft.Button(
+            dialog_button(
                 "選擇檔案...",
                 icon=ft.Icons.IMAGE,
                 on_click=lambda e: _one_click_pick_pack_image(ctx, pack_image_field),
+                role="preview",
             ),
             dialog_button(
                 "移除",
@@ -516,10 +517,22 @@ def _one_click_clear_pack_image(ctx, field) -> None:
 
 def _one_click_build_dialog(ctx, step: int):
     titles = {
-        1: "📦 抽取資源設定",
-        2: "🔍 語系比對設定",
-        3: "🔄 啟動翻譯設定",
-        4: "📦 打包資源設定",
+        1: "抽取資源設定",
+        2: "語系比對設定",
+        3: "啟動翻譯設定",
+        4: "打包資源設定",
+    }
+    icons = {
+        1: ft.Icons.UNARCHIVE,
+        2: ft.Icons.CALL_MERGE,
+        3: ft.Icons.AUTO_AWESOME,
+        4: ft.Icons.INVENTORY_2_OUTLINED,
+    }
+    tones = {
+        1: "dia",
+        2: "ench",
+        3: "gold",
+        4: "gold",
     }
 
     actions = []
@@ -538,19 +551,14 @@ def _one_click_build_dialog(ctx, step: int):
         )
     actions.append(dialog_button("取消", lambda e: ctx.close_all()))
 
-    dlg = ft.AlertDialog(
-        modal=True,
-        title=ft.Row(
-            [
-                ft.Text(titles[step], weight="bold"),
-                ft.Container(content=ctx.step_label, padding=5),
-            ]
-        ),
-        content=dialog_content(
-            ctx.page,
-            ft.Column(
-                [ctx._build_step_content(step), ctx.feedback], spacing=8, tight=False
-            ),
+    dlg = build_pipeline_dialog(
+        ctx.page,
+        title=titles[step],
+        icon=icons[step],
+        tone=tones[step],
+        step_label=ctx.step_label,
+        content=ft.Column(
+            [ctx._build_step_content(step), ctx.feedback], spacing=8, tight=False
         ),
         actions=actions,
     )

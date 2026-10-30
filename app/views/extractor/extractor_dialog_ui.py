@@ -6,6 +6,7 @@ import flet as ft
 
 from app.ui.design import C
 from app.views._log import LogView
+from app.views.pipeline.pipeline_forms import build_pipeline_dialog, dialog_button
 from translation_tool.utils.ui_mirror import mirror_to_backend
 
 
@@ -66,27 +67,33 @@ def _extractor_build_buttons(ctx) -> None:
     )
 
     # ========== 按鈕 ==========
-    ctx.start_button = ft.Button(
+    ctx.start_button = dialog_button(
         "開始提取",
+        None,
         icon=ft.Icons.PLAY_ARROW,
-        bgcolor=C.EM,
-        color=C.ON_EM,
+        role="primary",
     )
-    ctx.cancel_button = ft.Button(
+    ctx.cancel_button = dialog_button(
         "取消",
+        None,
         icon=ft.Icons.STOP,
-        visible=False,
+        role="secondary",
     )
-    ctx.close_button = ft.Button(
+    ctx.cancel_button.visible = False
+    ctx.close_button = dialog_button(
         "關閉",
+        None,
         icon=ft.Icons.CLOSE,
-        visible=False,
+        role="secondary",
     )
-    ctx.browse_button = ft.Button(
+    ctx.close_button.visible = False
+    ctx.browse_button = dialog_button(
         "開啟輸出資料夾",
+        None,
         icon=ft.Icons.FOLDER_OPEN,
-        visible=False,
+        role="preview",
     )
+    ctx.browse_button.visible = False
 
     # ========== 輔助函式 ==========
     # 背景執行緒只把 log / 進度寫進緩衝區；實際修改控制項與 page.update()
@@ -162,60 +169,51 @@ def _extractor_build_sections(ctx):
 def _extractor_build_dialog(
     ctx, dialog_width, info_text, log_section, progress_section
 ) -> None:
-    """對話框本體。"""
+    """建立與其他流水線共用的提取對話框外框。"""
 
-    ctx.dialog = ft.AlertDialog(
-        modal=False,
-        title=ft.Row(
-            [
-                ft.Icon(ft.Icons.DOWNLOAD, size=24, color=C.DIA),
-                ft.Text(
-                    f"提取資源 - {ctx.mode.upper()}", size=18, weight=ft.FontWeight.BOLD
+    content = ft.Column(
+        [
+            # 資訊區域
+            ft.Container(
+                content=ft.Column(
+                    [
+                        ft.Text("設定", weight=ft.FontWeight.BOLD, size=14),
+                        info_text,
+                    ],
+                    spacing=4,
                 ),
-            ],
-            spacing=10,
-        ),
-        content=ft.Container(
-            content=ft.Column(
-                [
-                    # 資訊區域
-                    ft.Container(
-                        content=ft.Column(
-                            [
-                                ft.Text("設定", weight=ft.FontWeight.BOLD, size=14),
-                                info_text,
-                            ],
-                            spacing=4,
-                        ),
-                        padding=10,
-                        bgcolor=C.PANEL2,
-                        border_radius=8,
-                    ),
-                    ft.Divider(),
-                    # 進度區域
-                    progress_section,
-                    ft.Divider(),
-                    # 日誌區域
-                    log_section,
-                    # 結果統計
-                    ctx.stats_row,
-                    # Phase 3 (2026-07-13) DUAL mode LANG/BOOK 分區
-                    ctx.lang_row,
-                    ctx.book_row,
-                ],
-                spacing=10,
-                scroll=ft.ScrollMode.AUTO,
+                padding=10,
+                bgcolor=C.PANEL2,
+                border_radius=8,
             ),
-            width=dialog_width,
-            height=min(600, int(ctx.page.height * 0.8)),
-        ),
+            ft.Divider(),
+            # 進度區域
+            progress_section,
+            ft.Divider(),
+            # 日誌區域
+            log_section,
+            # 結果統計
+            ctx.stats_row,
+            # Phase 3 (2026-07-13) DUAL mode LANG/BOOK 分區
+            ctx.lang_row,
+            ctx.book_row,
+        ],
+        spacing=10,
+        scroll=ft.ScrollMode.AUTO,
+    )
+    ctx.dialog = build_pipeline_dialog(
+        ctx.page,
+        title=f"提取資源 - {ctx.mode.upper()}",
+        icon=ft.Icons.DOWNLOAD,
+        tone="dia",
+        modal=False,
+        content=content,
         actions=[
             ctx.start_button,
             ctx.cancel_button,
             ctx.close_button,
             ctx.browse_button,
         ],
-        actions_alignment=ft.MainAxisAlignment.END,
     )
 
 

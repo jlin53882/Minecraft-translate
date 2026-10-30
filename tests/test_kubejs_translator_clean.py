@@ -150,6 +150,25 @@ def test_clean_merges_existing_effective_tw_and_removes_stale_pending(
     }
 
 
+def test_clean_uses_most_populated_locale_when_en_us_is_missing(clean_args) -> None:
+    raw, pending, final, kwargs = clean_args
+    lang = raw / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "pt_br.json").write_bytes(
+        orjson.dumps({"a": "Portuguese A", "b": "Portuguese B"})
+    )
+    (lang / "ru_ru.json").write_bytes(orjson.dumps({"a": "Russian A"}))
+
+    result = clean_kubejs_from_raw_impl(**kwargs)
+
+    assert result["fallback_source_locales"] == {"assets/demo/lang": "pt_br"}
+    assert orjson.loads((pending / "assets/demo/lang/en_us.json").read_bytes()) == {
+        "a": "Portuguese A",
+        "b": "Portuguese B",
+    }
+    assert not (final / "assets/demo/lang/zh_tw.json").exists()
+
+
 @pytest.mark.parametrize(
     ("current_tw", "expected_final", "expected_pending"),
     [

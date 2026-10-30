@@ -24,6 +24,11 @@ from translation_tool.utils.log_unit import (
     log_warning,
 )
 
+# KubeJS 2001 的兩參數 LangEventJS.add(key, value) 會使用預設
+# ``minecraft`` namespace。三參數形式必須由呼叫端明確提供 namespace；掃描器
+# 與 writer 共用這個常數，避免兩邊各自猜測身分。
+KUBEJS_DEFAULT_LANG_NAMESPACE = "minecraft"
+
 
 def resolve_kubejs_root(input_dir: str, *, max_depth: int = 4) -> str:
     """
@@ -179,6 +184,30 @@ def split_js_args(s: str) -> list[str]:
 
     log_debug(f"參數拆解完成，取得 {len(args)} 個參數")
     return args
+
+
+def parse_client_lang_add(parts: list[str]) -> tuple[str | None, str, str] | None:
+    """解析 ``ClientEvents.lang`` 的兩參數與三參數 ``event.add`` 契約。
+
+    KubeJS 同時存在 ``add(key, value)`` 與
+    ``add(namespace, key, value)`` 形式。兩個掃描／回寫入口必須使用同一個
+    key/value 位置，否則資料庫會收進錯誤的 key，輸出時也無法定位原始欄位。
+    """
+    if len(parts) == 2:
+        return None, parts[0], parts[1]
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+    return None
+
+
+def is_client_lang_add_shape(parts: list[str]) -> bool:
+    """判斷 ``ClientEvents.lang`` 的 occurrence 是否應消耗序號。
+
+    Scanner 與 writer 必須先對每一個具備至少兩個引數的 ``event.add``
+    消耗相同序號，再各自判斷值是否為可翻譯的靜態字串。否則前面的動態
+    引數會被 scanner 計數、writer 略過，導致後續合法項目的 selector 錯位。
+    """
+    return len(parts) >= 2
 
 
 def extract_array_strings(arr: str) -> list[str]:
@@ -481,58 +510,66 @@ def extract_itemevents_tooltips(
 
     match_count = 0
 
-    # 搜尋所有 .add( 的位置
-    for m in re.finditer(r"\.add\s*\(", content):
-        arg_str = extract_call_args(content, m.end())
-        if not arg_str:
-            continue
+    # 只搜尋 ItemEvents.tooltip callback 內的 event.add；不能把同一支腳本中
+    # ClientEvents.lang、配方或其他 API 的 add 誤當成 tooltip。
+    tooltip_bodies: list[str] = []
+    for tooltip in re.finditer(r"ItemEvents\.tooltip\s*\(", content):
+        body = extract_call_args(content, tooltip.end())
+        if body:
+            tooltip_bodies.append(body)
 
-        # 使用之前定義的 split_js_args 拆分參數 (Item ID, Tooltip Text, ...)
-        args = split_js_args(arg_str)
-        if len(args) < 2:
-            log_debug(f"跳過不完整的 .add() 調用: {arg_str[:50]}...")
-            continue
-
-        # 1. 處理 Item ID (第一個參數)
-        raw_id = args[0].strip()
-        # 使用 strip_quotes 邏輯簡化提取
-        if (raw_id.startswith("'") and raw_id.endswith("'")) or (
-            raw_id.startswith('"') and raw_id.endswith('"')
-        ):
-            item_id = raw_id[1:-1]
-        else:
-            # 如果是陣列或正則表達式，保留原樣作為 Key 的一部分
-            item_id = raw_id
-
-        # 2. 處理 Tooltip 區塊 (第二個參數以後)
-        tooltip_block = args[1]
-        idx = 0
-
-        # 尋找區塊內所有的 Text.xxx( 調用
-        for tm in re.finditer(r"Text\.\w+\s*\(", tooltip_block):
-            start_pos = tm.end()
-            text_content = extract_js_string_call(tooltip_block, start_pos)
-
-            if text_content is None:
+    for body in tooltip_bodies:
+        for m in re.finditer(r"\bevent\.add\s*\(", body):
+            arg_str = extract_call_args(body, m.end())
+            if not arg_str:
                 continue
 
-            # ✅ 檢查是否符合跳過條件（空值、指令、Key、已翻譯等）
-            if should_skip_text(text_content, skip_chinese=False):
+            # 使用之前定義的 split_js_args 拆分參數 (Item ID, Tooltip Text, ...)
+            args = split_js_args(arg_str)
+            if len(args) < 2:
+                log_debug(f"跳過不完整的 .add() 調用: {arg_str[:50]}...")
+                continue
+
+            # 1. 處理 Item ID (第一個參數)
+            raw_id = args[0].strip()
+            # 使用 strip_quotes 邏輯簡化提取
+            if (raw_id.startswith("'") and raw_id.endswith("'")) or (
+                raw_id.startswith('"') and raw_id.endswith('"')
+            ):
+                item_id = raw_id[1:-1]
+            else:
+                # 如果是陣列或正則表達式，保留原樣作為 Key 的一部分
+                item_id = raw_id
+
+            # 2. 處理 Tooltip 區塊 (第二個參數以後)
+            tooltip_block = args[1]
+            idx = 0
+
+            # 尋找區塊內所有的 Text.xxx( 調用
+            for tm in re.finditer(r"Text\.\w+\s*\(", tooltip_block):
+                start_pos = tm.end()
+                text_content = extract_js_string_call(tooltip_block, start_pos)
+
+                if text_content is None:
+                    continue
+
+                # ✅ 檢查是否符合跳過條件（空值、指令、Key、已翻譯等）
+                if should_skip_text(text_content, skip_chinese=False):
+                    idx += 1
+                    continue
+
+                # 產生唯一的 Key 格式: 相對路徑|物品ID.tooltip.序號
+                key = f"{file_name}|{item_id}.tooltip.{idx}"
+
+                # 存入結果並清理 Minecraft 顏色代碼
+                cleaned_val = clean_text(text_content)
+                extracted[key] = cleaned_val
+
+                log_debug(f"成功提取內容 [{key}]: {cleaned_val}")
+
+                auto_id += 1
                 idx += 1
-                continue
-
-            # 產生唯一的 Key 格式: 檔案名|物品ID.tooltip.序號
-            key = f"{file_name}|{item_id}.tooltip.{idx}"
-
-            # 存入結果並清理 Minecraft 顏色代碼
-            cleaned_val = clean_text(text_content)
-            extracted[key] = cleaned_val
-
-            log_debug(f"成功提取內容 [{key}]: {cleaned_val}")
-
-            auto_id += 1
-            idx += 1
-            match_count += 1
+                match_count += 1
 
     log_info(f"檔案 {file_name} 處理完畢，共提取 {match_count} 條文本。")
     return auto_id
@@ -618,6 +655,7 @@ def extract(
     for file_path in all_files_path:
         file_name = os.path.basename(file_path)
         rel_dir = os.path.relpath(os.path.dirname(file_path), src_root)
+        source_file = Path(rel_dir, file_name).as_posix()
         relative_parts = {part.lower() for part in Path(rel_dir).parts}
 
         extracted = {}  # 存放當前檔案提取出的 Key-Value
@@ -631,8 +669,21 @@ def extract(
                 with open(file_path, "r", encoding="utf-8") as f:
                     content = f.read()
 
+                tooltip_ranges = []
+                for tooltip_match in re.finditer(r"ItemEvents\.tooltip\s*\(", content):
+                    tooltip_body = extract_call_args(content, tooltip_match.end())
+                    if tooltip_body is not None:
+                        tooltip_ranges.append(
+                            (
+                                tooltip_match.end(),
+                                tooltip_match.end() + len(tooltip_body),
+                            )
+                        )
+
                 # 1. 處理 event.add(...)  ✅改用括號掃描，避免 regex 截斷造成括號/引號警告
                 for m in re.finditer(r"event\.add\s*\(", content):
+                    if any(start <= m.start() < end for start, end in tooltip_ranges):
+                        continue
                     arg_str = extract_call_args(content, m.end())
                     if not arg_str:
                         continue
@@ -650,7 +701,7 @@ def extract(
 
                         text = clean_text(text)
                         if len(text) > 1:
-                            key = f"{file_name}|auto.{auto_id}"
+                            key = f"{source_file}|auto.{auto_id}"
                             extracted[key] = text
                             auto_id += 1
 
@@ -671,7 +722,7 @@ def extract(
                             if m2:
                                 raw = m2.group(1)
                                 if not should_skip_text(raw, skip_chinese=False):
-                                    extracted[f"{file_name}|{item_id}.{n}"] = (
+                                    extracted[f"{source_file}|{item_id}.{n}"] = (
                                         clean_text(raw)
                                     )
 
@@ -686,15 +737,15 @@ def extract(
                                         t, skip_chinese=False
                                     ):
                                         extracted[
-                                            f"{file_name}|{item_id}.{n}.{idx}"
+                                            f"{source_file}|{item_id}.{n}.{idx}"
                                         ] = clean_text(t)
                             else:
                                 # 純字串陣列
                                 for i, txt in enumerate(extract_array_strings(args[1])):
                                     if not should_skip_text(txt, skip_chinese=False):
-                                        extracted[f"{file_name}|{item_id}.{n}.{i}"] = (
-                                            clean_text(txt)
-                                        )
+                                        extracted[
+                                            f"{source_file}|{item_id}.{n}.{i}"
+                                        ] = clean_text(txt)
 
                 # 2. 處理 Ponder 劇情文字 (scene.text)
                 for m in re.finditer(r"scene\.text\s*\((.+?)\)", content, re.DOTALL):
@@ -707,14 +758,14 @@ def extract(
 
                         text = strip_quotes(args[1])
                         if not should_skip_text(text, skip_chinese=False):
-                            key = f"{file_name}|scene.{auto_id}"
+                            key = f"{source_file}|scene.{auto_id}"
                             if key not in extracted:
                                 extracted[key] = clean_text(text)
                                 auto_id += 1
 
                 # 3. 處理 ItemEvents Tooltips (模組化調用)
                 auto_id = extract_itemevents_tooltips(
-                    content, file_name, extracted, auto_id
+                    content, source_file, extracted, auto_id
                 )
 
             # --- B) 處理語言檔 (.json) ---

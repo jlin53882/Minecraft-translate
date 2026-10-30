@@ -56,6 +56,11 @@ from translation_tool.translation_db.identity import (
     patchouli_dir_names,
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
+from translation_tool.translation_db.pack_sources import (
+    PackScanResult,
+    discover_pack_roots,
+    scan_pack_sources,
+)
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scan_ingest import (
     PreviewIngestTarget,
@@ -112,6 +117,7 @@ class ScanOptions:
     clean_english: bool = True  # 關閉＝放寬文字篩選，但仍排除結構值
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
+    include_pack_content: bool = True  # instance 根目錄下的 KubeJS／FTB Quests
 
 
 @dataclass
@@ -153,6 +159,15 @@ class ScanReport:
     truncated_nested: int = 0
     partial_jars: int = 0
     items_found: int = 0  # 讀到的項目數（預覽與實際掃描都會統計）
+    pack_items_found: int = 0
+    pack_files_seen: int = 0
+    pack_sources: int = 0
+    pack_references: int = 0
+    pack_locale_fallbacks: dict[str, str] = field(default_factory=dict)
+    pack_root: str = ""
+    pack_root_candidates: list[str] = field(default_factory=list)
+    pack_root_ambiguous: bool = False
+    pack_source_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
@@ -185,6 +200,18 @@ class ScanReport:
             "truncated_nested": self.truncated_nested,
             "partial_jars": self.partial_jars,
             "items_found": self.items_found,
+            "pack_items_found": self.pack_items_found,
+            "pack_files_seen": self.pack_files_seen,
+            "pack_sources": self.pack_sources,
+            "pack_references": self.pack_references,
+            "pack_locale_fallbacks": dict(sorted(self.pack_locale_fallbacks.items())),
+            "pack_root": self.pack_root,
+            "pack_root_candidates": list(self.pack_root_candidates),
+            "pack_root_ambiguous": self.pack_root_ambiguous,
+            "pack_source_breakdown": {
+                source: dict(sorted(stats.items()))
+                for source, stats in sorted(self.pack_source_breakdown.items())
+            },
             "dry_run": self.dry_run,
             "new_entries": self.stats.new_entries,
             "existing": self.stats.existing,
@@ -1133,6 +1160,116 @@ def _flush(
         yield _progress(done, jars, result, _ingest_log(result, stats))
 
 
+def _ingest_pack_result(
+    db: TranslationDB | None,
+    preview: PreviewIngestTarget | None,
+    result: PackScanResult,
+    version: str,
+    convert: Callable[[str], str] | None,
+) -> IngestStats:
+    """以與 jar 相同的分類規則匯入模組包文字。"""
+    if preview is not None:
+        # 預覽不能改動來源引用索引；條目分類仍與正式匯入相同。
+        if not result.items:
+            return IngestStats()
+        return preview_ingest_many(preview, [result.items], convert)[0]
+    if db is None:
+        raise ValueError("模組包來源需要資料庫才能寫入")
+    stats = (
+        db.ingest_many(version, [result.items], convert)[0]
+        if result.items
+        else IngestStats()
+    )
+    db.record_source_references(
+        version,
+        result.references,
+        pack_scope=result.pack_scope,
+    )
+    return stats
+
+
+_PACK_SOURCE_LABELS = {
+    "kubejs": "KubeJS",
+    "ftb_quests": "FTB Quests",
+}
+_PACK_ISSUE_LOG_LIMIT = 20
+
+
+def _pack_issue_log(issue: Mapping[str, object]) -> str:
+    source = str(
+        issue.get("source_archive") or issue.get("source_member") or "未知來源"
+    )
+    reason = str(issue.get("reason") or "unknown")
+    detail = str(issue.get("detail") or "")
+    suffix = f"：{detail}" if detail else ""
+    return f"⚠️ 模組包來源問題：{source} [{reason}]{suffix}"
+
+
+def _pack_source_updates(
+    result: PackScanResult,
+    ingest_stats: IngestStats,
+    *,
+    dry_run: bool,
+) -> Generator[dict[str, Any], None, None]:
+    """把模組包掃描結果轉成既有 UI／後台共用的階段日誌。"""
+    breakdown = result.source_breakdown()
+    for source, label in _PACK_SOURCE_LABELS.items():
+        if not result.source_directories.get(source):
+            continue
+        stats = breakdown[source]
+        yield {
+            "progress": 0.0,
+            "log": (
+                f"📖 {label}：掃描 {stats['files_seen']:,} 個檔案，"
+                f"讀取成功 {stats['files_read']:,} 個，"
+                f"可用來源 {stats['sources_found']:,} 個，"
+                f"找到 {stats['items_found']:,} 個文字候選，"
+                f"建立 {stats['references_found']:,} 個跨格式引用"
+            ),
+            "level": "info",
+        }
+
+    if result.locale_fallbacks:
+        locales = "、".join(
+            f"{namespace}→{locale}"
+            for namespace, locale in sorted(result.locale_fallbacks.items())
+        )
+        yield {
+            "progress": 0.0,
+            "log": f"🌐 模組包語系：沒有 en_us，使用最多內容語系（{locales}）",
+            "level": "info",
+        }
+
+    for issue in result.issues[:_PACK_ISSUE_LOG_LIMIT]:
+        yield {"progress": 0.0, "log": _pack_issue_log(issue), "level": "warning"}
+    if len(result.issues) > _PACK_ISSUE_LOG_LIMIT:
+        yield {
+            "progress": 0.0,
+            "log": (
+                f"⚠️ 模組包來源另有 {len(result.issues) - _PACK_ISSUE_LOG_LIMIT:,} "
+                "筆問題，完整內容保留在掃描報告與資料庫"
+            ),
+            "level": "warning",
+        }
+
+    yield {
+        "progress": 0.0,
+        "log": (
+            f"📦 模組包來源分析完成：讀取 {result.files_seen:,} 個檔案，"
+            f"找到 {len(result.items):,} 個文字候選，"
+            f"建立 {len(result.references):,} 個跨格式引用，"
+            f"問題 {len(result.issues):,} 筆"
+        ),
+        "level": "warning" if result.issues else "info",
+    }
+    phase = "預覽匯入統計（未寫入）" if dry_run else "匯入資料庫"
+    yield {
+        "progress": 0.0,
+        "log": f"📥 模組包來源{phase}：{ingest_counts_text(ingest_stats, always_changed=True)}",
+        "level": "info",
+    }
+
+
 def scan_folder_generator(
     db: TranslationDB | None,
     folder: str | Path,
@@ -1150,7 +1287,85 @@ def scan_folder_generator(
         raise ValueError("需要資料庫才能寫入掃描結果")
     jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
-    if not jars:
+    options = replace(options, rules=load_rules() if options.apply_rules else [])
+    convert = make_converter(options.rules) if options.convert_cn else None
+    preview = (
+        (
+            db.scan_preview_target(options.version)
+            if db is not None
+            else PreviewIngestTarget(None, options.version)
+        )
+        if options.dry_run
+        else None
+    )
+    pack_result = PackScanResult()
+    pack_ingest_stats: IngestStats | None = None
+    pack_root_missing = False
+    if options.include_pack_content and not options.translated:
+        pack_roots = discover_pack_roots(folder)
+        report.pack_root_candidates = [str(root) for root in pack_roots]
+        if not pack_roots:
+            pack_root_missing = True
+            if jars:
+                yield {
+                    "progress": 0.0,
+                    "log": (
+                        "📦 模組包來源：未找到 kubejs 或 "
+                        "config/ftbquests/quests，略過 KubeJS／FTB Quests 分析"
+                    ),
+                    "level": "info",
+                }
+        elif len(pack_roots) > 1:
+            report.pack_root_ambiguous = True
+            choices = "、".join(report.pack_root_candidates[:8])
+            yield {
+                "progress": 0.0,
+                "log": (
+                    f"📦 模組包來源有多個候選，未自動合併：{choices}；請明確選擇根目錄"
+                ),
+                "level": "warning",
+            }
+            pack_result.issues.append(
+                {
+                    "source_archive": str(folder),
+                    "source_member": "",
+                    "kind": "pack_source",
+                    "status": "pending",
+                    "reason": "pack_root_ambiguous",
+                    "detail": "multiple pack roots require explicit selection",
+                }
+            )
+        else:
+            pack_root = pack_roots[0]
+            report.pack_root = str(pack_root)
+            yield {
+                "progress": 0.0,
+                "log": f"📦 模組包來源：開始分析 {pack_root}",
+                "level": "info",
+            }
+            pack_result = scan_pack_sources(pack_root, options.version)
+            report.pack_items_found = len(pack_result.items)
+            report.pack_files_seen = pack_result.files_seen
+            report.pack_sources = len(pack_result.sources_found)
+            report.pack_references = len(pack_result.references)
+            report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
+            report.pack_source_breakdown = pack_result.source_breakdown()
+            for issue in pack_result.issues:
+                report.add_issue(issue)
+            pack_ingest_stats = _ingest_pack_result(
+                db, preview, pack_result, options.version, convert
+            )
+            report.stats.add(pack_ingest_stats)
+            yield from _pack_source_updates(
+                pack_result, pack_ingest_stats, dry_run=options.dry_run
+            )
+    has_pack_content = bool(
+        pack_result.sources_found
+        or pack_result.items
+        or pack_result.references
+        or pack_result.issues
+    )
+    if not jars and not has_pack_content:
         if db is not None and not options.dry_run:
             # An empty completed scan is a valid current snapshot.  Persisting
             # it clears issues from jars that were removed since the last scan.
@@ -1160,17 +1375,23 @@ def scan_folder_generator(
                 report.as_dict(),
                 issues=[],
             )
+        missing_pack_log = ""
+        if pack_root_missing:
+            missing_pack_log = "📦 模組包來源未找到 kubejs 或 config/ftbquests/quests；"
+        elif report.pack_root_ambiguous:
+            missing_pack_log = "📦 模組包來源有多個候選，尚未選定根目錄；"
         yield {
             "progress": 1.0,
-            "log": f"⚠️ 在 {folder} 找不到任何 {'jar／zip' if options.translated else 'jar'}"
-            "（請確認路徑，以及資料夾內是否有檔案）",
+            "log": (
+                f"{missing_pack_log}⚠️ 在 {folder} 找不到任何 "
+                f"{'jar／zip' if options.translated else 'jar'}"
+                "（請確認路徑，以及資料夾內是否有檔案）"
+            ),
             "level": "warning",
             "report": report,
         }
         return
 
-    options = replace(options, rules=load_rules() if options.apply_rules else [])
-    convert = make_converter(options.rules) if options.convert_cn else None
     dirs = patchouli_dir_names()
     yield {
         "progress": 0.0,
@@ -1183,16 +1404,6 @@ def scan_folder_generator(
 
     done = 0
     buffer = _IngestBuffer(db, options.version, convert)
-    # 預覽用與實際寫入相同的分類規則，只是不寫入（見 scan_ingest）；沒有資料庫時一定是預覽
-    preview = (
-        (
-            db.scan_preview_target(options.version)
-            if db is not None
-            else PreviewIngestTarget(None, options.version)
-        )
-        if options.dry_run
-        else None
-    )
 
     with (
         scan_executor(

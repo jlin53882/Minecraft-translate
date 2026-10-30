@@ -27,6 +27,10 @@ SHARED_SCOPE = (
     "main.py",
     "app/ui/**/*.py",
     "app/tasks/**/*.py",
+    # 流水線表單／工作台由多個流程 View 共用，文件引用時不應依賴
+    # 另一個 View 的私有識別字來通過範圍檢查。
+    "app/views/pipeline/pipeline_forms.py",
+    "app/views/pipeline/pipeline_workbench.py",
     "app/services_impl/**/*.py",
     "app/shell/**/*.py",
     "app/views/_log/**/*.py",
@@ -95,6 +99,9 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
     "TRANSLATION_VIEW_ARCHITECTURE.md": (
         "app/views/translation_view.py",
         "app/views/translation/**/*.py",
+    ),
+    "KUBEJS_FTB_PIPELINE_VIEW_ARCHITECTURE.md": (
+        "app/views/kubejs_ftb_pipeline_view.py",
     ),
     "UNTRANSLATED_CHECKER_ARCHITECTURE.md": (
         "app/views/untranslated_checker.py",

@@ -23,6 +23,7 @@ from app.ui.dialogs import (
     RESPONSIVE_FIELD_DATA_KEY,
     dialog_dimensions,
 )
+from app.ui.kit.basics import tone_icon
 from app.ui.sync_text_field import SyncTextField
 
 
@@ -155,6 +156,62 @@ def dialog_content(page: ft.Page, content: ft.Control) -> ft.Container:
         width=width,
         height=height,
         data=RESPONSIVE_DIALOG_MARKER,
+    )
+
+
+def build_pipeline_dialog(
+    page: ft.Page,
+    *,
+    title: str,
+    content: ft.Control,
+    actions: Sequence[ft.Control],
+    step_label: ft.Control | None = None,
+    icon: str | None = None,
+    tone: str = "em",
+    modal: bool = True,
+) -> ft.AlertDialog:
+    """建立所有流水線設定對話框共用的標題、內容與操作列。
+
+    ``step_label`` 僅供一鍵精靈顯示 ``1/4``；其餘對話框使用相同標題骨架。
+    表單工廠仍由呼叫者提供，因此這裡只統一殼層，不混入任何流程邏輯。
+    """
+    title_control = build_pipeline_dialog_title(
+        title, step_label=step_label, icon=icon, tone=tone
+    )
+    return ft.AlertDialog(
+        modal=modal,
+        title=title_control,
+        content=dialog_content(page, content),
+        actions=list(actions),
+        actions_alignment=ft.MainAxisAlignment.END,
+    )
+
+
+def build_pipeline_dialog_title(
+    title: str,
+    *,
+    step_label: ft.Control | None = None,
+    icon: str | None = None,
+    tone: str = "em",
+) -> ft.Row:
+    """Build the shared dialog title row for initial and result states.
+
+    Result states should replace the title through this helper instead of
+    constructing a second visual language inline.  Keeping the text first
+    also preserves the stable accessibility anchor used by existing tests and
+    Web clients.
+    """
+    title_parts: list[ft.Control] = [
+        ft.Text(title, size=18, weight=ft.FontWeight.BOLD, color=C.TEXT),
+    ]
+    if step_label is not None:
+        title_parts.append(ft.Container(content=step_label, padding=5))
+    if icon:
+        title_parts.append(tone_icon(icon, tone, size=18, box=34, radius=10))
+    return ft.Row(
+        title_parts,
+        spacing=10,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
 
 

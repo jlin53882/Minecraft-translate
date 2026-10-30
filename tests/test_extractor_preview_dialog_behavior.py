@@ -112,13 +112,23 @@ def _result(count=2, size=1.5):
     }
 
 
-def test_open_shows_unlocked_dialog_with_start_button_only(env):
+def test_open_shows_unlocked_dialog_with_shared_cancel_and_start_actions(env):
     dialog = env.open(mode="lang")
     assert dialog in env.page.overlay and dialog.open is True
     assert dialog.modal is False
-    assert [getattr(a, "content", None) for a in dialog.actions] == ["開始預覽"]
+    assert [getattr(a, "content", None) for a in dialog.actions] == [
+        "取消",
+        "開始預覽",
+    ]
     texts = _texts(dialog)
     assert "預覽 - LANG" in texts and "等待開始預覽..." in texts
+
+
+def test_idle_cancel_closes_preview_dialog(env):
+    dialog = env.open()
+    _action(dialog, "取消").on_click(None)
+    assert dialog.open is False
+    assert env.threads == []
 
 
 def test_start_locks_modal_and_starts_worker_and_poller(env):

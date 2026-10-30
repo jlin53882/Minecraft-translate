@@ -1,7 +1,7 @@
 # TRANSLATION_VIEW_ARCHITECTURE.md
 
 ## 定位
-TranslationView（頁面標題「任務翻譯工具」）是 FTB Quests / KubeJS Tooltips / Markdown 三種目標的**批次翻譯工作台**；每個目標都有「步驟可自由勾選」的多步流程（匯出／清理 → LM 翻譯 → 寫回），不處理 JAR Extract / Merge。
+TranslationView（頁面標題「任務翻譯工具」）是 FTB Quests / KubeJS Tooltips / Markdown 三種目標的**批次翻譯工作台**；每個目標都有「步驟可自由勾選」的多步流程（匯出／清理 → LM 翻譯 → 寫回），不處理 JAR Extract / Merge。頁面外框與執行狀態卡使用 `pipeline_workbench.py` 的共用契約，確保它和一鍵流水線、KubeJS／FTB 流水線維持相同的閱讀順序與操作位置。
 
 流程圖見 [page_flows/translation.md](../../page_flows/translation.md)。
 
@@ -10,21 +10,21 @@ TranslationView（頁面標題「任務翻譯工具」）是 FTB Quests / KubeJS
 - `app/views/translation_view.py` — 主視圖（`TranslationView`）
 - `app/views/translation/translation_actions.py` — `run_ftb` / `run_kjs` / `run_md` / `start_ui_timer`（`_poll_session` / `_sync_from_session`）/ 執行緒安全更新包裝
 - `app/views/translation/translation_panels.py` — `build_path_row` / `build_action_row` / `build_ftb_tab` / `build_kjs_tab` / `build_md_tab`（內部 `_step_row` / `_cache_switch` / `_tab`）
+- `app/views/pipeline/pipeline_workbench.py` — 共用頁首／左右工作台與執行狀態卡
 - `app/services_impl/pipelines/ftb_service.py` / `kubejs_service.py` / `md_service.py` — pipeline services（step 參數）
 
 ## 架構圖（文字版）
 ```
 TranslationView（ft.Column）
-  ├─ kit.page_header「任務翻譯工具」（副標：處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件，步驟可自由勾選）
-  └─ body = ft.Row
-       ├─ 左（expand=3）：ft.Tabs（TabBar + TabBarView：FTB Quests / KubeJS Tooltips / Markdown）
+  └─ build_pipeline_workbench（共用頁首與左右工作台）
+       ├─ 左（expand=5）：ft.Tabs（共用 section_card「翻譯來源」包住 TabBar；TabBarView：FTB Quests / KubeJS Tooltips / Markdown）
        │    └─ 每個 tab 由 translation_panels.build_*_tab() 建立（_tab）
        │         ├─ section_card「路徑設定」：build_path_row（輸入／輸出資料夾；MD 另有 md_lang_mode）
-       │         ├─ section_card「翻譯步驟」：kit.StepCard 步驟列（背後為 ft.Checkbox）+「每次寫入新快取分片」kit.SwitchRow（預設關閉）
+       │         ├─ section_card「翻譯步驟」：pipeline_workbench.PipelineStepRow 垂直步驟列（背後為 ft.Checkbox）+「每次寫入新快取分片」kit.SwitchRow（預設關閉）
        │         └─ build_action_row：開始翻譯 / Dry-run 開始模擬翻譯 / Reset
-       └─ 右（expand=2）：
-            ├─ 執行狀態卡：kit.ProgressRing（progress，預設 0%）+「執行狀態」標籤 + status_chip（預設「尚未開始」）+ cancel_button（「取消」，預設停用）
-            └─ section_card「執行日誌」：log_view（LogView tail）+ 標題列右側垃圾桶圖示按鈕（tooltip「清空日誌」）
+       └─ 右（expand=7）：
+            ├─ 共用執行狀態卡：目前狀態 + 橫向 progress bar + status_chip + cancel_button（「取消」，預設停用）
+            └─ section_card「執行日誌」（開始執行或收到第一筆日誌後顯示）：log_view（LogView tail）+ 標題列右側垃圾桶圖示按鈕（tooltip「清空日誌」）
 ```
 
 `__init__` 拆成 `_init_translation_state_and_tabs`（狀態、右側控制項、三個 tab）與 `_build_translation_status_and_right_panel`（`ft.Tabs`、service seam、右側面板）。
@@ -77,7 +77,7 @@ TranslationView（ft.Column）
 
 ## UI 風格
 
-- 以 `app/ui/kit` 的 `button`、`section_card`、`StepCard`、`SwitchRow`、`ProgressRing` 與 `app/ui/design` 的 `C` 色票組裝畫面。
+- 以 `app/ui/kit` 的 `button`、`section_card`、`SwitchRow`、`ProgressRing`、`app/views/pipeline/pipeline_workbench.py` 的 `PipelineStepRow` 與 `app/ui/design` 的 `C` 色票組裝畫面；不可在本頁另造步驟卡。
 - `log_view` 為 **LogView widget**（`mode="tail"`、`tail_lines=250`）；`_append_log` 直接走 `log_view.add(line, level="system", dedupe=False)`
 - `page` 屬性為 `@property`（回傳 `_page`）
 

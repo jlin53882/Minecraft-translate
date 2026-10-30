@@ -521,6 +521,8 @@ class SmartReviewRunResult:
 class EntryDetail:
     entry: EntryRow
     translations: list[TranslationRow] = field(default_factory=list)
+    origins: list[EntryOrigin] = field(default_factory=list)
+    references: list[SourceReference] = field(default_factory=list)
     versions: list[str] = field(default_factory=list)
     same_key: list[SameKeyRow] = field(default_factory=list)
     same_text: list[SameTextRow] = field(default_factory=list)
@@ -559,6 +561,56 @@ class ScanItem:
     zh_tw: str = ""
     zh_cn: str = ""
     source: int | None = None  # zh_tw 的來源代碼；None＝模組自帶繁中
+    # 以下欄位只由可安全回寫的外部來源（KubeJS／FTB Quests）填入；
+    # 舊有 jar 掃描維持空值，因此不改變既有 positional 建構契約。
+    source_path: str = ""
+    source_selector: str = ""
+    source_hash: str = ""
+    source_format: str = ""
+    pack_scope: str = ""
+
+
+@dataclass(frozen=True)
+class EntryOrigin:
+    """條目與來源檔案／選取器的可追溯身分。"""
+
+    pack_scope: str
+    source_kind: str
+    source_path: str
+    selector: str
+    source_hash: str = ""
+    format_profile: str = ""
+
+
+@dataclass(frozen=True)
+class SourceReference:
+    """跨格式來源引用；引用本身不是可翻譯條目。"""
+
+    pack_scope: str
+    source_kind: str
+    source_path: str
+    selector: str
+    target_key: str
+    target_mod_id: str = ""
+    target_kind: str = "lang"
+    target_locale: str = "en_us"
+    status: str = "pending"
+    detail: str = ""
+    target_entry_id: int | None = None
+    source_hash: str = ""
+
+
+@dataclass(frozen=True)
+class EffectivePackTranslation:
+    """一筆可供外部來源 writer 使用的生效翻譯與精確來源。"""
+
+    entry_id: int
+    kind: str
+    mod_id: str
+    key: str
+    en_us: str
+    zh_tw: str
+    origin: EntryOrigin
 
 
 @dataclass(frozen=True)
