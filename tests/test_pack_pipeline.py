@@ -504,7 +504,46 @@ def test_pipeline_blocks_publish_for_non_done_translation_status(
         assert len(manifests) == 1
         manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
         assert manifest["state"] == "blocked"
+        assert manifest["steps"]["translation"]["state"] == "failed"
         assert any(issue["reason"] == reason for issue in manifest["issues_detail"])
+    finally:
+        db.close()
+
+
+def test_pipeline_preview_dry_run_translation_is_not_reported_as_failure(
+    tmp_path: Path,
+):
+    """唯讀 LM 預覽成功時不應產生失敗 issue，manifest 應標記 preview。"""
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+
+    def translation_runner(*_args, **_kwargs):
+        return {
+            "status": "DONE",
+            "dry_run": True,
+            "candidates": 1,
+            "written": 0,
+            "planned_batches": 1,
+        }
+
+    try:
+        report = run_pack_pipeline(
+            db,
+            tmp_path,
+            PackPipelineOptions(
+                version="1.21.1",
+                dry_run=True,
+                translate_missing=True,
+                run_workspace=str(tmp_path / "runs"),
+            ),
+            pack_root=tmp_path,
+            translation_runner=translation_runner,
+        )
+
+        assert report.state == "done"
+        assert report.issues == []
+        manifest = json.loads(Path(report.manifest_path).read_text(encoding="utf-8"))
+        assert manifest["steps"]["translation"]["state"] == "preview"
     finally:
         db.close()
 

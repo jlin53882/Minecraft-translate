@@ -262,7 +262,10 @@ def _run_translation_phase(
     report.translation = _translation_summary(translation_result)
     report.timing_sec["translation"] = time.perf_counter() - translation_started
     status = str(report.translation.get("status") or "").upper()
-    stop_reason = translation_stop_reason(report.translation)
+    stop_reason = translation_stop_reason(
+        report.translation,
+        allow_dry_run=True,
+    )
     if stop_reason is not None:
         report.issues.append(
             {
@@ -770,7 +773,7 @@ def _manifest_steps(
             "elapsed_sec": report.timing_sec.get("db_sync", 0.0),
         },
         "translation": {
-            "state": "done" if report.translation else "skipped",
+            "state": _translation_step_state(report.translation),
             "elapsed_sec": report.timing_sec.get("translation", 0.0),
         },
         "output": {
@@ -778,6 +781,23 @@ def _manifest_steps(
             "elapsed_sec": report.timing_sec.get("output", 0.0),
         },
     }
+
+
+def _translation_step_state(translation: dict[str, Any] | None) -> str:
+    """將共用翻譯報告映射成 manifest 可診斷的階段狀態。
+
+    預覽的 ``dry_run=True`` 不是失敗；正式翻譯仍只有明確 ``DONE`` 才算
+    ``done``。其他終態沿用共用狀態契約並 fail closed，避免 manifest 把
+    部分或未知結果誤記成已完成。
+    """
+    if not translation:
+        return "skipped"
+    stop_reason = translation_stop_reason(translation, allow_dry_run=True)
+    if stop_reason is None:
+        return "preview" if translation.get("dry_run") else "done"
+    if stop_reason == "cancelled":
+        return "cancelled"
+    return "failed"
 
 
 def _output_step_state(output: PackOutputReport | None) -> str:
