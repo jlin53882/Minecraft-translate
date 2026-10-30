@@ -20,8 +20,11 @@ from app.views.pipeline.pipeline_progress import (
 )
 from app.views.pipeline.pipeline_view import PipelineView
 from app.views.pipeline.pipeline_workbench import (
+    PipelineActionSpec,
     PipelineStepRow,
+    PipelineStepSpec,
     build_pipeline_status_card,
+    build_pipeline_step_row,
     build_pipeline_workbench,
 )
 from tests.conftest import mock_filepicker, mock_page
@@ -451,6 +454,39 @@ def test_pipeline_workbench_uses_responsive_two_column_contract():
         {"xs": 12, "md": 5},
         {"xs": 12, "md": 7},
     ]
+
+
+def test_pipeline_step_row_wraps_actions_on_narrow_layouts():
+    """步驟列的狀態與多個操作在窄版 Web 必須可換行。"""
+    row = build_pipeline_step_row(
+        PipelineStepSpec(
+            number=1,
+            title="提取",
+            description="掃描來源",
+            icon=ft.Icons.FOLDER_OUTLINED,
+            tone="blue",
+            on_click=lambda _event: None,
+            extra_actions=(
+                PipelineActionSpec(
+                    label="預覽",
+                    on_click=lambda _event: None,
+                ),
+            ),
+        )
+    )
+
+    layout = row.content
+    assert isinstance(layout, ft.ResponsiveRow)
+    assert [column.col for column in layout.controls] == [
+        {"xs": 12, "md": 7},
+        {"xs": 12, "md": 5},
+    ]
+    trailing = layout.controls[1].content
+    assert isinstance(trailing, ft.Row)
+    assert trailing.wrap is True
+    action_group = trailing.controls[-1]
+    assert isinstance(action_group, ft.Row)
+    assert action_group.wrap is True
 
 
 def test_pipeline_status_card_keeps_icon_in_shared_header_only():

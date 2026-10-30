@@ -131,45 +131,58 @@ class PipelineStepRow(ft.Container):
                 ft.Row(
                     self.action_buttons,
                     spacing=6,
+                    run_spacing=6,
+                    wrap=True,
                     vertical_alignment=ft.CrossAxisAlignment.CENTER,
                 )
             )
 
-        row_controls: list[ft.Control] = [
-            self._build_number_badge(step),
-            ft.Column(
-                [
-                    ft.Text(
-                        step.title,
-                        size=14,
-                        weight=ft.FontWeight.BOLD,
-                        color=C.TEXT,
-                    ),
-                    ft.Text(step.description, size=12, color=C.DIM),
-                ],
-                spacing=1,
-                tight=True,
-                expand=True,
-            ),
-        ]
+        main = ft.Row(
+            [
+                self._build_number_badge(step),
+                ft.Column(
+                    [
+                        ft.Text(
+                            step.title,
+                            size=14,
+                            weight=ft.FontWeight.BOLD,
+                            color=C.TEXT,
+                        ),
+                        ft.Text(step.description, size=12, color=C.DIM),
+                    ],
+                    spacing=1,
+                    tight=True,
+                    expand=True,
+                ),
+            ],
+            spacing=14,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         if self.step_status is not None:
             self._state_icon = ft.Icon(ft.Icons.CIRCLE, size=16)
             self._state_label = ft.Text(size=11)
             self._update_step_status()
             trailing.insert(0, self._state_icon)
             trailing.insert(1, self._state_label)
-        if trailing:
-            row_controls.append(
-                ft.Row(
-                    trailing,
-                    spacing=6,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                )
-            )
-        return ft.Row(
-            row_controls,
-            spacing=14,
+        trailing_control = ft.Row(
+            trailing,
+            spacing=6,
+            run_spacing=6,
+            wrap=True,
+            alignment=ft.MainAxisAlignment.END,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
+        return ft.ResponsiveRow(
+            [
+                ft.Container(main, col={"xs": 12, "md": 7}),
+                ft.Container(
+                    trailing_control,
+                    col={"xs": 12, "md": 5},
+                    alignment=ft.Alignment(1, 0),
+                ),
+            ],
+            spacing=14,
+            run_spacing=6,
         )
 
     @staticmethod

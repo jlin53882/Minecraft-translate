@@ -331,7 +331,8 @@ def test_pipeline_step_row_can_share_primary_and_preview_actions():
 
     assert row.action_buttons == [extract, preview]
     assert row.action_button is extract
-    action_group = row.content.controls[-1].controls[0]
+    trailing = row.content.controls[1].content
+    action_group = trailing.controls[-1]
     assert action_group.controls == [extract, preview]
 
 
