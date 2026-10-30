@@ -19,7 +19,11 @@ from app.views.pipeline.pipeline_progress import (
     PipelineStepChip,
 )
 from app.views.pipeline.pipeline_view import PipelineView
-from app.views.pipeline.pipeline_workbench import PipelineStepRow
+from app.views.pipeline.pipeline_workbench import (
+    PipelineStepRow,
+    build_pipeline_status_card,
+    build_pipeline_workbench,
+)
 from tests.conftest import mock_filepicker, mock_page
 
 # -----------------------------------------------------------------------------
@@ -403,6 +407,64 @@ def test_pipeline_view_progress_panel_hidden_initially(monkeypatch):
     view = PipelineView(page, mock_filepicker())
 
     assert view.progress_panel.container.visible is False
+
+
+def test_pipeline_progress_panel_exclusively_toggles_idle_status_card():
+    """執行中只保留一張狀態卡，完成／隱藏後恢復初始狀態卡。"""
+    page = mock_page()
+    panel = PipelineProgressPanel(page)
+    idle_card = build_pipeline_status_card(
+        progress=ft.ProgressBar(value=0),
+        progress_status=ft.Text("尚未開始"),
+        title="執行狀態",
+        icon=ft.Icons.TIMELINE,
+        tone="gold",
+    )
+    panel.attach_idle_status_card(idle_card)
+
+    assert idle_card.visible is True
+    assert panel.container.visible is False
+
+    panel.start()
+    assert idle_card.visible is False
+    assert panel.container.visible is True
+
+    panel.hide()
+    assert idle_card.visible is True
+    assert panel.container.visible is False
+
+
+def test_pipeline_workbench_uses_responsive_two_column_contract():
+    """窄版 Web 上下排列，寬版 Web 維持設定／狀態左右欄。"""
+    workbench = build_pipeline_workbench(
+        title="測試工作台",
+        subtitle="測試",
+        icon=ft.Icons.INFO_OUTLINE,
+        tone="em",
+        left_controls=[ft.Text("左")],
+        right_controls=[ft.Text("右")],
+    )
+    layout = workbench.controls[1]
+    assert isinstance(layout, ft.ResponsiveRow)
+    columns = layout.controls
+    assert [column.col for column in columns] == [
+        {"xs": 12, "md": 5},
+        {"xs": 12, "md": 7},
+    ]
+
+
+def test_pipeline_status_card_keeps_icon_in_shared_header_only():
+    """狀態卡不在內容列重複繪製另一個圖示。"""
+    card = build_pipeline_status_card(
+        progress=ft.ProgressBar(value=0),
+        progress_status=ft.Text("尚未開始"),
+    )
+
+    body = card.body.content
+    assert isinstance(body, ft.Column)
+    status_row = body.controls[0]
+    assert isinstance(status_row, ft.Row)
+    assert len(status_row.controls) == 1
 
 
 def test_pipeline_view_lang_code_checks_empty_initially(monkeypatch):

@@ -154,10 +154,11 @@ def _preview_bind_handlers(ctx) -> None:
     ctx.start_scan = functools.partial(_preview_start_scan, ctx)
 
     # ========== 建立對話框 ==========
-    ctx.start_button = ft.Button(
+    ctx.start_button = dialog_button(
         "開始預覽",
         icon=ft.Icons.SEARCH,
         on_click=lambda e: ctx.start_scan(),
+        role="primary",
     )
     ctx.cancel_button = dialog_button(
         "取消",

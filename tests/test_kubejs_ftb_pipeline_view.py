@@ -18,7 +18,7 @@ def test_kubejs_pipeline_uses_one_click_workbench_layout():
     workbench = view.controls[0]
     assert isinstance(workbench, ft.Column)
     body = workbench.controls[1]
-    assert isinstance(body, ft.Row)
+    assert isinstance(body, ft.ResponsiveRow)
     assert len(body.controls) == 2
     assert all(isinstance(column, ft.Column) for column in body.controls)
     assert len(body.controls[0].controls) == 4

@@ -171,11 +171,16 @@ def _translate_build_content(ctx):
             ft.Row(
                 [
                     ctx.translate_input_field,
-                    ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_input_dir
+                    dialog_button(
+                        "選擇資料夾",
+                        icon=ft.Icons.FOLDER,
+                        on_click=ctx.pick_input_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_input_dir,
                     ),
                 ],
                 wrap=True,
@@ -189,13 +194,16 @@ def _translate_build_content(ctx):
             ft.Row(
                 [
                     ctx.translate_output_field,
-                    ft.Button(
+                    dialog_button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
                         on_click=ctx.pick_output_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_output_dir,
                     ),
                 ],
                 wrap=True,

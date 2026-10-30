@@ -119,6 +119,7 @@ class KubejsFtbPipelineView(ft.Column):
             on_cancel=self._cancel,
             step_names=["分析來源", "同步 ModDB", "LM 翻譯", "輸出 overlay"],
             log_height=180,
+            progress=self.progress,
         )
         self.log_view = self.progress_panel.log_view
         self.cancel_button = self.progress_panel.cancel_button
@@ -151,6 +152,7 @@ class KubejsFtbPipelineView(ft.Column):
         output_panel = self._build_output_panel()
         steps_panel = self._build_steps_panel()
         status_panel = self._build_status_panel()
+        self.progress_panel.attach_idle_status_card(status_panel)
         self.workbench_view = build_pipeline_workbench(
             title="KubeJS / FTB 流水線",
             subtitle="來源分析 → ModDB 同步 → LM 翻譯 → overlay 輸出；沿用一鍵流水線的工作台操作方式。",
@@ -293,6 +295,9 @@ class KubejsFtbPipelineView(ft.Column):
             progress_status=self.progress_status,
             status_chip=self.status_chip,
             summary=self.run_summary,
+            title="執行狀態",
+            icon=ft.Icons.TIMELINE,
+            tone="em",
             hint=kit.hint_text(
                 "每次執行會產生 run_id 與 manifest.json；執行後才展開階段狀態與即時 Log。"
             ),

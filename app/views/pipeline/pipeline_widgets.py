@@ -157,5 +157,9 @@ class PipelineWidgetsMixin:
         status_card = build_pipeline_status_card(
             progress=self.progress_bar,
             progress_status=self.progress_status,
+            title="執行狀態",
+            icon=ft.Icons.TIMELINE,
+            tone="gold",
         )
+        self.progress_panel.attach_idle_status_card(status_card)
         return status_card, steps_card

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import flet as ft
 
 from app.ui import kit
-from app.ui.design import RADIUS_CARD, C
+from app.ui.design import C
 from app.ui.design import tone as get_tone
 
 
@@ -303,44 +303,68 @@ def build_pipeline_status_card(
     summary: ft.Control | None = None,
     hint: ft.Control | None = None,
     cancel: ft.Control | None = None,
-) -> ft.Container:
+    title: str = "執行狀態",
+    icon: str = ft.Icons.INFO_OUTLINE,
+    tone: str = "em",
+) -> kit.SectionCard:
     """建立所有流水線頁共用的執行狀態卡。
 
     一鍵流水線、KubeJS／FTB 與任務翻譯的執行工作不同，但狀態卡的閱讀順序
     必須一致：目前狀態 → 整體進度 → 摘要／操作。把外殼集中在這裡，避免
     各頁面各自複製一套 padding、邊框與按鈕排列。
     """
+    # The SectionCard header already owns the status icon.  Keeping the body
+    # focused on the live status text avoids a double-icon variant that used to
+    # make execution cards look different from every other workflow card.
     leading = ft.Row(
-        [ft.Icon(ft.Icons.INFO_OUTLINE, size=14, color=C.DIM), progress_status],
+        [progress_status],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
     )
     trailing = [control for control in (status_chip, cancel) if control is not None]
     header: ft.Control = leading
-    if trailing:
-        header = ft.Row(
-            [
-                leading,
-                ft.Row(
-                    trailing,
-                    spacing=8,
-                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            vertical_alignment=ft.CrossAxisAlignment.CENTER,
-        )
     body = [header, progress]
     if summary is not None:
         body.append(summary)
     if hint is not None:
         body.append(hint)
-    return ft.Container(
-        padding=ft.Padding.symmetric(horizontal=18, vertical=14),
-        bgcolor=C.PANEL,
-        border=ft.Border.all(1, C.LINE),
-        border_radius=RADIUS_CARD,
-        content=ft.Column(body, spacing=8),
+    return kit.section_card(
+        title,
+        ft.Column(body, spacing=8),
+        icon=icon,
+        tone=tone,
+        actions=trailing,
+    )
+
+
+def build_pipeline_log_card(
+    log_view: ft.Control,
+    *,
+    title: str = "執行日誌",
+    icon: str = ft.Icons.RECEIPT_LONG,
+    tone: str = "neutral",
+    height: int | None = None,
+    actions: Sequence[ft.Control] = (),
+    expand: bool | int = False,
+    collapsible: bool = False,
+) -> ft.Control:
+    """建立工作流程共用的日誌卡。
+
+    日誌卡只負責視覺外殼與高度，不擁有 session、輪詢或取消邏輯；各流程
+    仍由自己的 ``LogView``／``TaskSession`` 管理內容。把標題、圖示與容器
+    集中在這裡，避免 LM、打包、合併與任務翻譯各自長出不同的日誌外觀。
+    """
+    content: ft.Control = log_view
+    if height is not None:
+        content = ft.Container(content=log_view, height=height)
+    return kit.section_card(
+        title,
+        content,
+        icon=icon,
+        tone=tone,
+        actions=list(actions),
+        expand=expand,
+        collapsible=collapsible,
     )
 
 
@@ -359,6 +383,22 @@ def build_pipeline_workbench(
     內容卡由呼叫頁面持有，外框統一處理頁首、左右欄間距、滾動與伸展。
     這樣新增流程入口時只需維護流程本身，不會再產生第二套頁面骨架。
     """
+    columns = ft.ResponsiveRow(
+        [
+            ft.Column(
+                list(left_controls),
+                spacing=16,
+                col={"xs": 12, "md": 5},
+            ),
+            ft.Column(
+                list(right_controls),
+                spacing=16,
+                col={"xs": 12, "md": 7},
+            ),
+        ],
+        spacing=16,
+        run_spacing=16,
+    )
     return ft.Column(
         [
             kit.page_header(
@@ -368,14 +408,7 @@ def build_pipeline_workbench(
                 tone=tone,
                 actions=list(actions),
             ),
-            ft.Row(
-                [
-                    ft.Column(list(left_controls), spacing=16, expand=5),
-                    ft.Column(list(right_controls), spacing=16, expand=7),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
+            columns,
         ],
         spacing=18,
         scroll=ft.ScrollMode.AUTO,
@@ -387,6 +420,7 @@ __all__ = [
     "PipelineActionSpec",
     "PipelineStepRow",
     "PipelineStepSpec",
+    "build_pipeline_log_card",
     "build_pipeline_status_card",
     "build_pipeline_step_list",
     "build_pipeline_step_row",

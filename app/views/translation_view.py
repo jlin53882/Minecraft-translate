@@ -15,6 +15,7 @@ from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView
 from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_log_card,
     build_pipeline_status_card,
     build_pipeline_workbench,
 )
@@ -179,13 +180,16 @@ class TranslationView(ft.Column):
             progress_status=self.progress_status,
             status_chip=self.status_chip,
             cancel=self.cancel_button,
+            title="執行狀態",
+            icon=ft.Icons.TRANSLATE,
+            tone="gold",
             hint=kit.hint_text(
                 "翻譯工作會沿用目前分頁的步驟設定；取消只在批次檢查點生效。"
             ),
         )
-        self.log_panel = kit.section_card(
-            "執行日誌",
+        self.log_panel = build_pipeline_log_card(
             self.log_view,
+            title="執行日誌",
             icon=ft.Icons.TERMINAL,
             tone="gold",
             expand=True,

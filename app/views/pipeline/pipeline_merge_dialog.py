@@ -237,11 +237,16 @@ def _merge_bind_handlers(ctx) -> None:
         content=ft.Row(
             [
                 ctx.merge_folder_field,
-                ft.Button(
-                    "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_folder_input
+                dialog_button(
+                    "選擇資料夾",
+                    icon=ft.Icons.FOLDER,
+                    on_click=ctx.pick_folder_input,
+                    role="preview",
                 ),
-                ft.Button(
-                    "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_folder_input
+                dialog_button(
+                    "瀏覽",
+                    icon=ft.Icons.SEARCH,
+                    on_click=ctx.browse_folder_input,
                 ),
             ]
         ),
@@ -261,8 +266,11 @@ def _merge_build_zip_row(ctx) -> None:
                     padding=5,
                     expand=True,
                 ),
-                ft.Button(
-                    "選擇 ZIP", icon=ft.Icons.FILE_OPEN, on_click=ctx.pick_zip_input
+                dialog_button(
+                    "選擇 ZIP",
+                    icon=ft.Icons.FILE_OPEN,
+                    on_click=ctx.pick_zip_input,
+                    role="preview",
                 ),
             ],
             spacing=4,
@@ -282,13 +290,16 @@ def _merge_build_content(ctx):
             ft.Row(
                 [
                     ctx.merge_output_dir_field,
-                    ft.Button(
+                    dialog_button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
                         on_click=ctx.pick_output_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_output_dir,
                     ),
                 ],
                 wrap=True,

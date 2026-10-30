@@ -6,6 +6,7 @@ from app.services_impl.pack_format_service import QUICK_VERSIONS
 from app.ui import design, kit
 from app.ui.design import C
 from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_log_card,
     build_pipeline_status_card,
     build_pipeline_workbench,
 )
@@ -22,13 +23,17 @@ class BundlerWidgetsMixin:
         run_card = build_pipeline_status_card(
             progress=self.progress_bar,
             progress_status=self.status_text,
+            title="執行狀態",
+            icon=ft.Icons.INVENTORY_2_OUTLINED,
+            tone="gold",
             hint=kit.hint_text("完成後會產生包含 pack.mcmeta 的資源包 ZIP。"),
         )
-        log_card = kit.section_card(
-            "打包日誌",
-            ft.Container(content=self.log_view, height=200),
+        log_card = build_pipeline_log_card(
+            self.log_view,
+            title="打包日誌",
             icon=ft.Icons.RECEIPT_LONG,
             tone="gold",
+            height=200,
             collapsible=True,
         )
         log_card.visible = False

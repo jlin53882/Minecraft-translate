@@ -222,11 +222,16 @@ def _bundle_build_content(ctx, _version_input):
             ft.Row(
                 [
                     ctx.bundle_input_field,
-                    ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_input_dir
+                    dialog_button(
+                        "選擇資料夾",
+                        icon=ft.Icons.FOLDER,
+                        on_click=ctx.pick_input_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_input_dir,
                     ),
                 ],
                 wrap=True,
@@ -235,8 +240,11 @@ def _bundle_build_content(ctx, _version_input):
             ft.Row(
                 [
                     ctx.bundle_output_zip_field,
-                    ft.Button(
-                        "選擇儲存位置", icon=ft.Icons.SAVE, on_click=ctx.pick_output_zip
+                    dialog_button(
+                        "選擇儲存位置",
+                        icon=ft.Icons.SAVE,
+                        on_click=ctx.pick_output_zip,
+                        role="preview",
                     ),
                 ],
                 wrap=True,
@@ -248,7 +256,12 @@ def _bundle_build_content(ctx, _version_input):
     image_row = ft.Row(
         [
             ctx.pack_image_field,
-            ft.Button("選擇檔案...", icon=ft.Icons.IMAGE, on_click=ctx.pick_pack_image),
+            dialog_button(
+                "選擇檔案...",
+                icon=ft.Icons.IMAGE,
+                on_click=ctx.pick_pack_image,
+                role="preview",
+            ),
             dialog_button(
                 "移除",
                 lambda _event: _bundle_clear_pack_image(ctx),

@@ -467,10 +467,11 @@ def _one_click_pack_image_row(ctx, pack_image_field) -> ft.Row:
     return ft.Row(
         [
             pack_image_field,
-            ft.Button(
+            dialog_button(
                 "選擇檔案...",
                 icon=ft.Icons.IMAGE,
                 on_click=lambda e: _one_click_pick_pack_image(ctx, pack_image_field),
+                role="preview",
             ),
             dialog_button(
                 "移除",

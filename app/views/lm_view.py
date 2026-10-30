@@ -22,6 +22,7 @@ from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_st
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.lm_db_options import LmDbOptions, LmDbRunSnapshot
 from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_log_card,
     build_pipeline_status_card,
     build_pipeline_workbench,
 )
@@ -216,11 +217,13 @@ class LMView(ft.Column):
             progress=self.progress_bar,
             progress_status=ft.Text("整體進度", size=13, color=C.DIM),
             status_chip=self.status_chip,
+            title="執行狀態",
+            icon=ft.Icons.AUTO_AWESOME,
+            tone="gold",
         )
-        log_card = kit.section_card(
-            "執行日誌",
-            # self.log_view 已是 LogView widget（自帶深色容器 + 等寬字）
+        log_card = build_pipeline_log_card(
             self.log_view,
+            title="執行日誌",
             icon=ft.Icons.TERMINAL,
             tone="gold",
             expand=True,

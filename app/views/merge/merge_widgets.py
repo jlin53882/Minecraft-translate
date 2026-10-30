@@ -15,6 +15,7 @@ from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
 from app.views.merge.merge_db_options import MergeDbOptions
 from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_log_card,
     build_pipeline_status_card,
     build_pipeline_workbench,
 )
@@ -537,6 +538,9 @@ class MergeWidgetsMixin:
             progress_status=self.progress_status,
             status_chip=self.status_chip,
             cancel=self.cancel_button,
+            title="執行狀態",
+            icon=ft.Icons.CALL_MERGE,
+            tone="ench",
             hint=kit.hint_text(
                 "先確認輸入來源與合併規則，再開始合併；執行日誌會在開始後展開。"
             ),
@@ -555,12 +559,12 @@ class MergeWidgetsMixin:
             icon=ft.Icons.TUNE,
             tone="ench",
         )
-        log_card = kit.section_card(
-            "執行日誌",
-            # LogView widget 自帶深色容器 + 圓角 + 等寬字（從 theme）
-            ft.Container(content=self.log_view, height=280),
+        log_card = build_pipeline_log_card(
+            self.log_view,
+            title="執行日誌",
             icon=ft.Icons.TERMINAL,
             tone="gold",
+            height=280,
         )
         log_card.visible = False
         self.log_card = log_card

@@ -10,6 +10,7 @@ from app.ui.design import tone as get_tone
 from app.views._log import LogView
 from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
+    build_pipeline_status_card,
     build_pipeline_step_row,
 )
 
@@ -76,6 +77,7 @@ class PipelineProgressPanel:
         *,
         step_names: list[str] | None = None,
         log_height: int = 120,
+        progress: ft.Control | None = None,
     ):
         self._page = page
         self.cancel_button = kit.button(
@@ -105,6 +107,8 @@ class PipelineProgressPanel:
         self.step_row = ft.Column(controls=self.steps, spacing=0)
 
         self.current_label = ft.Text("等待執行...", color=C.MUTED, size=14)
+        self.progress = progress or kit.progress_bar(0, "gold", height=8)
+        self.progress_status = self.current_label
         # PR refactor/unified-log-view: 改用 LogView widget
         # 統一深色容器 + 等寬字 + 等級顏色（從 theme）
         # 保留 height=120 限制
@@ -115,26 +119,31 @@ class PipelineProgressPanel:
             height=log_height,
         )
 
-        self.container = kit.section_card(
-            "執行進度",
-            ft.Column(
-                [
-                    self.step_row,
-                    ft.Row(
-                        [self.current_label, self.cancel_button],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
-                    self.log_view,
-                ],
-                spacing=10,
-            ),
+        self.container = build_pipeline_status_card(
+            progress=self.progress,
+            progress_status=self.progress_status,
+            cancel=self.cancel_button,
+            title="執行進度",
             icon=ft.Icons.TIMELINE,
             tone="gold",
+            summary=ft.Column(
+                [self.step_row, self.log_view],
+                spacing=10,
+            ),
         )
         self.container.visible = False
+        self._idle_status_card: ft.Control | None = None
+
+    def attach_idle_status_card(self, card: ft.Control) -> None:
+        """連結執行前狀態卡，執行時避免同一欄位同時顯示兩張狀態卡。"""
+        self._idle_status_card = card
+
+    def _set_idle_status_visible(self, visible: bool) -> None:
+        if self._idle_status_card is not None:
+            self._idle_status_card.visible = visible
 
     def start(self):
+        self._set_idle_status_visible(False)
         self.container.visible = True
         for step in self.steps:
             step.set_status("waiting")
@@ -198,6 +207,7 @@ class PipelineProgressPanel:
 
     def hide(self):
         self.container.visible = False
+        self._set_idle_status_visible(True)
 
     def clear_logs(self):
         # PR refactor/unified-log-view: log_view 改用 LogView

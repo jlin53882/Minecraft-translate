@@ -170,11 +170,16 @@ def _extract_build_content(ctx):
             ft.Row(
                 [
                     ctx.mods_field,
-                    ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_mods_dir
+                    dialog_button(
+                        "選擇資料夾",
+                        on_click=ctx.pick_mods_dir,
+                        icon=ft.Icons.FOLDER,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_mods_dir
+                    dialog_button(
+                        "瀏覽",
+                        on_click=ctx.browse_mods_dir,
+                        icon=ft.Icons.SEARCH,
                     ),
                 ],
                 wrap=True,
@@ -183,13 +188,16 @@ def _extract_build_content(ctx):
             ft.Row(
                 [
                     ctx.output_field,
-                    ft.Button(
+                    dialog_button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
                         on_click=ctx.pick_output_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_output_dir,
                     ),
                 ],
                 wrap=True,

@@ -56,12 +56,18 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 ### 共用工作台與對話框
 
 `pipeline_workbench.build_pipeline_workbench()` 統一一鍵流水線、KubeJS／FTB 流水線、
-抽取、合併、LM、打包與任務翻譯頁的頁首、左右欄、欄位間距與滾動行為；
-`build_pipeline_steps_card()` 與 `PipelineStepRow` 統一編號、說明、單步／成對操作位置；`build_pipeline_status_card()`
-統一狀態卡的「狀態 → 進度 → 摘要」順序。主設定對話框與抽取預覽／執行對話框一律
+抽取、合併、LM、打包與任務翻譯頁的頁首、左右欄、欄位間距與滾動行為；左右欄使用
+`ResponsiveRow`：寬版維持「左設定／步驟、右狀態／日誌」，窄版自動改為上下排列，
+不允許各頁自行以固定寬度複製另一套 responsive 版面；`build_pipeline_steps_card()` 與
+`PipelineStepRow` 統一編號、說明、單步／成對操作位置；`build_pipeline_status_card()`
+使用 `SectionCard` 殼層並統一「狀態 → 進度 → 摘要」順序，狀態 chip 與取消操作放在同一標題列，
+避免初始卡與執行卡各自長出不同外框。主設定對話框與抽取預覽／執行對話框一律
 透過 `pipeline_forms.build_pipeline_dialog()` 建立，內容由各流程提供，外殼負責標題圖示、
 固定視窗尺寸內的捲動區與操作列；預覽對話框的初始操作固定為「取消／開始預覽」，完成後只替換共用 body 與主要操作，不另開第二個對話框。
 這些 helper 只處理 UI，不改變 service、session 或資料格式。
+
+對話框內容中的「選擇資料夾／瀏覽／選擇 ZIP／選擇檔案」也必須使用
+`pipeline_forms.dialog_button()`；這些是同一個操作契約的一部分，不得在個別流程重新建立裸 `ft.Button`。
 
 流程完成／失敗摘要也必須沿用 `build_pipeline_dialog()` 的共用標題、內容容器與操作列；工作流程 View 不得在完成時自行建立另一種對話框外殼。若摘要需要額外操作，透過 `dialog_button()` 加入共用操作列，並保留原本的事件與資料內容。
 
