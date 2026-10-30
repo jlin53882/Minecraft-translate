@@ -548,6 +548,87 @@ def test_pipeline_preview_dry_run_translation_is_not_reported_as_failure(
         db.close()
 
 
+def test_pipeline_formal_publish_rejects_dry_run_translation_report(
+    tmp_path: Path,
+):
+    """正式發布不能接受翻譯器誤回傳的 dry-run 成功報告。"""
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    output = tmp_path.parent / "blocked-dry-run-translation"
+    run_workspace = tmp_path / "runs"
+
+    def translation_runner(*_args, **_kwargs):
+        return {
+            "status": "DONE",
+            "dry_run": True,
+            "candidates": 1,
+            "written": 0,
+            "planned_batches": 1,
+        }
+
+    try:
+        with pytest.raises(PackPipelineError, match="發布不完整 overlay 已停止"):
+            run_pack_pipeline(
+                db,
+                tmp_path,
+                PackPipelineOptions(
+                    version="1.21.1",
+                    dry_run=False,
+                    publish=True,
+                    output_root=str(output),
+                    run_workspace=str(run_workspace),
+                    translate_missing=True,
+                ),
+                pack_root=tmp_path,
+                translation_runner=translation_runner,
+            )
+
+        assert not output.exists()
+        manifests = list(run_workspace.glob("*/manifest.json"))
+        assert len(manifests) == 1
+        manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+        assert manifest["state"] == "blocked"
+        assert manifest["steps"]["translation"]["state"] == "failed"
+        assert any(issue["reason"] == "dry_run" for issue in manifest["issues_detail"])
+    finally:
+        db.close()
+
+
+def test_service_zero_candidate_translation_preserves_preview_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """沒有可翻譯條目時，流水線仍要在翻譯報告保留預覽／正式模式。"""
+    (tmp_path / "kubejs" / "client_scripts").mkdir(parents=True)
+    (tmp_path / "config" / "ftbquests" / "quests").mkdir(parents=True)
+    db = TranslationDB(tmp_path / "translation.db")
+    monkeypatch.setattr(pack_pipeline_service, "open_database", lambda **_kwargs: db)
+    session = TaskSession(max_logs=100)
+
+    try:
+        report = pack_pipeline_service.run_kubejs_ftb_pipeline_service(
+            str(tmp_path),
+            "1.21.1",
+            session,
+            dry_run=True,
+            publish=False,
+            pack_root=tmp_path,
+            translate_missing=True,
+        )
+    finally:
+        db.close()
+
+    assert report is not None
+    assert report.items_found == 0
+    assert report.translation == {
+        "status": "DONE",
+        "dry_run": True,
+        "candidates": 0,
+        "planned_batches": 0,
+    }
+    manifest = json.loads(Path(report.manifest_path).read_text(encoding="utf-8"))
+    assert manifest["steps"]["translation"]["state"] == "preview"
+
+
 def test_pipeline_cancel_after_publish_keeps_committed_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

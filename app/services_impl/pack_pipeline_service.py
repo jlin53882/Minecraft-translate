@@ -65,7 +65,12 @@ def run_kubejs_ftb_pipeline_service(
                 sorted({item.mod_id for item in result.items if item.mod_id})
             )
             if not mod_ids:
-                return {"status": "DONE", "candidates": 0, "planned_batches": 0}
+                return {
+                    "status": "DONE",
+                    "dry_run": pipeline_options.dry_run,
+                    "candidates": 0,
+                    "planned_batches": 0,
+                }
             return run_moddb_translate_service(
                 TranslateOptions(
                     version=pipeline_options.version,

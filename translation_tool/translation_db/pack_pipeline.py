@@ -264,7 +264,7 @@ def _run_translation_phase(
     status = str(report.translation.get("status") or "").upper()
     stop_reason = translation_stop_reason(
         report.translation,
-        allow_dry_run=True,
+        allow_dry_run=options.dry_run,
     )
     if stop_reason is not None:
         report.issues.append(
@@ -595,7 +595,7 @@ def _write_run_manifest(
     execution_report = _execution_manifest_report(report)
     format_issues = _format_issue_report(report, output)
     writeback_diff = _writeback_diff_report(output)
-    steps = _manifest_steps(report, output, db)
+    steps = _manifest_steps(report, output, db, options)
     retryable = _retryable_issues(report)
     coverage_report = _coverage_manifest_report(report)
     _write_json(metadata / "source_mapping.json", source_mapping)
@@ -762,6 +762,7 @@ def _manifest_steps(
     report: PackPipelineReport,
     output: PackOutputReport | None,
     db: TranslationDB | None,
+    options: PackPipelineOptions,
 ) -> dict[str, dict[str, Any]]:
     return {
         "scan": {
@@ -773,7 +774,9 @@ def _manifest_steps(
             "elapsed_sec": report.timing_sec.get("db_sync", 0.0),
         },
         "translation": {
-            "state": _translation_step_state(report.translation),
+            "state": _translation_step_state(
+                report.translation, allow_dry_run=options.dry_run
+            ),
             "elapsed_sec": report.timing_sec.get("translation", 0.0),
         },
         "output": {
@@ -783,18 +786,21 @@ def _manifest_steps(
     }
 
 
-def _translation_step_state(translation: dict[str, Any] | None) -> str:
+def _translation_step_state(
+    translation: dict[str, Any] | None, *, allow_dry_run: bool
+) -> str:
     """將共用翻譯報告映射成 manifest 可診斷的階段狀態。
 
+    ``allow_dry_run`` 必須由外層流水線模式提供，而不能由翻譯報告自行決定。
     預覽的 ``dry_run=True`` 不是失敗；正式翻譯仍只有明確 ``DONE`` 才算
     ``done``。其他終態沿用共用狀態契約並 fail closed，避免 manifest 把
     部分或未知結果誤記成已完成。
     """
     if not translation:
         return "skipped"
-    stop_reason = translation_stop_reason(translation, allow_dry_run=True)
+    stop_reason = translation_stop_reason(translation, allow_dry_run=allow_dry_run)
     if stop_reason is None:
-        return "preview" if translation.get("dry_run") else "done"
+        return "preview" if allow_dry_run else "done"
     if stop_reason == "cancelled":
         return "cancelled"
     return "failed"
