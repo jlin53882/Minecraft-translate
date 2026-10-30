@@ -233,6 +233,62 @@ def test_rescan_identity_uses_one_index_and_reports_duplicate_conflicts():
     assert duplicate_report.conflicts
 
 
+def test_kubejs_normalized_rescan_collision_is_not_hidden_by_expected_value():
+    """normalized occurrence 的不同值不能被 plan value 反向篩掉。"""
+    scope = "pack-scope"
+    source_path = "client_scripts/lang.js"
+    selector = "ClientEvents.lang[en_us][demo].event.add[1]|item.same"
+    origin = EntryOrigin(
+        scope,
+        KIND_KUBEJS_LANG,
+        source_path,
+        selector,
+        source_hash="source-hash",
+        format_profile="kubejs-js",
+    )
+    plan = _PlannedTranslation(
+        EffectivePackTranslation(
+            1,
+            KIND_KUBEJS_LANG,
+            f"demo@{scope}",
+            "item.same",
+            "Original",
+            "翻譯",
+            origin,
+        ),
+        f"kubejs-script/{source_path}",
+        "翻譯",
+    )
+    scanned = [
+        ScanItem(
+            KIND_KUBEJS_LANG,
+            f"demo@{scope}",
+            "item.same",
+            "",
+            zh_tw="翻譯",
+            source_path=source_path,
+            source_selector=("ClientEvents.lang[zh_tw][demo].event.add[3]|item.same"),
+        ),
+        ScanItem(
+            KIND_KUBEJS_LANG,
+            f"demo@{scope}",
+            "item.same",
+            "",
+            zh_tw="另一個翻譯",
+            source_path=source_path,
+            source_selector=("ClientEvents.lang[zh_tw][demo].event.add[4]|item.same"),
+        ),
+    ]
+    report = PackOutputReport(scope, "output", True)
+
+    _check_rescan_identity(
+        [plan], PackScanResult(pack_scope=scope, items=scanned), report
+    )
+
+    assert report.conflicts
+    assert report.entries_rescan_verified == 0
+
+
 def test_stage_validation_uses_javascript_parser(tmp_path: Path):
     stage = tmp_path / "stage"
     stage.mkdir()

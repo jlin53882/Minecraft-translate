@@ -455,6 +455,60 @@ def test_pipeline_can_run_shared_translation_phase(tmp_path: Path):
         db.close()
 
 
+@pytest.mark.parametrize(
+    ("status", "reason"),
+    [
+        ("FAILED", "translation_failed"),
+        ("ABORTED", "translation_failed"),
+        ("ALL_KEYS_EXHAUSTED", "translation_failed"),
+        ("UNKNOWN", "translation_status_unknown"),
+        ("DONE_WITH_WARNINGS", "translation_status_unknown"),
+    ],
+)
+def test_pipeline_blocks_publish_for_non_done_translation_status(
+    tmp_path: Path, status: str, reason: str
+):
+    """不完整或未知的 LM 終態不得發布部分 overlay。"""
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    output = tmp_path.parent / f"blocked-{status.lower()}"
+    run_workspace = tmp_path / "runs"
+
+    def translation_runner(*_args, **_kwargs):
+        return {
+            "status": status,
+            "candidates": 1,
+            "written": 1,
+            "planned_batches": 1,
+        }
+
+    try:
+        with pytest.raises(PackPipelineError, match="發布不完整 overlay 已停止"):
+            run_pack_pipeline(
+                db,
+                tmp_path,
+                PackPipelineOptions(
+                    version="1.21.1",
+                    dry_run=False,
+                    publish=True,
+                    output_root=str(output),
+                    run_workspace=str(run_workspace),
+                    translate_missing=True,
+                ),
+                pack_root=tmp_path,
+                translation_runner=translation_runner,
+            )
+
+        assert not output.exists()
+        manifests = list(run_workspace.glob("*/manifest.json"))
+        assert len(manifests) == 1
+        manifest = json.loads(manifests[0].read_text(encoding="utf-8"))
+        assert manifest["state"] == "blocked"
+        assert any(issue["reason"] == reason for issue in manifest["issues_detail"])
+    finally:
+        db.close()
+
+
 def test_pipeline_cancel_after_publish_keeps_committed_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

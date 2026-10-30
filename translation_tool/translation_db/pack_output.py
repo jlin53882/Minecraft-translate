@@ -716,10 +716,19 @@ def _find_rescanned_items(
                     [],
                 )
             )
-        matching = [
-            item for item in candidates if (item.zh_tw or item.en_us) == plan.value
-        ]
-        return matching or candidates
+        target_locale = _kubejs_lang_locale(selector)
+        if target_locale is not None:
+            localized = [
+                item
+                for item in candidates
+                if _kubejs_lang_locale(item.source_selector) == target_locale
+            ]
+            if localized:
+                candidates = localized
+        # 先保留完整候選集合，讓呼叫端檢查 normalized selector 是否把
+        # 不同 occurrence／不同內容錯誤合併。不能用預期譯文反向篩掉
+        # 候選，否則真正的 identity collision 會被看成成功重掃描。
+        return candidates
     target_path = origin.source_path
     kind = origin.source_kind
     if origin.source_kind in {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS}:

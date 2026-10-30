@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.translation_status import translation_stop_reason
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.pack_output import (
     PackOutputReport,
@@ -261,12 +262,15 @@ def _run_translation_phase(
     report.translation = _translation_summary(translation_result)
     report.timing_sec["translation"] = time.perf_counter() - translation_started
     status = str(report.translation.get("status") or "").upper()
-    if status in {"ERROR", "CANCELLED"}:
+    stop_reason = translation_stop_reason(report.translation)
+    if stop_reason is not None:
         report.issues.append(
             {
                 "status": "translation_failed",
-                "reason": status.lower(),
-                "detail": "共用 ModDB LM 翻譯 phase 未完成",
+                "reason": stop_reason,
+                "detail": (
+                    f"共用 ModDB LM 翻譯 phase 未完成，狀態={status or 'UNKNOWN'}"
+                ),
             }
         )
     _log(
