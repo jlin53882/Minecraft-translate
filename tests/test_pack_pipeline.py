@@ -7,9 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from app.services_impl import pack_pipeline_service
+from app.services_impl import moddb_translate_service, pack_pipeline_service
+from app.services_impl.moddb_translate_service import TranslateOptions
 from app.tasks.task_session import TaskSession
 from tests.test_pack_sources import _write_fixture
+from translation_tool.translation_db import pack_pipeline as pack_pipeline_module
+from translation_tool.translation_db.pack_output import PackOutputReport
 from translation_tool.translation_db.pack_pipeline import (
     PackPipelineError,
     PackPipelineOptions,
@@ -18,6 +21,7 @@ from translation_tool.translation_db.pack_pipeline import (
     run_pack_pipeline,
 )
 from translation_tool.translation_db.repository import TranslationDB
+from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 
 
 def test_service_preview_opens_a_sqlite_readonly_connection(
@@ -49,6 +53,113 @@ def test_service_preview_opens_a_sqlite_readonly_connection(
     assert report is not None
     assert calls == [(False, True)]
     assert session.status == "DONE"
+
+
+def test_shared_translation_service_reuses_pipeline_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    db = TranslationDB(tmp_path / "translation.db")
+    session = TaskSession(max_logs=100)
+    monkeypatch.setattr(
+        moddb_translate_service,
+        "open_database",
+        lambda **_kwargs: pytest.fail("pipeline must pass its existing DB connection"),
+    )
+    try:
+        result = moddb_translate_service.run_moddb_translate_service(
+            TranslateOptions(version="1.21.1", dry_run=True),
+            session,
+            manage_session=False,
+            db_override=db,
+        )
+    finally:
+        db.close()
+
+    assert result is not None
+    assert result["status"] == "DONE"
+    assert result["planned_batches"] == 0
+
+
+def test_service_wires_shared_translation_runner_with_scoped_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """流水線 LM phase 必須沿用同一個 DB 與來源範圍，不另開第二套流程。"""
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    calls: list[tuple[tuple[str, ...], str]] = []
+
+    monkeypatch.setattr(
+        pack_pipeline_service,
+        "open_database",
+        lambda **_kwargs: db,
+    )
+
+    def fake_shared_translation(options, session, **kwargs):
+        assert kwargs["db_override"] is db
+        calls.append(
+            (tuple(sorted(options.mod_ids)), options.version)
+        )
+        return {
+            "status": "DONE",
+            "candidates": 0,
+            "written": 0,
+            "planned_batches": 0,
+        }
+
+    monkeypatch.setattr(
+        pack_pipeline_service,
+        "run_moddb_translate_service",
+        fake_shared_translation,
+    )
+    session = TaskSession(max_logs=100)
+
+    try:
+        report = pack_pipeline_service.run_kubejs_ftb_pipeline_service(
+            str(tmp_path),
+            "1.21.1",
+            session,
+            dry_run=True,
+            publish=False,
+            pack_root=tmp_path,
+            translate_missing=True,
+        )
+    finally:
+        db.close()
+
+    assert report is not None
+    assert calls
+    assert calls[0][1] == "1.21.1"
+    assert calls[0][0]
+    # KubeJS lang JSON 以 namespace 作為 mod_id；所有來源仍必須帶本次
+    # pack scope，避免把同資料庫其他模組包的條目交給 LM。
+    assert all(value.endswith(f"@{report.pack_scope}") for value in calls[0][0])
+    assert report.translation["status"] == "DONE"
+
+
+def test_shared_translation_failure_is_reported_to_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """共用翻譯服務失敗時不得以預設 DONE 回報。"""
+    db = TranslationDB(tmp_path / "translation.db")
+    session = TaskSession(max_logs=100)
+
+    def fail_selection(*_args, **_kwargs):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(moddb_translate_service, "_select_rows", fail_selection)
+    try:
+        result = moddb_translate_service.run_moddb_translate_service(
+            TranslateOptions(version="1.21.1", dry_run=True),
+            session,
+            manage_session=False,
+            db_override=db,
+        )
+    finally:
+        db.close()
+
+    assert result is not None
+    assert result["status"] == "ERROR"
+    assert "provider unavailable" in result["metrics"]["error"]
 
 
 def test_discovery_keeps_multiple_pack_roots_separate(tmp_path: Path):
@@ -233,5 +344,200 @@ def test_incremental_sync_uses_source_identity_without_deleting_translations(
         assert incremental.items_to_sync == 0
         assert incremental.ingest.new_entries == 0
         assert db.count_entries() == count_before
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    ("include_kubejs", "include_ftb", "expected_prefixes", "excluded_prefix"),
+    [
+        (True, False, ("kubejs/",), "config/"),
+        (False, True, ("config/",), "kubejs/"),
+        (True, True, ("kubejs/", "config/"), None),
+    ],
+)
+def test_pipeline_output_respects_selected_source_kinds(
+    tmp_path: Path,
+    include_kubejs: bool,
+    include_ftb: bool,
+    expected_prefixes: tuple[str, ...],
+    excluded_prefix: str | None,
+):
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        for kind in ("kubejs_lang", "ftb_quests"):
+            entry_id = db._one("SELECT id FROM entry WHERE kind=? LIMIT 1", (kind,))[0]
+            db.save_manual(entry_id, f"{kind} 翻譯", propagate=False)
+
+        output = tmp_path.parent / f"selected-{int(include_kubejs)}-{int(include_ftb)}"
+        report = run_pack_pipeline(
+            db,
+            tmp_path,
+            PackPipelineOptions(
+                version="1.21.1",
+                include_kubejs=include_kubejs,
+                include_ftb=include_ftb,
+                dry_run=False,
+                publish=True,
+                output_root=str(output),
+                run_workspace=str(tmp_path / "runs"),
+            ),
+            pack_root=tmp_path,
+        )
+
+        assert report.output_published
+        files = [
+            path.relative_to(output).as_posix()
+            for path in output.rglob("*")
+            if path.is_file() and not path.name.startswith(".minecraft-translate")
+        ]
+        assert all(
+            any(path.startswith(prefix) for path in files)
+            for prefix in expected_prefixes
+        )
+        if excluded_prefix is not None:
+            assert not any(path.startswith(excluded_prefix) for path in files)
+    finally:
+        db.close()
+
+
+def test_pipeline_can_run_shared_translation_phase(tmp_path: Path):
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    calls: list[tuple[int, str]] = []
+
+    def translation_runner(current_db, result, options, session):
+        calls.append((len(result.items), options.version))
+        assert current_db is db
+        return {
+            "status": "DONE",
+            "candidates": len(result.items),
+            "written": 3,
+            "planned_batches": 1,
+        }
+
+    try:
+        report = run_pack_pipeline(
+            db,
+            tmp_path,
+            PackPipelineOptions(
+                version="1.21.1",
+                dry_run=True,
+                translate_missing=True,
+                run_workspace=str(tmp_path / "runs"),
+            ),
+            pack_root=tmp_path,
+            translation_runner=translation_runner,
+        )
+
+        assert calls and calls[0][0] == report.items_found
+        assert report.translation == {
+            "status": "DONE",
+            "candidates": report.items_found,
+            "written": 3,
+            "planned_batches": 1,
+        }
+        plan = json.loads(
+            (
+                Path(report.manifest_path).parent / "metadata" / "translation_plan.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert plan["translation_phase"] == "shared_moddb_lm"
+        assert plan["lm_delegated_to_existing_task"] is False
+    finally:
+        db.close()
+
+
+def test_pipeline_cancel_after_publish_keeps_committed_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    session = TaskSession(max_logs=100)
+
+    def publish_then_cancel(*_args, **_kwargs):
+        session.request_cancel()
+        return PackOutputReport("scope", "output", False)
+
+    monkeypatch.setattr(pack_pipeline_module, "_export_output", publish_then_cancel)
+    try:
+        report = run_pack_pipeline(
+            db,
+            tmp_path,
+            PackPipelineOptions(
+                version="1.21.1",
+                dry_run=False,
+                publish=True,
+                output_root=str(tmp_path / "output"),
+                run_workspace=str(tmp_path / "runs"),
+            ),
+            session=session,
+            pack_root=tmp_path,
+        )
+    finally:
+        db.close()
+
+    assert report.output_published is True
+    assert report.state == "done"
+
+
+def test_pipeline_manifest_failure_after_publish_is_explicit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _write_fixture(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    monkeypatch.setattr(
+        pack_pipeline_module,
+        "_export_output",
+        lambda *_args, **_kwargs: PackOutputReport("scope", "output", False),
+    )
+
+    def fail_manifest(*_args, **_kwargs):
+        raise OSError("manifest disk full")
+
+    monkeypatch.setattr(pack_pipeline_module, "_write_run_manifest", fail_manifest)
+    try:
+        report = run_pack_pipeline(
+            db,
+            tmp_path,
+            PackPipelineOptions(
+                version="1.21.1",
+                dry_run=False,
+                publish=True,
+                output_root=str(tmp_path / "output"),
+                run_workspace=str(tmp_path / "runs"),
+            ),
+            pack_root=tmp_path,
+        )
+    finally:
+        db.close()
+
+    assert report.output_published is True
+    assert report.state == "published_with_manifest_error"
+    assert "manifest disk full" in report.manifest_error
+
+
+def test_pipeline_rejects_stale_selected_pack_root(tmp_path: Path):
+    _write_fixture(tmp_path)
+    other = tmp_path.parent / f"{tmp_path.name}-other-pack"
+    _write_fixture(other)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        with pytest.raises(PackPipelineError, match="不再屬於目前來源"):
+            run_pack_pipeline(
+                db,
+                tmp_path,
+                PackPipelineOptions(version="1.21.1", dry_run=True),
+                pack_root=other,
+            )
     finally:
         db.close()

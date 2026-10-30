@@ -40,6 +40,7 @@ class KubejsFtbPipelineView(ft.Column):
         self._poller = PollerHandle()
         self._running = False
         self._candidates: list[str] = []
+        self._source_generation = 0
 
         self.source_field = kit.text_field(
             "來源資料夾／模組包根目錄",
@@ -75,6 +76,7 @@ class KubejsFtbPipelineView(ft.Column):
         )
         self.include_kubejs = ft.Checkbox(label="KubeJS", value=True)
         self.include_ftb = ft.Checkbox(label="FTB Quests", value=True)
+        self.translate_missing = ft.Checkbox(label="LM 翻譯待處理", value=False)
         self.execution_hint = kit.hint_text(
             "預覽按鈕只讀來源與目前 DB；正式按鈕才會同步 DB 並發布 overlay。"
         )
@@ -157,9 +159,9 @@ class KubejsFtbPipelineView(ft.Column):
 
     def _source_changed(self, _e=None) -> None:
         """來源路徑變更後清除舊候選，避免執行時沿用前一個模組包根目錄。"""
-        if not self._candidates and not self.root_dropdown.value:
-            return
+        self._source_generation += 1
         self._candidates = []
+        self.discover_button.disabled = False
         self.root_dropdown.value = None
         kit.set_dropdown_options(self.root_dropdown, [])
         self.source_summary.value = "來源已變更，請重新分析來源。"
@@ -203,6 +205,7 @@ class KubejsFtbPipelineView(ft.Column):
             ft.Column(
                 [
                     ft.Row([self.include_kubejs, self.include_ftb], spacing=16),
+                    ft.Row([self.translate_missing], spacing=16),
                     self.execution_hint,
                     ft.Row(
                         [self.preview_button, self.publish_button, self.cancel_button],
@@ -212,7 +215,7 @@ class KubejsFtbPipelineView(ft.Column):
                     self.progress,
                     self.run_summary,
                     kit.hint_text(
-                        "預覽只讀來源與目前 DB；正式執行沿用既有有效譯文，LM／Smart Review 仍由任務翻譯既有入口處理，不在此頁重造翻譯引擎。"
+                        "啟用「LM 翻譯待處理」會在同一個流水線 session 呼叫共用 ModDB LM 翻譯入口；Smart Review 仍沿用既有校對頁。"
                     ),
                 ],
                 spacing=10,
@@ -265,6 +268,7 @@ class KubejsFtbPipelineView(ft.Column):
         result = await self.file_picker.get_directory_path()
         if result:
             self.source_field.value = result
+            self._source_changed()
             await self._discover()
         else:
             self.source_summary.value = (
@@ -283,6 +287,7 @@ class KubejsFtbPipelineView(ft.Column):
             self.source_summary.color = C.RED
             self._safe_update()
             return
+        generation = self._source_generation
         self.discover_button.disabled = True
         self.source_summary.value = "分析有限深度來源候選中…"
         self.source_summary.color = C.MUTED
@@ -293,8 +298,20 @@ class KubejsFtbPipelineView(ft.Column):
             )
         except (OSError, RuntimeError, ValueError) as exc:
             candidates = []
+            if (
+                generation != self._source_generation
+                or source != (self.source_field.value or "").strip()
+            ):
+                self.discover_button.disabled = False
+                return
             self.source_summary.value = f"來源分析失敗：{exc}"
             self.source_summary.color = C.RED
+        if (
+            generation != self._source_generation
+            or source != (self.source_field.value or "").strip()
+        ):
+            self.discover_button.disabled = False
+            return
         self._candidates = candidates
         kit.set_dropdown_options(
             self.root_dropdown,
@@ -376,6 +393,7 @@ class KubejsFtbPipelineView(ft.Column):
                 dry_run=dry_run,
                 publish=publish,
                 pack_root=pack_root,
+                translate_missing=bool(self.translate_missing.value),
             ),
             name="KubeJS / FTB 流水線",
             owner="kubejs-ftb-pipeline",
@@ -437,6 +455,15 @@ class KubejsFtbPipelineView(ft.Column):
             return
         coverage = summary.get("coverage") or {}
         kinds = coverage.get("kind_counts") or {}
+        translation = summary.get("translation") or {}
+        translation_line = ""
+        if translation:
+            translation_line = (
+                f"\nLM 翻譯：{translation.get('status', '—')}　"
+                f"候選 {translation.get('candidates', 0):,}　"
+                f"寫入 {translation.get('written', 0):,}　"
+                f"預估批次 {translation.get('planned_batches', 0):,}"
+            )
         self.run_summary.value = (
             f"run_id={summary.get('run_id', '—')}　狀態={summary.get('state', '—')}\n"
             f"模式={summary.get('scan_mode', '—')}　"
@@ -444,6 +471,7 @@ class KubejsFtbPipelineView(ft.Column):
             f"候選 {coverage.get('items_found', 0):,}　引用 {coverage.get('references_found', 0):,}\n"
             f"待同步 {((summary.get('sync') or {}).get('items_to_sync', 0)):,}　"
             f"未變更略過 {((summary.get('sync') or {}).get('items_unchanged', 0)):,}"
+            f"{translation_line}"
         )
         self.source_summary.value = (
             f"來源根：{summary.get('source_root', '—')}\n"

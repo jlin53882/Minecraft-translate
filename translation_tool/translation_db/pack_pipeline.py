@@ -1,8 +1,8 @@
 """KubeJS／FTB Quests 與 ModDB 共用的模組包執行契約。
 
 這個 orchestrator 不建立第二個資料庫，也不執行 JavaScript。它把既有的
-``pack_sources`` 掃描器、``TranslationDB`` ingest 與 ``pack_output`` writer
-串成可預覽、可重試、可記錄的單次 run；翻譯本身仍交給既有任務翻譯入口。
+``pack_sources`` 掃描器、``TranslationDB`` ingest、共用翻譯入口與
+``pack_output`` writer 串成可預覽、可重試、可記錄的單次 run。
 """
 
 from __future__ import annotations
@@ -12,6 +12,7 @@ import json
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,7 @@ class PackPipelineOptions:
     publish: bool = False
     output_root: str | None = None
     run_workspace: str | None = None
+    translate_missing: bool = False
 
     def __post_init__(self) -> None:
         if self.scan_mode not in {"full", "incremental"}:
@@ -92,6 +94,9 @@ class PackPipelineReport:
     ingest: IngestStats = field(default_factory=IngestStats)
     output: PackOutputReport | None = None
     manifest_path: str = ""
+    translation: dict[str, Any] | None = None
+    output_published: bool = False
+    manifest_error: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -124,6 +129,11 @@ class PackPipelineReport:
             },
             "ingest": self.ingest.__dict__.copy(),
             "output": self.output.as_dict() if self.output else None,
+            "translation": dict(self.translation) if self.translation else None,
+            "publish": {
+                "committed": self.output_published,
+                "manifest_error": self.manifest_error,
+            },
             "issues_detail": list(self.issues),
             "manifest_path": self.manifest_path,
         }
@@ -156,27 +166,18 @@ def run_pack_pipeline(
     *,
     session=None,
     pack_root: str | Path | None = None,
+    translation_runner: Callable[..., Any] | None = None,
 ) -> PackPipelineReport:
     """執行來源分析、DB 同步與可選 overlay 輸出。
 
     ``dry_run`` 永遠只讀來源；``publish`` 只有在 dry-run 驗證成功後才會發布。
     ``db`` 為 None 時可做純來源預覽，但不能發布 overlay。
     """
-    if options.publish:
-        if options.dry_run:
-            raise PackPipelineError("正式發布不可使用預覽模式")
-        if db is None:
-            raise PackPipelineError("發布 overlay 需要資料庫")
-        if not options.output_root:
-            raise PackPipelineError("發布 overlay 需要輸出路徑")
+    _validate_run_options(db, options)
     started = time.perf_counter()
     _raise_if_cancelled(session)
     run_id = uuid.uuid4().hex[:16]
-    root = (
-        Path(pack_root).expanduser().resolve()
-        if pack_root
-        else resolve_pack_root(source)[0]
-    )
+    root = _resolve_selected_pack_root(source, pack_root)
     scan_started = time.perf_counter()
     result = _scan_selected_sources(root, options)
     scan_elapsed = time.perf_counter() - scan_started
@@ -207,39 +208,172 @@ def run_pack_pipeline(
     _set_progress(session, 0.65)
     _raise_if_cancelled(session)
 
-    if options.publish and report.issues:
-        report.state = "blocked"
-        report.elapsed_sec = time.perf_counter() - started
-        report.timing_sec["total"] = report.elapsed_sec
-        report.manifest_path = _write_run_manifest(report, options, result, db=db)
-        _log(
-            session,
-            f"⛔ [{run_id}] 發布停止：來源有 {len(report.issues):,} 筆未解決問題；"
-            f"詳見 {report.manifest_path}",
-        )
-        if session is not None:
-            session.set_summary(report.as_dict())
-        raise PackPipelineError(
-            f"來源掃描有 {len(report.issues):,} 筆問題，為避免發布不完整 overlay 已停止；"
-            f"報告：{report.manifest_path}"
-        )
-
-    output_started = time.perf_counter()
-    if options.output_root and db is not None:
-        report.output = _export_output(db, root, options, result.pack_scope, session)
-    elif options.publish:
-        raise PackPipelineError("發布 overlay 需要輸出路徑與資料庫")
-    report.timing_sec["output"] = time.perf_counter() - output_started
-    _set_progress(session, 0.95)
+    _run_translation_phase(
+        db,
+        result,
+        options,
+        report,
+        session,
+        run_id,
+        translation_runner,
+    )
     _raise_if_cancelled(session)
+    _block_publish_with_issues(db, options, report, result, session, started, run_id)
+    _export_requested_output(db, root, options, result.pack_scope, report, session)
+    return _complete_pipeline(report, options, result, db, session, started, run_id)
 
-    report.state = "done" if not report.issues else "done_with_warnings"
+
+def _validate_run_options(
+    db: TranslationDB | None, options: PackPipelineOptions
+) -> None:
+    if not options.publish:
+        return
+    if options.dry_run:
+        raise PackPipelineError("正式發布不可使用預覽模式")
+    if db is None:
+        raise PackPipelineError("發布 overlay 需要資料庫")
+    if not options.output_root:
+        raise PackPipelineError("發布 overlay 需要輸出路徑")
+
+
+def _run_translation_phase(
+    db: TranslationDB | None,
+    result: PackScanResult,
+    options: PackPipelineOptions,
+    report: PackPipelineReport,
+    session,
+    run_id: str,
+    translation_runner: Callable[..., Any] | None,
+) -> None:
+    if not options.translate_missing:
+        return
+    if db is None:
+        raise PackPipelineError("LM 翻譯需要資料庫")
+    if report.issues:
+        _log(session, f"⏭️ [{run_id}] 來源有問題，跳過 LM 翻譯；請先處理掃描問題")
+        return
+    if translation_runner is None:
+        raise PackPipelineError("LM 翻譯已啟用，但未提供共用翻譯服務入口")
+
+    translation_started = time.perf_counter()
+    _log(session, f"🧠 [{run_id}] 啟動共用 ModDB LM 翻譯 phase")
+    translation_result = translation_runner(db, result, options, session)
+    report.translation = _translation_summary(translation_result)
+    report.timing_sec["translation"] = time.perf_counter() - translation_started
+    status = str(report.translation.get("status") or "").upper()
+    if status in {"ERROR", "CANCELLED"}:
+        report.issues.append(
+            {
+                "status": "translation_failed",
+                "reason": status.lower(),
+                "detail": "共用 ModDB LM 翻譯 phase 未完成",
+            }
+        )
+    _log(
+        session,
+        f"🧠 [{run_id}] LM 翻譯 phase 完成："
+        f"狀態={status or 'UNKNOWN'}，"
+        f"候選={report.translation.get('candidates', 0):,}，"
+        f"寫入={report.translation.get('written', 0):,}，"
+        f"預估批次={report.translation.get('planned_batches', 0):,}",
+    )
+
+
+def _block_publish_with_issues(
+    db: TranslationDB | None,
+    options: PackPipelineOptions,
+    report: PackPipelineReport,
+    result: PackScanResult,
+    session,
+    started: float,
+    run_id: str,
+) -> None:
+    if not options.publish or not report.issues:
+        return
+    report.state = "blocked"
     report.elapsed_sec = time.perf_counter() - started
     report.timing_sec["total"] = report.elapsed_sec
     report.manifest_path = _write_run_manifest(report, options, result, db=db)
+    _log(
+        session,
+        f"⛔ [{run_id}] 發布停止：來源有 {len(report.issues):,} 筆未解決問題；"
+        f"詳見 {report.manifest_path}",
+    )
+    if session is not None:
+        session.set_summary(report.as_dict())
+    raise PackPipelineError(
+        f"來源掃描有 {len(report.issues):,} 筆問題，為避免發布不完整 overlay 已停止；"
+        f"報告：{report.manifest_path}"
+    )
+
+
+def _export_requested_output(
+    db: TranslationDB | None,
+    root: Path,
+    options: PackPipelineOptions,
+    scope: str,
+    report: PackPipelineReport,
+    session,
+) -> None:
+    output_started = time.perf_counter()
+    if options.output_root and db is not None:
+        report.output = _export_output(db, root, options, scope, session)
+    elif options.publish:
+        raise PackPipelineError("發布 overlay 需要輸出路徑與資料庫")
+    report.timing_sec["output"] = time.perf_counter() - output_started
+    report.output_published = bool(
+        options.publish and report.output is not None and report.output.ok
+    )
+    _set_progress(session, 0.95)
+    if (
+        report.output_published
+        and session is not None
+        and getattr(session, "cancel_requested", False)
+    ):
+        _log(session, "ℹ️ 發布提交點已完成；忽略之後才到達的取消請求")
+
+
+def _complete_pipeline(
+    report: PackPipelineReport,
+    options: PackPipelineOptions,
+    result: PackScanResult,
+    db: TranslationDB | None,
+    session,
+    started: float,
+    run_id: str,
+) -> PackPipelineReport:
+    report.state = "done" if not report.issues else "done_with_warnings"
+    report.elapsed_sec = time.perf_counter() - started
+    report.timing_sec["total"] = report.elapsed_sec
+    try:
+        report.manifest_path = _write_run_manifest(report, options, result, db=db)
+    except (OSError, UnicodeError, TypeError, ValueError) as exc:
+        report.manifest_error = str(exc)
+        if not report.output_published:
+            raise PackPipelineError(f"執行 manifest 寫入失敗：{exc}") from exc
+        report.state = "published_with_manifest_error"
+        _log(
+            session,
+            f"⚠️ [{run_id}] overlay 已發布，但 manifest 寫入失敗：{exc}",
+        )
     _log(session, f"✅ [{run_id}] 執行完成：{report.state}")
     _set_progress(session, 1.0)
     return report
+
+
+def _resolve_selected_pack_root(
+    source: str | Path, pack_root: str | Path | None
+) -> Path:
+    """重新驗證 UI 選定的根目錄仍屬於目前來源快照。"""
+    if pack_root is None:
+        return resolve_pack_root(source)[0]
+    selected = Path(pack_root).expanduser().resolve()
+    current_candidates = discover_pack_roots(source)
+    if selected not in current_candidates:
+        raise PackPipelineError(
+            "來源在分析後已變更，選定的模組包根目錄不再屬於目前來源；請重新分析"
+        )
+    return selected
 
 
 def _scan_selected_sources(root: Path, options: PackPipelineOptions) -> PackScanResult:
@@ -392,12 +526,42 @@ def _export_output(
 ) -> PackOutputReport:
     output = Path(options.output_root).expanduser().resolve()
     preview = export_pack_overlay(
-        db, root, options.version, output, pack_scope=scope, dry_run=True
+        db,
+        root,
+        options.version,
+        output,
+        pack_scope=scope,
+        dry_run=True,
+        allowed_kinds=_selected_pack_kinds(options),
     )
     _log(session, f"📋 overlay 預覽：{preview.entries_considered:,} 筆候選")
     if not options.publish:
         return preview
-    return export_pack_overlay(db, root, options.version, output, pack_scope=scope)
+    return export_pack_overlay(
+        db,
+        root,
+        options.version,
+        output,
+        pack_scope=scope,
+        allowed_kinds=_selected_pack_kinds(options),
+    )
+
+
+def _selected_pack_kinds(options: PackPipelineOptions) -> frozenset[str]:
+    kinds: set[str] = set()
+    if options.include_kubejs:
+        kinds.update(KUBEJS_KINDS)
+    if options.include_ftb:
+        kinds.update(FTB_KINDS)
+    return frozenset(kinds)
+
+
+def _translation_summary(value: Any) -> dict[str, Any]:
+    if hasattr(value, "as_dict"):
+        return dict(value.as_dict())
+    if isinstance(value, dict):
+        return dict(value)
+    raise PackPipelineError("共用翻譯服務沒有回傳可序列化的報告")
 
 
 def _coverage_log(report: PackPipelineReport) -> str:
@@ -520,8 +684,11 @@ def _translation_plan_report(
 ) -> dict[str, Any]:
     return {
         "schema": "minecraft_translate.pack_translation_plan.v1",
-        "existing_translation_only": True,
-        "lm_delegated_to_existing_task": True,
+        "existing_translation_only": not options.translate_missing,
+        "lm_delegated_to_existing_task": not options.translate_missing,
+        "translation_phase": (
+            "shared_moddb_lm" if options.translate_missing else "external_task"
+        ),
         "items_planned": len(result.items),
         "items_to_sync": report.items_to_sync,
         "items_unchanged": report.items_unchanged,
@@ -547,6 +714,11 @@ def _execution_manifest_report(report: PackPipelineReport) -> dict[str, Any]:
         "timing_sec": dict(report.timing_sec),
         "ingest": report.ingest.__dict__.copy(),
         "output": report.output.as_dict() if report.output else None,
+        "translation": dict(report.translation) if report.translation else None,
+        "publish": {
+            "committed": report.output_published,
+            "manifest_error": report.manifest_error,
+        },
         "issues": list(report.issues),
     }
 
@@ -592,6 +764,10 @@ def _manifest_steps(
         "db_sync": {
             "state": "done" if db is not None else "skipped",
             "elapsed_sec": report.timing_sec.get("db_sync", 0.0),
+        },
+        "translation": {
+            "state": "done" if report.translation else "skipped",
+            "elapsed_sec": report.timing_sec.get("translation", 0.0),
         },
         "output": {
             "state": _output_step_state(output),

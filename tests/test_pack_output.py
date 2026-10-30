@@ -10,17 +10,27 @@ import ftb_snbt_lib as snbt
 import pytest
 
 from tests.test_pack_sources import _write_fixture
-from translation_tool.translation_db.models import ScanItem
+from translation_tool.translation_db.models import (
+    EffectivePackTranslation,
+    EntryOrigin,
+    ScanItem,
+)
 from translation_tool.translation_db.pack_output import (
     PackOutputError,
+    PackOutputReport,
+    _check_rescan_identity,
+    _PlannedTranslation,
+    _validate_stage_files,
     export_pack_overlay,
 )
 from translation_tool.translation_db.pack_sources import (
+    PackScanResult,
     pack_scope_for_root,
     scan_pack_sources,
 )
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
+from translation_tool.translation_db.schema import KIND_KUBEJS_LANG
 
 
 def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Path):
@@ -115,6 +125,123 @@ def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Pa
         assert second_hashes == first_hashes
     finally:
         db.close()
+
+
+def test_kubejs_lang_script_round_trip_maps_en_us_to_emitted_zh_tw_selector(
+    tmp_path: Path,
+):
+    """追加的 zh_tw ClientEvents.lang 必須能被同一 scanner 找回。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo.key', 'Original');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind=? AND e.key=? AND eo.pack_scope=? LIMIT 1",
+            (KIND_KUBEJS_LANG, "demo.key", scope),
+        )[0]
+        db.save_manual(entry_id, "翻譯後", propagate=False)
+
+        report = export_pack_overlay(
+            db,
+            tmp_path,
+            "1.21.1",
+            tmp_path.parent / "kubejs-lang-overlay",
+            pack_scope=scope,
+        )
+
+        assert report.ok
+        emitted = (
+            tmp_path.parent / "kubejs-lang-overlay" / "kubejs/client_scripts/lang.js"
+        ).read_text(encoding="utf-8")
+        assert "ClientEvents.lang('zh_tw'" in emitted
+        assert "翻譯後" in emitted
+        assert report.entries_rescan_verified == report.entries_applied
+    finally:
+        db.close()
+
+
+def test_rescan_identity_uses_one_index_and_reports_duplicate_conflicts():
+    """大批量重掃描不可退化成每筆計畫線性掃描。"""
+    scope = "pack-scope"
+    plans: list[_PlannedTranslation] = []
+    scanned: list[ScanItem] = []
+    for index in range(2_000):
+        source_path = f"client_scripts/{index}.js"
+        selector = f"ItemEvents.tooltip.event.add[demo:{index}|1]"
+        origin = EntryOrigin(scope, "kubejs_script", source_path, selector)
+        item = EffectivePackTranslation(
+            index,
+            "kubejs_script",
+            f"kubejs@{scope}",
+            f"key-{index}",
+            "Original",
+            "翻譯",
+            origin,
+        )
+        plans.append(_PlannedTranslation(item, f"kubejs-script/{source_path}", "翻譯"))
+        scanned.append(
+            ScanItem(
+                "kubejs_script",
+                f"kubejs@{scope}",
+                f"key-{index}",
+                "Original",
+                zh_tw="翻譯",
+                source_path=source_path,
+                source_selector=selector,
+            )
+        )
+
+    report = PackOutputReport(scope, "output", True)
+    _check_rescan_identity(
+        plans, PackScanResult(pack_scope=scope, items=scanned), report
+    )
+    assert report.entries_rescan_verified == len(plans)
+    assert report.unapplied == []
+
+    duplicate = scanned[0]
+    conflicting = ScanItem(
+        duplicate.kind,
+        duplicate.mod_id,
+        duplicate.key,
+        duplicate.en_us,
+        zh_tw="另一個翻譯",
+        source_path=duplicate.source_path,
+        source_selector=duplicate.source_selector,
+    )
+    duplicate_report = PackOutputReport(scope, "output", True)
+    _check_rescan_identity(
+        plans[:1],
+        PackScanResult(pack_scope=scope, items=[duplicate, conflicting]),
+        duplicate_report,
+    )
+    assert duplicate_report.conflicts
+
+
+def test_stage_validation_uses_javascript_parser(tmp_path: Path):
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    (stage / "broken.js").write_text("function (", encoding="utf-8")
+    report = PackOutputReport("scope", str(tmp_path / "output"), True)
+
+    _validate_stage_files(stage, report)
+
+    assert any("JS 語法驗證失敗" in message for message in report.unapplied)
 
 
 def test_export_rejects_a_changed_source_before_writing(tmp_path: Path):

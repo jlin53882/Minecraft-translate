@@ -6,6 +6,10 @@ import logging
 import traceback
 
 from app.services_impl.moddb_service import open_database
+from app.services_impl.moddb_translate_service import (
+    TranslateOptions,
+    run_moddb_translate_service,
+)
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.translation_db.pack_pipeline import (
     PackPipelineOptions,
@@ -34,6 +38,7 @@ def run_kubejs_ftb_pipeline_service(
     dry_run: bool = True,
     publish: bool = False,
     pack_root: str | None = None,
+    translate_missing: bool = False,
 ):
     """以既有 TaskSession 執行一次可取消的來源／DB／overlay run。"""
     db = None
@@ -52,13 +57,35 @@ def run_kubejs_ftb_pipeline_service(
             dry_run=dry_run,
             publish=publish,
             output_root=output_root,
+            translate_missing=translate_missing,
         )
+
+        def translate_pack_missing(current_db, result, pipeline_options, task_session):
+            mod_ids = tuple(
+                sorted({item.mod_id for item in result.items if item.mod_id})
+            )
+            if not mod_ids:
+                return {"status": "DONE", "candidates": 0, "planned_batches": 0}
+            return run_moddb_translate_service(
+                TranslateOptions(
+                    version=pipeline_options.version,
+                    mod_ids=mod_ids,
+                    limit=0,
+                    dry_run=pipeline_options.dry_run,
+                    write_cache=not pipeline_options.dry_run,
+                ),
+                task_session,
+                manage_session=False,
+                db_override=current_db,
+            )
+
         report = run_pack_pipeline(
             db,
             source,
             options,
             session=session,
             pack_root=pack_root,
+            translation_runner=translate_pack_missing if translate_missing else None,
         )
         session.set_summary(report.as_dict())
         return report

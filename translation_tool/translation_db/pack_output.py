@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import tempfile
 import uuid
 from collections import defaultdict
@@ -118,6 +119,7 @@ def export_pack_overlay(
     *,
     pack_scope: str | None = None,
     dry_run: bool = False,
+    allowed_kinds: frozenset[str] | set[str] | None = None,
 ) -> PackOutputReport:
     """輸出生效譯文 overlay，不修改來源模組包或資料庫。
 
@@ -137,6 +139,13 @@ def export_pack_overlay(
     _validate_output_destination(root, output, scope)
     report = PackOutputReport(str(scope), str(output), bool(dry_run))
     items = db.effective_pack_translations(version, scope)
+    if allowed_kinds is not None:
+        selected_kinds = frozenset(allowed_kinds)
+        items = [
+            item
+            for item in items
+            if item.kind in selected_kinds or item.origin.source_kind in selected_kinds
+        ]
     report.entries_considered = len(items)
     plans = _make_plan(root, items, report)
     _validate_sources(root, plans, report)
@@ -589,22 +598,60 @@ def _validate_stage_files(stage: Path, report: PackOutputReport) -> None:
             elif path.suffix.lower() == ".snbt" and walk_snbt_file(str(path)) is None:
                 report.unapplied.append(f"{path} (SNBT 無法重新解析)")
             elif path.suffix.lower() == ".js":
-                path.read_text(encoding="utf-8")
+                _validate_javascript_file(path, report)
         except (OSError, UnicodeError, ValueError) as exc:
             report.unapplied.append(f"{path} (輸出格式驗證失敗：{exc})")
+
+
+def _validate_javascript_file(path: Path, report: PackOutputReport) -> None:
+    """用 Node 的 parser 驗證完整輸出腳本，而不把 UTF-8 可讀誤當成語法正確。"""
+    node = shutil.which("node")
+    if not node:
+        report.unapplied.append(f"{path} (JS 語法驗證失敗：找不到 node)")
+        return
+    try:
+        result = subprocess.run(
+            [node, "--check", str(path)],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        report.unapplied.append(f"{path} (JS 語法驗證失敗：{exc})")
+        return
+    if result.returncode:
+        detail = (result.stderr or result.stdout or "語法錯誤").strip()
+        report.unapplied.append(f"{path} (JS 語法驗證失敗：{detail})")
 
 
 def _check_rescan_identity(
     plans: list[_PlannedTranslation], result: PackScanResult, report: PackOutputReport
 ) -> None:
     """以 kind/path/selector/key 對齊掃描結果，不以連續 ordinal 猜測。"""
+    index = _build_rescan_index(result)
     for plan in plans:
-        item = _find_rescanned_item(plan, result)
-        if item is None:
+        candidates = _find_rescanned_items(plan, index)
+        if not candidates:
             report.unapplied.append(
                 f"{plan.item.origin.source_path}:{plan.item.origin.selector} (重掃描未找到)"
             )
             continue
+        values = {item.zh_tw or item.en_us for item in candidates}
+        if len(values) > 1:
+            report.conflicts.append(
+                f"重掃描 identity 碰撞：{plan.item.origin.source_path}:"
+                f"{plan.item.origin.selector} ({len(candidates)} 筆不同內容)"
+            )
+            continue
+        item = next(
+            (
+                candidate
+                for candidate in candidates
+                if (candidate.zh_tw or candidate.en_us) == plan.value
+            ),
+            candidates[0],
+        )
         diagnostics = analyze_format_diagnostics(
             plan.item.en_us, plan.value, kind=plan.item.kind
         )
@@ -617,43 +664,86 @@ def _check_rescan_identity(
         value = item.zh_tw or item.en_us
         if value != plan.value:
             report.unapplied.append(
-                f"{plan.item.origin.source_path}:{plan.item.selector} (重掃描內容不一致)"
+                f"{plan.item.origin.source_path}:{plan.item.origin.selector} (重掃描內容不一致)"
             )
             continue
         report.entries_rescan_verified += 1
 
 
-def _find_rescanned_item(
-    plan: _PlannedTranslation, result: PackScanResult
-) -> Any | None:
+def _build_rescan_index(
+    result: PackScanResult,
+) -> dict[tuple[str, str, str], list[Any]]:
+    """一次建立重掃描 identity index，避免每個計畫反覆線性掃描結果。"""
+    index: dict[tuple[str, str, str], list[Any]] = defaultdict(list)
+    for item in result.items:
+        exact_key = (item.kind, item.source_path, item.source_selector)
+        index[exact_key].append(item)
+        if (
+            item.kind in _KUBEJS_LANG_KINDS
+            and "ClientEvents.lang[" in item.source_selector
+        ):
+            index[
+                (
+                    item.kind,
+                    item.source_path,
+                    _kubejs_normalized_selector(item.source_selector),
+                )
+            ].append(item)
+    return index
+
+
+def _find_rescanned_items(
+    plan: _PlannedTranslation,
+    index: dict[tuple[str, str, str], list[Any]],
+) -> list[Any]:
     origin = plan.item.origin
     if _is_kubejs_json_origin(origin):
         target_path = plan.target
         key = _lang_key(plan.item.key)
-        return next(
-            (
-                item
-                for item in result.items
-                if item.kind == KIND_KUBEJS_LANG
-                and item.source_path == target_path
-                and item.source_selector == f"lang:zh_tw:{key}"
-            ),
-            None,
-        )
+        return index.get((KIND_KUBEJS_LANG, target_path, f"lang:zh_tw:{key}"), [])
+    if _is_kubejs_js_origin(origin):
+        selector = _kubejs_emitted_selector(origin.selector)
+        candidates: list[Any] = []
+        for kind in (KIND_KUBEJS_LANG, KIND_LANG):
+            candidates.extend(
+                index.get((kind, origin.source_path, selector), [])
+                or index.get(
+                    (
+                        kind,
+                        origin.source_path,
+                        _kubejs_normalized_selector(selector),
+                    ),
+                    [],
+                )
+            )
+        matching = [
+            item for item in candidates if (item.zh_tw or item.en_us) == plan.value
+        ]
+        return matching or candidates
     target_path = origin.source_path
     kind = origin.source_kind
     if origin.source_kind in {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS}:
         target_path = target_path.removeprefix("config/ftbquests/quests/")
-    return next(
-        (
-            item
-            for item in result.items
-            if item.kind == kind
-            and item.source_path == target_path
-            and item.source_selector == origin.selector
-        ),
-        None,
+    return index.get((kind, target_path, origin.selector), [])
+
+
+def _kubejs_emitted_selector(selector: str) -> str:
+    """把英文 ClientEvents.lang identity 對應到 writer 產生的 zh_tw identity。"""
+    match = _KUBEJS_LANG_SELECTOR.match(selector)
+    if match is None or match.group("locale").lower() != "en_us":
+        return selector
+    return selector.replace("ClientEvents.lang[en_us]", "ClientEvents.lang[zh_tw]", 1)
+
+
+def _kubejs_normalized_selector(selector: str) -> str:
+    """忽略輸出追加區塊重新編號的 locale occurrence。"""
+    normalized = re.sub(
+        r"ClientEvents\.lang\[[^\]]+\]",
+        "ClientEvents.lang[zh_tw]",
+        selector,
+        count=1,
     )
+    return re.sub(r"(\.event\.add\[)\d+(\])", r"\1*\2", normalized, count=1)
 
 
 def _sha256(path: Path) -> str:
