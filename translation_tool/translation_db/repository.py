@@ -707,6 +707,29 @@ class TranslationDB(
         """掃描預覽用的分類目標：只讀這個資料庫，分類規則與 :meth:`ingest_many` 相同。"""
         return PreviewIngestTarget(lambda sql, params: self._q(sql, params), version)
 
+    def pack_origin_hashes(
+        self, version: str, pack_scope: str
+    ) -> dict[tuple[str, str, str, str], frozenset[str]]:
+        """回傳指定模組包已同步來源的 hash。
+
+        增量同步只會略過 ``kind``、模組身分、相對路徑與 selector 都相同，
+        且來源 hash 仍相同的條目。以 hash set 表示同一 selector 若資料庫歷史
+        上存在多個來源版本，避免錯把不一致的來源當成已同步。
+        """
+        rows = self._q(
+            "SELECT e.kind, e.mod_id, eo.source_path, eo.selector, eo.source_hash "
+            "FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.mc_version=? AND eo.pack_scope=?",
+            (version, pack_scope),
+        )
+        hashes: dict[tuple[str, str, str, str], set[str]] = {}
+        for kind, mod_id, source_path, selector, source_hash in rows:
+            if not source_hash:
+                continue
+            key = (str(kind), str(mod_id), str(source_path), str(selector))
+            hashes.setdefault(key, set()).add(str(source_hash))
+        return {key: frozenset(values) for key, values in hashes.items()}
+
     @staticmethod
     def _content_issue_row(
         issue: dict[str, Any],

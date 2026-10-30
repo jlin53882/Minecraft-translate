@@ -96,6 +96,9 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
         "app/views/translation_view.py",
         "app/views/translation/**/*.py",
     ),
+    "KUBEJS_FTB_PIPELINE_VIEW_ARCHITECTURE.md": (
+        "app/views/kubejs_ftb_pipeline_view.py",
+    ),
     "UNTRANSLATED_CHECKER_ARCHITECTURE.md": (
         "app/views/untranslated_checker.py",
         "app/views/qc_view.py",  # 文件說明 QCView 的 start_task 分派

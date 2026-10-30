@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -19,13 +20,19 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import walk_snbt_file
 from translation_tool.plugins.ftbquests.ftbquests_snbt_inject import (
     patch_lang_snbt_file,
     patch_quest_snbt_file,
 )
 from translation_tool.plugins.kubejs.kubejs_tooltip_inject import inject
 from translation_tool.translation_db.models import EffectivePackTranslation
-from translation_tool.translation_db.pack_sources import pack_scope_for_root
+from translation_tool.translation_db.pack_sources import (
+    PackScanResult,
+    pack_scope_for_root,
+    scan_pack_sources,
+)
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUEST_LANG,
@@ -63,6 +70,8 @@ class PackOutputReport:
     entries_verified: int = 0
     files_written: int = 0
     source_files_checked: int = 0
+    entries_reparsed: int = 0
+    entries_rescan_verified: int = 0
     unsupported: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
     stale_sources: list[str] = field(default_factory=list)
@@ -84,6 +93,8 @@ class PackOutputReport:
             "entries_verified": self.entries_verified,
             "files_written": self.files_written,
             "source_files_checked": self.source_files_checked,
+            "entries_reparsed": self.entries_reparsed,
+            "entries_rescan_verified": self.entries_rescan_verified,
             "unsupported": list(self.unsupported),
             "conflicts": list(self.conflicts),
             "stale_sources": list(self.stale_sources),
@@ -139,6 +150,9 @@ def export_pack_overlay(
     stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.stage-", dir=output.parent))
     try:
         report.entries_applied = _write_plan(root, stage, plans, report)
+        if not report.ok:
+            raise PackOutputError(_format_report_error(report))
+        _verify_stage_with_rescan(root, stage, version, plans, report)
         if not report.ok:
             raise PackOutputError(_format_report_error(report))
         _write_output_ownership_marker(stage, root, scope)
@@ -208,6 +222,28 @@ def _target_for(item: EffectivePackTranslation) -> str | None:
     return None
 
 
+def overlay_target_path(
+    kind: str, source_path: str, *, format_profile: str = ""
+) -> str | None:
+    """回傳來源條目在模組包 overlay 中的相對目標路徑。
+
+    這是 manifest 與輸出契約共用的唯一路徑映射；不把 KubeJS／FTB 內容
+    假裝成 Resource Pack，也不讓報告自行複製另一套路徑規則。
+    """
+    relative = _safe_relative(source_path)
+    if kind == KIND_KUBEJS_SCRIPT or (
+        kind == KIND_KUBEJS_LANG and format_profile == "kubejs-js"
+    ):
+        return f"kubejs/{relative}"
+    if kind == KIND_KUBEJS_LANG:
+        return f"kubejs/{_kubejs_lang_target(relative)}"
+    if kind == KIND_FTB_QUESTS:
+        return f"config/ftbquests/quests/{relative}"
+    if kind == KIND_FTB_QUEST_LANG:
+        return f"config/ftbquests/quests/{_ftb_lang_target(relative)}"
+    return None
+
+
 def _target_selector(item: EffectivePackTranslation) -> str:
     origin = item.origin
     if _is_kubejs_json_origin(origin):
@@ -255,6 +291,8 @@ def _validate_sources(
         if not source.is_file():
             report.stale_sources.append(str(source))
             continue
+        if not _source_path_is_safe(pack_root, source):
+            report.stale_sources.append(f"{source} (symbolic link 或 junction)")
     expected_by_source: dict[Path, set[str]] = defaultdict(set)
     for plan in plans:
         source = _source_path(pack_root, plan.item)
@@ -442,12 +480,180 @@ def _safe_relative(value: str) -> str:
 
 def _safe_join(root: Path, value: str) -> Path:
     relative = Path(_safe_relative(value))
+    _reject_reparse_components(root, relative)
     resolved = (root / relative).resolve()
     try:
         resolved.relative_to(root.resolve())
     except ValueError as exc:
         raise PackOutputError(f"來源路徑越界：{value}") from exc
     return resolved
+
+
+def _reject_reparse_components(root: Path, relative: Path) -> None:
+    """拒絕來源路徑中的 symlink、junction 或 Windows reparse point。"""
+    current = root
+    for part in relative.parts:
+        current /= part
+        if _is_reparse_point(current):
+            raise PackOutputError(
+                f"來源路徑包含 symlink/junction/reparse point：{current}"
+            )
+
+
+def _is_reparse_point(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if callable(is_junction) and is_junction():
+        return True
+    is_junction = getattr(os.path, "isjunction", None)
+    return bool(is_junction and is_junction(path))
+
+
+def _source_path_is_safe(pack_root: Path, source: Path) -> bool:
+    """確認來源檔案與其父層沒有把輸出導向模組包外的 reparse point。"""
+    try:
+        relative = source.resolve().relative_to(pack_root.resolve())
+    except ValueError:
+        return False
+    current = pack_root.resolve()
+    for part in relative.parts:
+        current /= part
+        if current.is_symlink():
+            return False
+        if _is_reparse_point(current):
+            return False
+    return True
+
+
+def _verify_stage_with_rescan(
+    pack_root: Path,
+    stage: Path,
+    version: str,
+    plans: list[_PlannedTranslation],
+    report: PackOutputReport,
+) -> None:
+    """在發布前以同一掃描器重讀 stage，避免只相信 writer 的計數。"""
+    if not plans:
+        return
+    _validate_stage_files(stage, report)
+    if report.unapplied:
+        return
+    with tempfile.TemporaryDirectory(prefix="pack-output-rescan-") as temp:
+        verification_root = Path(temp)
+        _copy_plan_sources(pack_root, verification_root, plans)
+        _copy_stage_files(stage, verification_root)
+        result = scan_pack_sources(verification_root, version)
+        report.entries_reparsed = len(result.items)
+        for issue in result.issues:
+            reason = issue.get("reason", "unknown")
+            source = issue.get("source_path") or issue.get("source_archive") or "來源"
+            report.unapplied.append(f"重掃描問題：{source} ({reason})")
+        _check_rescan_identity(plans, result, report)
+
+
+def _copy_plan_sources(
+    pack_root: Path, verification_root: Path, plans: list[_PlannedTranslation]
+) -> None:
+    copied: set[Path] = set()
+    for plan in plans:
+        source = _source_path(pack_root, plan.item)
+        if source in copied:
+            continue
+        copied.add(source)
+        relative = source.relative_to(pack_root)
+        destination = verification_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+
+
+def _copy_stage_files(stage: Path, verification_root: Path) -> None:
+    for path in stage.rglob("*"):
+        if not path.is_file() or path.name == _OUTPUT_OWNERSHIP_MARKER:
+            continue
+        relative = path.relative_to(stage)
+        destination = verification_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination)
+
+
+def _validate_stage_files(stage: Path, report: PackOutputReport) -> None:
+    for path in stage.rglob("*"):
+        if not path.is_file() or path.name == _OUTPUT_OWNERSHIP_MARKER:
+            continue
+        try:
+            if path.suffix.lower() == ".json":
+                value = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(value, dict):
+                    report.unapplied.append(f"{path} (JSON 根節點不是 object)")
+            elif path.suffix.lower() == ".snbt" and walk_snbt_file(str(path)) is None:
+                report.unapplied.append(f"{path} (SNBT 無法重新解析)")
+            elif path.suffix.lower() == ".js":
+                path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError, ValueError) as exc:
+            report.unapplied.append(f"{path} (輸出格式驗證失敗：{exc})")
+
+
+def _check_rescan_identity(
+    plans: list[_PlannedTranslation], result: PackScanResult, report: PackOutputReport
+) -> None:
+    """以 kind/path/selector/key 對齊掃描結果，不以連續 ordinal 猜測。"""
+    for plan in plans:
+        item = _find_rescanned_item(plan, result)
+        if item is None:
+            report.unapplied.append(
+                f"{plan.item.origin.source_path}:{plan.item.origin.selector} (重掃描未找到)"
+            )
+            continue
+        diagnostics = analyze_format_diagnostics(
+            plan.item.en_us, plan.value, kind=plan.item.kind
+        )
+        if diagnostics.has_issues:
+            report.unapplied.append(
+                f"{plan.item.origin.source_path}:{plan.item.origin.selector} "
+                f"(格式驗證失敗：{'；'.join(diagnostics.summary_lines)})"
+            )
+            continue
+        value = item.zh_tw or item.en_us
+        if value != plan.value:
+            report.unapplied.append(
+                f"{plan.item.origin.source_path}:{plan.item.selector} (重掃描內容不一致)"
+            )
+            continue
+        report.entries_rescan_verified += 1
+
+
+def _find_rescanned_item(
+    plan: _PlannedTranslation, result: PackScanResult
+) -> Any | None:
+    origin = plan.item.origin
+    if _is_kubejs_json_origin(origin):
+        target_path = plan.target
+        key = _lang_key(plan.item.key)
+        return next(
+            (
+                item
+                for item in result.items
+                if item.kind == KIND_KUBEJS_LANG
+                and item.source_path == target_path
+                and item.source_selector == f"lang:zh_tw:{key}"
+            ),
+            None,
+        )
+    target_path = origin.source_path
+    kind = origin.source_kind
+    if origin.source_kind in {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS}:
+        target_path = target_path.removeprefix("config/ftbquests/quests/")
+    return next(
+        (
+            item
+            for item in result.items
+            if item.kind == kind
+            and item.source_path == target_path
+            and item.source_selector == origin.selector
+        ),
+        None,
+    )
 
 
 def _sha256(path: Path) -> str:
@@ -605,4 +811,9 @@ def _format_report_error(report: PackOutputReport) -> str:
     return "；".join(parts)
 
 
-__all__ = ["PackOutputError", "PackOutputReport", "export_pack_overlay"]
+__all__ = [
+    "PackOutputError",
+    "PackOutputReport",
+    "export_pack_overlay",
+    "overlay_target_path",
+]

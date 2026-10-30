@@ -58,7 +58,7 @@ from translation_tool.translation_db.identity import (
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.pack_sources import (
     PackScanResult,
-    discover_pack_root,
+    discover_pack_roots,
     scan_pack_sources,
 )
 from translation_tool.translation_db.repository import TranslationDB
@@ -165,6 +165,8 @@ class ScanReport:
     pack_references: int = 0
     pack_locale_fallbacks: dict[str, str] = field(default_factory=dict)
     pack_root: str = ""
+    pack_root_candidates: list[str] = field(default_factory=list)
+    pack_root_ambiguous: bool = False
     pack_source_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
     issues: list[dict[str, str]] = field(default_factory=list)
@@ -204,6 +206,8 @@ class ScanReport:
             "pack_references": self.pack_references,
             "pack_locale_fallbacks": dict(sorted(self.pack_locale_fallbacks.items())),
             "pack_root": self.pack_root,
+            "pack_root_candidates": list(self.pack_root_candidates),
+            "pack_root_ambiguous": self.pack_root_ambiguous,
             "pack_source_breakdown": {
                 source: dict(sorted(stats.items()))
                 for source, stats in sorted(self.pack_source_breakdown.items())
@@ -1298,8 +1302,9 @@ def scan_folder_generator(
     pack_ingest_stats: IngestStats | None = None
     pack_root_missing = False
     if options.include_pack_content and not options.translated:
-        pack_root = discover_pack_root(folder)
-        if pack_root is None:
+        pack_roots = discover_pack_roots(folder)
+        report.pack_root_candidates = [str(root) for root in pack_roots]
+        if not pack_roots:
             pack_root_missing = True
             if jars:
                 yield {
@@ -1310,7 +1315,28 @@ def scan_folder_generator(
                     ),
                     "level": "info",
                 }
+        elif len(pack_roots) > 1:
+            report.pack_root_ambiguous = True
+            choices = "、".join(report.pack_root_candidates[:8])
+            yield {
+                "progress": 0.0,
+                "log": (
+                    f"📦 模組包來源有多個候選，未自動合併：{choices}；請明確選擇根目錄"
+                ),
+                "level": "warning",
+            }
+            pack_result.issues.append(
+                {
+                    "source_archive": str(folder),
+                    "source_member": "",
+                    "kind": "pack_source",
+                    "status": "pending",
+                    "reason": "pack_root_ambiguous",
+                    "detail": "multiple pack roots require explicit selection",
+                }
+            )
         else:
+            pack_root = pack_roots[0]
             report.pack_root = str(pack_root)
             yield {
                 "progress": 0.0,
@@ -1349,11 +1375,11 @@ def scan_folder_generator(
                 report.as_dict(),
                 issues=[],
             )
-        missing_pack_log = (
-            "📦 模組包來源未找到 kubejs 或 config/ftbquests/quests；"
-            if pack_root_missing
-            else ""
-        )
+        missing_pack_log = ""
+        if pack_root_missing:
+            missing_pack_log = "📦 模組包來源未找到 kubejs 或 config/ftbquests/quests；"
+        elif report.pack_root_ambiguous:
+            missing_pack_log = "📦 模組包來源有多個候選，尚未選定根目錄；"
         yield {
             "progress": 1.0,
             "log": (

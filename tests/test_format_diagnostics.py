@@ -38,6 +38,24 @@ def test_registered_kinds_keep_cache_and_newline_policies_explicit():
     assert advancement.newline_policy == "hard"
 
 
+def test_kubejs_lang_reuses_lang_token_diagnostics_but_keeps_kind_cache():
+    source = "Value %1$s {0} \\n"
+    translated = "值 {0} \\n"
+
+    lang = analyze_format_diagnostics(source, translated, kind="lang")
+    kubejs = analyze_format_diagnostics(source, translated, kind="kubejs_lang")
+
+    assert [
+        (issue.category, issue.identifier, issue.direction) for issue in lang.issues
+    ] == [
+        (issue.category, issue.identifier, issue.direction) for issue in kubejs.issues
+    ]
+    assert (
+        format_kind_policy("lang").cache_type
+        != format_kind_policy("kubejs_lang").cache_type
+    )
+
+
 def test_guide_diagnostics_include_structured_marks_and_exact_spans():
     source = "# Title\nSee <br> [label](target) **bold**"
     translated = "標題\nSee [label](other) **bold**"

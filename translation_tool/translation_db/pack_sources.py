@@ -205,28 +205,137 @@ class PackScanResult:
         return breakdown
 
 
-def discover_pack_root(folder: str | Path) -> Path | None:
-    """由 mods、kubejs 或模組包根目錄找出同一個 instance 根目錄。"""
+def discover_pack_roots(
+    folder: str | Path, *, max_depth: int = 4, max_candidates: int = 32
+) -> list[Path]:
+    """找出指定路徑下可用的模組包根目錄。
+
+    ``kubejs``、``config/ftbquests/quests`` 可能位於解壓包的 wrapper、
+    ``overrides`` 或直接根目錄。這裡只做有限深度、拒絕 reparse point 的
+    結構探索；多個結果不會自動合併，呼叫端必須讓使用者明確選擇。
+    """
+    current = _discovery_start(folder)
+    if current is None:
+        return []
+    roots: dict[Path, int] = {}
+    _add_discovery_root(roots, current, 0)
+    if current.name.lower() in {"mods", "kubejs", "config", "quests"}:
+        _add_discovery_root(roots, current.parent, 0)
+    for parent in current.parents[:4]:
+        _add_discovery_root(roots, parent, 1)
+    _walk_discovery_tree(current, max_depth, roots)
+    return _rank_discovery_roots(roots, max_candidates)
+
+
+def _discovery_start(folder: str | Path) -> Path | None:
     try:
         current = Path(folder).expanduser().resolve()
     except (OSError, RuntimeError):
         return None
-    if current.is_file():
-        current = current.parent
-    candidates = [current]
-    if current.name.lower() in {"mods", "kubejs"}:
-        candidates.append(current.parent)
-    candidates.extend(current.parents[:3])
-    for candidate in candidates:
-        if (candidate / "kubejs").is_dir() or (
-            candidate / "config" / "ftbquests" / "quests"
-        ).is_dir():
-            return candidate
-    return current if _has_pack_sources(current) else None
+    return current.parent if current.is_file() else current
 
 
-def scan_pack_sources(pack_root: str | Path, version: str) -> PackScanResult:
-    """掃描 KubeJS 與 FTB Quests，保守地只輸出可定位的靜態文字。"""
+def _add_discovery_root(roots: dict[Path, int], root: Path, rank: int) -> None:
+    try:
+        resolved = root.resolve()
+    except (OSError, RuntimeError):
+        return
+    if _has_pack_sources(resolved):
+        roots[resolved] = min(rank, roots.get(resolved, rank))
+
+
+def _walk_discovery_tree(start: Path, max_depth: int, roots: dict[Path, int]) -> None:
+    pending: list[tuple[Path, int]] = [(start, 0)]
+    visited: set[Path] = set()
+    while pending and len(visited) < 4096:
+        directory, depth = pending.pop()
+        if depth > max_depth:
+            continue
+        try:
+            directory = directory.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if directory in visited or _is_reparse_point(directory):
+            continue
+        visited.add(directory)
+        _add_discovery_root(roots, directory, 2 if depth else 0)
+        _visit_discovery_children(directory, depth, max_depth, roots, pending)
+
+
+def _visit_discovery_children(
+    directory: Path,
+    depth: int,
+    max_depth: int,
+    roots: dict[Path, int],
+    pending: list[tuple[Path, int]],
+) -> None:
+    try:
+        entries = sorted(os.scandir(directory), key=lambda entry: entry.name.casefold())
+    except OSError:
+        return
+    for entry in entries:
+        _queue_discovery_child(entry, depth, max_depth, roots, pending)
+
+
+def _queue_discovery_child(
+    entry: os.DirEntry,
+    depth: int,
+    max_depth: int,
+    roots: dict[Path, int],
+    pending: list[tuple[Path, int]],
+) -> None:
+    child = Path(entry.path)
+    try:
+        if entry.is_symlink() or _is_reparse_point(child):
+            return
+        if not entry.is_dir(follow_symlinks=False):
+            return
+        name = entry.name.casefold()
+        if name == "kubejs":
+            _add_discovery_root(roots, child.parent, 2)
+        elif _is_ftb_quests_directory(child, name):
+            _add_discovery_root(roots, child.parents[2], 2)
+        if depth < max_depth:
+            pending.append((child, depth + 1))
+    except OSError:
+        return
+
+
+def _is_ftb_quests_directory(child: Path, name: str) -> bool:
+    return (
+        name == "quests"
+        and child.parent.name.casefold() == "ftbquests"
+        and len(child.parents) > 2
+        and child.parents[1].name.casefold() == "config"
+    )
+
+
+def _rank_discovery_roots(roots: dict[Path, int], max_candidates: int) -> list[Path]:
+    return [
+        root
+        for root, _rank in sorted(
+            roots.items(), key=lambda pair: (pair[1], str(pair[0]).casefold())
+        )[:max_candidates]
+    ]
+
+
+def discover_pack_root(folder: str | Path) -> Path | None:
+    """相容舊呼叫者：回傳排序後第一個根目錄。
+
+    新的流水線應使用 :func:`discover_pack_roots`，遇到多個候選時要求明確選擇。
+    """
+    roots = discover_pack_roots(folder)
+    return roots[0] if roots else None
+
+
+def scan_pack_sources(
+    pack_root: str | Path,
+    version: str,
+    *,
+    include_kubejs: bool = True,
+    include_ftb: bool = True,
+) -> PackScanResult:
+    """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。"""
     root = Path(pack_root).expanduser().resolve()
     result = PackScanResult(pack_scope=_pack_scope(root))
     if not root.is_dir():
@@ -239,9 +348,9 @@ def scan_pack_sources(pack_root: str | Path, version: str) -> PackScanResult:
         "kubejs": kubejs.is_dir(),
         "ftb_quests": quests.is_dir(),
     }
-    if kubejs.is_dir():
+    if include_kubejs and kubejs.is_dir():
         _scan_kubejs(kubejs, version, scope, result)
-    if quests.is_dir():
+    if include_ftb and quests.is_dir():
         _scan_ftb_quests(quests, version, scope, result)
     _resolve_reference_targets(result)
     return result
@@ -254,9 +363,47 @@ def pack_scope_for_root(pack_root: str | Path) -> str:
 
 
 def _has_pack_sources(root: Path) -> bool:
-    return (root / "kubejs").is_dir() or (
-        root / "config" / "ftbquests" / "quests"
-    ).is_dir()
+    return (
+        _has_kubejs_source(root) or (root / "config" / "ftbquests" / "quests").is_dir()
+    )
+
+
+def _has_kubejs_source(root: Path) -> bool:
+    """確認 ``root/kubejs`` 是 KubeJS 來源，而不是 namespace 內容資料夾。
+
+    KubeJS 的 ``assets/<namespace>`` 內可能再次出現名為 ``kubejs`` 的
+    namespace。單純檢查 ``root/kubejs`` 是否存在，會把
+    ``<pack>/kubejs/assets`` 或 ``dynamic_data`` 誤判成第二個模組包根目錄。
+    只接受 KubeJS 已知的來源子目錄或直接存在的腳本檔案，讓候選清單
+    保持「可實際掃描的 pack root」語意。
+    """
+    kubejs = root / "kubejs"
+    if not kubejs.is_dir() or _is_reparse_point(kubejs):
+        return False
+    known_source_dirs = {
+        "assets",
+        "client_scripts",
+        "config",
+        "data",
+        "server_scripts",
+        "startup_scripts",
+    }
+    try:
+        for entry in os.scandir(kubejs):
+            if entry.is_symlink() or _is_reparse_point(Path(entry.path)):
+                continue
+            if entry.is_dir(follow_symlinks=False) and entry.name.casefold() in {
+                name.casefold() for name in known_source_dirs
+            }:
+                return True
+            if (
+                entry.is_file(follow_symlinks=False)
+                and Path(entry.name).suffix.lower() == ".js"
+            ):
+                return True
+    except OSError:
+        return False
+    return False
 
 
 def _pack_scope(root: Path) -> str:

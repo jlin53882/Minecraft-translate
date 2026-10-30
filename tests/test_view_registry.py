@@ -24,6 +24,7 @@ def test_spec_keys_are_unique_and_cover_all_views():
         "merge",
         "lm",
         "translation",
+        "kubejs_ftb_pipeline",
         "qc",
         "icon_preview",
         "moddb",
@@ -115,10 +116,11 @@ def test_views_are_built_lazily(monkeypatch):
     assert vr.built_view(registry[2]) is None
 
     hooked = []
-    registry[13].on_build(hooked.append)
-    first = registry[13]["view"]
+    config_entry = next(item for item in registry if item["key"] == "config")
+    config_entry.on_build(hooked.append)
+    first = config_entry["view"]
     assert built == ["config"]
     assert hooked == [first]
-    assert registry[13]["view"] is first
-    assert vr.built_view(registry[13]) is first
+    assert config_entry["view"] is first
+    assert vr.built_view(config_entry) is first
     assert built == ["config"]

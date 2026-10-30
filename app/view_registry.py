@@ -115,6 +115,17 @@ VIEW_SPECS: tuple[ViewSpec, ...] = (
         ("task", "翻譯工具"),
     ),
     ViewSpec(
+        "kubejs_ftb_pipeline",
+        "KubeJS / FTB 流水線",
+        ft.Icons.ACCOUNT_TREE_OUTLINED,
+        "flow",
+        "app.views.kubejs_ftb_pipeline_view",
+        "KubejsFtbPipelineView",
+        True,
+        None,
+        ("kubejs", "ftb", "quests", "腳本", "任務", "模組包"),
+    ),
+    ViewSpec(
         "qc",
         "QC 檢驗",
         ft.Icons.VERIFIED_USER_OUTLINED,

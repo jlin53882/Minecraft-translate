@@ -69,6 +69,8 @@ def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Pa
         report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
         assert report.ok
         assert report.entries_applied >= 4
+        assert report.entries_reparsed > 0
+        assert report.entries_rescan_verified >= report.entries_applied
 
         lang = json.loads(
             (output / "kubejs/assets/demo/lang/zh_tw.json").read_text(encoding="utf-8")
@@ -93,6 +95,24 @@ def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Pa
         with lang_path.open(encoding="utf-8") as stream:
             lang_snbt = snbt.load(stream)
         assert str(lang_snbt["demo.quest.lang.title"]) == "任務語系翻譯"
+
+        first_hashes = {
+            path.relative_to(output).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in output.rglob("*")
+            if path.is_file()
+        }
+        second = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+        assert second.ok
+        second_hashes = {
+            path.relative_to(output).as_posix(): hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
+            for path in output.rglob("*")
+            if path.is_file()
+        }
+        assert second_hashes == first_hashes
     finally:
         db.close()
 
