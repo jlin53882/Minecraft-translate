@@ -96,9 +96,7 @@ def test_service_wires_shared_translation_runner_with_scoped_database(
 
     def fake_shared_translation(options, session, **kwargs):
         assert kwargs["db_override"] is db
-        calls.append(
-            (tuple(sorted(options.mod_ids)), options.version)
-        )
+        calls.append((tuple(sorted(options.mod_ids)), options.version))
         return {
             "status": "DONE",
             "candidates": 0,
