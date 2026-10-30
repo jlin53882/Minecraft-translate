@@ -21,6 +21,16 @@ from translation_tool.utils.cancellation import TaskCancelled
 logger = logging.getLogger(__name__)
 
 
+def _empty_translation_report(*, dry_run: bool) -> dict[str, bool | int | str]:
+    """回傳沒有候選時仍帶有完整執行模式的翻譯報告。"""
+    return {
+        "status": "DONE",
+        "dry_run": dry_run,
+        "candidates": 0,
+        "planned_batches": 0,
+    }
+
+
 def discover_kubejs_ftb_pack_candidates(source: str) -> list[str]:
     """Expose bounded pack-root discovery through the application service layer."""
     return discover_pack_candidates(source)
@@ -65,12 +75,7 @@ def run_kubejs_ftb_pipeline_service(
                 sorted({item.mod_id for item in result.items if item.mod_id})
             )
             if not mod_ids:
-                return {
-                    "status": "DONE",
-                    "dry_run": pipeline_options.dry_run,
-                    "candidates": 0,
-                    "planned_batches": 0,
-                }
+                return _empty_translation_report(dry_run=pipeline_options.dry_run)
             return run_moddb_translate_service(
                 TranslateOptions(
                     version=pipeline_options.version,
