@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
 
 import flet as ft
 
-from app.services_impl.pack_pipeline_service import run_kubejs_ftb_pipeline_service
+from app.services_impl.pack_pipeline_service import (
+    discover_kubejs_ftb_pack_candidates,
+    run_kubejs_ftb_pipeline_service,
+)
 from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
@@ -23,7 +25,6 @@ from app.ui.snack import show_snack
 from app.ui.status_chip import make_status_chip, set_chip_status
 from app.ui.update_scope import update_regions
 from app.views._log import LogView
-from translation_tool.translation_db.pack_pipeline import discover_pack_candidates
 
 _POLL_INTERVAL_SEC = 0.2
 
@@ -287,7 +288,9 @@ class KubejsFtbPipelineView(ft.Column):
         self.source_summary.color = C.MUTED
         self._safe_update()
         try:
-            candidates = await asyncio.to_thread(discover_pack_candidates, source)
+            candidates = await asyncio.to_thread(
+                discover_kubejs_ftb_pack_candidates, source
+            )
         except (OSError, RuntimeError, ValueError) as exc:
             candidates = []
             self.source_summary.value = f"來源分析失敗：{exc}"
@@ -377,9 +380,6 @@ class KubejsFtbPipelineView(ft.Column):
             name="KubeJS / FTB 流水線",
             owner="kubejs-ftb-pipeline",
             task_session=self.session,
-            fallback_launcher=lambda target: threading.Thread(
-                target=target, daemon=True
-            ).start(),
         )
         if not launched:
             self._running = False

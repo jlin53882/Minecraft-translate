@@ -9,11 +9,17 @@ from app.services_impl.moddb_service import open_database
 from app.tasks.task_session import add_log_unmirrored
 from translation_tool.translation_db.pack_pipeline import (
     PackPipelineOptions,
+    discover_pack_candidates,
     run_pack_pipeline,
 )
 from translation_tool.utils.cancellation import TaskCancelled
 
 logger = logging.getLogger(__name__)
+
+
+def discover_kubejs_ftb_pack_candidates(source: str) -> list[str]:
+    """Expose bounded pack-root discovery through the application service layer."""
+    return discover_pack_candidates(source)
 
 
 def run_kubejs_ftb_pipeline_service(
@@ -71,4 +77,7 @@ def run_kubejs_ftb_pipeline_service(
         session.finish()
 
 
-__all__ = ["run_kubejs_ftb_pipeline_service"]
+__all__ = [
+    "discover_kubejs_ftb_pack_candidates",
+    "run_kubejs_ftb_pipeline_service",
+]
