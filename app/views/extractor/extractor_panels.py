@@ -3,11 +3,11 @@
 本模組負責 ExtractorView 的 UI 面板組合，提供以下面板：
 
 Settings（左欄）：
-  - build_settings_panel() → 路徑設定卡片 + 動作區卡片 + 跳過開關
+  - build_settings_panel() → 路徑設定卡片 + 共用流水線步驟卡 + 跳過開關
 
 面板構建工具：
   - _build_path_row() → 路徑輸入列（icon 前綴 + TextField + 選擇按鈕）
-  - _build_action_zone() → 動作區卡片（執行按鈕 + 預覽按鈕）
+  - _build_action_zone() → 共用步驟列（提取按鈕 + 預覽按鈕）
   - _build_pick_button() → 目錄選擇 IconButton
 
 🐛 2026-08-01 user review 物理刪除 (commit 14b823e 系列):
@@ -23,8 +23,13 @@ Settings（左欄）：
 
 import flet as ft
 
-from app.ui import design, kit
+from app.ui import kit
 from app.ui.design import C
+from app.views.pipeline.pipeline_workbench import (
+    PipelineActionSpec,
+    PipelineStepSpec,
+    build_pipeline_steps_card,
+)
 
 
 def _build_path_row(view, icon, label, field, pick_target) -> ft.Control:
@@ -63,33 +68,8 @@ def _build_pick_button(view, target):
     )
 
 
-def _mode_card(
-    title: str, desc: str, icon: str, tone: str, extract_button, preview_button
-) -> ft.Container:
-    """一種提取模式的卡片：圖示 + 說明 + 「提取」「預覽」兩顆按鈕。"""
-    return ft.Container(
-        expand=1,
-        padding=16,
-        bgcolor=C.PANEL,
-        border=ft.Border.all(1, C.LINE),
-        border_radius=design.RADIUS_CARD,
-        content=ft.Column(
-            [
-                ft.Row([kit.tone_icon(icon, tone, size=20, box=40, radius=11)]),
-                ft.Text(title, size=15, weight=ft.FontWeight.BOLD, color=C.TEXT),
-                ft.Text(desc, size=12, color=C.DIM),
-                ft.Container(height=4),
-                extract_button,
-                preview_button,
-            ],
-            spacing=6,
-            horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-        ),
-    )
-
-
 def _build_action_zone(view, extract_row: list, preview_row: list) -> ft.Control:
-    """三種模式卡（Lang / Book / Lang + Book），各自有「提取」與「預覽」按鈕。
+    """建立共用垂直步驟卡（Lang / Book / Lang + Book）。
 
     參數：
         view：ExtractorView 實例。
@@ -111,17 +91,43 @@ def _build_action_zone(view, extract_row: list, preview_row: list) -> ft.Control
             "ench",
         ),
     )
-    cards = [
-        _mode_card(title, desc, icon, tone, extract, preview)
-        for (title, desc, icon, tone), extract, preview in zip(
-            modes, extract_row, preview_row, strict=True
+    steps = []
+    for number, ((title, desc, icon, tone), extract, preview) in enumerate(
+        zip(modes, extract_row, preview_row, strict=True),
+        start=1,
+    ):
+        steps.append(
+            PipelineStepSpec(
+                number=number,
+                title=title,
+                description=desc,
+                icon=icon,
+                tone=tone,
+                action_control=extract,
+                extra_actions=(
+                    PipelineActionSpec(
+                        label="預覽",
+                        icon=ft.Icons.PREVIEW,
+                        tooltip=f"預覽 {title}",
+                        control=preview,
+                    ),
+                ),
+            )
         )
-    ]
-    return ft.Row(cards, spacing=16, vertical_alignment=ft.CrossAxisAlignment.START)
+    return build_pipeline_steps_card(
+        steps,
+        title="提取流程",
+        icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+        tone="dia",
+    )
 
 
 def build_settings_panel(view) -> ft.Column:
-    """整個提取頁的內容：頁首 + 路徑 / 選項設定 + 三種模式卡。
+    """建立提取頁的設定內容，不重複建立頁首。
+
+    頁首與左右工作區由 ``build_pipeline_workbench`` 統一負責；這個函式
+    只保留提取頁自己的設定卡與模式操作卡，避免提取頁再維護另一套頁面
+    外框。保留原函式名稱是為了讓既有測試與外部呼叫者不必改變。
 
     參數：
         view：ExtractorView 實例（需具備輸入框、開關與六顆按鈕屬性）。
@@ -170,12 +176,6 @@ def build_settings_panel(view) -> ft.Column:
         expand=True,
         spacing=18,
         controls=[
-            kit.page_header(
-                "JAR 提取",
-                "從模組 JAR 取出語言檔與 Patchouli 手冊；可先預覽掃描結果再決定提取範圍",
-                icon=ft.Icons.INVENTORY_2_OUTLINED,
-                tone="dia",
-            ),
             settings_card,
             _build_action_zone(
                 view,

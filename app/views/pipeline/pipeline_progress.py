@@ -8,6 +8,10 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.views._log import LogView
+from app.views.pipeline.pipeline_workbench import (
+    PipelineStepSpec,
+    build_pipeline_step_row,
+)
 
 
 class PipelineStepChip:
@@ -65,7 +69,14 @@ class PipelineStepChip:
 class PipelineProgressPanel:
     """日誌+進度面板，顯示步驟狀態晶片、進度條、即時日誌"""
 
-    def __init__(self, page: ft.Page, on_cancel=None):
+    def __init__(
+        self,
+        page: ft.Page,
+        on_cancel=None,
+        *,
+        step_names: list[str] | None = None,
+        log_height: int = 120,
+    ):
         self._page = page
         self.cancel_button = kit.button(
             "取消",
@@ -75,21 +86,23 @@ class PipelineProgressPanel:
             on_click=(lambda e: on_cancel()) if on_cancel else None,
         )
         self.cancel_button.visible = False
+        names = step_names or ["抽取資源", "語系比對", "啟動翻譯", "打包資源"]
         self.steps = [
-            PipelineStepChip("抽取資源", 1),
-            PipelineStepChip("語系比對", 2),
-            PipelineStepChip("啟動翻譯", 3),
-            PipelineStepChip("打包資源", 4),
+            build_pipeline_step_row(
+                PipelineStepSpec(
+                    number=index,
+                    title=name,
+                    description="",
+                    icon=ft.Icons.TIMELINE,
+                    tone="neutral",
+                    status="waiting",
+                )
+            )
+            for index, name in enumerate(names, start=1)
         ]
         self.current_step = None
 
-        arrow = lambda: ft.Icon(ft.Icons.ARROW_FORWARD, size=16, color=C.DIM)
-        step_controls: list[ft.Control] = []
-        for index, step in enumerate(self.steps):
-            if index:
-                step_controls.append(arrow())
-            step_controls.append(ft.Container(content=step.chip, padding=5))
-        self.step_row = ft.Row(controls=step_controls, spacing=5, wrap=True)
+        self.step_row = ft.Column(controls=self.steps, spacing=0)
 
         self.current_label = ft.Text("等待執行...", color=C.MUTED, size=14)
         # PR refactor/unified-log-view: 改用 LogView widget
@@ -99,7 +112,7 @@ class PipelineProgressPanel:
             page=page,
             mode="append",
             max_lines=500,
-            height=120,
+            height=log_height,
         )
 
         self.container = kit.section_card(

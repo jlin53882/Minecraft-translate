@@ -24,13 +24,19 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import make_status_chip, set_chip_status
 from app.ui.update_scope import update_regions
-from app.views._log import LogView
+from app.views.pipeline.pipeline_progress import PipelineProgressPanel
+from app.views.pipeline.pipeline_workbench import (
+    PipelineStepSpec,
+    build_pipeline_status_card,
+    build_pipeline_steps_card,
+    build_pipeline_workbench,
+)
 
 _POLL_INTERVAL_SEC = 0.2
 
 
 class KubejsFtbPipelineView(ft.Column):
-    """以四個區域呈現來源、執行、輸出與紀錄的單一工作流。"""
+    """以一鍵流水線工作台呈現 KubeJS／FTB 的來源、執行與輸出。"""
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
@@ -41,7 +47,19 @@ class KubejsFtbPipelineView(ft.Column):
         self._running = False
         self._candidates: list[str] = []
         self._source_generation = 0
+        self._current_dry_run = True
 
+        self._build_controls(page)
+        self._build_layout()
+
+    def _build_controls(self, page: ft.Page) -> None:
+        """建立工作台需要的控制項；各群組維持單一職責。"""
+        self._build_input_controls()
+        self._build_mode_controls()
+        self._build_status_controls(page)
+        self._build_action_controls()
+
+    def _build_input_controls(self) -> None:
         self.source_field = kit.text_field(
             "來源資料夾／模組包根目錄",
             hint="Web 可直接輸入完整路徑；也可輸入 kubejs 或 quests 資料夾",
@@ -74,13 +92,18 @@ class KubejsFtbPipelineView(ft.Column):
             expand=True,
             path=True,
         )
+
+    def _build_mode_controls(self) -> None:
         self.include_kubejs = ft.Checkbox(label="KubeJS", value=True)
         self.include_ftb = ft.Checkbox(label="FTB Quests", value=True)
         self.translate_missing = ft.Checkbox(label="LM 翻譯待處理", value=False)
         self.execution_hint = kit.hint_text(
-            "預覽按鈕只讀來源與目前 DB；正式按鈕才會同步 DB 並發布 overlay。"
+            "先預覽確認來源與 DB 計畫，再執行正式同步；正式發布需要填寫 overlay 輸出目錄。"
         )
+
+    def _build_status_controls(self, page: ft.Page) -> None:
         self.status_chip = make_status_chip("尚未開始")
+        self.progress_status = ft.Text("等待任務啟動...", size=12, color=C.MUTED)
         self.progress = kit.progress_bar(0, "em", height=8)
         self.source_summary = ft.Text(
             "尚未分析來源。", size=12, color=C.MUTED, selectable=True
@@ -91,15 +114,16 @@ class KubejsFtbPipelineView(ft.Column):
         self.run_summary = ft.Text(
             "尚未執行。", size=12, color=C.MUTED, selectable=True
         )
-        self.log_view = LogView(page=page, mode="tail", tail_lines=300, height=300)
-        self.cancel_button = kit.button(
-            "取消",
-            "danger",
-            icon=ft.Icons.STOP_CIRCLE_OUTLINED,
-            disabled=True,
-            on_click=self._cancel,
-            tooltip="在目前安全檢查點取消；未完成 overlay 不會發布",
+        self.progress_panel = PipelineProgressPanel(
+            page,
+            on_cancel=self._cancel,
+            step_names=["分析來源", "同步 ModDB", "LM 翻譯", "輸出 overlay"],
+            log_height=180,
         )
+        self.log_view = self.progress_panel.log_view
+        self.cancel_button = self.progress_panel.cancel_button
+
+    def _build_action_controls(self) -> None:
         self.preview_button = kit.button(
             "預覽來源／同步計畫",
             "secondary",
@@ -119,43 +143,29 @@ class KubejsFtbPipelineView(ft.Column):
             icon=ft.Icons.FIND_IN_PAGE_OUTLINED,
             on_click=self._discover_clicked,
         )
-        self.tabs = kit.Segmented(
-            [
-                ("source", "來源", ft.Icons.FOLDER_OUTLINED),
-                ("execute", "執行", ft.Icons.PLAY_ARROW),
-                ("output", "輸出", ft.Icons.FOLDER_ZIP_OUTLINED),
-                ("logs", "紀錄", ft.Icons.TERMINAL),
-            ],
-            "source",
-            self._select_tab,
+
+    def _build_layout(self) -> None:
+        """以一鍵流水線相同的左右工作台排列設定、狀態與進度。"""
+        source_panel = self._build_source_panel()
+        execute_panel = self._build_execute_panel()
+        output_panel = self._build_output_panel()
+        steps_panel = self._build_steps_panel()
+        status_panel = self._build_status_panel()
+        self.workbench_view = build_pipeline_workbench(
+            title="KubeJS / FTB 流水線",
+            subtitle="來源分析 → ModDB 同步 → LM 翻譯 → overlay 輸出；沿用一鍵流水線的工作台操作方式。",
+            icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+            tone="em",
+            # Keep every pipeline page's reading order identical: the left
+            # column contains source/configuration/steps, while the right
+            # column is reserved for status, progress and logs.  KubeJS/FTB
+            # has two extra configuration cards, but their position must not
+            # make this page look like a separate product.
+            left_controls=[source_panel, execute_panel, output_panel, steps_panel],
+            right_controls=[status_panel, self.progress_panel.container],
+            actions=[self.preview_button, self.publish_button],
         )
-        self._source_panel = self._build_source_panel()
-        self._execute_panel = self._build_execute_panel()
-        self._output_panel = self._build_output_panel()
-        self._logs_panel = self._build_logs_panel()
-        self._panels = {
-            "source": self._source_panel,
-            "execute": self._execute_panel,
-            "output": self._output_panel,
-            "logs": self._logs_panel,
-        }
-        self.controls = [
-            kit.page_header(
-                "KubeJS / FTB 流水線",
-                "共用來源掃描、ModDB 同步與模組包根目錄 overlay；不把腳本或 config 偽裝成 Resource Pack。",
-                icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-                tone="em",
-            ),
-            ft.Row(
-                [self.tabs, self.status_chip],
-                alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-            ),
-            self._source_panel,
-            self._execute_panel,
-            self._output_panel,
-            self._logs_panel,
-        ]
-        self._select_tab("source")
+        self.controls = [self.workbench_view]
 
     def _source_changed(self, _e=None) -> None:
         """來源路徑變更後清除舊候選，避免執行時沿用前一個模組包根目錄。"""
@@ -201,26 +211,24 @@ class KubejsFtbPipelineView(ft.Column):
 
     def _build_execute_panel(self) -> ft.Control:
         return kit.section_card(
-            "執行",
+            "處理範圍與模式",
             ft.Column(
                 [
-                    ft.Row([self.include_kubejs, self.include_ftb], spacing=16),
+                    ft.Text("來源類型", size=12, color=C.MUTED),
+                    ft.Row(
+                        [self.include_kubejs, self.include_ftb],
+                        spacing=16,
+                        wrap=True,
+                    ),
                     ft.Row([self.translate_missing], spacing=16),
                     self.execution_hint,
-                    ft.Row(
-                        [self.preview_button, self.publish_button, self.cancel_button],
-                        wrap=True,
-                        spacing=10,
-                    ),
-                    self.progress,
-                    self.run_summary,
                     kit.hint_text(
-                        "啟用「LM 翻譯待處理」會在同一個流水線 session 呼叫共用 ModDB LM 翻譯入口；Smart Review 仍沿用既有校對頁。"
+                        "啟用 LM 後會在同一個流水線 session 呼叫共用 ModDB 翻譯入口；Smart Review 仍沿用既有校對頁。"
                     ),
                 ],
                 spacing=10,
             ),
-            icon=ft.Icons.PLAY_CIRCLE_OUTLINE,
+            icon=ft.Icons.TUNE,
             tone="ench",
         )
 
@@ -241,28 +249,54 @@ class KubejsFtbPipelineView(ft.Column):
             tone="gold",
         )
 
-    def _build_logs_panel(self) -> ft.Control:
-        return kit.section_card(
-            "紀錄",
-            ft.Column(
-                [
-                    self.log_view,
-                    ft.Text(
-                        "每次執行會產生 run_id 與 manifest.json，保存來源 scope、kind 統計、DB 結果、輸出驗證與問題分類。",
-                        size=12,
-                        color=C.MUTED,
-                    ),
-                ],
-                spacing=10,
-            ),
-            icon=ft.Icons.TERMINAL,
-            tone="gold",
+    def _build_steps_panel(self) -> ft.Control:
+        """以與一鍵流水線相同的編號與間距呈現本流程的四個階段。"""
+        return build_pipeline_steps_card(
+            [
+                PipelineStepSpec(
+                    1,
+                    "分析來源",
+                    "辨識 KubeJS 與 FTB Quests 的實際來源根目錄",
+                    ft.Icons.FIND_IN_PAGE_OUTLINED,
+                    "dia",
+                ),
+                PipelineStepSpec(
+                    2,
+                    "同步 ModDB",
+                    "以共用 scanner 建立來源、條目與 manifest 計畫",
+                    ft.Icons.SYNC,
+                    "ench",
+                ),
+                PipelineStepSpec(
+                    3,
+                    "LM 翻譯",
+                    "可選；沿用共用 ModDB 翻譯入口與批次記錄",
+                    ft.Icons.AUTO_AWESOME,
+                    "gold",
+                ),
+                PipelineStepSpec(
+                    4,
+                    "輸出 overlay",
+                    "預覽不寫入；正式同步才發布 kubejs／FTB Quests overlay",
+                    ft.Icons.PUBLISH,
+                    "em",
+                ),
+            ],
+            title="流水線步驟",
+            icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+            tone="ench",
         )
 
-    def _select_tab(self, key: str) -> None:
-        for name, panel in self._panels.items():
-            panel.visible = name == key
-        update_regions(self)
+    def _build_status_panel(self) -> ft.Control:
+        return build_pipeline_status_card(
+            progress=self.progress,
+            progress_status=self.progress_status,
+            status_chip=self.status_chip,
+            summary=self.run_summary,
+            hint=kit.hint_text(
+                "每次執行會產生 run_id 與 manifest.json；執行後才展開階段狀態與即時 Log。"
+            ),
+        )
 
     async def _pick_source(self, _e=None) -> None:
         result = await self.file_picker.get_directory_path()
@@ -353,7 +387,6 @@ class KubejsFtbPipelineView(ft.Column):
             await self._discover()
         if len(self._candidates) > 1 and not self.root_dropdown.value:
             show_snack(self._page, "來源有多個候選，請先明確選擇根目錄", C.GOLD)
-            self._select_tab("source")
             return
         if not (self.include_kubejs.value or self.include_ftb.value):
             show_snack(self._page, "至少選擇 KubeJS 或 FTB Quests", C.RED)
@@ -361,7 +394,6 @@ class KubejsFtbPipelineView(ft.Column):
         output = (self.output_field.value or "").strip() or None
         if publish and not output:
             show_snack(self._page, "正式發布前請填寫 overlay 輸出目錄", C.RED)
-            self._select_tab("output")
             return
         self.session = tag_session(
             TaskSession(max_logs=2000),
@@ -370,9 +402,11 @@ class KubejsFtbPipelineView(ft.Column):
             page=self._page,
         )
         self._running = True
+        self._current_dry_run = dry_run
         self._set_running(True)
+        self.progress_panel.start()
         self.progress.value = 0
-        self.log_view.clear()
+        self.progress_panel.clear_logs()
         self.run_summary.value = "執行中…"
         self._safe_update()
         source = (self.source_field.value or "").strip()
@@ -436,19 +470,42 @@ class KubejsFtbPipelineView(ft.Column):
         self.log_view.sync_entries(snapshot.get("logs", []) or [], update=False)
         status = str(snapshot.get("status") or "").upper()
         summary = snapshot.get("summary") or {}
+        self._sync_progress_stage(self.progress.value, status)
         if status in {"DONE", "ERROR"}:
             self._running = False
             self._set_running(False)
+            cancelled = summary.get("status") == "CANCELLED"
+            success = status != "ERROR" and not cancelled
+            if success:
+                self.progress_panel.set_step_running(4, "輸出 overlay")
             if status == "ERROR":
                 set_chip_status(self.status_chip, "失敗", "red")
-            elif summary.get("status") == "CANCELLED":
+            elif cancelled:
                 set_chip_status(self.status_chip, "已取消", "gold")
             elif summary.get("state") == "done_with_warnings":
                 set_chip_status(self.status_chip, "完成但有警告", "gold")
             else:
                 set_chip_status(self.status_chip, "完成", "em")
+            self.progress_panel.finish_all(
+                success,
+                cancelled=cancelled,
+                dry_run=self._current_dry_run,
+            )
             self._render_summary(summary)
         self._safe_update()
+
+    def _sync_progress_stage(self, progress: float, status: str) -> None:
+        """把共用 session 進度映射成一鍵流水線風格的階段狀態。"""
+        if not self._running or status in {"DONE", "ERROR"}:
+            return
+        if progress < 0.35:
+            self.progress_panel.set_step_running(1, "分析來源")
+        elif progress < 0.65:
+            self.progress_panel.set_step_running(2, "同步 ModDB")
+        elif progress < 0.95:
+            self.progress_panel.set_step_running(3, "LM 翻譯／驗證")
+        else:
+            self.progress_panel.set_step_running(4, "輸出 overlay")
 
     def _render_summary(self, summary: dict) -> None:
         if not summary:
@@ -488,13 +545,12 @@ class KubejsFtbPipelineView(ft.Column):
                 f"格式重讀 {output.get('entries_reparsed', 0):,}\n"
                 f"衝突 {len(output.get('conflicts', [])):,}、未套用 {len(output.get('unapplied', [])):,}"
             )
-        self._select_tab("output" if output else "logs")
 
     def _set_running(self, running: bool) -> None:
         self.preview_button.disabled = running
         self.publish_button.disabled = running
         self.discover_button.disabled = running
-        self.cancel_button.disabled = not running
+        self.progress_panel.set_running(running)
 
     def will_unmount(self) -> None:
         self._poller.stop()

@@ -21,6 +21,10 @@ from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.lm_db_options import LmDbOptions, LmDbRunSnapshot
+from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_status_card,
+    build_pipeline_workbench,
+)
 from translation_tool.utils.config_manager import (
     get_batch_write_interval,
     get_lm_translate_folder_name,
@@ -153,6 +157,7 @@ class LMView(ft.Column):
             on_click=self.cancel_clicked,
         )
         self.cancel_button.disabled = True
+        self.cancel_button.visible = False
 
         # 統計卡：進度 / 已用時間 / API Key / 快取寫入
         self.stat_progress = kit.stat_card(
@@ -207,17 +212,10 @@ class LMView(ft.Column):
 
     def _build_lm_status_and_log_cards(self, settings_card) -> None:
         """狀態卡片、日誌卡片與整體版面。"""
-        status_card = kit.section_card(
-            "執行狀態",
-            ft.Column(
-                [
-                    ft.Row([self.status_chip], wrap=True),
-                    self.progress_bar,
-                ],
-                spacing=10,
-            ),
-            icon=ft.Icons.TIMELINE,
-            tone="em",
+        status_card = build_pipeline_status_card(
+            progress=self.progress_bar,
+            progress_status=ft.Text("整體進度", size=13, color=C.DIM),
+            status_chip=self.status_chip,
         )
         log_card = kit.section_card(
             "執行日誌",
@@ -227,46 +225,31 @@ class LMView(ft.Column):
             tone="gold",
             expand=True,
         )
+        log_card.visible = False
+        self.log_card = log_card
 
-        self.controls = [
-            kit.page_header(
-                "機器翻譯",
-                "Gemini 批次翻譯：多組金鑰自動輪替、失敗自動縮小批次重試",
-                icon=ft.Icons.AUTO_AWESOME_OUTLINED,
-                tone="gold",
-                actions=[self.cancel_button, self.start_button],
-            ),
-            ft.Row(
-                [
-                    ft.Column(
-                        [settings_card, self.db_card],
-                        spacing=16,
-                        expand=5,
-                        scroll=ft.ScrollMode.AUTO,
-                    ),
-                    ft.Column(
-                        [
-                            ft.Row(
-                                [
-                                    self.stat_progress,
-                                    self.stat_elapsed,
-                                    self.stat_keys,
-                                    self.stat_cache,
-                                ],
-                                spacing=12,
-                            ),
-                            status_card,
-                            log_card,
-                        ],
-                        spacing=16,
-                        expand=8,
-                    ),
-                ],
-                spacing=16,
-                expand=True,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-        ]
+        self.workbench_view = build_pipeline_workbench(
+            title="機器翻譯",
+            subtitle="Gemini 批次翻譯：多組金鑰自動輪替、失敗自動縮小批次重試",
+            icon=ft.Icons.AUTO_AWESOME_OUTLINED,
+            tone="gold",
+            left_controls=[settings_card, self.db_card],
+            right_controls=[
+                ft.Row(
+                    [
+                        self.stat_progress,
+                        self.stat_elapsed,
+                        self.stat_keys,
+                        self.stat_cache,
+                    ],
+                    spacing=12,
+                ),
+                status_card,
+                log_card,
+            ],
+            actions=[self.cancel_button, self.start_button],
+        )
+        self.controls = [self.workbench_view]
 
     # --------------------------------------------------
     # Style helpers
@@ -400,6 +383,7 @@ class LMView(ft.Column):
         self._set_running(True)
         self.progress_bar.value = 0
         self.log_view.clear()
+        self.log_card.visible = True
         self.page.update()
 
         output_dir = self.output_path.value or get_lm_translate_folder_name()
@@ -517,6 +501,7 @@ class LMView(ft.Column):
         """執行中停用「開始」、啟用「取消」。"""
         self.start_button.disabled = running
         self.cancel_button.disabled = not running
+        self.cancel_button.visible = running
 
     # --------------------------------------------------
     # UI Timer

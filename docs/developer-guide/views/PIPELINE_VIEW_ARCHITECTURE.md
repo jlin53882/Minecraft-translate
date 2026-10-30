@@ -21,6 +21,7 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 | `pipeline_bundle_dialog.py` | `open_bundle_dialog(...)` 打包參數對話框（版本輸入框由 `pipeline_forms.build_version_input` 建立） |
 | `pipeline_one_click_dialog.py` | `open_one_click_dialog(...)` 一鍵製作參數對話框（步驟 4 的版本輸入框同上） |
 | `pipeline_forms.py` | 對話框共用的表單狀態（`ExtractFormState` 等）與 `build_*_form` 表單建構 |
+| `pipeline_workbench.py` | 共用頁首／左右工作台、步驟列、成對操作、執行狀態卡與 responsive 外框 |
 | `pipeline_one_click_bundle_widgets.py` | 一鍵製作步驟 4（打包）的版本與輸出控制項 |
 
 ## 核心類別
@@ -38,15 +39,34 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
 | 打包來源 | `bundle_sources`（優先序由低到高）：`<merge_output>/lang_output` → `<merge_output>/patchouli_output` → 翻譯輸出 |
 | 打包輸出 | `<output>/<output_bundler.output_zip_name>` |
 
-### PipelineStepChip
-單一步驟晶片，`set_status("waiting"|"running"|"done"|"failed"|"cancelled")` 切換 icon（CIRCLE/PENDING/CHECK_CIRCLE/ERROR/STOP_CIRCLE）與顏色。晶片本體是一般 `ft.Container` 膠囊（各頁的 `status_chip` 由 `app.ui.status_chip.make_status_chip` 建立，同理），不用 `ft.Chip`：`ft.Chip` 沒有 `on_click`／`on_select` 時 Flutter 視為停用並整體淡化，狀態色會看不出來。
+### PipelineStepRow
+單一步驟列由 `pipeline_workbench.PipelineStepRow` 統一建立，支援三種共用狀態：右側單步操作按鈕（必要時可追加
+`PipelineActionSpec` 成對操作，例如「提取／預覽」）、可勾選的「執行／略過」，以及執行中的
+`waiting`／`running`／`done`／`failed`／`cancelled` 狀態。編號圓點、padding、分隔線、說明文字與右側操作位置都由同一個元件負責；
+新增流程不可自行複製另一套步驟列。執行狀態以圖示、文字與語意色同步更新，不使用 `ft.Chip`，避免未設定互動事件時被 Flutter 視為停用而整體淡化。
 
 ### PipelineProgressPanel
-四步驟狀態列（抽取資源→語系比對→啟動翻譯→打包資源，以 ARROW_FORWARD 相連）+ `current_label` + `LogView`（`mode="append"`、`max_lines=500`、`height=120`）。
+四步驟狀態列（抽取資源→語系比對→啟動翻譯→打包資源）使用與主頁相同的 `PipelineStepRow` 垂直排列，並搭配 `current_label` + `LogView`
+（`mode="append"`、`max_lines=500`、`height=120`）。
 - `start()` / `set_step_running(step_num, name)` / `add_log(msg, level, is_success)` / `finish_step(step_num, success, cancelled)` / `finish_all(success, cancelled, dry_run)` / `set_running(running)` / `hide()` / `clear_logs()`
 - `cancel_button`（「取消」）：執行中顯示，按下呼叫 `PipelineView._on_cancel`
 - 這些方法都會修改 control，只能在 event loop 上呼叫
 - 日誌使用 `LogView` widget；外層為 `kit.section_card("執行進度")`（`container`，預設隱藏，`start()` 後顯示）
+
+### 共用工作台與對話框
+
+`pipeline_workbench.build_pipeline_workbench()` 統一一鍵流水線、KubeJS／FTB 流水線、
+抽取、合併、LM、打包與任務翻譯頁的頁首、左右欄、欄位間距與滾動行為；
+`build_pipeline_steps_card()` 與 `PipelineStepRow` 統一編號、說明、單步／成對操作位置；`build_pipeline_status_card()`
+統一狀態卡的「狀態 → 進度 → 摘要」順序。主設定對話框與抽取預覽／執行對話框一律
+透過 `pipeline_forms.build_pipeline_dialog()` 建立，內容由各流程提供，外殼負責標題圖示、
+固定視窗尺寸內的捲動區與操作列；預覽對話框的初始操作固定為「取消／開始預覽」，完成後只替換共用 body 與主要操作，不另開第二個對話框。
+這些 helper 只處理 UI，不改變 service、session 或資料格式。
+
+流程完成／失敗摘要也必須沿用 `build_pipeline_dialog()` 的共用標題、內容容器與操作列；工作流程 View 不得在完成時自行建立另一種對話框外殼。若摘要需要額外操作，透過 `dialog_button()` 加入共用操作列，並保留原本的事件與資料內容。
+
+JAR 提取頁的 Lang、Book、Lang + Book 三種模式也必須使用 `build_pipeline_steps_card()` 的垂直步驟列；
+各模式可以保留自己的「提取」與「預覽」事件，但不可回到橫向模式卡或自行繪製另一套操作列。
 
 ## 主要流程
 
@@ -64,7 +84,9 @@ PipelineView（`app/views/pipeline/pipeline_view.py`，組版／事件委派／�
   → _start_single_step()
 ```
 
-頁面佈局由 `_build_ui` 組合：`kit.page_header`（標題「模組流水線・一鍵製作」；右側為「一鍵製作（自動執行所有流程）」按鈕，`_build_one_click_button`）下方分兩欄——左欄為「專案路徑」卡片（`_build_pipeline_paths_card`，欄位「讀取來源（mods 資料夾） *」與「輸出目的地 *」，未選擇時顯示「尚未選擇…」placeholder，各欄右側為選資料夾按鈕）與「流水線步驟」卡片（編號 1–4 的四列，右側各一「執行」按鈕），右欄為進度狀態卡（`progress_status` 預設顯示「等待任務啟動...」+ `progress_bar`）與 `progress_panel.container`（預設隱藏，截圖預設狀態下不可見）；步驟與狀態卡由 `_build_pipeline_steps_and_status_cards` 建立。
+頁面佈局由 `_build_ui` 組合：`kit.page_header`（標題「模組流水線・一鍵製作」；右側為「一鍵製作（自動執行所有流程）」按鈕，`_build_one_click_button`）下方分兩欄——左欄為「專案路徑」卡片（`_build_pipeline_paths_card`，欄位「讀取來源（mods 資料夾） *」與「輸出目的地 *」，未選擇時顯示「尚未選擇…」placeholder，各欄右側為選資料夾按鈕）與「流水線步驟」卡片（編號 1–4 的四列，右側各一「執行」按鈕），右欄為進度狀態卡（`progress_status` 預設顯示「等待任務啟動...」+ `progress_bar`）與 `progress_panel.container`（預設隱藏，截圖預設狀態下不可見）；步驟與狀態卡由 `_build_pipeline_steps_and_status_cards` 建立。其他工作流頁也必須遵守相同順序：設定／步驟在左，狀態／日誌在右；只有流程特有的資料卡可追加，不能另造頁首或執行狀態外框。
+
+這個左右契約也適用於合併與打包頁：輸入來源、資料庫／過濾規則、輸出設定、`pack.mcmeta` 預覽等「執行前設定」全部放左欄；右欄只放執行狀態、進度、取消操作與日誌。不要把輸出目錄或預覽卡混到狀態欄，否則同一個工作台在不同入口會有不同閱讀順序。
 
 ### 執行模型（worker thread → TaskSession → event loop）
 
@@ -191,7 +213,7 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 - `app/views/pipeline/pipeline_actions.py`：`PipelineActions`／`PipelineServices`（service 邊界）。
 - `app/views/pipeline/pipeline_session.py`：`PipelineRunner`（session／worker／輪詢／取消／生命週期）。
 - `app/views/pipeline/pipeline_config.py`：`PipelineConfig`，由輸入／輸出根目錄推算各步驟的資料夾。
-- `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`、`PipelineProgressPanel`（步驟標籤與進度面板）。
+- `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`（舊相容介面）、`PipelineProgressPanel`（使用共用步驟列的進度面板）。
 - `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。
 - 五個設定對話框：`pipeline_translate_dialog.py`、`pipeline_bundle_dialog.py`、`pipeline_extract_dialog.py`、`pipeline_merge_dialog.py`、`pipeline_one_click_dialog.py`（皆在 `app/views/pipeline/`）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（對應的 `tests/test_pipeline_*_dialog_behavior.py`）。
 

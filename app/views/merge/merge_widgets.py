@@ -14,6 +14,10 @@ from app.ui.status_chip import apply_status_style, make_status_chip
 from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
 from app.views.merge.merge_db_options import MergeDbOptions
+from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_status_card,
+    build_pipeline_workbench,
+)
 from translation_tool.utils.config_manager import load_config
 
 
@@ -134,6 +138,7 @@ class MergeWidgetsMixin:
         self.zip_list_view = ft.ListView(height=160, spacing=4, auto_scroll=False)
         self.status_chip = make_status_chip("尚未開始")
         apply_status_style(self.status_chip, "neutral")
+        self.progress_status = ft.Text("整體進度", size=13, color=C.DIM)
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # LogView widget 接管 append + UI controls 數量控制（取代 LogPresenter）
         self.log_view = LogView(
@@ -520,16 +525,21 @@ class MergeWidgetsMixin:
                         ],
                         spacing=8,
                     ),
-                    self.start_button,
-                    self.cancel_button,
-                    ft.Row([self.status_chip], wrap=True),
-                    self.progress_bar,
                 ],
                 spacing=12,
                 horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
             ),
             icon=ft.Icons.FOLDER_OPEN,
             tone="em",
+        )
+        status_card = build_pipeline_status_card(
+            progress=self.progress_bar,
+            progress_status=self.progress_status,
+            status_chip=self.status_chip,
+            cancel=self.cancel_button,
+            hint=kit.hint_text(
+                "先確認輸入來源與合併規則，再開始合併；執行日誌會在開始後展開。"
+            ),
         )
         rules_card = kit.section_card(
             "合併規則",
@@ -552,28 +562,25 @@ class MergeWidgetsMixin:
             icon=ft.Icons.TERMINAL,
             tone="gold",
         )
+        log_card.visible = False
+        self.log_card = log_card
 
-        self.controls = [
-            kit.page_header(
-                "語系比對合併",
-                "整合 en_us、zh_cn、zh_tw 三種來源，只留下真正需要翻譯的條目，並保留已完成的繁中",
-                icon=ft.Icons.CALL_MERGE,
-                tone="ench",
-            ),
-            self._info_container,
-            ft.Row(
-                [
-                    ft.Column(
-                        [input_card, self.db_options.card, output_card],
-                        spacing=16,
-                        expand=5,
-                    ),
-                    ft.Column([rules_card, log_card], spacing=16, expand=7),
-                ],
-                spacing=16,
-                vertical_alignment=ft.CrossAxisAlignment.START,
-            ),
-        ]
+        self.workbench_view = build_pipeline_workbench(
+            title="語系比對合併",
+            subtitle="整合 en_us、zh_cn、zh_tw 三種來源，只留下真正需要翻譯的條目，並保留已完成的繁中",
+            icon=ft.Icons.CALL_MERGE,
+            tone="ench",
+            left_controls=[
+                self._info_container,
+                input_card,
+                self.db_options.card,
+                rules_card,
+                output_card,
+            ],
+            right_controls=[status_card, log_card],
+            actions=[self.start_button, self.cancel_button],
+        )
+        self.controls = [self.workbench_view]
 
     def _merge_summary_output_block(self, oc, organized_name, pending_name):
         """輸出統計區塊的控制項。"""

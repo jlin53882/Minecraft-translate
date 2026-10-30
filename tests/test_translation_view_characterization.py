@@ -21,16 +21,30 @@ def test_translation_view_builds_three_tabs_and_shared_status_panel(monkeypatch)
 
     view = tv.TranslationView(page, picker)
 
-    # Flet 0.85.0: tabs.content is a Column containing [TabBar, TabBarView]
-    # Structure: Column([TabBar(tabs=[3 tabs]), TabBarView(controls=[3 contents])])
+    # Flet 0.85.0: tabs.content is a Column containing the shared selector card
+    # and the TabBarView.  The selector card keeps this page aligned with the
+    # other workflow pages while preserving the existing tab contract.
     content = view.tabs.content
     assert hasattr(content, "controls")  # Is a Column-like
-    assert len(content.controls) == 2  # TabBar + TabBarView
-    tab_bar = content.controls[0]
+    assert len(content.controls) == 2  # selector card + TabBarView
+    selector = content.controls[0]
+    assert getattr(selector, "title", None) == "翻譯來源"
+    tab_bar = selector.body.content
     assert hasattr(tab_bar, "tabs")  # Is a TabBar
     assert len(tab_bar.tabs) == 3  # 3 tabs in TabBar
     assert view.status_chip.label.value == "尚未開始"
     assert view.progress.value == 0
+    assert view.log_panel.visible is False
+    assert view.cancel_button.visible is False
+
+
+def test_translation_log_panel_opens_only_after_run_or_user_message(monkeypatch):
+    monkeypatch.setattr(tv, "TaskSession", _Session)
+    view = tv.TranslationView(mock_page(), mock_filepicker())
+
+    assert view.log_panel.visible is False
+    view._append_log("[UI] 測試訊息")
+    assert view.log_panel.visible is True
 
 
 def test_run_ftb_dry_run_calls_service_with_current_flags(monkeypatch):

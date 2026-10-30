@@ -43,6 +43,10 @@ from app.views.extractor.extractor_dialog import (
 from app.views.extractor.extractor_panels import (
     build_settings_panel,
 )
+from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_status_card,
+    build_pipeline_workbench,
+)
 from translation_tool.utils.log_unit import log_info, log_warning
 
 
@@ -102,7 +106,30 @@ class ExtractorView(ft.Column):
         self._logs_panel = ft.Container(content=ft.Column([self.log_view], height=350))
         self._logs_panel.visible = False  # 隱藏 — 日誌只在 dialog 內顯示
 
-        self.controls = [build_settings_panel(self)]
+        self.extract_status = ft.Text(
+            "尚未開始",
+            size=13,
+            weight=ft.FontWeight.W_600,
+            color=C.TEXT,
+        )
+        self.extract_progress = kit.progress_bar(0, "dia", height=8)
+        self.extract_progress.visible = False
+        self.extract_status_card = build_pipeline_status_card(
+            progress=self.extract_progress,
+            progress_status=self.extract_status,
+            hint=kit.hint_text(
+                "提取與預覽會在對話框中顯示詳細進度；主頁維持同一套工作台結構。"
+            ),
+        )
+        self.workbench_view = build_pipeline_workbench(
+            title="JAR 提取",
+            subtitle="從模組 JAR 取出語言檔與 Patchouli 手冊；可先預覽掃描結果再決定提取範圍",
+            icon=ft.Icons.INVENTORY_2_OUTLINED,
+            tone="dia",
+            left_controls=[build_settings_panel(self)],
+            right_controls=[self.extract_status_card],
+        )
+        self.controls = [self.workbench_view]
 
         # 初始化 output_dir helper，動態讀取設定值
         # 用 try-except 避免 __init__ 階段 self.page.update() 觸發 Control must be added to the page first

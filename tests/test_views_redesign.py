@@ -6,6 +6,12 @@ import flet as ft
 import pytest
 
 from app.ui import kit
+from app.views.pipeline.pipeline_workbench import (
+    PipelineActionSpec,
+    PipelineStepRow,
+    PipelineStepSpec,
+    build_pipeline_step_row,
+)
 from tests.conftest import mock_filepicker, mock_page
 
 
@@ -264,16 +270,69 @@ def test_translation_steps_stay_in_sync_after_reset(monkeypatch):
     assert view.ftb_step_clean.value is True and clean_card._status.value == "將執行"
 
 
-def test_translation_progress_ring_has_progressbar_interface(monkeypatch):
+def test_translation_progress_bar_has_shared_progress_interface(monkeypatch):
     from app.views import translation_view as tv
 
     monkeypatch.setattr(tv, "TaskSession", None)
     view = tv.TranslationView(mock_page(), mock_filepicker())
     view.progress.value = 0.5
-    assert view.progress.value == 0.5 and view.progress.label.value == "50%"
+    assert view.progress.value == 0.5
 
 
 # -- 工作台 -------------------------------------------------------------------
+
+
+def test_pipeline_step_rows_share_container_and_status_contract():
+    action_row = build_pipeline_step_row(
+        PipelineStepSpec(
+            1,
+            "抽取資源",
+            "執行提取",
+            ft.Icons.UNARCHIVE,
+            "dia",
+            on_click=lambda _event: None,
+        )
+    )
+    status_row = build_pipeline_step_row(
+        PipelineStepSpec(
+            2,
+            "語系合併",
+            "執行合併",
+            ft.Icons.CALL_MERGE,
+            "ench",
+            status="waiting",
+        )
+    )
+
+    assert isinstance(action_row, PipelineStepRow)
+    assert isinstance(status_row, PipelineStepRow)
+    assert action_row.padding == status_row.padding
+    assert action_row.border == status_row.border
+    assert status_row.status == "waiting"
+    status_row.set_status("running")
+    assert status_row.status == "running"
+    assert status_row._state_label.value == "執行中"
+
+
+def test_pipeline_step_row_can_share_primary_and_preview_actions():
+    extract = ft.Button("提取")
+    preview = ft.Button("預覽")
+    row = build_pipeline_step_row(
+        PipelineStepSpec(
+            1,
+            "Lang 語言檔",
+            "提取語言檔",
+            ft.Icons.TRANSLATE,
+            "dia",
+            action_control=extract,
+            extra_actions=(PipelineActionSpec("預覽", control=preview),),
+        )
+    )
+
+    assert row.action_buttons == [extract, preview]
+    assert row.action_button is extract
+    action_group = row.content.controls[-1].controls[0]
+    assert action_group.controls == [extract, preview]
 
 
 def _dashboard(**overrides):

@@ -35,9 +35,9 @@ from app.views.pipeline.pipeline_config import RESOURCE_PACK_INSTALL_HINT
 from app.views.pipeline.pipeline_forms import (
     BundleFormState,
     build_bundle_form,
+    build_pipeline_dialog,
     build_version_input,
     dialog_button,
-    dialog_content,
     dialog_dimensions,
     dialog_text_field,
 )
@@ -81,10 +81,12 @@ def open_bundle_dialog(
     _bundle_build_extra_widgets(ctx)
     content = _bundle_build_content(ctx, version_input)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("📦 打包資源設定"),
-        content=dialog_content(page, content),
+    dialog = build_pipeline_dialog(
+        page,
+        title="打包資源設定",
+        icon=ft.Icons.INVENTORY_2_OUTLINED,
+        tone="gold",
+        content=content,
         actions=[
             dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
             dialog_button(

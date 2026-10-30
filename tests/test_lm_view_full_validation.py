@@ -325,13 +325,17 @@ def test_set_status_updates_chip_label_and_color(monkeypatch):
 
 
 def test_controls_contains_all_sections(monkeypatch):
-    """驗證 LMView 版面：頁首（含開始 / 取消）+ 左側設定 / 右側統計、狀態、日誌。"""
+    """驗證 LMView 使用共用工作台：頁首、左右欄與狀態／日誌都存在。"""
     monkeypatch.setattr(lm_view, "TaskSession", _Session)
     view = lm_view.LMView(mock_page(), mock_filepicker())
 
-    assert len(view.controls) == 2
-    header, body = view.controls
-    assert isinstance(header, ft.Row) and isinstance(body, ft.Row)
+    assert len(view.controls) == 1
+    workbench = view.controls[0]
+    assert isinstance(workbench, ft.Column)
+    assert isinstance(workbench.controls[0], ft.Row)
+    body = workbench.controls[1]
+    assert isinstance(body, ft.Row)
+    assert len(body.controls) == 2
     nodes = list(_walk(view))
     for control in (
         view.input_path,

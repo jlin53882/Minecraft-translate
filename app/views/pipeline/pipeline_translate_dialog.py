@@ -20,9 +20,9 @@ from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feed
 from app.views.moddb.lm_db_options import LmDbOptions
 from app.views.pipeline.pipeline_forms import (
     TranslateFormState,
+    build_pipeline_dialog,
     build_translate_form,
     dialog_button,
-    dialog_content,
     dialog_dimensions,
     dialog_text_field,
 )
@@ -67,10 +67,12 @@ def open_translate_dialog(
     _translate_build_option_widgets(ctx)
     content = _translate_build_content(ctx)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("🔄 啟動翻譯設定"),
-        content=dialog_content(page, content),
+    dialog = build_pipeline_dialog(
+        page,
+        title="啟動翻譯設定",
+        icon=ft.Icons.AUTO_AWESOME,
+        tone="gold",
+        content=content,
         actions=[
             dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
             dialog_button(

@@ -2,10 +2,15 @@
 
 import flet as ft
 
-from app.ui import design, kit
-from app.ui.design import C
-from app.ui.design import tone as get_tone
+from app.ui import kit
 from app.views.pipeline.pipeline_config import RESOURCE_PACK_INSTALL_HINT
+from app.views.pipeline.pipeline_workbench import (
+    PipelineStepSpec,
+    build_pipeline_status_card,
+    build_pipeline_step_row,
+    build_pipeline_steps_card,
+    build_pipeline_workbench,
+)
 
 
 class PipelineWidgetsMixin:
@@ -29,48 +34,16 @@ class PipelineWidgetsMixin:
         self, number: int, title: str, desc: str, icon: str, tone: str, handler
     ) -> ft.Control:
         """一個流水線步驟：編號圓點 + 標題 / 說明 + 「執行此步驟」按鈕。"""
-        button = kit.button(
-            "執行",
-            "secondary",
-            icon=icon,
-            size="sm",
-            tooltip=f"單獨執行：{title}",
-            on_click=handler,
-        )
-        self._run_buttons.append(button)
-        t = get_tone(tone)
-        return ft.Container(
-            padding=ft.Padding.symmetric(horizontal=4, vertical=10),
-            border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
-            content=ft.Row(
-                [
-                    ft.Container(
-                        width=34,
-                        height=34,
-                        border_radius=17,
-                        bgcolor=t.bg,
-                        border=ft.Border.all(1, t.line),
-                        alignment=ft.Alignment.CENTER,
-                        content=ft.Text(
-                            str(number), size=14, weight=ft.FontWeight.BOLD, color=t.fg
-                        ),
-                    ),
-                    ft.Column(
-                        [
-                            ft.Text(
-                                title, size=14, weight=ft.FontWeight.BOLD, color=C.TEXT
-                            ),
-                            ft.Text(desc, size=12, color=C.DIM),
-                        ],
-                        spacing=1,
-                        tight=True,
-                        expand=True,
-                    ),
-                    button,
-                ],
-                spacing=14,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        return build_pipeline_step_row(
+            PipelineStepSpec(
+                number=number,
+                title=title,
+                description=desc,
+                icon=icon,
+                tone=tone,
+                on_click=handler,
             ),
+            on_button_created=self._run_buttons.append,
         )
 
     def _build_ui(self):
@@ -78,31 +51,14 @@ class PipelineWidgetsMixin:
         status_card, steps_card = self._build_pipeline_steps_and_status_cards()
         one_click = self._build_one_click_button()
 
-        self.workbench_view = ft.Column(
-            [
-                kit.page_header(
-                    "模組流水線・一鍵製作",
-                    "從 JAR 提取到資源包打包，四個步驟一次完成；可隨時取消，已完成的批次會保留",
-                    icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-                    tone="em",
-                    actions=[one_click],
-                ),
-                ft.Row(
-                    [
-                        ft.Column([paths_card, steps_card], spacing=16, expand=5),
-                        ft.Column(
-                            [status_card, self.progress_panel.container],
-                            spacing=16,
-                            expand=7,
-                        ),
-                    ],
-                    spacing=16,
-                    vertical_alignment=ft.CrossAxisAlignment.START,
-                ),
-            ],
-            spacing=18,
-            scroll=ft.ScrollMode.AUTO,
-            expand=True,
+        self.workbench_view = build_pipeline_workbench(
+            title="模組流水線・一鍵製作",
+            subtitle="從 JAR 提取到資源包打包，四個步驟一次完成；可隨時取消，已完成的批次會保留",
+            icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
+            tone="em",
+            left_controls=[paths_card, steps_card],
+            right_controls=[status_card, self.progress_panel.container],
+            actions=[one_click],
         )
 
         self.controls.append(self.workbench_view)
@@ -161,64 +117,45 @@ class PipelineWidgetsMixin:
 
     def _build_pipeline_steps_and_status_cards(self):
         """步驟與狀態卡片。"""
-        steps_card = kit.section_card(
-            "流水線步驟",
-            ft.Column(
-                [
-                    self._step_row(
-                        1,
-                        "抽取資源",
-                        "掃描 JAR，取出 lang 與 Patchouli 手冊",
-                        ft.Icons.UNARCHIVE,
-                        "dia",
-                        self._on_extract_click,
-                    ),
-                    self._step_row(
-                        2,
-                        "語系比對合併",
-                        "en_us / zh_cn / zh_tw 智慧合併，保留既有繁中",
-                        ft.Icons.CALL_MERGE,
-                        "ench",
-                        self._on_merge_click,
-                    ),
-                    self._step_row(
-                        3,
-                        "啟動翻譯",
-                        "Gemini 批次翻譯待翻譯條目",
-                        ft.Icons.AUTO_AWESOME,
-                        "gold",
-                        self._on_translate_click,
-                    ),
-                    self._step_row(
-                        4,
-                        "打包資源",
-                        f"輸出 pack.mcmeta 與 ZIP；{RESOURCE_PACK_INSTALL_HINT}",
-                        ft.Icons.INVENTORY_2,
-                        "em",
-                        self._on_bundle_click,
-                    ),
-                ],
-                spacing=0,
-            ),
-            icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
-            tone="ench",
+        steps_card = build_pipeline_steps_card(
+            [
+                PipelineStepSpec(
+                    1,
+                    "抽取資源",
+                    "掃描 JAR，取出 lang 與 Patchouli 手冊",
+                    ft.Icons.UNARCHIVE,
+                    "dia",
+                    self._on_extract_click,
+                ),
+                PipelineStepSpec(
+                    2,
+                    "語系比對合併",
+                    "en_us / zh_cn / zh_tw 智慧合併，保留既有繁中",
+                    ft.Icons.CALL_MERGE,
+                    "ench",
+                    self._on_merge_click,
+                ),
+                PipelineStepSpec(
+                    3,
+                    "啟動翻譯",
+                    "Gemini 批次翻譯待翻譯條目",
+                    ft.Icons.AUTO_AWESOME,
+                    "gold",
+                    self._on_translate_click,
+                ),
+                PipelineStepSpec(
+                    4,
+                    "打包資源",
+                    f"輸出 pack.mcmeta 與 ZIP；{RESOURCE_PACK_INSTALL_HINT}",
+                    ft.Icons.INVENTORY_2,
+                    "em",
+                    self._on_bundle_click,
+                ),
+            ],
+            on_button_created=self._run_buttons.append,
         )
-        status_card = ft.Container(
-            padding=ft.Padding.symmetric(horizontal=18, vertical=14),
-            bgcolor=C.PANEL,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=design.RADIUS_CARD,
-            content=ft.Column(
-                [
-                    ft.Row(
-                        [
-                            ft.Icon(ft.Icons.INFO_OUTLINE, size=14, color=C.DIM),
-                            self.progress_status,
-                        ]
-                    ),
-                    self.progress_bar,
-                ],
-                spacing=8,
-            ),
+        status_card = build_pipeline_status_card(
+            progress=self.progress_bar,
+            progress_status=self.progress_status,
         )
         return status_card, steps_card

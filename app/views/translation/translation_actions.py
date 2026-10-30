@@ -383,4 +383,5 @@ def _sync_from_session(view):
         cancel_button = getattr(view, "cancel_button", None)
         if cancel_button is not None:
             cancel_button.disabled = True
+            cancel_button.visible = False
     view.page.update()

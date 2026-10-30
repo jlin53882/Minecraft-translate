@@ -1,6 +1,7 @@
 """app/views/pipeline/pipeline_view.py 單元測試（Characterization Tests）。
 
 驗證 PipelineView、PipelineConfig、PipelineStepChip、PipelineProgressPanel 的 UI 狀態與行為。
+進度面板的實際步驟列必須沿用共用 PipelineStepRow。
 """
 
 import os
@@ -18,6 +19,7 @@ from app.views.pipeline.pipeline_progress import (
     PipelineStepChip,
 )
 from app.views.pipeline.pipeline_view import PipelineView
+from app.views.pipeline.pipeline_workbench import PipelineStepRow
 from tests.conftest import mock_filepicker, mock_page
 
 # -----------------------------------------------------------------------------
@@ -241,6 +243,7 @@ def test_pipeline_progress_panel_initial_state():
     panel = PipelineProgressPanel(page)
 
     assert len(panel.steps) == 4
+    assert all(isinstance(step, PipelineStepRow) for step in panel.steps)
     assert all(s.status == "waiting" for s in panel.steps)
     assert panel.current_step is None
     assert not panel.container.visible

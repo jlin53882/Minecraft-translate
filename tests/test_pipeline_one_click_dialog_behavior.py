@@ -168,7 +168,7 @@ def env(monkeypatch, tmp_path):
 def test_open_shows_step1_only_with_next_and_cancel(env):
     env.open()
     assert env.dialog.open is True and env.dialog.modal is True
-    assert env.title() == "📦 抽取資源設定"
+    assert env.title() == "抽取資源設定"
     assert env.step_text() == "1/4"
     assert env.labels() == ["下一個", "取消"]
     assert env.executed == []
@@ -232,9 +232,9 @@ def test_next_walks_through_all_four_steps(env):
         env.click("下一個")
         seen.append((env.title(), env.step_text(), env.labels()))
     assert seen == [
-        ("🔍 語系比對設定", "2/4", ["上一個", "下一個", "取消"]),
-        ("🔄 啟動翻譯設定", "3/4", ["上一個", "下一個", "取消"]),
-        ("📦 打包資源設定", "4/4", ["上一個", "確定執行", "取消"]),
+        ("語系比對設定", "2/4", ["上一個", "下一個", "取消"]),
+        ("啟動翻譯設定", "3/4", ["上一個", "下一個", "取消"]),
+        ("打包資源設定", "4/4", ["上一個", "確定執行", "取消"]),
     ]
     assert len(env.page.overlay) == 1 and env.page.overlay[0].open is True
 
@@ -246,7 +246,7 @@ def test_prev_goes_back_and_old_dialog_is_closed(env):
     second = env.dialog
     assert first.open is False and first not in env.page.overlay
     env.click("上一個")
-    assert env.title() == "📦 抽取資源設定"
+    assert env.title() == "抽取資源設定"
     assert second.open is False
     assert env.step_text() == "1/4"
 
@@ -263,7 +263,7 @@ def test_stale_buttons_do_not_overrun_step_bounds(env):
     stale_next = env.button("下一個")
     env.goto(4)
     stale_next.on_click(None)  # step 4 時再按舊的「下一個」
-    assert env.step_text() == "4/4" and env.title() == "📦 打包資源設定"
+    assert env.step_text() == "4/4" and env.title() == "打包資源設定"
     for _ in range(3):
         stale_prev = env.button("上一個")
         stale_prev.on_click(None)
@@ -794,7 +794,7 @@ def test_cancel_discards_state_and_reopen_has_fresh_defaults(env):
     assert env.step_text() == "3/4"
     env.page.overlay.clear()
     env.open()
-    assert env.title() == "📦 抽取資源設定"
+    assert env.title() == "抽取資源設定"
 
 
 def test_reopen_reads_updated_config(env):

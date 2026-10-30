@@ -241,7 +241,7 @@ class TestFix4834213_FletDialogAPI:
 # commit a59e85b — single-dialog refactor
 # =============================================================================
 class TestFixA59e85b_SingleDialogRefactor:
-    """show_result_dialog 改為 mutate preview_dialog 本身,不開新 result_dialog。"""
+    """show_result_dialog 維持單一對話框並只替換共用 body／操作列。"""
 
     def test_no_result_dialog_show_dialog_call(self):
         """不應該有 page.show_dialog(result_dialog) — 證明 single-dialog 架構。"""
@@ -260,11 +260,10 @@ class TestFixA59e85b_SingleDialogRefactor:
         )
 
     def test_preview_dialog_content_mutated(self):
-        """show_result_dialog 內必須 mutate preview_dialog.content。"""
+        """結果狀態只能替換共用 body，不能重建另一個對話框外殼。"""
         src = _read(EXTRACTOR_PREVIEW_DIALOG)
-        assert "preview_dialog.content =" in src, (
-            "回歸:preview_dialog.content 沒有被 mutate "
-            "(commit a59e85b 改成 mutate-in-place)"
+        assert "preview_body.content =" in src, (
+            "回歸:preview_body.content 沒有被 mutate (共用對話框外殼只能替換 body 內容)"
         )
 
     def test_preview_dialog_actions_mutated(self):
