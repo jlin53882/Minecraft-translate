@@ -23,6 +23,20 @@ from app.views.pipeline.pipeline_workbench import (
 from translation_tool.utils.config_manager import load_config
 
 
+def _setting_row(label: str, control, *, weight=None) -> ft.Row:
+    """標籤與控制項同列；視窗變窄時控制項換到下一行，標籤不會被壓成一字一行。"""
+    return ft.Row(
+        [
+            ft.Text(label, weight=weight or ft.FontWeight.W_500, size=14),
+            control,
+        ],
+        wrap=True,
+        spacing=12,
+        run_spacing=8,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+
+
 class MergeWidgetsMixin:
     """MergeView 的控制項與版面組裝（由 merge_view.py 拆出，#114）。"""
 
@@ -78,7 +92,7 @@ class MergeWidgetsMixin:
         # - 此開關只影響 Patchouli Book 的 en_us 資料夾，不影響 root-level lang 檔案
         # - 當 process_zh_cn_switch=False 時，此開關連動 Disabled（因 zh_cn 已被全域略過）
         self.patchouli_skip_zh_cn_switch = ft.Switch(
-            label="優先使用已有繁中，無則信任簡中（跳過英文）",
+            label=None,
             value=False,
             on_change=lambda e: self._on_merge_field_changed(
                 "patchouli_skip_en_us_when_zh_cn_exists", e.control.value
@@ -260,19 +274,7 @@ class MergeWidgetsMixin:
                         color=C.MUTED,
                     ),
                     ft.Container(height=6),
-                    ft.Row(
-                        [
-                            ft.Text(
-                                "zh 英文含量閾值",
-                                weight=ft.FontWeight.W_500,
-                                size=14,
-                                expand=True,
-                            ),
-                            self.zh_en_letter_threshold_field,
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                        vertical_alignment=ft.CrossAxisAlignment.CENTER,
-                    ),
+                    _setting_row("zh 英文含量閾值", self.zh_en_letter_threshold_field),
                     ft.Text(
                         "超過此數值判定為英文，用於 lang 過濾，預設 2。",
                         size=12,
@@ -315,18 +317,14 @@ class MergeWidgetsMixin:
                     ft.Container(
                         content=ft.Column(
                             [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            "翻譯來源優先級：繁中 > 簡中(達門檻) > 英文",
-                                            weight=ft.FontWeight.W_500,
-                                            size=14,
-                                            expand=True,
-                                        ),
-                                        self.patchouli_skip_zh_cn_switch,
-                                    ],
-                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                ft.Text(
+                                    "翻譯來源優先級：繁中 > 簡中(達門檻) > 英文",
+                                    weight=ft.FontWeight.W_500,
+                                    size=14,
+                                ),
+                                _setting_row(
+                                    "優先使用已有繁中，無則信任簡中（跳過英文）",
+                                    self.patchouli_skip_zh_cn_switch,
                                 ),
                                 ft.Text(
                                     "內容中日韓文字佔比達門檻時，視為有效翻譯並跳過英文",
@@ -344,18 +342,8 @@ class MergeWidgetsMixin:
                     ft.Container(
                         content=ft.Column(
                             [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            "en_us 跳過門檻",
-                                            weight=ft.FontWeight.W_500,
-                                            size=14,
-                                            expand=True,
-                                        ),
-                                        self.patchouli_threshold_field,
-                                    ],
-                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                _setting_row(
+                                    "en_us 跳過門檻", self.patchouli_threshold_field
                                 ),
                                 ft.Text(
                                     "預設 0.5，範圍 0.0 ~ 1.0。",
@@ -396,7 +384,7 @@ class MergeWidgetsMixin:
             lang_merger_cfg.get("zh_en_letter_threshold", 2)
         )
         self.extracted_merge_switch = ft.Switch(
-            label="合併 XX_extracted → assets/(階段 2)",
+            label=None,
             value=True,
             on_change=lambda e: self._on_merge_field_changed(
                 "enable_extracted_to_assets_merge", e.control.value
@@ -410,18 +398,9 @@ class MergeWidgetsMixin:
                     ft.Container(
                         content=ft.Column(
                             [
-                                ft.Row(
-                                    [
-                                        ft.Text(
-                                            "合併 XX_extracted → assets/",
-                                            weight=ft.FontWeight.W_500,
-                                            size=14,
-                                            expand=True,
-                                        ),
-                                        self.extracted_merge_switch,
-                                    ],
-                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                                _setting_row(
+                                    "合併 XX_extracted → assets/",
+                                    self.extracted_merge_switch,
                                 ),
                                 ft.Text(
                                     "把 {XX_extracted}/{modid}/lang/*.json 的 key 補到 assets/{modid}/lang/*.json,"
@@ -572,9 +551,9 @@ class MergeWidgetsMixin:
             left_controls=[
                 self._info_container,
                 input_card,
+                output_card,
                 self.db_options.card,
                 rules_card,
-                output_card,
             ],
             right_controls=[status_card, log_card],
             actions=[self.start_button, self.cancel_button],
