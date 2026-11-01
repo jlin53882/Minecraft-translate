@@ -332,7 +332,7 @@ def test_controls_contains_all_sections(monkeypatch):
     assert len(view.controls) == 1
     workbench = view.controls[0]
     assert isinstance(workbench, ft.Column)
-    assert isinstance(workbench.controls[0], ft.Row)
+    assert isinstance(workbench.controls[0], ft.ResponsiveRow)
     body = workbench.controls[1]
     assert isinstance(body, ft.ResponsiveRow)
     assert len(body.controls) == 2
