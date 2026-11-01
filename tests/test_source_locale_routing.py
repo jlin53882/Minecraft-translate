@@ -246,3 +246,60 @@ def test_shared_cache_key_isolates_non_default_locales_and_keeps_default_keys():
     assert (
         rich.make_key({**same_text, "source_locale": "pt_br"}) == "item.iron|Iron@pt_br"
     )
+
+
+# ---------------------------------------------------------------- 單一非英文語系模組包
+def test_ru_only_json_namespace_is_written_and_keeps_ru_source_in_db(tmp_path):
+    """只有 ru_ru 的 KubeJS JSON 語系會以 ru_ru 作為來源寫入資料庫，語系可由 selector 還原。"""
+    import json
+
+    from translation_tool.translation_db.pack_sources import scan_pack_sources
+
+    lang = tmp_path / "kubejs" / "assets" / "chipped" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "ru_ru.json").write_text(
+        json.dumps(
+            {"block.chipped.loom": "Верстак пастуха", "x.y": "Зубило"},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    assert result.locale_fallbacks == {"chipped": "ru_ru"}
+    assert {item.key: item.en_us for item in result.items} == {
+        "block.chipped.loom": "Верстак пастуха",
+        "x.y": "Зубило",
+    }
+
+    db = TranslationDB(tmp_path / "ru.db")
+    try:
+        db.ingest("1.21.1", result.items)
+        rows = db.list_entries("1.21.1", limit=None)[0]
+        assert len(rows) == 2
+        locales = db.source_locales_for_entries([row.id for row in rows])
+        assert set(locales.values()) == {"ru_ru"}
+    finally:
+        db.close()
+
+
+def test_js_lang_script_with_non_whitelisted_locale_is_reported_not_written(tmp_path):
+    """ClientEvents.lang 的非白名單語系（例如 ru_ru）不寫入資料庫，並留下可見的 issue。
+
+    JS 寫回端只支援 en_us／zh_cn／zh_tw；放寬掃描前必須同時保證寫回安全，所以這裡是刻意的邊界。
+    """
+    from translation_tool.translation_db.pack_sources import scan_pack_sources
+
+    script = tmp_path / "kubejs" / "client_scripts" / "lang_ru.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('ru_ru', event => {\n"
+        "  event.add('ru_test', 'item.ru_test.hammer', 'Молот кузнеца');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    assert result.items == []
+    reasons = [
+        issue.get("reason") for issue in result.issues if isinstance(issue, dict)
+    ]
+    assert "kubejs_lang_locale_unsupported" in reasons
