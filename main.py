@@ -12,6 +12,8 @@
 
 import logging
 import multiprocessing
+import os
+import socket
 
 import flet as ft
 
@@ -25,6 +27,69 @@ WINDOW_WIDTH_DEFAULT, WINDOW_HEIGHT_DEFAULT = DEFAULT_WINDOW_SIZE
 WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT = MIN_WINDOW_SIZE
 
 logger = logging.getLogger("main_app")
+
+
+def _port_is_free(port: int, host: str = "127.0.0.1") -> bool:
+    """嘗試綁定連接埠；能綁定代表目前沒有其他程式占用。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind((host, port))
+        except OSError:
+            return False
+    return True
+
+
+def resolve_server_port(preferred: int | None, host: str = "127.0.0.1") -> int:
+    """回傳 Flet 網頁服務可用的連接埠。
+
+    偏好埠（``FLET_SERVER_PORT`` 或 Flet 預設的 8000）被占用時，通常是上一個
+    沒有關閉的程式仍在執行；此時改用系統配置的空閒埠，並留下警告，避免 uvicorn
+    啟動失敗後 Flet 關閉流程再拋出第二個錯誤。
+    """
+    if preferred is not None and _port_is_free(preferred, host):
+        return preferred
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((host, 0))
+        free_port = probe.getsockname()[1]
+    if preferred is not None:
+        logger.warning(
+            "連接埠 %d 已被占用（可能是上一個程式尚未關閉），改用空閒連接埠 %d",
+            preferred,
+            free_port,
+        )
+    return free_port
+
+
+def _preferred_server_port() -> int | None:
+    """讀取 ``FLET_SERVER_PORT``；未設定或格式錯誤時回傳 None。"""
+    raw = os.getenv("FLET_SERVER_PORT", "").strip()
+    if not raw:
+        return None
+    try:
+        port = int(raw)
+    except ValueError:
+        logger.warning("FLET_SERVER_PORT 不是有效的連接埠數字：%r，忽略此設定", raw)
+        return None
+    return port if 0 < port < 65536 else None
+
+
+def _web_server_port() -> int:
+    """網頁服務模式才需要檢查埠；桌面模式維持 Flet 自動選埠（0）。
+
+    ``FLET_SERVER_PORT`` 有設定時一定使用它；網頁服務強制啟用但沒有設定時，
+    Flet 預設使用 8000，這裡一併檢查。
+    """
+    preferred = _preferred_server_port()
+    forced_web = os.getenv("FLET_FORCE_WEB_SERVER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if preferred is None and forced_web:
+        preferred = 8000
+    if preferred is None:
+        return 0
+    return resolve_server_port(preferred)
 
 
 def bootstrap_runtime():
@@ -92,4 +157,12 @@ if __name__ == "__main__":
             "致命錯誤：配置或日誌系統初始化失敗！錯誤: %s", e, exc_info=True
         )
 
-    ft.run(main, assets_dir=str(get_resource_root() / "assets"))
+    server_port = _web_server_port()
+    if server_port:
+        # Flet 會以 FLET_SERVER_PORT 覆蓋 port 參數，因此選定的埠必須寫回環境變數。
+        os.environ["FLET_SERVER_PORT"] = str(server_port)
+    ft.run(
+        main,
+        assets_dir=str(get_resource_root() / "assets"),
+        port=server_port,
+    )
