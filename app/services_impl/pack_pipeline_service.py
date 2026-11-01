@@ -36,6 +36,29 @@ def discover_kubejs_ftb_pack_candidates(source: str) -> list[str]:
     return discover_pack_candidates(source)
 
 
+def _pack_translation_runner(target_version: str, use_translation_db: bool):
+    """流水線的 LM 翻譯階段：只翻譯本次來源涉及的 mod；資料庫設定關閉時略過。"""
+
+    def translate_pack_missing(current_db, result, pipeline_options, task_session):
+        mod_ids = tuple(sorted({item.mod_id for item in result.items if item.mod_id}))
+        if not mod_ids or not use_translation_db:
+            return _empty_translation_report(dry_run=pipeline_options.dry_run)
+        return run_moddb_translate_service(
+            TranslateOptions(
+                version=target_version,
+                mod_ids=mod_ids,
+                limit=0,
+                dry_run=pipeline_options.dry_run,
+                write_cache=not pipeline_options.dry_run,
+            ),
+            task_session,
+            manage_session=False,
+            db_override=current_db,
+        )
+
+    return translate_pack_missing
+
+
 def run_kubejs_ftb_pipeline_service(
     source: str,
     version: str,
@@ -49,8 +72,14 @@ def run_kubejs_ftb_pipeline_service(
     publish: bool = False,
     pack_root: str | None = None,
     translate_missing: bool = False,
+    translation_version: str | None = None,
+    use_translation_db: bool = True,
 ):
-    """以既有 TaskSession 執行一次可取消的來源／DB／overlay run。"""
+    """以既有 TaskSession 執行一次可取消的來源／DB／overlay run。
+
+    ``translation_version`` 是 LM 翻譯寫入的資料庫目標版本；未指定時沿用遊戲版本。
+    ``use_translation_db=False`` 時不執行 LM 翻譯（Mod 資料庫設定為關閉）。
+    """
     db = None
     try:
         session.start()
@@ -70,24 +99,11 @@ def run_kubejs_ftb_pipeline_service(
             translate_missing=translate_missing,
         )
 
-        def translate_pack_missing(current_db, result, pipeline_options, task_session):
-            mod_ids = tuple(
-                sorted({item.mod_id for item in result.items if item.mod_id})
-            )
-            if not mod_ids:
-                return _empty_translation_report(dry_run=pipeline_options.dry_run)
-            return run_moddb_translate_service(
-                TranslateOptions(
-                    version=pipeline_options.version,
-                    mod_ids=mod_ids,
-                    limit=0,
-                    dry_run=pipeline_options.dry_run,
-                    write_cache=not pipeline_options.dry_run,
-                ),
-                task_session,
-                manage_session=False,
-                db_override=current_db,
-            )
+        translation_runner = (
+            _pack_translation_runner(translation_version or version, use_translation_db)
+            if translate_missing
+            else None
+        )
 
         report = run_pack_pipeline(
             db,
@@ -95,7 +111,7 @@ def run_kubejs_ftb_pipeline_service(
             options,
             session=session,
             pack_root=pack_root,
-            translation_runner=translate_pack_missing if translate_missing else None,
+            translation_runner=translation_runner,
         )
         session.set_summary(report.as_dict())
         return report

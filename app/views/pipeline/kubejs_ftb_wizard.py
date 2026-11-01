@@ -126,8 +126,9 @@ class KubejsFtbWizard:
             [
                 view.translate_missing,
                 kit.hint_text(
-                    "開啟後，同步 ModDB 之後會翻譯待處理條目（需要 LM 設定）；預覽不會翻譯。"
+                    "開啟後，同步 ModDB 之後會翻譯待處理條目；預覽不會翻譯。"
                 ),
+                view.lm_db_options.card,
             ],
             spacing=12,
             tight=True,
@@ -163,6 +164,7 @@ class KubejsFtbWizard:
             ("同步模式", "完整掃描" if view.scan_mode.value == "full" else "增量同步"),
             ("來源類型", _source_label(view)),
             ("LM 翻譯待處理", "開啟" if view.translate_missing.value else "未啟用"),
+            ("翻譯資料庫", _db_label(view)),
             ("Overlay 輸出目錄", view.output_field.value or "—"),
         ]
         return ft.Column(
@@ -211,6 +213,15 @@ class KubejsFtbWizard:
         if step == 3 and not (view.output_field.value or "").strip():
             return "一鍵執行會發布 overlay，請先填寫輸出目錄", C.RED
         return None
+
+
+def _db_label(view: KubejsFtbPipelineView) -> str:
+    use_db, version = view.translation_db_choice()
+    if not use_db:
+        return "未使用（LM 翻譯會略過）"
+    return f"使用；目標版本：{version or view.version_field.value or '—'}" + (
+        "" if version else "（未指定，沿用遊戲版本）"
+    )
 
 
 def _source_label(view: KubejsFtbPipelineView) -> str:

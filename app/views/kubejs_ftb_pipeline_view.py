@@ -12,6 +12,7 @@ import json
 
 import flet as ft
 
+from app.services_impl.moddb_service import load_db_settings
 from app.services_impl.pack_pipeline_service import (
     discover_kubejs_ftb_pack_candidates,
     run_kubejs_ftb_pipeline_service,
@@ -29,6 +30,7 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import make_status_chip, set_chip_status
 from app.ui.update_scope import update_regions
+from app.views.moddb.lm_db_options import LmDbOptions
 from app.views.pipeline.kubejs_ftb_wizard import KubejsFtbWizard
 from app.views.pipeline.pipeline_forms import build_pipeline_dialog, dialog_button
 from app.views.pipeline.pipeline_progress import PipelineProgressPanel
@@ -44,6 +46,7 @@ _POLL_INTERVAL_SEC = 0.2
 
 
 _MODES = ("both", "ftb", "kubejs")
+_SUGGESTION_LIMIT = 8
 
 
 class KubejsFtbPipelineView(ft.Column):
@@ -82,6 +85,7 @@ class KubejsFtbPipelineView(ft.Column):
         self._one_click_stage: str | None = None
         self._publish_dialog: ft.AlertDialog | None = None
         self._publish_confirm_button: ft.Button | None = None
+        self._detected_version: str | None = None
 
         self._build_controls(page)
         self._build_layout()
@@ -102,20 +106,23 @@ class KubejsFtbPipelineView(ft.Column):
             path=True,
             on_change=self._source_changed,
         )
-        # 版本由來源自動帶入（分析來源時）；使用者也可直接輸入，輸入時依前綴過濾選項。
+        # 版本由來源自動帶入（分析來源時）；使用者也可直接輸入。建議清單只列前幾筆符合的版本。
         self._version_auto = False
         self.version_hint = kit.hint_text(
-            "分析來源後會自動帶入版本，也可手動選擇或輸入。"
+            "分析來源後會自動帶入版本，也可輸入（例如 1.21）篩選。"
         )
-        self.version_field = ft.Dropdown(
+        self.version_field = kit.dropdown(
             label="遊戲版本",
-            options=[ft.dropdown.Option(v) for v in known_minecraft_versions()],
+            hint_text="輸入如 1.21 篩選版本",
             editable=True,
             enable_filter=True,
-            enable_search=True,
+            options=[],
             width=260,
             on_text_change=self._version_typed,
             on_select=self._version_selected,
+        )
+        kit.set_dropdown_options(
+            self.version_field, [(v, v) for v in self._version_suggestions("")]
         )
         self.scan_mode = kit.dropdown(
             label="同步模式",
@@ -148,6 +155,8 @@ class KubejsFtbPipelineView(ft.Column):
             label="FTB Quests", value=mode != "kubejs", visible=mode != "kubejs"
         )
         self.translate_missing = ft.Checkbox(label="LM 翻譯待處理", value=False)
+        # 與模組包一鍵製作相同的 Mod 資料庫設定卡：使用資料庫、沿用全域目標版本、目標版本與統計。
+        self.lm_db_options = LmDbOptions(self._page.update)
 
     def _build_status_controls(self, page: ft.Page) -> None:
         self.status_chip = make_status_chip("尚未開始")
@@ -203,31 +212,70 @@ class KubejsFtbPipelineView(ft.Column):
         )
         self.controls = [self.workbench_view]
 
+    def _version_suggestions(self, text: str) -> list[str]:
+        """建議清單：空白時為偵測到的版本與最新的幾個版本；有輸入時為前綴符合的版本（最多 8 筆）。"""
+        text = text.strip()
+        versions = known_minecraft_versions()
+        if text:
+            matches = [v for v in versions if v.startswith(text)]
+        else:
+            matches = versions
+        if (
+            self._detected_version
+            and self._detected_version not in matches
+            and not text
+        ):
+            matches = [self._detected_version, *matches]
+        return matches[:_SUGGESTION_LIMIT]
+
+    def _refresh_version_suggestions(self, text: str) -> None:
+        matches = self._version_suggestions(text)
+        kit.set_dropdown_options(self.version_field, [(v, v) for v in matches])
+        self.version_field.value = text or None
+        total = (
+            len([v for v in known_minecraft_versions() if v.startswith(text.strip())])
+            if text.strip()
+            else 0
+        )
+        if text.strip():
+            self.version_hint.value = (
+                f"符合 {total} 個版本，列出前 {len(matches)} 個；可直接輸入完整版本。"
+                if total
+                else "沒有符合的版本，可直接輸入完整版本號。"
+            )
+
     def _version_typed(self, e=None) -> None:
         """使用者手動輸入版本：視為手動值，之後分析來源不會覆蓋它。"""
-        text = (getattr(e, "data", None) or self.version_field.value or "").strip()
-        self.version_field.value = text or None
+        text = (
+            e.control.text if e is not None and getattr(e, "control", None) else ""
+        ) or ""
         self._version_auto = False
+        self._refresh_version_suggestions(text)
+        self._safe_update()
 
     def _version_selected(self, e=None) -> None:
         self._version_auto = False
 
     def _apply_detected_version(self, version: str | None) -> None:
         """依來源偵測結果帶入版本；手動輸入過的版本不會被覆蓋。"""
+        self._detected_version = version
         manual = bool(self.version_field.value) and not self._version_auto
         if version is None:
             if self._version_auto:
                 self.version_field.value = None
                 self._version_auto = False
-            self.version_hint.value = "未偵測到版本，請手動選擇或輸入。"
+            self.version_hint.value = "未偵測到版本，請輸入或選擇（例如 1.21）。"
             return
-        if version not in {option.key for option in self.version_field.options}:
-            self.version_field.options.append(ft.dropdown.Option(version))
         if manual:
             self.version_hint.value = (
                 f"來源偵測到 {version}，目前保留你手動輸入的版本。"
             )
             return
+        keys = [option.key for option in self.version_field.options]
+        if version not in keys:
+            kit.set_dropdown_options(
+                self.version_field, [(version, version)] + [(k, k) for k in keys]
+            )
         self.version_field.value = version
         self._version_auto = True
         self.version_hint.value = f"已自動偵測：{version}（可手動改）"
@@ -517,6 +565,14 @@ class KubejsFtbPipelineView(ft.Column):
     async def _publish_run(self, _e=None) -> None:
         await self._start(dry_run=False, publish=True)
 
+    def translation_db_choice(self) -> tuple[bool, str | None]:
+        """LM 翻譯使用的資料庫設定（與一鍵製作相同的快照）：(是否使用資料庫, 目標版本或 None)。
+
+        目標版本未指定（None）時，流水線會沿用遊戲版本。
+        """
+        snapshot = self.lm_db_options.snapshot_for_run(load_db_settings())
+        return bool(snapshot.use_db), (snapshot.version or None)
+
     def _run_blocker(self, publish: bool) -> tuple[str, str] | None:
         """回傳無法開始執行的原因與提示顏色；None 表示輸入可以開始執行。
 
@@ -563,6 +619,7 @@ class KubejsFtbPipelineView(ft.Column):
         self._safe_update()
         source = (self.source_field.value or "").strip()
         version = (self.version_field.value or "").strip()
+        lm_use_db, lm_version = self.translation_db_choice()
         pack_root = self.root_dropdown.value or (
             self._candidates[0] if self._candidates else None
         )
@@ -580,6 +637,8 @@ class KubejsFtbPipelineView(ft.Column):
                 publish=publish,
                 pack_root=pack_root,
                 translate_missing=bool(self.translate_missing.value),
+                translation_version=lm_version,
+                use_translation_db=lm_use_db,
             ),
             name="KubeJS / FTB 流水線",
             owner="kubejs-ftb-pipeline",
