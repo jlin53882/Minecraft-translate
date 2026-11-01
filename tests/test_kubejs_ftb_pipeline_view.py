@@ -91,12 +91,39 @@ def test_kubejs_sync_only_run_never_marks_overlay_stage():
     assert view.progress_panel.steps[3].status != "running"
 
 
-def test_kubejs_steps_share_one_settings_dialog_and_four_run_buttons():
+def test_kubejs_steps_share_one_run_button_list_and_wizard():
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
 
-    assert len(view._run_buttons) == 5
-    assert view._settings_dialog is not None
-    assert view._settings_button is not None
+    assert len(view._run_buttons) == 5  # 四個步驟按鈕＋一鍵執行
+    assert view._one_click_button in view._run_buttons
+    assert view._wizard is not None
+
+
+def test_wizard_blocks_next_until_sources_are_analyzed_and_selected():
+    from app.views.pipeline.kubejs_ftb_wizard import KubejsFtbWizard
+
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    wizard = view._wizard
+    assert isinstance(wizard, KubejsFtbWizard)
+
+    assert wizard._step_problem(1) is not None  # 尚未分析來源
+    view._candidates = ["/a", "/b"]
+    assert wizard._step_problem(1) is not None  # 多個候選未選
+    view.root_dropdown.value = "/a"
+    view.include_kubejs.value = False
+    view.include_ftb.value = False
+    assert wizard._step_problem(1) is not None  # 來源類型都未選
+    view.include_kubejs.value = True
+    assert wizard._step_problem(1) is None
+
+
+def test_wizard_requires_output_directory_before_the_final_step():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+
+    view.output_field.value = ""
+    assert view._wizard._step_problem(3) is not None
+    view.output_field.value = "/overlay"
+    assert view._wizard._step_problem(3) is None
 
 
 def _preview_summary(*, conflicts: int = 0) -> dict:

@@ -25,6 +25,7 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import make_status_chip, set_chip_status
 from app.ui.update_scope import update_regions
+from app.views.pipeline.kubejs_ftb_wizard import KubejsFtbWizard
 from app.views.pipeline.pipeline_forms import build_pipeline_dialog, dialog_button
 from app.views.pipeline.pipeline_progress import PipelineProgressPanel
 from app.views.pipeline.pipeline_workbench import (
@@ -98,7 +99,7 @@ class KubejsFtbPipelineView(ft.Column):
             on_change=self._source_changed,
         )
         self.version_field = kit.text_field(
-            "遊戲版本", value="1.21.1", mono=True, expand=True
+            "遊戲版本", value="1.21.1", mono=True, width=260
         )
         self.scan_mode = kit.dropdown(
             label="同步模式",
@@ -156,7 +157,7 @@ class KubejsFtbPipelineView(ft.Column):
         self.cancel_button = self.progress_panel.cancel_button
 
     def _build_action_controls(self) -> None:
-        """步驟按鈕由步驟卡建立；這裡只保留統一停用用的清單與設定入口。"""
+        """步驟按鈕由步驟卡建立；這裡只保留一鍵執行與統一停用用的清單。"""
         self._run_buttons: list[ft.Button] = []
         self._one_click_button = kit.button(
             "一鍵執行",
@@ -166,12 +167,6 @@ class KubejsFtbPipelineView(ft.Column):
             on_click=self._one_click_clicked,
         )
         self._run_buttons.append(self._one_click_button)
-        self._settings_button = kit.button(
-            "流程設定",
-            "secondary",
-            icon=ft.Icons.TUNE,
-            on_click=self._open_settings,
-        )
 
     def _build_layout(self) -> None:
         """與一鍵製作相同的兩欄工作台：左側路徑與步驟，右側狀態與日誌。"""
@@ -179,7 +174,7 @@ class KubejsFtbPipelineView(ft.Column):
         steps_card = self._build_steps_card()
         status_panel = self._build_status_panel()
         self.progress_panel.attach_idle_status_card(status_panel)
-        self._settings_dialog = self._build_settings_dialog()
+        self._wizard = KubejsFtbWizard(self)
         self.workbench_view = build_pipeline_workbench(
             show_header=not self._embedded,
             title="KubeJS / FTB 任務流水線",
@@ -188,7 +183,7 @@ class KubejsFtbPipelineView(ft.Column):
             tone="em",
             left_controls=[paths_card, steps_card],
             right_controls=[status_panel, self.progress_panel.container],
-            actions=[self._one_click_button, self._settings_button],
+            actions=[self._one_click_button],
         )
         self.controls = [self.workbench_view]
 
@@ -222,22 +217,7 @@ class KubejsFtbPipelineView(ft.Column):
                         ],
                         spacing=6,
                     ),
-                    self.root_dropdown,
                     self.source_summary,
-                    ft.Column(
-                        [
-                            kit.section_label("輸出目的地（overlay，正式發布必填）"),
-                            build_pipeline_input_row(
-                                self.output_field,
-                                kit.pick_button(
-                                    ft.Icons.FOLDER_SPECIAL_OUTLINED,
-                                    "選擇 overlay 輸出目錄",
-                                    self._pick_output,
-                                ),
-                            ),
-                        ],
-                        spacing=6,
-                    ),
                 ],
                 spacing=14,
             ),
@@ -288,34 +268,6 @@ class KubejsFtbPipelineView(ft.Column):
             on_button_created=self._run_buttons.append,
         )
 
-    def _build_settings_dialog(self) -> ft.AlertDialog:
-        """流程設定對話框：版本、同步模式、來源類型與 LM 開關集中於此，不佔用工作台版面。"""
-        content = ft.Column(
-            [
-                self.version_field,
-                self.scan_mode,
-                ft.Row(
-                    [self.include_kubejs, self.include_ftb],
-                    spacing=16,
-                    wrap=True,
-                ),
-                self.translate_missing,
-                kit.hint_text(
-                    "LM 翻譯會在「同步 ModDB」與「輸出 overlay」步驟生效；預覽不會翻譯。"
-                ),
-            ],
-            spacing=12,
-            tight=True,
-        )
-        return build_pipeline_dialog(
-            self._page,
-            title="流程設定",
-            content=content,
-            actions=[dialog_button("完成", self._close_settings, role="primary")],
-            icon=ft.Icons.TUNE,
-            tone="ench",
-        )
-
     def _build_status_panel(self) -> ft.Control:
         return build_pipeline_status_card(
             progress=self.progress,
@@ -333,28 +285,26 @@ class KubejsFtbPipelineView(ft.Column):
             self.output_field.value = result
             self._safe_update()
 
-    def _open_settings(self, _e=None) -> None:
-        present_page_dialog(self._page, self._settings_dialog)
-
-    def _close_settings(self, _e=None) -> None:
-        close_page_dialog(self._page, self._settings_dialog)
-
     def _set_run_buttons_disabled(self, disabled: bool) -> None:
         for button in self._run_buttons:
             button.disabled = disabled
 
-    async def _one_click_clicked(self, _e=None) -> None:
-        """一鍵執行：先唯讀預覽，預覽成功後由確認對話框決定是否正式發布。"""
+    def _one_click_clicked(self, _e=None) -> None:
+        """一鍵執行：開啟設定精靈；第 4 步開始唯讀預覽，預覽後由確認對話框決定是否發布。"""
         if self._running:
             show_snack(self._page, "已有 KubeJS／FTB 流水線執行中", C.GOLD)
             return
         if not (self.source_field.value or "").strip():
             show_snack(self._page, "請先輸入來源路徑", C.RED)
             return
-        if not (self.output_field.value or "").strip():
-            show_snack(self._page, "一鍵執行會發布 overlay，請先填寫輸出目的地", C.RED)
-            return
+        self._wizard.open()
+
+    def _begin_one_click_preview(self) -> None:
+        """精靈第 4 步「開始預覽」：唯讀預覽，成功後才會出現發布確認。"""
         self._one_click_stage = "preview"
+        self._page.run_task(self._run_one_click_preview)
+
+    async def _run_one_click_preview(self) -> None:
         await self._start(dry_run=True, publish=False)
         if not self._running:
             self._one_click_stage = None
