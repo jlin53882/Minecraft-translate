@@ -13,6 +13,7 @@ import requests
 
 from translation_tool.translation_db import (
     KIND_ADVANCEMENT,
+    KIND_FTB_QUEST_LANG,
     KIND_GUIDE,
     KIND_KUBEJS_LANG,
     KIND_LANG,
@@ -640,16 +641,17 @@ def test_smart_review_bulk_glossary_keeps_global_limit_after_kind_merge():
             kind = params[0]
             if "e.mc_version<>?" in sql:
                 return []
-            offset = 0 if kind == KIND_LANG else 1
+            # 每個 kind 使用不重疊的 id 區段，避免合併時被當成重複列
+            offset = {KIND_LANG: 0, KIND_KUBEJS_LANG: 1, KIND_FTB_QUEST_LANG: 2}[kind]
             return [
                 (
-                    offset + index * 2,
+                    offset + index * 3,
                     kind,
                     "1.21.1",
                     "demo",
-                    f"key_{offset + index * 2}",
-                    f"Source {offset + index * 2}",
-                    f"譯文 {offset + index * 2}",
+                    f"key_{offset + index * 3}",
+                    f"Source {offset + index * 3}",
+                    f"譯文 {offset + index * 3}",
                     SRC_JAR_TW,
                     "reviewed",
                     1,
@@ -671,7 +673,11 @@ def test_smart_review_bulk_glossary_keeps_global_limit_after_kind_merge():
     rows = builder._bulk_glossary_rows()
 
     assert len(rows) == 5000
-    assert {row[1] for row in rows} == {KIND_LANG, KIND_KUBEJS_LANG}
+    assert {row[1] for row in rows} == {
+        KIND_LANG,
+        KIND_KUBEJS_LANG,
+        KIND_FTB_QUEST_LANG,
+    }
 
 
 def test_smart_review_candidate_offset_keeps_absolute_ordinals(db):

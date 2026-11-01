@@ -839,7 +839,8 @@ def build_translation_prompt(
     # Reviewed Mod DB lang entries are terminology references for every
     # Patchouli-compatible route as well.  They are never written directly;
     # the model still translates the current source item.
-    if profile in {"lang", "patch", "md"} and include_moddb_reviewed:
+    # 所有翻譯類型都注入同模組已審核的 lang 譯文（以 profile 區分的 guide、advancement 也一樣）。
+    if include_moddb_reviewed:
         reviewed = _reviewed_glossary_for_items(items, index)
         if reviewed:
             lines = ["\n【Mod DB 已審核 lang 翻譯參考（目前版本、本批相關）】"]
