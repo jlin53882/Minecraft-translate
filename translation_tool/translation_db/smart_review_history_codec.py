@@ -39,11 +39,11 @@ SMART_REVIEW_CAS_SNAPSHOT_FIELDS = (
     "effective_source",
     "review_status",
     "effective_revision",
+    "source_locale",
     "manual_zh_tw",
     "manual_checker",
     "manual_review_status",
     "manual_revision",
-    "source_locale",
 )
 
 

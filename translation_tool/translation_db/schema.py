@@ -333,6 +333,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
             (str(SCHEMA_VERSION),),
         )
         conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_entry_origin_locale "
+            "ON entry_origin (entry_id, source_locale)"
+        )
+        conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
             "ON effective (source, review_status)"
         )

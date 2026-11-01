@@ -937,10 +937,19 @@ def _scan_kubejs_lang(
 def _scan_ftb_quests(
     root: Path, version: str, scope: str, result: PackScanResult
 ) -> None:
+    lang_root = root / "lang"
+    locale_values = _collect_ftb_lang_values(root, lang_root, scope, result)
+    _emit_ftb_lang_items(locale_values, version, scope, result)
+    _scan_ftb_quest_files(root, lang_root, version, scope, result)
+
+
+def _collect_ftb_lang_values(
+    root: Path, lang_root: Path, scope: str, result: PackScanResult
+) -> dict[tuple[str, str], dict[str, tuple[str, str, str]]]:
+    """讀取 FTB lang SNBT，依（相對路徑, 鍵）收集各語系的（值, 摘要, 來源路徑）。"""
     locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]] = defaultdict(
         dict
     )
-    lang_root = root / "lang"
     if lang_root.is_dir():
         for path in _iter_files(lang_root, (".snbt",), result):
             result.mark_file("ftb_quests")
@@ -983,6 +992,16 @@ def _scan_ftb_quests(
             for key, value in _top_level_lang(data):
                 locale_values[(rel, key)][locale] = (value, digest, source_path)
             result.mark_source("ftb_quests", path.relative_to(root).as_posix())
+    return locale_values
+
+
+def _emit_ftb_lang_items(
+    locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]],
+    version: str,
+    scope: str,
+    result: PackScanResult,
+) -> None:
+    """為每個鍵選定來源語系後輸出條目（或含語言鍵的參照）。"""
     fallback_locale = select_source_locale(
         {
             locale: sum(1 for values in locale_values.values() if values.get(locale))
@@ -1006,11 +1025,6 @@ def _scan_ftb_quests(
         source, source_digest, source_path = locales[source_locale]
         if not source:
             continue
-        digest = hashlib.sha256(
-            "|".join(
-                f"{locale}:{value[1]}" for locale, value in sorted(locales.items())
-            ).encode()
-        ).hexdigest()
         if is_lang_key_ref_like(source):
             _append_references(
                 result,
@@ -1052,6 +1066,12 @@ def _scan_ftb_quests(
                 source_locale=source_locale,
             )
         )
+
+
+def _scan_ftb_quest_files(
+    root: Path, lang_root: Path, version: str, scope: str, result: PackScanResult
+) -> None:
+    """掃描任務 SNBT（排除 lang 目錄）並輸出任務文字條目。"""
     for path in _iter_files(root, (".snbt",), result):
         if lang_root in path.parents:
             continue

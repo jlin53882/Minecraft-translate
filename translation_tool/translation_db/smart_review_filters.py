@@ -85,7 +85,10 @@ def _smart_review_current_snapshot_sql() -> str:
     return (
         "SELECT e.kind, e.mc_version, e.mod_id, e.key, e.en_us, f.zh_tw, f.source, "
         + _effective_review_sql()
-        + ", t.revision FROM entry e JOIN effective f ON f.entry_id=e.id "
+        + ", t.revision, "
+        # 查詢哨兵 unknown:<id> 在快照中還原為 NULL，與 Python 端的可信來源語系一致
+        + f"NULLIF({source_locale_sql('e')}, 'unknown:' || CAST(e.id AS TEXT)) AS source_locale"
+        + " FROM entry e JOIN effective f ON f.entry_id=e.id "
         "LEFT JOIN translation t ON t.entry_id=f.entry_id AND t.source=f.source "
         "WHERE f.entry_id=?"
     )
