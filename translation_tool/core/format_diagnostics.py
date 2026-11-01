@@ -247,6 +247,19 @@ def _token_diagnostics(
     return tuple(diagnostics)
 
 
+def _structure_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    """Markup tags, tag order and color codes.  Empty source has no structure to compare."""
+    if not source:
+        return ()
+    return (
+        *_markup_tag_diagnostics(source, translated),
+        *_markup_order_diagnostics(source, translated),
+        *_color_code_diagnostics(source, translated),
+    )
+
+
 def _analyze_token_format(
     source: str,
     translated: str,
@@ -257,12 +270,15 @@ def _analyze_token_format(
     return FormatAnalysis(
         source_occurrences=source_occurrences,
         target_occurrences=target_occurrences,
-        diagnostics=_token_diagnostics(
-            source,
-            translated,
-            source_occurrences,
-            target_occurrences,
-            newline_policy=newline_policy,
+        diagnostics=(
+            *_token_diagnostics(
+                source,
+                translated,
+                source_occurrences,
+                target_occurrences,
+                newline_policy=newline_policy,
+            ),
+            *_structure_diagnostics(source, translated),
         ),
     )
 
@@ -271,6 +287,33 @@ def _analyze_token_format(
 # token 分析器認得的格式，若只看一般 token，標記被丟掉、改名或翻譯也會被當成正常譯文。
 _MARKUP_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9_.:-]*\s*/?>")
 MARKUP_ORDER_CATEGORY = "markup_order"
+# Legacy "&" color codes (e.g. &2, &r) used by FTB Quests text. Only lowercase
+# codes are matched so that words such as "Q&A" are not treated as codes.
+_COLOR_CODE_RE = re.compile(r"&[0-9a-fk-or]")
+
+
+def _color_code_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    source_counts = Counter(m.group(0) for m in _COLOR_CODE_RE.finditer(source))
+    target_counts = Counter(m.group(0) for m in _COLOR_CODE_RE.finditer(translated))
+    diagnostics: list[FormatDiagnostic] = []
+    for code in sorted(set(source_counts) | set(target_counts)):
+        delta = target_counts[code] - source_counts[code]
+        if not delta:
+            continue
+        diagnostics.append(
+            FormatDiagnostic(
+                identifier=code,
+                category="color",
+                direction="extra" if delta > 0 else "missing",
+                source_count=source_counts[code],
+                target_count=target_counts[code],
+                delta=delta,
+                display_label=code,
+            )
+        )
+    return tuple(diagnostics)
 
 
 def diagnostic_action(issue: FormatDiagnostic) -> str:
@@ -328,25 +371,6 @@ def _markup_order_diagnostics(
             delta=1,
             display_label="標記順序",
         ),
-    )
-
-
-def _analyze_script_format(
-    source: str,
-    translated: str,
-    newline_policy: NewlinePolicy,
-) -> FormatAnalysis:
-    """KubeJS 腳本文字：一般 token 檢查，加上自訂標記的數量檢查。"""
-    base = _analyze_token_format(source, translated, newline_policy)
-    return FormatAnalysis(
-        source_occurrences=base.source_occurrences,
-        target_occurrences=base.target_occurrences,
-        diagnostics=(
-            *base.diagnostics,
-            *_markup_tag_diagnostics(source, translated),
-            *_markup_order_diagnostics(source, translated),
-        ),
-        guide_issues=base.guide_issues,
     )
 
 
@@ -493,9 +517,9 @@ _POLICIES: dict[str, FormatKindPolicy] = {
             "kubejs_script",
             "kubejs",
             "kubejs",
-            _analyze_script_format,
+            _analyze_token_format,
             "hard",
-            analyzer_name="script",
+            analyzer_name="token",
         )
     ),
     "kubejs_lang": _normalize_policy(

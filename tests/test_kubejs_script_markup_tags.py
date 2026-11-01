@@ -34,9 +34,11 @@ def test_extra_markup_tag_is_reported():
     assert issues == ["多了 1 個「<r>」"]
 
 
-def test_markup_check_is_scoped_to_kubejs_script():
-    # 其他 kind 的行為不變：自訂標記不影響 lang 的既有檢查結果
-    assert translation_issues("<item>Drill<r>", "<物品>鑽頭", kind="lang") == []
+def test_markup_check_applies_to_general_lang_too():
+    assert translation_issues("<item>Drill<r>", "<物品>鑽頭", kind="lang") == [
+        "少了 1 個「<item>」",
+        "少了 1 個「<r>」",
+    ]
 
 
 def test_editor_hint_path_reports_the_same_markup_issue():
@@ -88,10 +90,48 @@ def test_order_diagnostic_has_its_own_action_wording():
     assert order[0].summary == "標記順序與原文不同"
 
 
-def test_order_check_is_scoped_to_kubejs_script():
+def test_order_check_applies_to_general_lang_too():
+    assert translation_issues(
+        "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="lang"
+    ) == ["標記順序與原文不同"]
+
+
+def test_ampersand_color_code_dropped_is_reported_for_ftb():
+    assert translation_issues(
+        "&2Skyroot&r Weapons", "&2Skyroot 武器", kind="ftb_quest_lang"
+    ) == ["少了 1 個「&r」"]
+
+
+def test_ampersand_color_code_kept_passes():
     assert (
-        translation_issues(
-            "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="lang"
-        )
+        translation_issues("&2Skyroot&r Weapons", "&2Skyroot&r 武器", kind="ftb_quests")
         == []
     )
+
+
+def test_word_with_ampersand_is_not_a_color_code():
+    assert translation_issues("Q&A session", "問答時段", kind="lang") == []
+
+
+def test_markup_checks_apply_to_kubejs_lang_and_ftb_quests():
+    for kind in ("kubejs_lang", "ftb_quests", "ftb_quest_lang", "lang"):
+        assert translation_issues("<imp>A<r>", "<imp>甲", kind=kind) == [
+            "少了 1 個「<r>」"
+        ], kind
+
+
+def test_empty_source_has_no_structure_check():
+    assert translation_issues("", "<imp>甲<r>", kind="kubejs_script") == []
+
+
+def test_shared_cache_quality_gate_rejects_dropped_markup_and_color_codes():
+    from translation_tool.core.lm_translator_shared_cache import cache_quality_issues
+
+    item = {
+        "source_text": "<imp>Download<r> &2Skyroot&r",
+        "cache_type": "lang",
+        "path": "k",
+    }
+    assert cache_quality_issues(item, "<imp>下載<r> &2天空根&r") == []
+    assert cache_quality_issues(item, "下載 &2天空根&r") != []  # <imp> and <r> dropped
+    assert cache_quality_issues(item, "<imp>下載<r> 天空根") != []  # &2 and &r dropped
