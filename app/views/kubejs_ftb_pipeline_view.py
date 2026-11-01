@@ -27,9 +27,9 @@ from app.ui.update_scope import update_regions
 from app.views.pipeline.pipeline_progress import PipelineProgressPanel
 from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
+    build_pipeline_input_row,
     build_pipeline_status_card,
     build_pipeline_steps_card,
-    build_pipeline_input_row,
     build_pipeline_workbench,
 )
 

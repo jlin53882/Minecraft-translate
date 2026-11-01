@@ -6,10 +6,10 @@ from app.ui import kit
 from app.views.pipeline.pipeline_config import RESOURCE_PACK_INSTALL_HINT
 from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
+    build_pipeline_input_row,
     build_pipeline_status_card,
     build_pipeline_step_row,
     build_pipeline_steps_card,
-    build_pipeline_input_row,
     build_pipeline_workbench,
 )
 

@@ -23,8 +23,8 @@ from app.views.pipeline.pipeline_workbench import (
     PipelineActionSpec,
     PipelineStepRow,
     PipelineStepSpec,
-    build_pipeline_status_card,
     build_pipeline_input_row,
+    build_pipeline_status_card,
     build_pipeline_step_row,
     build_pipeline_workbench,
 )
