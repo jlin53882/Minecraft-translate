@@ -618,15 +618,25 @@ class TestPurgeLegacyMarkers:
         self, tmp_path, monkeypatch
     ):
         monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
-        legacy = plugin_resume.marker_path("md")
-        legacy.parent.mkdir(parents=True, exist_ok=True)
-        legacy.write_text(
-            json.dumps({"plugin": "md", "processed": 2, "total": 7}), encoding="utf-8"
+        for kind in ("md", "kubejs", "ftbquests"):
+            legacy = plugin_resume.marker_path(kind)
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            legacy.write_text(
+                json.dumps({"plugin": kind, "processed": 2, "total": 7}),
+                encoding="utf-8",
+            )
+
+        assert lm_resume.purge_legacy_plugin_markers() == ["md", "kubejs", "ftbquests"]
+        assert all(
+            not plugin_resume.marker_path(kind).exists()
+            for kind in ("md", "kubejs", "ftbquests")
         )
 
-        assert lm_resume.purge_legacy_plugin_markers() == ["md"]
-        assert not legacy.exists()
-
         _write_plugin_marker("md")
+        _write_plugin_marker("kubejs")
+        _write_plugin_marker("ftbquests")
         assert lm_resume.purge_legacy_plugin_markers() == []
-        assert plugin_resume.marker_path("md").exists()
+        assert all(
+            plugin_resume.marker_path(kind).exists()
+            for kind in ("md", "kubejs", "ftbquests")
+        )

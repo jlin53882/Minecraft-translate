@@ -230,7 +230,7 @@ def purge_legacy_plugin_markers() -> list[str]:
     版本正確但內容不符的標記不在此處理，仍會顯示給使用者決定。回傳被清除的 kind。
     """
     purged: list[str] = []
-    for kind in plugin_resume.PLUGIN_KINDS:
+    for kind in plugin_resume.KNOWN_MARKER_KINDS:
         data = plugin_resume.read_marker(kind)
         if not isinstance(data, dict) or data.get("version") == 2:
             continue

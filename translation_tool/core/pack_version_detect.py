@@ -40,6 +40,14 @@ def _valid(version: object) -> str | None:
     return None
 
 
+def _nested_value(data: dict[str, object], parent: str, child: str) -> object | None:
+    """Read a nested descriptor field only when its parent has object shape."""
+    nested = data.get(parent)
+    if not isinstance(nested, dict):
+        return None
+    return nested.get(child)
+
+
 def _parse_descriptor(name: str, text: str) -> str | None:
     """依描述檔名稱取出版本；格式不符或損毀時回傳 None（不拋出例外）。"""
     try:
@@ -55,17 +63,20 @@ def _parse_descriptor(name: str, text: str) -> str | None:
     if not isinstance(data, dict):
         return None
     if name == "manifest.json":
-        return _valid((data.get("minecraft") or {}).get("version"))
+        return _valid(_nested_value(data, "minecraft", "version"))
     if name == "modrinth.index.json":
-        return _valid((data.get("dependencies") or {}).get("minecraft"))
+        return _valid(_nested_value(data, "dependencies", "minecraft"))
     if name == "mmc-pack.json":
-        for component in data.get("components") or []:
+        components = data.get("components")
+        if not isinstance(components, list):
+            return None
+        for component in components:
             if isinstance(component, dict) and component.get("uid") == "net.minecraft":
                 return _valid(component.get("version"))
         return None
     if name == "minecraftinstance.json":
-        base = data.get("baseModLoader") or {}
-        return _valid(base.get("minecraftVersion") or data.get("gameVersion"))
+        base_version = _nested_value(data, "baseModLoader", "minecraftVersion")
+        return _valid(base_version or data.get("gameVersion"))
     return None
 
 

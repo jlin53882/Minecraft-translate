@@ -505,9 +505,12 @@ class KubejsFtbPipelineView(ft.Column):
             self.source_summary.color = C.RED
             self._safe_update()
             return
-        detected = await asyncio.to_thread(detect_minecraft_version, source)
-        self._apply_detected_version(detected)
         generation = self._source_generation
+        detected = await asyncio.to_thread(detect_minecraft_version, source)
+        if not self._is_current_source(source, generation):
+            self._set_run_buttons_disabled(self._running)
+            return
+        self._apply_detected_version(detected)
         self._set_run_buttons_disabled(True)
         self.source_summary.value = "分析有限深度來源候選中…"
         self.source_summary.color = C.MUTED
@@ -518,18 +521,12 @@ class KubejsFtbPipelineView(ft.Column):
             )
         except (OSError, RuntimeError, ValueError) as exc:
             candidates = []
-            if (
-                generation != self._source_generation
-                or source != (self.source_field.value or "").strip()
-            ):
+            if not self._is_current_source(source, generation):
                 self._set_run_buttons_disabled(self._running)
                 return
             self.source_summary.value = f"來源分析失敗：{exc}"
             self.source_summary.color = C.RED
-        if (
-            generation != self._source_generation
-            or source != (self.source_field.value or "").strip()
-        ):
+        if not self._is_current_source(source, generation):
             self._set_run_buttons_disabled(self._running)
             return
         self._candidates = candidates
@@ -555,6 +552,13 @@ class KubejsFtbPipelineView(ft.Column):
             self.source_summary.color = C.RED
         self._set_run_buttons_disabled(self._running)
         self._safe_update()
+
+    def _is_current_source(self, source: str, generation: int) -> bool:
+        """Reject results produced for a path that changed while a worker awaited."""
+        return (
+            generation == self._source_generation
+            and source == (self.source_field.value or "").strip()
+        )
 
     async def _preview_run(self, _e=None) -> None:
         await self._start(dry_run=True, publish=False)

@@ -1,5 +1,8 @@
 """KubeJS／FTB 流水線工作台的 UI 契約測試。"""
 
+import asyncio
+import threading
+
 import flet as ft
 
 from app.views.kubejs_ftb_pipeline_view import KubejsFtbPipelineView
@@ -203,3 +206,46 @@ def test_plain_preview_completion_does_not_open_publish_confirmation():
     view._sync_session()
 
     assert view._publish_dialog is None
+
+
+def test_discover_discards_version_result_when_source_changes_while_detecting(
+    monkeypatch,
+):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    view.source_field.value = "source-a"
+    started = threading.Event()
+    release = threading.Event()
+    candidates_called = False
+
+    def detect(source):
+        assert source == "source-a"
+        started.set()
+        assert release.wait(timeout=2)
+        return "1.21.1"
+
+    def discover(_source):
+        nonlocal candidates_called
+        candidates_called = True
+        return ["source-a"]
+
+    monkeypatch.setattr(
+        "app.views.kubejs_ftb_pipeline_view.detect_minecraft_version", detect
+    )
+    monkeypatch.setattr(
+        "app.views.kubejs_ftb_pipeline_view.discover_kubejs_ftb_pack_candidates",
+        discover,
+    )
+
+    async def exercise():
+        task = asyncio.create_task(view._discover())
+        assert await asyncio.to_thread(started.wait, 2)
+        view.source_field.value = "source-b"
+        view._source_changed()
+        release.set()
+        await asyncio.wait_for(task, timeout=2)
+
+    asyncio.run(exercise())
+
+    assert view._detected_version is None
+    assert view._candidates == []
+    assert candidates_called is False
