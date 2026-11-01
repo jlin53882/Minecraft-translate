@@ -14,6 +14,7 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_status
 from app.views._log import LogView
+from app.views.kubejs_ftb_pipeline_view import KubejsFtbPipelineView
 from app.views.pipeline.pipeline_workbench import (
     build_pipeline_log_card,
     build_pipeline_status_card,
@@ -21,8 +22,6 @@ from app.views.pipeline.pipeline_workbench import (
 )
 from app.views.translation.translation_actions import (
     resume_ui_timer,
-    run_ftb,
-    run_kjs,
     run_md,
     stop_ui_timer,
 )
@@ -31,26 +30,12 @@ from app.views.translation.translation_actions import (
 )
 from app.views.translation.translation_panels import (
     build_action_row,
-    build_ftb_tab,
-    build_kjs_tab,
     build_md_tab,
     build_path_row,
 )
 from translation_tool.utils.log_unit import log_error, log_warning
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
-try:
-    from app.services_impl.pipelines.ftb_service import run_ftb_translation_service
-except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
-    log_error("FTB 翻譯服務載入失敗，翻譯頁的 FTB 功能將無法使用", exc_info=True)
-    run_ftb_translation_service = None
-
-try:
-    from app.services_impl.pipelines.kubejs_service import run_kubejs_tooltip_service
-except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
-    log_error("KubeJS 翻譯服務載入失敗，翻譯頁的 KubeJS 功能將無法使用", exc_info=True)
-    run_kubejs_tooltip_service = None
-
 try:
     from app.services_impl.pipelines.md_service import run_md_translation_service
 except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
@@ -75,25 +60,36 @@ class TranslationView(ft.Column):
             file_picker: Flet FilePicker 物件
         """
         super().__init__(expand=True, spacing=16)
-        tab_content = self._init_translation_state_and_tabs(file_picker, page)
-        right_panel = self._build_translation_status_and_right_panel(tab_content)
-
-        self.workbench_view = build_pipeline_workbench(
-            title="任務翻譯工具",
-            subtitle="處理 FTB Quests、KubeJS Tooltip 與 Markdown 文件；左側設定流程，右側查看狀態與 Log。",
-            icon=ft.Icons.TRANSLATE,
-            tone="ench",
-            left_controls=[self.tabs],
-            right_controls=[right_panel],
+        self._init_translation_state(file_picker, page)
+        md_workbench = self._build_md_workbench()
+        # FTB／KubeJS 分頁與側欄的「KubeJS / FTB 流水線」頁使用同一個實作，只差 mode 與是否顯示頁首。
+        self.ftb_view = KubejsFtbPipelineView(
+            page, file_picker, mode="ftb", embedded=True
         )
-        self.controls = [self.workbench_view]
+        self.kjs_view = KubejsFtbPipelineView(
+            page, file_picker, mode="kubejs", embedded=True
+        )
+        self.tabs = self._build_source_tabs(md_workbench)
+        self.controls = [
+            kit.page_header(
+                "任務翻譯工具",
+                "選擇翻譯來源分頁：FTB Quests、KubeJS Tooltips 或 Markdown；FTB 與 KubeJS 的流程與流水線頁相同。",
+                icon=ft.Icons.TRANSLATE,
+                tone="ench",
+                responsive=True,
+            ),
+            self.tabs,
+        ]
 
-    def _init_translation_state_and_tabs(self, file_picker, page):
-        """任務翻譯頁的狀態與分頁。"""
+    def _init_translation_state(self, file_picker, page):
+        """任務翻譯頁共用的狀態與日誌控制項。"""
         self._page = page
         self.file_picker = file_picker
         self._picker_target_field: ft.TextField | None = None
         self._step_cards: list = []  # 面板建立時登記，reset 後用來刷新步驟卡外觀
+        # action layer 讀取的相容 seam
+        self.run_md_translation_service = run_md_translation_service
+        self.TaskSession = TaskSession
 
         self.session = None
         self._ui_timer_running = False
@@ -122,10 +118,21 @@ class TranslationView(ft.Column):
             tail_lines=250,
         )
 
-        self.ftb_tab_content = self._build_ftb_tab()
-        self.kjs_tab_content = self._build_kjs_tab()
+    def _build_md_workbench(self):
+        """Markdown 分頁：左側設定與步驟，右側狀態與日誌（與流水線頁相同的工作台）。"""
         self.md_tab_content = self._build_md_tab()
+        return build_pipeline_workbench(
+            title="Markdown 翻譯",
+            subtitle="處理 Markdown 文件；左側設定流程，右側查看狀態與 Log。",
+            icon=ft.Icons.TRANSLATE,
+            tone="ench",
+            left_controls=[self.md_tab_content],
+            right_controls=[self._build_translation_status_and_right_panel()],
+            show_header=False,
+        )
 
+    def _build_source_tabs(self, md_workbench):
+        """三個翻譯來源分頁：FTB Quests、KubeJS Tooltips、Markdown。"""
         tab_bar = ft.TabBar(
             tabs=[
                 ft.Tab(label="FTB Quests"),
@@ -138,11 +145,7 @@ class TranslationView(ft.Column):
             divider_color=C.LINE,
         )
         tab_view = ft.TabBarView(
-            controls=[
-                self.ftb_tab_content,
-                self.kjs_tab_content,
-                self.md_tab_content,
-            ],
+            controls=[self.ftb_view, self.kjs_view, md_workbench],
             expand=True,
         )
         tab_selector = kit.section_card(
@@ -152,29 +155,16 @@ class TranslationView(ft.Column):
             tone="ench",
             padding=ft.Padding.symmetric(horizontal=8, vertical=4),
         )
-        tab_content = ft.Column(
-            [tab_selector, tab_view],
-            expand=True,
-            spacing=12,
-        )
-        return tab_content
-
-    def _build_translation_status_and_right_panel(self, tab_content):
-        """狀態卡片與右側面板。"""
-        self.tabs = ft.Tabs(
-            content=tab_content,
+        return ft.Tabs(
+            content=ft.Column([tab_selector, tab_view], expand=True, spacing=12),
             length=3,
             selected_index=0,
             expand=True,
             animation_duration=180,
         )
 
-        # action layer 讀取的相容 seam
-        self.run_ftb_translation_service = run_ftb_translation_service
-        self.run_kubejs_tooltip_service = run_kubejs_tooltip_service
-        self.run_md_translation_service = run_md_translation_service
-        self.TaskSession = TaskSession
-
+    def _build_translation_status_and_right_panel(self):
+        """Markdown 分頁的狀態卡與日誌面板。"""
         status_card = build_pipeline_status_card(
             progress=self.progress,
             progress_status=self.progress_status,
@@ -243,14 +233,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     # Tab builders
     # ------------------------------------------------------------------
-    def _build_ftb_tab(self) -> ft.Control:
-        """建立 FTB 翻譯標籤頁"""
-        return build_ftb_tab(self)
-
-    def _build_kjs_tab(self) -> ft.Control:
-        """建立 KubeJS 翻譯標籤頁"""
-        return build_kjs_tab(self)
-
     def _build_md_tab(self) -> ft.Control:
         """建立 Markdown 翻譯標籤頁"""
         return build_md_tab(self)
@@ -277,14 +259,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     # runners
     # ------------------------------------------------------------------
-    def _run_ftb(self, *, dry_run: bool):
-        """執行 FBT 翻譯流程"""
-        return run_ftb(self, dry_run=dry_run)
-
-    def _run_kjs(self, *, dry_run: bool):
-        """執行 KubeJS 翻譯流程"""
-        return run_kjs(self, dry_run=dry_run)
-
     def _run_md(self, *, dry_run: bool):
         """執行 Markdown 翻譯流程"""
         return run_md(self, dry_run=dry_run)
@@ -304,39 +278,18 @@ class TranslationView(ft.Column):
         def flag(name: str, default: bool = True) -> bool:
             return bool(options.get(name, default))
 
-        if kind == "ftbquests":
-            self.tabs.selected_index = 0
-            self.ftb_in_dir.value = task.input_dir
-            self.ftb_out_dir.value = task.output_dir or ""
-            self.ftb_step_export.value = flag("step_export")
-            self.ftb_step_clean.value = flag("step_clean")
-            self.ftb_step_translate.value = True
-            self.ftb_step_inject.value = flag("step_inject")
-            self.ftb_write_new_cache.value = flag("write_new_cache")
-            runner = self._run_ftb
-        elif kind == "kubejs":
-            self.tabs.selected_index = 1
-            self.kjs_in_dir.value = task.input_dir
-            self.kjs_out_dir.value = task.output_dir or ""
-            self.kjs_step_extract.value = flag("step_extract")
-            self.kjs_step_translate.value = True
-            self.kjs_step_inject.value = flag("step_inject")
-            self.kjs_write_new_cache.value = flag("write_new_cache")
-            self.kjs_source_mode.value = str(options.get("source_mode") or "fresh")
-            runner = self._run_kjs
-        elif kind == "md":
-            self.tabs.selected_index = 2
-            self.md_in_dir.value = task.input_dir
-            self.md_out_dir.value = task.output_dir or ""
-            self.md_step_extract.value = flag("step_extract")
-            self.md_step_translate.value = True
-            self.md_step_inject.value = flag("step_inject")
-            self.md_write_new_cache.value = flag("write_new_cache")
-            self.md_lang_mode.value = str(options.get("lang_mode") or "non_cjk_only")
-            runner = self._run_md
-        else:
+        if kind != "md":
             log_warning(f"[Resume] 任務翻譯頁不支援續跑類型：{kind!r}")
             return
+        self.tabs.selected_index = 2
+        self.md_in_dir.value = task.input_dir
+        self.md_out_dir.value = task.output_dir or ""
+        self.md_step_extract.value = flag("step_extract")
+        self.md_step_translate.value = True
+        self.md_step_inject.value = flag("step_inject")
+        self.md_write_new_cache.value = flag("write_new_cache")
+        self.md_lang_mode.value = str(options.get("lang_mode") or "non_cjk_only")
+        runner = self._run_md
         self._refresh_steps()
         runner(dry_run=False)
 
@@ -405,38 +358,6 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     # reset actions
     # ------------------------------------------------------------------
-    def _reset_ftb_inputs(self):
-        """重置 FTB 翻譯的所有輸入欄位"""
-        self.cancel_button.visible = False
-        self.ftb_in_dir.value = ""
-        self.ftb_out_dir.value = ""
-        self.ftb_step_export.value = True
-        self.ftb_step_clean.value = True
-        self.ftb_step_translate.value = True
-        self.ftb_step_inject.value = True
-        self.ftb_write_new_cache.value = False
-        self._set_status("尚未開始", "neutral")
-        self.progress.value = 0
-        self._refresh_steps()
-        self._append_log("[UI] 已重置：FTB Quests 輸入已清空")
-        self.page.update()
-
-    def _reset_kjs_inputs(self):
-        """重置 KubeJS 翻譯的所有輸入欄位"""
-        self.cancel_button.visible = False
-        self.kjs_in_dir.value = ""
-        self.kjs_source_mode.value = "fresh"
-        self.kjs_out_dir.value = ""
-        self.kjs_step_extract.value = True
-        self.kjs_step_translate.value = True
-        self.kjs_step_inject.value = True
-        self.kjs_write_new_cache.value = False
-        self._set_status("尚未開始", "neutral")
-        self.progress.value = 0
-        self._refresh_steps()
-        self._append_log("[UI] 已重置：KubeJS 輸入已清空")
-        self.page.update()
-
     def _reset_md_inputs(self):
         """重置 Markdown 翻譯的所有輸入欄位"""
         self.cancel_button.visible = False

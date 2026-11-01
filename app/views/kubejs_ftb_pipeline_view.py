@@ -38,13 +38,35 @@ from app.views.pipeline.pipeline_workbench import (
 _POLL_INTERVAL_SEC = 0.2
 
 
-class KubejsFtbPipelineView(ft.Column):
-    """以一鍵流水線工作台呈現 KubeJS／FTB 的來源、執行與輸出。"""
+_MODES = ("both", "ftb", "kubejs")
 
-    def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
+
+class KubejsFtbPipelineView(ft.Column):
+    """以一鍵流水線工作台呈現 KubeJS／FTB 的來源、執行與輸出。
+
+    同一個實作同時服務側欄的「KubeJS / FTB 流水線」頁與任務翻譯頁的 FTB／KubeJS 分頁：
+    ``mode`` 決定來源類型（``both`` ／ ``ftb`` ／ ``kubejs``），``embedded=True`` 時不顯示頁首。
+    同一時間只允許一個流水線執行，避免兩個入口同時寫入 ModDB。
+    """
+
+    # 目前執行中的流水線擁有者（任一入口）；None 表示沒有執行中的流水線。
+    _active_run: KubejsFtbPipelineView | None = None
+
+    def __init__(
+        self,
+        page: ft.Page,
+        file_picker: ft.FilePicker,
+        *,
+        mode: str = "both",
+        embedded: bool = False,
+    ):
+        if mode not in _MODES:
+            raise ValueError(f"未知的流水線模式：{mode!r}")
         super().__init__(expand=True, spacing=14, scroll=ft.ScrollMode.AUTO)
         self._page = page
         self.file_picker = file_picker
+        self._mode = mode
+        self._embedded = embedded
         self.session: TaskSession | None = None
         self._poller = PollerHandle()
         self._running = False
@@ -101,8 +123,13 @@ class KubejsFtbPipelineView(ft.Column):
         )
 
     def _build_mode_controls(self) -> None:
-        self.include_kubejs = ft.Checkbox(label="KubeJS", value=True)
-        self.include_ftb = ft.Checkbox(label="FTB Quests", value=True)
+        mode = self._mode
+        self.include_kubejs = ft.Checkbox(
+            label="KubeJS", value=mode != "ftb", visible=mode != "ftb"
+        )
+        self.include_ftb = ft.Checkbox(
+            label="FTB Quests", value=mode != "kubejs", visible=mode != "kubejs"
+        )
         self.translate_missing = ft.Checkbox(label="LM 翻譯待處理", value=False)
 
     def _build_status_controls(self, page: ft.Page) -> None:
@@ -154,6 +181,7 @@ class KubejsFtbPipelineView(ft.Column):
         self.progress_panel.attach_idle_status_card(status_panel)
         self._settings_dialog = self._build_settings_dialog()
         self.workbench_view = build_pipeline_workbench(
+            show_header=not self._embedded,
             title="KubeJS / FTB 任務流水線",
             subtitle="來源分析 → ModDB 同步 → LM 翻譯 → overlay 輸出；與模組包一鍵製作相同的操作方式",
             icon=ft.Icons.ACCOUNT_TREE_OUTLINED,
@@ -488,25 +516,33 @@ class KubejsFtbPipelineView(ft.Column):
     async def _publish_run(self, _e=None) -> None:
         await self._start(dry_run=False, publish=True)
 
-    async def _start(self, *, dry_run: bool, publish: bool) -> None:
-        if self._running:
-            show_snack(self._page, "已有 KubeJS／FTB 流水線執行中", C.GOLD)
-            return
+    def _run_blocker(self, publish: bool) -> tuple[str, str] | None:
+        """回傳無法開始執行的原因與提示顏色；None 表示輸入可以開始執行。
+
+        根目錄候選在 ``_start`` 分析來源後才能檢查，因此不在這裡處理。
+        """
+        active = KubejsFtbPipelineView._active_run
+        if self._running or (active is not None and active is not self):
+            return "已有 KubeJS／FTB 流水線執行中", C.GOLD
         if not (self.source_field.value or "").strip():
-            show_snack(self._page, "請先輸入來源路徑", C.RED)
+            return "請先輸入來源路徑", C.RED
+        if not (self.include_kubejs.value or self.include_ftb.value):
+            return "至少選擇 KubeJS 或 FTB Quests", C.RED
+        if publish and not (self.output_field.value or "").strip():
+            return "正式發布前請填寫 overlay 輸出目錄", C.RED
+        return None
+
+    async def _start(self, *, dry_run: bool, publish: bool) -> None:
+        blocker = self._run_blocker(publish)
+        if blocker is not None:
+            show_snack(self._page, blocker[0], blocker[1])
             return
         if not self._candidates:
             await self._discover()
         if len(self._candidates) > 1 and not self.root_dropdown.value:
             show_snack(self._page, "來源有多個候選，請先明確選擇根目錄", C.GOLD)
             return
-        if not (self.include_kubejs.value or self.include_ftb.value):
-            show_snack(self._page, "至少選擇 KubeJS 或 FTB Quests", C.RED)
-            return
         output = (self.output_field.value or "").strip() or None
-        if publish and not output:
-            show_snack(self._page, "正式發布前請填寫 overlay 輸出目錄", C.RED)
-            return
         self.session = tag_session(
             TaskSession(max_logs=2000),
             "KubeJS / FTB 流水線",
@@ -548,10 +584,12 @@ class KubejsFtbPipelineView(ft.Column):
         )
         if not launched:
             self._running = False
+            KubejsFtbPipelineView._active_run = None
             self._set_running(False)
             show_snack(self._page, "應用程式正在關閉，未啟動流水線", C.GOLD)
             self._safe_update()
             return
+        KubejsFtbPipelineView._active_run = self
         self._poller.start(self._page, self._poll)
 
     def _cancel(self, _e=None) -> None:
@@ -586,6 +624,8 @@ class KubejsFtbPipelineView(ft.Column):
         self._sync_progress_stage(self.progress.value, status)
         if status in {"DONE", "ERROR"}:
             self._running = False
+            if KubejsFtbPipelineView._active_run is self:
+                KubejsFtbPipelineView._active_run = None
             self._set_running(False)
             cancelled = summary.get("status") == "CANCELLED"
             success = status != "ERROR" and not cancelled

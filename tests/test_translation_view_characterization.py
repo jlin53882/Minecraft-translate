@@ -14,26 +14,15 @@ class _Session:
         self.started += 1
 
 
-def test_translation_view_builds_three_tabs_and_shared_status_panel(monkeypatch):
+def test_translation_view_has_embedded_pipeline_tabs_and_markdown_status(monkeypatch):
     monkeypatch.setattr(tv, "TaskSession", _Session)
-    page = mock_page()
-    picker = mock_filepicker()
+    view = tv.TranslationView(mock_page(), mock_filepicker())
 
-    view = tv.TranslationView(page, picker)
-
-    # Flet 0.85.0: tabs.content is a Column containing the shared selector card
-    # and the TabBarView.  The selector card keeps this page aligned with the
-    # other workflow pages while preserving the existing tab contract.
-    content = view.tabs.content
-    assert hasattr(content, "controls")  # Is a Column-like
-    assert len(content.controls) == 2  # selector card + TabBarView
-    selector = content.controls[0]
-    assert getattr(selector, "title", None) == "翻譯來源"
-    tab_bar = selector.body.content
-    assert hasattr(tab_bar, "tabs")  # Is a TabBar
-    assert len(tab_bar.tabs) == 3  # 3 tabs in TabBar
+    # FTB／KubeJS 分頁與流水線頁是同一個元件，只差 mode。
+    assert view.ftb_view._mode == "ftb" and view.ftb_view._embedded is True
+    assert view.kjs_view._mode == "kubejs" and view.kjs_view._embedded is True
+    assert view.md_in_dir is not None
     assert view.status_chip.label.value == "尚未開始"
-    assert view.progress.value == 0
     assert view.log_panel.visible is False
     assert view.cancel_button.visible is False
 
@@ -45,47 +34,6 @@ def test_translation_log_panel_opens_only_after_run_or_user_message(monkeypatch)
     assert view.log_panel.visible is False
     view._append_log("[UI] 測試訊息")
     assert view.log_panel.visible is True
-
-
-def test_run_ftb_dry_run_calls_service_with_current_flags(monkeypatch):
-    page = mock_page()
-    picker = mock_filepicker()
-    calls = {}
-
-    monkeypatch.setattr(tv, "TaskSession", _Session)
-    monkeypatch.setattr(
-        tv.threading,
-        "Thread",
-        lambda target=None, daemon=None: type(
-            "T", (), {"start": lambda self: target()}
-        )(),
-    )
-    monkeypatch.setattr(tv.TranslationView, "_start_ui_timer", lambda self: None)
-
-    def fake_service(in_dir, session, **kwargs):
-        calls["in_dir"] = in_dir
-        calls["session"] = session
-        calls.update(kwargs)
-
-    monkeypatch.setattr(tv, "run_ftb_translation_service", fake_service)
-
-    view = tv.TranslationView(page, picker)
-    view.ftb_in_dir.value = "C:/Pack"
-    view.ftb_out_dir.value = "C:/Out"
-    view.ftb_step_export.value = True
-    view.ftb_step_clean.value = False
-    view.ftb_step_translate.value = True
-    view.ftb_step_inject.value = False
-    view.ftb_write_new_cache.value = True
-
-    view._run_ftb(dry_run=True)
-
-    assert calls["in_dir"] == "C:/Pack"
-    assert calls["output_dir"] == "C:/Out"
-    assert calls["dry_run"] is True
-    assert calls["step_clean"] is False
-    assert calls["step_inject"] is False
-    assert view.status_chip.label.value == "模擬執行"
 
 
 def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
@@ -114,60 +62,6 @@ def test_reset_md_inputs_restores_defaults_and_appends_log(monkeypatch):
     assert (
         view.log_view._list_view.controls[-1].value
         == "[UI] 已重置：Markdown 輸入已清空"
-    )  # PR refactor/unified-log-view
-
-
-def test_reset_kjs_inputs_restores_defaults_and_appends_log(monkeypatch):
-    """驗證 KubeJS 輸入重置行為"""
-    monkeypatch.setattr(tv, "TaskSession", _Session)
-    page = mock_page()
-    picker = mock_filepicker()
-    view = tv.TranslationView(page, picker)
-
-    view.kjs_in_dir.value = "X"
-    view.kjs_out_dir.value = "Y"
-    view.kjs_step_extract.value = False
-    view.kjs_step_translate.value = False
-    view.kjs_step_inject.value = False
-    view.kjs_write_new_cache.value = True
-
-    view._reset_kjs_inputs()
-
-    assert view.kjs_in_dir.value == ""
-    assert view.kjs_out_dir.value == ""
-    assert view.kjs_step_extract.value is True
-    assert view.kjs_step_translate.value is True
-    assert view.kjs_step_inject.value is True
-    assert view.kjs_write_new_cache.value is False
-
-
-def test_reset_ftb_inputs_restores_defaults(monkeypatch):
-    """驗證 FTB 輸入重置行為"""
-    monkeypatch.setattr(tv, "TaskSession", _Session)
-    page = mock_page()
-    picker = mock_filepicker()
-    view = tv.TranslationView(page, picker)
-
-    view.ftb_in_dir.value = "X"
-    view.ftb_out_dir.value = "Y"
-    view.ftb_step_export.value = False
-    view.ftb_step_clean.value = False
-    view.ftb_step_translate.value = False
-    view.ftb_step_inject.value = False
-    view.ftb_write_new_cache.value = True
-
-    view._reset_ftb_inputs()
-
-    assert view.ftb_in_dir.value == ""
-    assert view.ftb_out_dir.value == ""
-    assert view.ftb_step_export.value is True
-    assert view.ftb_step_clean.value is True
-    assert view.ftb_step_translate.value is True
-    assert view.ftb_step_inject.value is True
-    assert view.ftb_write_new_cache.value is False
-    assert (
-        view.log_view._list_view.controls[-1].value
-        == "[UI] 已重置：FTB Quests 輸入已清空"
     )  # PR refactor/unified-log-view
 
 
@@ -248,76 +142,6 @@ def test_show_snack_adds_to_page_overlay(monkeypatch):
     assert page.overlay[0].open is True
 
 
-def test_kjs_controls_accessible_and_resettable(monkeypatch):
-    """驗證 KJS 所有控件可存取且 Reset 正確"""
-    monkeypatch.setattr(tv, "TaskSession", _Session)
-    page = mock_page()
-    picker = mock_filepicker()
-    view = tv.TranslationView(page, picker)
-
-    assert hasattr(view, "kjs_in_dir")
-    assert hasattr(view, "kjs_out_dir")
-    assert hasattr(view, "kjs_step_extract")
-    assert hasattr(view, "kjs_step_translate")
-    assert hasattr(view, "kjs_step_inject")
-    assert hasattr(view, "kjs_write_new_cache")
-
-    view.kjs_in_dir.value = "C:/KJS/In"
-    view.kjs_out_dir.value = "C:/KJS/Out"
-    view.kjs_step_extract.value = False
-    view.kjs_step_translate.value = False
-    view.kjs_step_inject.value = False
-    view.kjs_write_new_cache.value = True
-
-    view._reset_kjs_inputs()
-
-    assert view.kjs_in_dir.value == ""
-    assert view.kjs_out_dir.value == ""
-    assert view.kjs_step_extract.value is True
-    assert view.kjs_step_translate.value is True
-    assert view.kjs_step_inject.value is True
-    assert view.kjs_write_new_cache.value is False
-
-
-def test_run_kjs_calls_run_kjs_service(monkeypatch):
-    """驗證 _run_kjs 正確呼叫 run_kjs"""
-    page = mock_page()
-    picker = mock_filepicker()
-    calls = {}
-
-    monkeypatch.setattr(tv, "TaskSession", _Session)
-    monkeypatch.setattr(
-        tv.threading,
-        "Thread",
-        lambda target=None, daemon=None: type(
-            "T", (), {"start": lambda self: target()}
-        )(),
-    )
-    monkeypatch.setattr(tv.TranslationView, "_start_ui_timer", lambda self: None)
-
-    def fake_service(input_dir, session, **kwargs):
-        calls["input_dir"] = input_dir
-        calls.update(kwargs)
-
-    monkeypatch.setattr(tv, "run_kubejs_tooltip_service", fake_service)
-
-    view = tv.TranslationView(page, picker)
-    view.kjs_in_dir.value = "C:/KJS/In"
-    view.kjs_out_dir.value = "C:/KJS/Out"
-    view.kjs_step_extract.value = True
-    view.kjs_step_translate.value = False
-    view.kjs_step_inject.value = True
-    view.kjs_write_new_cache.value = True
-
-    view._run_kjs(dry_run=False)
-
-    assert calls["input_dir"] == "C:/KJS/In"
-    assert calls["output_dir"] == "C:/KJS/Out"
-    assert calls["dry_run"] is False
-    assert calls["step_translate"] is False
-    assert view.status_chip.label.value == "執行中"
-
-
 def test_run_md_calls_run_md_service(monkeypatch):
     """驗證 _run_md 正確呼叫 run_md"""
     page = mock_page()
@@ -354,44 +178,6 @@ def test_run_md_calls_run_md_service(monkeypatch):
     assert calls["output_dir"] == "C:/MD/Out"
     assert calls["dry_run"] is True
     assert calls["step_inject"] is False
-
-
-def test_run_ftb_calls_run_ftb_service(monkeypatch):
-    """驗證 _run_ftb 正確呼叫 run_ftb"""
-    page = mock_page()
-    picker = mock_filepicker()
-    calls = {}
-
-    monkeypatch.setattr(tv, "TaskSession", _Session)
-    monkeypatch.setattr(
-        tv.threading,
-        "Thread",
-        lambda target=None, daemon=None: type(
-            "T", (), {"start": lambda self: target()}
-        )(),
-    )
-    monkeypatch.setattr(tv.TranslationView, "_start_ui_timer", lambda self: None)
-
-    def fake_service(input_dir, session, **kwargs):
-        calls["input_dir"] = input_dir
-        calls.update(kwargs)
-
-    monkeypatch.setattr(tv, "run_ftb_translation_service", fake_service)
-
-    view = tv.TranslationView(page, picker)
-    view.ftb_in_dir.value = "C:/FTB/In"
-    view.ftb_out_dir.value = "C:/FTB/Out"
-    view.ftb_step_export.value = True
-    view.ftb_step_clean.value = True
-    view.ftb_step_translate.value = True
-    view.ftb_step_inject.value = True
-    view.ftb_write_new_cache.value = True
-
-    view._run_ftb(dry_run=False)
-
-    assert calls["input_dir"] == "C:/FTB/In"
-    assert calls["output_dir"] == "C:/FTB/Out"
-    assert calls["dry_run"] is False
 
 
 def test_pick_directory_into_without_page_update_when_no_result(monkeypatch):
@@ -468,16 +254,11 @@ def _resume_view(monkeypatch):
         )(),
     )
     monkeypatch.setattr(tv.TranslationView, "_start_ui_timer", lambda self: None)
-    for attr, name in (
-        ("run_ftb_translation_service", "ftbquests"),
-        ("run_kubejs_tooltip_service", "kubejs"),
-        ("run_md_translation_service", "md"),
-    ):
-        monkeypatch.setattr(
-            tv,
-            attr,
-            lambda *a, _n=name, **k: calls.append((_n, a, k)),
-        )
+    monkeypatch.setattr(
+        tv,
+        "run_md_translation_service",
+        lambda *a, **k: calls.append(("md", a, k)),
+    )
     return tv.TranslationView(mock_page(), mock_filepicker()), calls
 
 
@@ -492,43 +273,6 @@ def _task(kind, **options):
             "options": options,
         },
     )()
-
-
-def test_resume_ftb_selects_the_tab_restores_the_options_and_starts(monkeypatch):
-    view, calls = _resume_view(monkeypatch)
-    view.ftb_step_translate.value = False  # 使用者目前的設定不應影響續跑
-    task = _task(
-        "ftbquests",
-        step_export=True,
-        step_clean=False,
-        step_inject=False,
-        write_new_cache=False,
-    )
-
-    view.resume_interrupted(task)
-
-    assert view.tabs.selected_index == 0
-    ((name, args, kwargs),) = calls
-    assert name == "ftbquests" and args[0] == "C:/Pack"
-    assert kwargs["output_dir"] == "C:/Out"
-    assert kwargs["dry_run"] is False
-    assert kwargs["step_translate"] is True, "有續跑標記代表翻譯步驟本來就是開的"
-    assert (kwargs["step_export"], kwargs["step_clean"]) == (True, False)
-    assert (kwargs["step_inject"], kwargs["write_new_cache"]) == (False, False)
-
-
-def test_resume_kubejs_selects_the_tab_and_restores_the_options(monkeypatch):
-    view, calls = _resume_view(monkeypatch)
-
-    view.resume_interrupted(
-        _task("kubejs", step_extract=False, step_inject=True, write_new_cache=True)
-    )
-
-    assert view.tabs.selected_index == 1
-    ((name, args, kwargs),) = calls
-    assert name == "kubejs" and args[0] == "C:/Pack"
-    assert kwargs["dry_run"] is False and kwargs["step_translate"] is True
-    assert kwargs["step_extract"] is False and kwargs["write_new_cache"] is True
 
 
 def test_resume_md_restores_the_language_mode(monkeypatch):
@@ -558,7 +302,7 @@ def test_resume_does_not_start_a_second_run(monkeypatch):
     view, calls = _resume_view(monkeypatch)
     view._ui_timer_running = True  # 已有任務在跑
 
-    view.resume_interrupted(_task("kubejs"))
+    view.resume_interrupted(_task("md"))
 
     assert calls == []
 

@@ -20,8 +20,6 @@ import pytest
 
 from app.services_impl.pipelines import (
     _task_runner,
-    ftb_service,
-    kubejs_service,
     md_service,
 )
 from app.tasks.task_session import TaskSession
@@ -31,8 +29,6 @@ from translation_tool.core import (
     plugin_resume,
 )
 from translation_tool.core.lm_translator_skeleton import JsonCheckpointAdapter
-from translation_tool.plugins.ftbquests import ftbquests_lmtranslator
-from translation_tool.plugins.kubejs import kubejs_tooltip_lmtranslator
 from translation_tool.plugins.md import md_lmtranslator
 from translation_tool.utils import cache_manager, cache_store
 from translation_tool.utils import config_manager as _config_manager
@@ -232,97 +228,6 @@ class Flow:
             yield
 
 
-class FtbFlow(Flow):
-    kind = "ftbquests"
-    cache_type = "ftbquests"
-    early_step = ("translation_tool.core.ftb_translator", "clean_ftbquests_from_raw")
-    module = ftbquests_lmtranslator
-    default_options: ClassVar[dict[str, Any]] = {
-        "step_export": True,
-        "step_clean": True,
-        "step_translate": True,
-        "step_inject": True,
-        "write_new_cache": True,
-    }
-    edit_marker = (
-        "config/ftbquests/quests/alpha.snbt",
-        "Title alpha 0",
-        "Edited title",
-    )
-    inject_option = "step_inject"
-
-    def make_input(self, root: Path) -> Path:
-        quests_root = root / "config" / "ftbquests" / "quests"
-        (quests_root / "lang").mkdir(parents=True)
-        (quests_root / "lang" / "en_us.snbt").write_text(
-            '{ quest.t0: "English title 0" }', encoding="utf-8"
-        )
-        for chapter in ("alpha", "beta"):
-            quests = " ".join(
-                f'{{ id: "{chapter}{i}", title: "Title {chapter} {i}", '
-                f'description: ["First line {chapter} {i}", "Second line {chapter} {i}"] }}'
-                for i in range(5)
-            )
-            (quests_root / f"{chapter}.snbt").write_text(
-                f'{{ id: "{chapter}", quests: [ {quests} ] }}', encoding="utf-8"
-            )
-        return root
-
-    def run(self, rt, input_dir, *, session=None, **overrides):
-        session = session or TaskSession()
-        kwargs = {
-            "directory_path": str(input_dir),
-            "session": session,
-            "output_dir": str(self.output_root(input_dir)),
-            "dry_run": False,
-            **self.default_options,
-        }
-        kwargs.update(overrides)
-        ftb_service.run_ftb_translation_service(**kwargs)
-        return session
-
-
-class KubejsFlow(Flow):
-    kind = "kubejs"
-    cache_type = "kubejs"
-    early_step = ("translation_tool.core.kubejs_translator", "step1_extract_and_clean")
-    module = kubejs_tooltip_lmtranslator
-    default_options: ClassVar[dict[str, Any]] = {
-        "step_extract": True,
-        "step_translate": True,
-        "step_inject": True,
-        "write_new_cache": True,
-        "source_mode": "fresh",
-    }
-    edit_marker = ("kubejs/client_scripts/test.js", "Scene text 0", "Edited scene")
-    inject_option = "step_inject"
-
-    def make_input(self, root: Path) -> Path:
-        scripts = root / "kubejs" / "client_scripts"
-        scripts.mkdir(parents=True)
-        calls = "\n".join(f"scene.text('scene', 'Scene text {i}')" for i in range(8))
-        (scripts / "test.js").write_text(
-            calls + "\nItemEvents.tooltip(event => {\n"
-            "  event.add('minecraft:stone', [Text.literal('Tooltip text')]);\n"
-            "});",
-            encoding="utf-8",
-        )
-        return root / "kubejs"
-
-    def run(self, rt, input_dir, *, session=None, **overrides):
-        session = session or TaskSession()
-        kwargs = {
-            "input_dir": str(input_dir),
-            "session": session,
-            "output_dir": str(self.output_root(input_dir)),
-            "dry_run": False,
-            **self.default_options,
-        }
-        kwargs.update(overrides)
-        kubejs_service.run_kubejs_tooltip_service(**kwargs)
-        return session
-
-
 class MdFlow(Flow):
     kind = "md"
     cache_type = "md"
@@ -361,7 +266,7 @@ class MdFlow(Flow):
         return session
 
 
-FLOWS = [FtbFlow(), KubejsFlow(), MdFlow()]
+FLOWS = [MdFlow()]
 
 
 @pytest.fixture(params=FLOWS, ids=lambda f: f.kind)
@@ -538,11 +443,7 @@ class TestPluginResume:
             flow.run(rt, flow.input_dir)
         rt.restart_app()
         rel, old, new = flow.edit_marker
-        target = (
-            flow.input_dir.parent / rel
-            if flow.kind != "ftbquests"
-            else flow.input_dir / rel
-        )
+        target = flow.input_dir.parent / rel
         if not target.exists():
             target = flow.input_dir / rel
         text = target.read_text("utf-8")
@@ -610,27 +511,3 @@ class TestPluginResume:
 
         assert not _marker(flow).exists()
         assert other.exists()
-
-
-class TestFtbMultiFile:
-    """FTB 逐檔案翻譯：第一個檔案的迴圈 DONE 時不能把整個任務的標記清掉。"""
-
-    def test_the_marker_survives_the_first_file_finishing(self, rt, tmp_path):
-        flow = FtbFlow()
-        rt.install_fake_translator(flow.module)
-        flow.input_dir = flow.make_input(tmp_path / "pack")
-        seen: list[bool] = []
-        fake = flow.module.translate_batch_smart
-
-        def probing(batch, total=None):
-            result = fake(batch, total)
-            seen.append(_marker(flow).exists())
-            return result
-
-        rt.monkeypatch.setattr(flow.module, "translate_batch_smart", probing)
-
-        flow.run(rt, flow.input_dir)
-
-        # 從第二次呼叫起（前一批已 durable 並寫過標記）標記必須存在，直到整個任務結束才清除
-        assert len(seen) > 2 * BATCH_SIZE and all(seen[1:])
-        assert not _marker(flow).exists()

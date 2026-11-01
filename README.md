@@ -96,7 +96,6 @@ uv run python main.py
 | `ui` | 介面偏好（`theme_mode`：`dark` / `light`） |
 | `logging` | 日誌等級與輸出目錄 |
 | `translator` | 輸出資料夾、快取目錄、平行處理 worker 數、替換規則檔路徑 |
-| `ftb_translator` | FTB 任務翻譯輸出資料夾 |
 | `species_cache` | 生物學名快取（Wikipedia 查詢） |
 | `translation_db` | Mod 翻譯資料庫路徑、使用時機、版本與來源優先序 |
 | `lm_translator` | Gemini API Keys、模型清單、溫度、批次大小、token 預算、Key 冷卻、System Prompt |

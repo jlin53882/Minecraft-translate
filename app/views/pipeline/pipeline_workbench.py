@@ -415,12 +415,18 @@ def build_pipeline_workbench(
     left_controls: Sequence[ft.Control],
     right_controls: Sequence[ft.Control],
     actions: Sequence[ft.Control] = (),
+    show_header: bool = True,
 ) -> ft.Column:
     """建立一鍵流水線風格的頁面外框。
+
+    ``show_header=False`` 供嵌入其他分頁時使用，由外層分頁提供標題。
 
     內容卡由呼叫頁面持有，外框統一處理頁首、左右欄間距、滾動與伸展。
     這樣新增流程入口時只需維護流程本身，不會再產生第二套頁面骨架。
     """
+    if not show_header and actions:
+        # 嵌入分頁時沒有頁首，操作按鈕改放在左欄最上方，維持同一個操作位置。
+        left_controls = [ft.Row(list(actions), spacing=8, wrap=True), *left_controls]
     columns = ft.ResponsiveRow(
         [
             ft.Column(
@@ -437,8 +443,9 @@ def build_pipeline_workbench(
         spacing=16,
         run_spacing=16,
     )
-    return ft.Column(
-        [
+    header_parts: list[ft.Control] = []
+    if show_header:
+        header_parts.append(
             kit.page_header(
                 title,
                 subtitle,
@@ -446,9 +453,10 @@ def build_pipeline_workbench(
                 tone=tone,
                 actions=list(actions),
                 responsive=True,
-            ),
-            columns,
-        ],
+            )
+        )
+    return ft.Column(
+        [*header_parts, columns],
         spacing=18,
         scroll=ft.ScrollMode.AUTO,
         expand=True,

@@ -2,6 +2,8 @@
 
 入口：`app/views/kubejs_ftb_pipeline_view.py`。
 
+側欄的「KubeJS / FTB 流水線」頁與任務翻譯頁的 FTB Quests、KubeJS Tooltips 分頁使用同一個元件與同一套流程。
+
 這一頁是模組包根目錄 overlay 工作流，不是 Resource Pack 打包器。它沿用
 `pack_sources.scan_pack_sources`、ModDB `TranslationDB` 與
 `pack_output.export_pack_overlay`，因此不另建資料庫、也不執行來源內的 JavaScript。

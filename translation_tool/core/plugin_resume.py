@@ -27,7 +27,7 @@ from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_info, log_warning
 
-PLUGIN_KINDS = ("ftbquests", "kubejs", "md")
+PLUGIN_KINDS = ("md",)
 
 # 指紋會讀取來源檔案內容；來源資料夾可能是整個 modpack，所以限制檔案種類與規模，
 # 超過上限就不提供續跑（不寫標記），而不是花很久雜湊或誤報。
