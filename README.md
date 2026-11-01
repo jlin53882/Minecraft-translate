@@ -46,7 +46,7 @@
 | | JAR 提取 | 提取語言檔與 Patchouli 手冊 | `Ctrl+3` |
 | | 語系合併 | 合併 `en_us` / `zh_cn` / `zh_tw` | `Ctrl+4` |
 | | 機器翻譯 | Gemini 批次翻譯 | `Ctrl+5` |
-| | 任務翻譯 | FTB Quests / KubeJS / Markdown 翻譯 | `Ctrl+6` |
+| | 任務翻譯 | Markdown 翻譯 | `Ctrl+6` |
 | 品管與校對 | QC 檢驗 | 未翻譯、簡繁不一致、英文殘留 | `Ctrl+7` |
 | | 翻譯校對 | 圖示預覽與逐項校對 | `Ctrl+8` |
 | 資料庫 | Mod 資料庫 | 總覽、掃描匯入、條目校對、批次機翻與 AI 修復 | — |
@@ -96,7 +96,6 @@ uv run python main.py
 | `ui` | 介面偏好（`theme_mode`：`dark` / `light`） |
 | `logging` | 日誌等級與輸出目錄 |
 | `translator` | 輸出資料夾、快取目錄、平行處理 worker 數、替換規則檔路徑 |
-| `ftb_translator` | FTB 任務翻譯輸出資料夾 |
 | `species_cache` | 生物學名快取（Wikipedia 查詢） |
 | `translation_db` | Mod 翻譯資料庫路徑、使用時機、版本與來源優先序 |
 | `lm_translator` | Gemini API Keys、模型清單、溫度、批次大小、token 預算、Key 冷卻、System Prompt |
