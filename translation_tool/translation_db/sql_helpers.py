@@ -69,9 +69,30 @@ def source_locale_sql(entry_alias: str) -> str:
     )
 
 
+def source_locale_match_sql(left_alias: str, right_alias: str) -> str:
+    """建立可重用的來源語系相容條件。
+
+    兩個沒有 ``entry_origin`` 的舊條目維持升級前的重用行為；只要任一條目
+    有來源紀錄但語系無法確認，就不把 ``unknown:<id>`` 當成可匹配的語系。
+    """
+    left_locale = source_locale_sql(left_alias)
+    right_locale = source_locale_sql(right_alias)
+    return (
+        "("
+        f"(NOT EXISTS (SELECT 1 FROM entry_origin eo_{left_alias} "
+        f"WHERE eo_{left_alias}.entry_id={left_alias}.id) "
+        f"AND NOT EXISTS (SELECT 1 FROM entry_origin eo_{right_alias} "
+        f"WHERE eo_{right_alias}.entry_id={right_alias}.id)) "
+        f"OR ({left_locale} NOT LIKE 'unknown:%' "
+        f"AND {right_locale}={left_locale})"
+        ")"
+    )
+
+
 __all__ = [
     "effective_review_sql",
     "like_pattern",
+    "source_locale_match_sql",
     "source_locale_sql",
     "translation_review_sql",
 ]

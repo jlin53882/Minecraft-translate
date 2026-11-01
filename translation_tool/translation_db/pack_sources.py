@@ -934,144 +934,152 @@ def _scan_kubejs_lang(
         )
 
 
-def _scan_ftb_quests(
-    root: Path, version: str, scope: str, result: PackScanResult
+def _read_ftb_lang_file(
+    path: Path,
+    lang_root: Path,
+    root: Path,
+    scope: str,
+    result: PackScanResult,
+    locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]],
 ) -> None:
-    lang_root = root / "lang"
-    locale_values = _collect_ftb_lang_values(root, lang_root, scope, result)
-    _emit_ftb_lang_items(locale_values, version, scope, result)
-    _scan_ftb_quest_files(root, lang_root, version, scope, result)
+    result.mark_file("ftb_quests")
+    loaded = _read_text(path, result)
+    if loaded is None:
+        return
+    result.mark_file_read("ftb_quests")
+    _, digest = loaded
+    data = walk_snbt_file(str(path))
+    if data is None:
+        result.issues.append(
+            _issue(
+                path,
+                "snbt_parse_failed",
+                "語系 SNBT 無法解析",
+                status="parse_failed",
+            )
+        )
+        return
+    locale = _locale_for_lang_file(path, lang_root)
+    if not locale:
+        result.issues.append(
+            _issue(
+                path,
+                "ftb_lang_locale_invalid",
+                "無法從 lang 路徑辨識合法語系，已略過以避免誤當成來源",
+                status="unsupported",
+            )
+        )
+        return
+    rel = _lang_relative(path, lang_root, locale)
+    source_path = path.relative_to(root).as_posix()
+    _record_lang_references(
+        data,
+        source_path=source_path,
+        scope=scope,
+        digest=digest,
+        result=result,
+    )
+    for key, value in _top_level_lang(data):
+        locale_values[(rel, key)][locale] = (value, digest, source_path)
+    result.mark_source("ftb_quests", source_path)
 
 
 def _collect_ftb_lang_values(
-    root: Path, lang_root: Path, scope: str, result: PackScanResult
+    root: Path, scope: str, result: PackScanResult
 ) -> dict[tuple[str, str], dict[str, tuple[str, str, str]]]:
-    """讀取 FTB lang SNBT，依（相對路徑, 鍵）收集各語系的（值, 摘要, 來源路徑）。"""
     locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]] = defaultdict(
         dict
     )
-    if lang_root.is_dir():
-        for path in _iter_files(lang_root, (".snbt",), result):
-            result.mark_file("ftb_quests")
-            loaded = _read_text(path, result)
-            if loaded is None:
-                continue
-            result.mark_file_read("ftb_quests")
-            _, digest = loaded
-            data = walk_snbt_file(str(path))
-            if data is None:
-                result.issues.append(
-                    _issue(
-                        path,
-                        "snbt_parse_failed",
-                        "語系 SNBT 無法解析",
-                        status="parse_failed",
-                    )
-                )
-                continue
-            locale = _locale_for_lang_file(path, lang_root)
-            if not locale:
-                result.issues.append(
-                    _issue(
-                        path,
-                        "ftb_lang_locale_invalid",
-                        "無法從 lang 路徑辨識合法語系，已略過以避免誤當成來源",
-                        status="unsupported",
-                    )
-                )
-                continue
-            rel = _lang_relative(path, lang_root, locale)
-            source_path = path.relative_to(root).as_posix()
-            _record_lang_references(
-                data,
-                source_path=source_path,
-                scope=scope,
-                digest=digest,
-                result=result,
-            )
-            for key, value in _top_level_lang(data):
-                locale_values[(rel, key)][locale] = (value, digest, source_path)
-            result.mark_source("ftb_quests", path.relative_to(root).as_posix())
+    lang_root = root / "lang"
+    if not lang_root.is_dir():
+        return locale_values
+    for path in _iter_files(lang_root, (".snbt",), result):
+        _read_ftb_lang_file(path, lang_root, root, scope, result, locale_values)
     return locale_values
 
 
-def _emit_ftb_lang_items(
+def _ftb_source_locale(
+    locales: dict[str, tuple[str, str, str]], fallback_locale: str | None
+) -> str | None:
+    if locales.get("en_us"):
+        return "en_us"
+    if fallback_locale and locales.get(fallback_locale):
+        return fallback_locale
+    return select_source_locale({locale: 1 for locale in locales})
+
+
+def _append_ftb_lang_item(
+    rel: str,
+    lang_key: str,
+    locales: dict[str, tuple[str, str, str]],
+    source_locale: str,
+    version: str,
+    scope: str,
+    result: PackScanResult,
+) -> None:
+    source, source_digest, source_path = locales[source_locale]
+    if not source:
+        return
+    selector = f"lang:{source_locale}:{lang_key}"
+    if is_lang_key_ref_like(source):
+        _append_references(
+            result,
+            scope=scope,
+            source_kind=KIND_FTB_QUEST_LANG,
+            source_path=source_path,
+            selector=selector,
+            text=source,
+            digest=source_digest,
+        )
+        return
+    result.items.append(
+        _make_item(
+            kind=KIND_FTB_QUEST_LANG,
+            mod_id=f"ftbquests@{scope}",
+            key=f"{rel}|lang:{lang_key}",
+            text=source,
+            rel=source_path,
+            selector=selector,
+            digest=source_digest,
+            scope=scope,
+            version=version,
+            # When en_us is present it is the source text and zh_tw/zh_cn
+            # are companion translations.  Mark a translated locale only
+            # for a locale-only file; otherwise _make_item would clear the
+            # English source while keeping the existing translation.
+            translated_locale="",
+            zh_cn="" if source_locale == "zh_cn" else locales.get("zh_cn", ("", ""))[0],
+            zh_tw="" if source_locale == "zh_tw" else locales.get("zh_tw", ("", ""))[0],
+            source_format="ftb-snbt-lang",
+            source_locale=source_locale,
+        )
+    )
+
+
+def _append_ftb_lang_items(
     locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]],
     version: str,
     scope: str,
     result: PackScanResult,
 ) -> None:
-    """為每個鍵選定來源語系後輸出條目（或含語言鍵的參照）。"""
-    fallback_locale = select_source_locale(
-        {
-            locale: sum(1 for values in locale_values.values() if values.get(locale))
-            for locale in {
-                locale for values in locale_values.values() for locale in values
-            }
-        }
-    )
+    locales = {
+        locale: sum(1 for values in locale_values.values() if values.get(locale))
+        for locale in {locale for values in locale_values.values() for locale in values}
+    }
+    fallback_locale = select_source_locale(locales)
     if fallback_locale and fallback_locale != "en_us":
         result.locale_fallbacks["ftbquests"] = fallback_locale
-    for (rel, lang_key), locales in sorted(locale_values.items()):
-        source_locale = (
-            "en_us"
-            if locales.get("en_us")
-            else fallback_locale
-            if fallback_locale and locales.get(fallback_locale)
-            else select_source_locale({locale: 1 for locale in locales})
-        )
-        if source_locale is None:
-            continue
-        source, source_digest, source_path = locales[source_locale]
-        if not source:
-            continue
-        if is_lang_key_ref_like(source):
-            _append_references(
-                result,
-                scope=scope,
-                source_kind=KIND_FTB_QUEST_LANG,
-                source_path=source_path,
-                selector=f"lang:{source_locale or 'unknown'}:{lang_key}",
-                text=source,
-                digest=source_digest,
+    for (rel, lang_key), values in sorted(locale_values.items()):
+        source_locale = _ftb_source_locale(values, fallback_locale)
+        if source_locale is not None:
+            _append_ftb_lang_item(
+                rel, lang_key, values, source_locale, version, scope, result
             )
-            continue
-        result.items.append(
-            _make_item(
-                kind=KIND_FTB_QUEST_LANG,
-                mod_id=f"ftbquests@{scope}",
-                key=f"{rel}|lang:{lang_key}",
-                text=source,
-                rel=source_path,
-                selector=f"lang:{source_locale or 'unknown'}:{lang_key}",
-                digest=source_digest,
-                scope=scope,
-                version=version,
-                # When en_us is present it is the source text and zh_tw/zh_cn
-                # are companion translations.  Mark a translated locale only
-                # for a locale-only file; otherwise _make_item would clear the
-                # English source while keeping the existing translation.
-                translated_locale="",
-                zh_cn=(
-                    ""
-                    if source_locale == "zh_cn"
-                    else locales.get("zh_cn", ("", ""))[0]
-                ),
-                zh_tw=(
-                    ""
-                    if source_locale == "zh_tw"
-                    else locales.get("zh_tw", ("", ""))[0]
-                ),
-                source_format="ftb-snbt-lang",
-                source_locale=source_locale,
-            )
-        )
 
 
-def _scan_ftb_quest_files(
+def _scan_ftb_quest_data_files(
     root: Path, lang_root: Path, version: str, scope: str, result: PackScanResult
 ) -> None:
-    """掃描任務 SNBT（排除 lang 目錄）並輸出任務文字條目。"""
     for path in _iter_files(root, (".snbt",), result):
         if lang_root in path.parents:
             continue
@@ -1095,6 +1103,14 @@ def _scan_ftb_quest_files(
         rel = path.relative_to(root).as_posix()
         _scan_quest_value(data, rel, version, scope, digest, result, "root")
         result.mark_source("ftb_quests", rel)
+
+
+def _scan_ftb_quests(
+    root: Path, version: str, scope: str, result: PackScanResult
+) -> None:
+    locale_values = _collect_ftb_lang_values(root, scope, result)
+    _append_ftb_lang_items(locale_values, version, scope, result)
+    _scan_ftb_quest_data_files(root, root / "lang", version, scope, result)
 
 
 def _scan_quest_value(

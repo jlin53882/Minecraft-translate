@@ -117,6 +117,7 @@ from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
+    source_locale_match_sql,
     source_locale_sql,
     translation_review_sql,
 )
@@ -5057,21 +5058,23 @@ class TranslationDB(
             "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
             "WHERE e2.kind=u.kind AND e2.mod_id=u.mod_id AND e2.key=u.key "
             "AND e2.en_us=u.en_us "
-            "AND u.source_locale<>'' "
+            "AND ("
+            "(u.has_source_origin=0 AND NOT EXISTS ("
+            "SELECT 1 FROM entry_origin eo2 WHERE eo2.entry_id=e2.id)) "
+            "OR (u.source_locale NOT LIKE 'unknown:%' "
             f"AND {source_locale_sql('e2')}=u.source_locale)"
+            "))"
         )
 
     @staticmethod
     def _reusable_sql() -> str:
-        """建立單筆跨版本重用條件；unknown 來源不可自動沿用。"""
-        source_locale = source_locale_sql("e")
+        """建立單筆跨版本重用條件；只相容沒有來源紀錄的舊資料。"""
         return (
             "(SELECT COUNT(DISTINCT f2.zh_tw) "
             "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
             "WHERE e2.kind=e.kind AND e2.mod_id=e.mod_id AND e2.key=e.key "
             "AND e2.en_us=e.en_us AND e2.mc_version<>e.mc_version "
-            f"AND {source_locale}<>'' "
-            f"AND {source_locale_sql('e2')}={source_locale})=1"
+            f"AND {source_locale_match_sql('e', 'e2')})=1"
         )
 
     def _untranslated_candidates_cte(
@@ -5092,7 +5095,9 @@ class TranslationDB(
         sql = (
             "WITH u AS MATERIALIZED ("
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
-            f"{source_locale_sql('e')} AS source_locale "
+            f"{source_locale_sql('e')} AS source_locale, "
+            "EXISTS (SELECT 1 FROM entry_origin eo "
+            "WHERE eo.entry_id=e.id) AS has_source_origin "
             "FROM (SELECT i.id FROM entry i WHERE i.mc_version = ?"
             f"{mod_filter} AND i.id NOT IN (SELECT entry_id FROM effective)) c "
             "JOIN entry e ON e.id = c.id WHERE e.en_us <> ''"
@@ -5348,7 +5353,7 @@ class TranslationDB(
                 "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
                 "AND e2.key = e.key AND e2.en_us = e.en_us "
                 "AND e2.mc_version <> e.mc_version "
-                f"AND {source_locale_sql('e2')}={source_locale_sql('e')} "
+                f"AND {source_locale_match_sql('e', 'e2')} "
                 "JOIN effective f2 ON f2.entry_id = e2.id "
                 f"WHERE {where} AND {self._reusable_sql()} "
                 "ORDER BY e.id, f2.rowid",

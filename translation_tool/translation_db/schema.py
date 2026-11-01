@@ -267,6 +267,8 @@ CREATE TABLE IF NOT EXISTS entry_origin (
 CREATE INDEX IF NOT EXISTS idx_entry_origin_entry ON entry_origin (entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_origin_scope
     ON entry_origin (pack_scope, source_kind, source_path);
+CREATE INDEX IF NOT EXISTS idx_entry_origin_locale
+    ON entry_origin (entry_id, source_locale);
 
 -- 跨格式引用（例如 FTB Quests 的 {my_pack.quest.start}）不建立重複 entry；
 -- 只保存來源位置、目標 key 與目前可否解析到語言定義。
