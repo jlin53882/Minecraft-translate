@@ -18,7 +18,7 @@
 - **JAR 提取**：把模組 JAR 內容提取成語言檔或 Patchouli 輸出。
 - **語系合併**：將資料夾或 ZIP 的 `en_us`／`zh_cn`／`zh_tw` 內容整理成待翻譯資料與既有譯文。
 - **機器翻譯**：翻譯指定目錄並寫入輸出；翻譯快取和 Mod DB 是否參與由目前設定與該頁選項決定。
-- **任務翻譯**：處理 Markdown 文件的專用流程。FTB Quests 與 KubeJS 請使用「KubeJS / FTB 流水線」頁。
+- **任務翻譯**：處理 FTB Quests、KubeJS Tooltip 或 Markdown 的專用流程。
 - **QC 檢驗**：在打包前檢查未翻譯條目、英文殘留或格式問題。
 
 這些頁面不是一條固定的「Extract → Translate → Merge → Writeback」順序；完整差異與資料流見

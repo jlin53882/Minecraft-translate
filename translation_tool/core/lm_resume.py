@@ -1,6 +1,6 @@
 """重開後續跑：偵測上次沒做完的翻譯，並判斷能不能接續（#151、#164、ADR-0001 方案 C）。
 
-涵蓋機器翻譯頁（``lm_directory``）與 Markdown 翻譯（``md``，
+涵蓋機器翻譯頁（``lm_directory``）與 FTB／KubeJS／MD 翻譯（``ftbquests``／``kubejs``／``md``，
 標記由 ``plugin_resume`` 寫出）。
 
 設計重點
@@ -23,6 +23,8 @@ from translation_tool.utils.worker_count import resolve_worker_count
 LM_KIND = "lm_directory"
 KIND_LABELS = {
     LM_KIND: "機器翻譯",
+    "ftbquests": "FTB 任務翻譯",
+    "kubejs": "KubeJS 翻譯",
     "md": "Markdown 翻譯",
 }
 

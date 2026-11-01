@@ -25,9 +25,13 @@ def test_translation_run_is_ignored_while_task_running(monkeypatch):
     monkeypatch.setattr(
         operation_registry.threading, "Thread", _FakeThreadFactory(started)
     )
+    view.ftb_in_dir.value = "C:/pack"
+    view.kjs_in_dir.value = "C:/pack"
     view.md_in_dir.value = "C:/pack"
     view._ui_timer_running = True
 
+    ta.run_ftb(view, dry_run=False)
+    ta.run_kjs(view, dry_run=False)
     ta.run_md(view, dry_run=False)
 
     assert started == []

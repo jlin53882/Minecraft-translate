@@ -950,7 +950,7 @@ def test_confirming_resume_opens_the_lm_page_and_hands_over_the_task(env):
     shell.dispose()
 
 
-@pytest.mark.parametrize("kind", ["md"])
+@pytest.mark.parametrize("kind", ["ftbquests", "kubejs", "md"])
 def test_plugin_tasks_resume_in_the_translation_page(env, kind):
     task = _interrupted_task(kind)
     shell = _shell_with_interrupted_tasks(env, [task])

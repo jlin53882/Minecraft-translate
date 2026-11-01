@@ -80,7 +80,7 @@ Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecyc
 
 ### TaskSession terminal 契約（所有背景任務）
 
-`start()` 之後任何結束路徑都要有一次 `finish()`，失敗順序為 `set_error()` → `finish()`（`TaskSession.finish()` 對已出錯的維持 ERROR）；`TaskManager` 以 `finish` 為結案事件。覆蓋範圍：`_task_runner.run_callable_task`（Markdown）；extract（lang／book／dual／取消）、LM、merge（folder／zip）、`MergeView`／翻譯頁的 worker 例外邊界，以及 `PipelineActions`（dual 抽取、一鍵 merge、打包）。護欄：`tests/test_task_terminal_lifecycle.py`（真正的 `TaskManager`，每條路徑都驗證 `active() == []` 與 recent 狀態）。
+`start()` 之後任何結束路徑都要有一次 `finish()`，失敗順序為 `set_error()` → `finish()`（`TaskSession.finish()` 對已出錯的維持 ERROR）；`TaskManager` 以 `finish` 為結案事件。覆蓋範圍：`_task_runner.run_callable_task`（FTB／KubeJS／MD）；extract（lang／book／dual／取消）、LM、merge（folder／zip）、`MergeView`／翻譯頁的 worker 例外邊界，以及 `PipelineActions`（dual 抽取、一鍵 merge、打包）。護欄：`tests/test_task_terminal_lifecycle.py`（真正的 `TaskManager`，每條路徑都驗證 `active() == []` 與 recent 狀態）。
 
 #### `session.start()` 的 owner 分類（`rg "session\.start\(" app`）
 
@@ -94,8 +94,8 @@ Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecyc
 | `PipelineActions._step_merge` | composite outer owner | `finally`；內部以 `finish_session=False` 呼叫 |
 | `PipelineActions._step_translate` | composite outer owner | `finally`；內部以 `manage_session=False` 呼叫 |
 | `PipelineActions._step_bundle` | composite outer owner | `finally`；內部 `bundle(manage_session=False)` |
-| `_task_runner.run_callable_task`（Markdown） | single owner | `finally` |
-| `MergeView`、翻譯頁（Markdown）的 `session.start()` | UI owner（View 啟動，service 結案；worker 例外邊界補 `set_error()`→`finish()`） | service；View 例外邊界 |
+| `_task_runner.run_callable_task`（FTB／KubeJS／MD） | single owner | `finally` |
+| `MergeView`、翻譯頁（FTB／KJS／MD）的 `session.start()` | UI owner（View 啟動，service 結案；worker 例外邊界補 `set_error()`→`finish()`） | service；View 例外邊界 |
 | `LMView` | 不呼叫 `session.start()`（由 `lm_service` 負責；重複 start 會清掉已寫入的日誌） | `lm_service` |
 
 merge 的取消檢查點（`merge_service`，經 `raise_if_cancelled()`；`PipelineRunner` 以 `cancel_scope` 包住 service，`TaskCancelled` 繼承 `BaseException` 不會被內部 `except Exception` 吞掉，會經 service `finally` 結案）：folder 階段 1 與階段 2 的每個 update、ZIP 的每個 update、ZIP 與 ZIP 之間——停止消費核心 generator 即中止其後續處理，執行中的來源不會「跑完才標記取消」。測試以「10 個 update、第 1 個之後取消、`processed == [0]`」驗證（folder／ZIP 各一）。

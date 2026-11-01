@@ -124,6 +124,6 @@ Minecraft-translate/
 | `checkers/color_char_checker.py` | 偵測色彩字元殘留 | `check_color_chars()`, `ColorCharError` |
 | `utils/cache_manager.py` | SQLite 分片快取、全文搜尋、WAL 優化 | module-level façade（無 class） |
 | `utils/config_manager.py` | 設定載入與驗證、Logging 初始化 | `load_config()`, `setup_logging()` |
-| `app/views/translation_view.py` | 任務翻譯工具主視圖（Markdown） | `TranslationView` |
+| `app/views/translation_view.py` | 任務翻譯工具主視圖（FTB / KubeJS / Markdown） | `TranslationView` |
 | `app/views/lm_view.py` | 機器翻譯設定與操作視圖 | `LMView` |
 | `app/ui/design.py` | 設計 token 與主題（深色／淺色切換） | module-level constants |

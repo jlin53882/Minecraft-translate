@@ -1,4 +1,4 @@
-"""MD 翻譯的「重開後續跑」標記（#164，沿用 #151 的設計）。
+"""FTB／KubeJS／MD 翻譯的「重開後續跑」標記（#164，沿用 #151 的設計）。
 
 與機器翻譯頁相同：已完成批次的譯文在翻譯快取（每批 fsync），標記只是「這個任務沒做完」的
 記錄與重新執行所需的選項；續跑 = 以同一組輸入與選項重新執行整條流程，抽取／清理等步驟會
@@ -27,13 +27,16 @@ from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_info, log_warning
 
-PLUGIN_KINDS = ("md",)
+PLUGIN_KINDS = ("ftbquests", "kubejs", "md")
 
 # 指紋會讀取來源檔案內容；來源資料夾可能是整個 modpack，所以限制檔案種類與規模，
 # 超過上限就不提供續跑（不寫標記），而不是花很久雜湊或誤報。
 MAX_FINGERPRINT_FILES = 50_000
 MAX_FINGERPRINT_BYTES = 512 * 1024 * 1024
 _HASH_CHUNK = 1024 * 1024
+
+_FTB_SUFFIXES = (".snbt", ".json", ".qkdownloading")
+_KUBEJS_SUFFIXES = (".js", ".json")
 
 
 def marker_path(kind: str) -> Path:
@@ -67,7 +70,27 @@ def list_source_files(
     out_root = _output_root(input_dir, output_dir)
     base = Path(input_dir).resolve()
     files: list[Path]
-    if kind == "md":
+    if kind == "ftbquests":
+        from translation_tool.core.ftb_translator import resolve_ftbquests_quests_root
+
+        base = Path(resolve_ftbquests_quests_root(input_dir))
+        files = [
+            p
+            for p in base.rglob("*")
+            if p.is_file() and p.name.lower().endswith(_FTB_SUFFIXES)
+        ]
+    elif kind == "kubejs":
+        from translation_tool.core.kubejs_translator_paths import (
+            resolve_kubejs_root_impl,
+        )
+
+        base = Path(resolve_kubejs_root_impl(input_dir))
+        files = [
+            p
+            for p in base.rglob("*")
+            if p.is_file() and p.name.lower().endswith(_KUBEJS_SUFFIXES)
+        ]
+    elif kind == "md":
         from translation_tool.plugins.md.md_extract_qa import iter_md_files
 
         files = list(iter_md_files(base))

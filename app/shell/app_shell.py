@@ -75,9 +75,11 @@ _REGISTRY_SETTERS = ("set_registry", "set_view_registry")
 _OPERATION_REGISTRY_SETTERS = ("set_operation_registry",)
 # 需要拿到外殼（導覽 / 任務事件）的頁面
 _SHELL_SETTERS = ("set_shell",)
-# 續跑時各種任務要回到的頁面（機器翻譯頁；Markdown 在任務翻譯頁）
+# 續跑時各種任務要回到的頁面（機器翻譯頁；FTB／KubeJS／MD 都在任務翻譯頁的分頁）
 _RESUME_VIEW_BY_KIND = {
     "lm_directory": "lm",
+    "ftbquests": "translation",
+    "kubejs": "translation",
     "md": "translation",
 }
 

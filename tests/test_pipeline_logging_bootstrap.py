@@ -3,6 +3,8 @@ from __future__ import annotations
 from app.services_impl.pipelines import (
     _pipeline_logging,
     extract_service,
+    ftb_service,
+    kubejs_service,
     lm_service,
     md_service,
     merge_service,
@@ -49,6 +51,47 @@ def _make_logger_patch(events: list[str]):
         events.append("logger")
 
     return _fake_apply
+
+
+def test_ftb_pipeline_bootstrap_order(monkeypatch):
+    try:
+        import translation_tool.core.ftb_translator as ftb_core
+    except ModuleNotFoundError:
+        import pytest
+
+        pytest.skip("ftb_snbt_lib not installed")
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        _pipeline_logging, "apply_logger_config", _make_logger_patch(events)
+    )
+    monkeypatch.setattr(ftb_service, "UI_LOG_HANDLER", DummyHandler())
+
+    def _fake_run_ftb_pipeline(*_args, **_kwargs):
+        events.append("first-step")
+
+    monkeypatch.setattr(ftb_core, "run_ftb_pipeline", _fake_run_ftb_pipeline)
+
+    ftb_service.run_ftb_translation_service("in", DummySession(), None)
+    _assert_logger_before_first_step(events)
+
+
+def test_kubejs_pipeline_bootstrap_order(monkeypatch):
+    import translation_tool.core.kubejs_translator as kubejs_core
+
+    events: list[str] = []
+    monkeypatch.setattr(
+        _pipeline_logging, "apply_logger_config", _make_logger_patch(events)
+    )
+    monkeypatch.setattr(kubejs_service, "UI_LOG_HANDLER", DummyHandler())
+
+    def _fake_run_kubejs_pipeline(*_args, **_kwargs):
+        events.append("first-step")
+
+    monkeypatch.setattr(kubejs_core, "run_kubejs_pipeline", _fake_run_kubejs_pipeline)
+
+    kubejs_service.run_kubejs_tooltip_service("in", DummySession(), None)
+    _assert_logger_before_first_step(events)
 
 
 def test_md_pipeline_bootstrap_order(monkeypatch):

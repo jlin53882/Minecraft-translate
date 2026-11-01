@@ -2,8 +2,6 @@
 
 入口：`app/views/kubejs_ftb_pipeline_view.py`。
 
-FTB Quests 與 KubeJS 翻譯的唯一入口是本頁（任務翻譯頁只保留 Markdown）。
-
 這一頁是模組包根目錄 overlay 工作流，不是 Resource Pack 打包器。它沿用
 `pack_sources.scan_pack_sources`、ModDB `TranslationDB` 與
 `pack_output.export_pack_overlay`，因此不另建資料庫、也不執行來源內的 JavaScript。

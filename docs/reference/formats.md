@@ -6,8 +6,8 @@
 |---|---|---|
 | Minecraft `lang/*.json` | `translation_tool/core/jar_processor.py`、`translation_tool/core/lang_merger.py` | [`../developer-guide/jar-pipeline.md`](../developer-guide/jar-pipeline.md)、[`../developer-guide/views/MERGE_VIEW_ARCHITECTURE.md`](../developer-guide/views/MERGE_VIEW_ARCHITECTURE.md) |
 | Patchouli 書籍 JSON | `translation_tool/core/jar_processor.py` 與合併／翻譯 service | [`../developer-guide/views/EXTRACTOR_VIEW_ARCHITECTURE.md`](../developer-guide/views/EXTRACTOR_VIEW_ARCHITECTURE.md) |
-| FTB Quests SNBT | `translation_tool/plugins/ftbquests/` | [`../../app/views/kubejs_ftb_pipeline_view.py`](../../app/views/kubejs_ftb_pipeline_view.py) |
-| KubeJS Tooltip | `translation_tool/plugins/kubejs/` | [`../../app/views/kubejs_ftb_pipeline_view.py`](../../app/views/kubejs_ftb_pipeline_view.py) |
+| FTB Quests SNBT | `translation_tool/plugins/ftbquests/` | [`../../app/views/translation_view.py`](../../app/views/translation_view.py) |
+| KubeJS Tooltip | `translation_tool/plugins/kubejs/` | [`../../app/views/translation_view.py`](../../app/views/translation_view.py) |
 | Markdown | `translation_tool/plugins/md/` | [`../../app/views/translation_view.py`](../../app/views/translation_view.py) |
 | Mod 翻譯資料庫 | `translation_tool/translation_db/`（SQLite） | [`../user-guide/mod-translation-db.md`](../user-guide/mod-translation-db.md) |
 

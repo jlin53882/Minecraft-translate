@@ -381,10 +381,10 @@ def test_a_legacy_plugin_marker_is_shown_as_not_resumable_and_can_be_discarded(
 
     monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(rp, "show_snack", lambda *a, **k: None)
-    marker = plugin_resume.marker_path("md")
+    marker = plugin_resume.marker_path("ftbquests")
     marker.parent.mkdir(parents=True)
     marker.write_text(
-        json.dumps({"plugin": "md", "processed": 2, "total": 7}),
+        json.dumps({"plugin": "ftbquests", "processed": 2, "total": 7}),
         encoding="utf-8",
     )
     page = FakePage()
@@ -400,7 +400,7 @@ def test_a_legacy_plugin_marker_is_shown_as_not_resumable_and_can_be_discarded(
     assert prompt.show_if_needed() is True
 
     texts = [c.value for c in _walk(page.dialogs[-1]) if isinstance(c, ft.Text)]
-    assert any("Markdown 翻譯" in t for t in texts)
+    assert any("FTB 任務翻譯" in t for t in texts)
     assert any("無法續跑" in t and "舊版" in t for t in texts)
     buttons = {
         c.content: c for c in _walk(page.dialogs[-1]) if isinstance(c, ft.TextButton)
