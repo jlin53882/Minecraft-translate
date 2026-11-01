@@ -13,8 +13,7 @@ import flet as ft
 
 from app.ui import kit
 from app.ui.design import C
-from app.ui.dialogs import close_page_dialog, present_page_dialog
-from app.ui.snack import show_snack
+from app.ui.dialogs import close_page_dialog, present_page_dialog, set_dialog_feedback
 from app.views.pipeline.pipeline_forms import build_pipeline_dialog, dialog_button
 from app.views.pipeline.pipeline_workbench import build_pipeline_input_row
 
@@ -32,6 +31,8 @@ class KubejsFtbWizard:
         self._view = view
         self._step = 1
         self._dialog: ft.AlertDialog | None = None
+        # 校驗訊息放在對話框內：SnackBar 會被 modal 擋住，使用者看不到。
+        self._feedback = ft.Text("", size=12, color=C.GOLD, visible=False)
 
     # ------------------------------------------------------------ 開啟／關閉
 
@@ -75,25 +76,22 @@ class KubejsFtbWizard:
             3: self._content_output,
             4: self._content_summary,
         }
-        return builders[self._step]()
+        return ft.Column(
+            [builders[self._step](), self._feedback], spacing=12, tight=True
+        )
 
     def _step_actions(self) -> list[ft.Control]:
-        if self._step == 1:
-            return [
-                dialog_button("取消", self._close),
-                dialog_button("下一步", self._next, role="primary"),
-            ]
+        """每一步都有取消；第 1 步沒有上一步，最後一步的主要動作是開始預覽。"""
+        cancel = dialog_button("取消", self._close)
         if self._step == STEP_COUNT:
-            return [
-                dialog_button("上一步", self._back),
-                dialog_button(
-                    "開始預覽", self._finish, role="primary", icon=ft.Icons.SEARCH
-                ),
-            ]
-        return [
-            dialog_button("上一步", self._back),
-            dialog_button("下一步", self._next, role="primary"),
-        ]
+            primary = dialog_button(
+                "開始預覽", self._finish, role="primary", icon=ft.Icons.SEARCH
+            )
+        else:
+            primary = dialog_button("下一步", self._next, role="primary")
+        if self._step == 1:
+            return [cancel, primary]
+        return [cancel, dialog_button("上一步", self._back), primary]
 
     # ------------------------------------------------------------ 各步驟內容
 
@@ -186,8 +184,12 @@ class KubejsFtbWizard:
     def _next(self, _e=None) -> None:
         problem = self._step_problem(self._step)
         if problem is not None:
-            show_snack(self._view._page, problem[0], problem[1])
+            set_dialog_feedback(
+                self._view._page, self._feedback, f"⚠️ {problem[0]}", problem[1]
+            )
             return
+        self._feedback.value = ""
+        self._feedback.visible = False
         self._step += 1
         self._show()
 
