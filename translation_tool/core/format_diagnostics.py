@@ -9,6 +9,7 @@ token-only compatibility policy.
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_left
 from collections import Counter
 from collections.abc import Callable
@@ -262,6 +263,51 @@ def _analyze_token_format(
     )
 
 
+# KubeJS 腳本文字可能帶有遊戲內的自訂標記（例如 <imp>、<r>、<item>）。這類標記不是
+# token 分析器認得的格式，若只看一般 token，標記被丟掉、改名或翻譯也會被當成正常譯文。
+_MARKUP_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9_.:-]*\s*/?>")
+
+
+def _markup_tag_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    """依數量比對自訂標記；標記的順序與開闔配對目前不檢查，只比對數量。"""
+    source_counts = Counter(m.group(0) for m in _MARKUP_TAG_RE.finditer(source))
+    target_counts = Counter(m.group(0) for m in _MARKUP_TAG_RE.finditer(translated))
+    diagnostics: list[FormatDiagnostic] = []
+    for tag in sorted(set(source_counts) | set(target_counts)):
+        delta = target_counts[tag] - source_counts[tag]
+        if not delta:
+            continue
+        diagnostics.append(
+            FormatDiagnostic(
+                identifier=tag,
+                category="markup",
+                direction="extra" if delta > 0 else "missing",
+                source_count=source_counts[tag],
+                target_count=target_counts[tag],
+                delta=delta,
+                display_label=tag,
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _analyze_script_format(
+    source: str,
+    translated: str,
+    newline_policy: NewlinePolicy,
+) -> FormatAnalysis:
+    """KubeJS 腳本文字：一般 token 檢查，加上自訂標記的數量檢查。"""
+    base = _analyze_token_format(source, translated, newline_policy)
+    return FormatAnalysis(
+        source_occurrences=base.source_occurrences,
+        target_occurrences=base.target_occurrences,
+        diagnostics=(*base.diagnostics, *_markup_tag_diagnostics(source, translated)),
+        guide_issues=base.guide_issues,
+    )
+
+
 def _analyze_guide_format(
     source: str,
     translated: str,
@@ -405,9 +451,9 @@ _POLICIES: dict[str, FormatKindPolicy] = {
             "kubejs_script",
             "kubejs",
             "kubejs",
-            _analyze_token_format,
+            _analyze_script_format,
             "hard",
-            analyzer_name="token",
+            analyzer_name="script",
         )
     ),
     "kubejs_lang": _normalize_policy(
