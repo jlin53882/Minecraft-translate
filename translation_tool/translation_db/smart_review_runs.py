@@ -163,7 +163,9 @@ def _resume_cas_values(
     )
 
 
-def _resume_snapshot(run_id: str, item: SmartReviewCandidate) -> SmartReviewSnapshot:
+def _resume_snapshot(
+    run_id: str, item: SmartReviewCandidate, source_locale: str | None = None
+) -> SmartReviewSnapshot:
     """把歷史候選轉成續跑所需的不可變 snapshot。"""
     return SmartReviewSnapshot(
         run_id=run_id,
@@ -183,6 +185,7 @@ def _resume_snapshot(run_id: str, item: SmartReviewCandidate) -> SmartReviewSnap
         manual_checker=item.manual_checker,
         manual_review_status=item.manual_review_status,
         manual_revision=item.manual_revision,
+        source_locale=source_locale,
     )
 
 
@@ -453,10 +456,13 @@ class SmartReviewRunStoreMixin:
             )
         self._merge_resume_metrics(run, resume_stats)
         refreshed = history.list_candidates(run_id)
+        pending = [
+            item for item in refreshed if item.status == SmartReviewStatus.PENDING
+        ]
+        locales = self.source_locales_for_entries([item.entry_id for item in pending])
         snapshots = [
-            _resume_snapshot(run_id, item)
-            for item in refreshed
-            if item.status == SmartReviewStatus.PENDING
+            _resume_snapshot(run_id, item, locales.get(item.entry_id))
+            for item in pending
         ]
         base = _resume_counts(refreshed)
         if progress is not None:

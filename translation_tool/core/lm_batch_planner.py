@@ -12,11 +12,15 @@ from translation_tool.core.lm_batch_budget import (
 )
 
 
-def batch_group_key(item: dict[str, Any]) -> tuple[str, str]:
-    """Return the stable boundary key used by both preview and execution."""
+def batch_group_key(item: dict[str, Any]) -> tuple[str, ...]:
+    """Return the stable boundary key used by both preview and execution.
+
+    Mod DB 路線的非預設來源語系會在模組與類型之後加上第三個元素，
+    讓不同語系的項目不會被放進同一批（見 ``translation_tool.core.source_locale``）。
+    """
     group = item.get("_batch_group")
-    if isinstance(group, tuple) and len(group) == 2:
-        return str(group[0]), str(group[1])
+    if isinstance(group, tuple) and len(group) in (2, 3):
+        return tuple(str(part) for part in group)
     # 一般機翻沒有 Mod DB 的模組邊界；同 cache type 的項目維持原本
     # 的批次行為。Mod DB 路線若需要更細的邊界，會明確寫入 _batch_group。
     return "", str(item.get("cache_type") or "lang")
@@ -28,8 +32,8 @@ def group_items_by_batch_key(
     check: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Stable-group items by ``cache_type + batch_group`` without losing order."""
-    groups: dict[tuple[str, tuple[str, str]], list[dict[str, Any]]] = {}
-    order: list[tuple[str, tuple[str, str]]] = []
+    groups: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+    order: list[tuple[str, tuple[str, ...]]] = []
     for item in items:
         if check is not None:
             check()

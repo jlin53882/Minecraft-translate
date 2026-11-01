@@ -20,6 +20,7 @@ from translation_tool.translation_db.smart_review_prompt import (
     SMART_REVIEW_VALIDATION_REPAIR_LIMIT,
     build_smart_review_validation_repair_payload,
     smart_review_response_schema,
+    smart_review_system_prompt,
 )
 from translation_tool.translation_db.smart_review_provider import (
     SmartReviewProviderSession,
@@ -154,7 +155,9 @@ class _ValidationRepair:
         state.executor.metrics.provider_attempts += 1
         try:
             raw = self.session.call(
-                system_prompt=SMART_REVIEW_REPAIR_SYSTEM_PROMPT,
+                system_prompt=smart_review_system_prompt(
+                    SMART_REVIEW_REPAIR_SYSTEM_PROMPT, self.repair_batch
+                ),
                 payload=payload,
                 api_key=api_key,
                 meta_out=meta,

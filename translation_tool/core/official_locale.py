@@ -21,6 +21,10 @@ from translation_tool.core.lm_format_policy import (
     format_policy_for_items,
     normalize_legacy_prompt,
 )
+from translation_tool.core.source_locale import (
+    batch_source_locale,
+    source_locale_supplement,
+)
 from translation_tool.core.terminology_model import (
     MATCH_STANDALONE,
     STANDALONE_ALLOWLIST,
@@ -805,12 +809,21 @@ def build_translation_prompt(
     include_moddb_reviewed: bool = True,
     item_ids: Sequence[str] | None = None,
 ) -> str:
-    """在基礎提示詞後加入繁中與目前批次的穩定識別碼術語指令。"""
-    sections = [
-        normalize_legacy_prompt(base_prompt).rstrip(),
-        format_policy_for_items(items, profile=profile),
-        _TERMINOLOGY_INSTRUCTION,
-    ]
+    """在基礎提示詞後加入來源語系補充、繁中與目前批次的穩定識別碼術語指令。
+
+    來源語系補充只在批次含非預設且可信的來源語系時加入；它緊接在基礎提示詞之後，
+    確保超過長度上限時被截掉的是後段術語，不是語系指令。
+    """
+    sections = [normalize_legacy_prompt(base_prompt).rstrip()]
+    source_locale = batch_source_locale(items)
+    if source_locale is not None:
+        sections.append(source_locale_supplement(source_locale))
+    sections.extend(
+        [
+            format_policy_for_items(items, profile=profile),
+            _TERMINOLOGY_INSTRUCTION,
+        ]
+    )
     index = load_official_locale_index()
     directives = _terminology_directives(
         items,

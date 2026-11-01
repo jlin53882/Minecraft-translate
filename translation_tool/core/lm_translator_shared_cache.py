@@ -6,17 +6,29 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
 from translation_tool.core.lm_config_rules import value_fully_translated
 from translation_tool.core.lm_format_policy import kind_for_item
+from translation_tool.core.source_locale import (
+    is_default_source_locale,
+    normalize_source_locale,
+)
 from translation_tool.plugins.shared.rich_text_shield import (
     inspect_shielded_translation,
 )
 from translation_tool.translation_db.quality import translation_issues
 from translation_tool.utils.cache_manager import get_cache_dict_ref
+
+
+def source_locale_key_suffix(item: Mapping[str, Any]) -> str:
+    """非預設且可信的來源語系回傳 ``@<locale>``，否則回傳空字串。"""
+    locale = normalize_source_locale(item.get("source_locale"))
+    if is_default_source_locale(locale):
+        return ""
+    return f"@{locale}"
 
 
 @dataclass(frozen=True)
@@ -26,12 +38,17 @@ class CacheRule:
     key_mode: str = "path|source_text"
 
     def make_key(self, item: dict[str, Any]) -> str:
-        """依規則建立 cache key。"""
+        """依規則建立 cache key。
+
+        非預設來源語系的項目會在鍵尾加上語系後綴，讓相同路徑與相同原文的不同語系不共用快取；
+        預設語系（與 unknown）的鍵維持原本的格式，既有快取不會失效。
+        """
         path = str(item.get("path") or "")
         src = str(item.get("source_text") or "")
+        suffix = source_locale_key_suffix(item)
         if self.key_mode == "path":
-            return path
-        return f"{path}|{src}"
+            return f"{path}{suffix}"
+        return f"{path}|{src}{suffix}"
 
 
 STRICT_SRC_TYPES = {

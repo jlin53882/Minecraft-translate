@@ -3302,6 +3302,33 @@ class TranslationDB(
         )
         return self._row(r) if r else None
 
+    def source_locales_for_entries(
+        self, entry_ids: Sequence[int]
+    ) -> dict[int, str | None]:
+        """每個條目的可信來源語系（由 ``entry_origin`` 的來源 selector 還原；無法確定為 ``None``）。
+
+        以 ``json_each`` 分段批次查詢，不逐筆 N+1；沒有來源紀錄的條目（例如 jar 掃描）為 ``None``。
+        """
+        from translation_tool.core.source_locale import resolve_source_locale
+
+        ids = [int(entry_id) for entry_id in entry_ids]
+        result: dict[int, str | None] = {entry_id: None for entry_id in ids}
+        chunk_size = 500
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start : start + chunk_size]
+            rows = self._q(
+                "SELECT eo.entry_id, eo.selector FROM entry_origin eo "
+                "WHERE eo.entry_id IN (SELECT value FROM json_each(?))",
+                (json.dumps(chunk),),
+            )
+            selectors: dict[int, list[str]] = {}
+            for entry_id, selector in rows:
+                selectors.setdefault(int(entry_id), []).append(str(selector))
+            for entry_id in chunk:
+                if entry_id in selectors:
+                    result[entry_id] = resolve_source_locale(selectors[entry_id])
+        return result
+
     def entry_origins(self, entry_id: int) -> list[EntryOrigin]:
         """回傳條目的精確來源；供預覽、清理與格式專用 writer 使用。"""
         return [

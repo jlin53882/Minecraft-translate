@@ -9,6 +9,12 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from translation_tool.core.source_locale import (
+    SourceLocaleError,
+    is_default_source_locale,
+    normalize_source_locale,
+    source_locale_supplement,
+)
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.utils.config_manager import (
     DEFAULT_SMART_REVIEW_BATCH_SIZE,
@@ -111,25 +117,55 @@ def smart_review_response_schema(ids: Sequence[str]) -> dict[str, Any]:
     return schema
 
 
+def trusted_non_default_locale(value: object) -> str | None:
+    """回傳可信且非預設的來源語系；預設、unknown 與不合法的值都回傳 ``None``。"""
+    locale = normalize_source_locale(value)
+    return None if is_default_source_locale(locale) else locale
+
+
+def smart_review_system_prompt(
+    base_prompt: str, snapshots: Sequence[SmartReviewSnapshot]
+) -> str:
+    """依請求內條目的來源語系決定 system prompt。
+
+    預設語系與 unknown 沿用 ``base_prompt``（位元組相同）；非預設語系附加補充段落。
+    同一請求混有不同語系時 fail closed，不得把其中一種語系套用到全部條目。
+    """
+    locales = {trusted_non_default_locale(item.source_locale) for item in snapshots}
+    if len(locales) > 1:
+        raise SourceLocaleError(
+            f"同一請求混有多種來源語系：{sorted(map(str, locales))}"
+        )
+    locale = next(iter(locales), None)
+    if locale is None:
+        return base_prompt
+    return base_prompt + "\n\n" + source_locale_supplement(locale)
+
+
 def build_smart_review_payload(
     snapshots: Sequence[SmartReviewSnapshot],
 ) -> dict[str, list[dict[str, Any]]]:
-    """建立送給模型的不可預測識別碼智慧校對負載。"""
-    return {
-        "items": [
-            {
-                "id": str(item.ordinal),
-                "kind": item.kind,
-                "mc_version": item.mc_version,
-                "mod_id": item.mod_id,
-                "key": item.key,
-                "source_text": item.en_us,
-                "current_translation": item.current_zh_tw,
-                "context": list(item.context),
-            }
-            for item in snapshots
-        ]
-    }
+    """建立送給模型的不可預測識別碼智慧校對負載。
+
+    只有可信的非預設來源語系才附加 ``source_locale``；預設語系的負載維持不變。
+    """
+    items: list[dict[str, Any]] = []
+    for item in snapshots:
+        entry: dict[str, Any] = {
+            "id": str(item.ordinal),
+            "kind": item.kind,
+            "mc_version": item.mc_version,
+            "mod_id": item.mod_id,
+            "key": item.key,
+            "source_text": item.en_us,
+            "current_translation": item.current_zh_tw,
+            "context": list(item.context),
+        }
+        locale = trusted_non_default_locale(item.source_locale)
+        if locale is not None:
+            entry["source_locale"] = locale
+        items.append(entry)
+    return {"items": items}
 
 
 def build_smart_review_validation_repair_payload(

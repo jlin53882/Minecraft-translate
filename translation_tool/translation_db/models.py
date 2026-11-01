@@ -450,6 +450,8 @@ class SmartReviewSnapshot:
     manual_revision: int | None = None
     # 選取時被去重、套用時一併寫入的同文條目（見 smart_review._dedupe_same_text_rows）
     twin_entry_ids: tuple[int, ...] = ()
+    # 條目可信的來源語系（由 entry_origin 還原）；None 代表未知，不得視為 en_us
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
