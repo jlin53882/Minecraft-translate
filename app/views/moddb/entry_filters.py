@@ -215,7 +215,7 @@ def _build_controls(panel) -> None:
         label="模組", dense=True, width=220, on_select=panel._on_mod
     )
     panel.kind_dd = kit.dropdown(
-        label="類型", dense=True, width=160, on_select=panel._on_kind
+        label="類型", dense=True, width=200, on_select=panel._on_kind
     )
     panel.source_filter = SourceFilter(panel._on_source)
     panel.review_filter = ReviewStatusFilter(panel._on_review_status).dropdown
