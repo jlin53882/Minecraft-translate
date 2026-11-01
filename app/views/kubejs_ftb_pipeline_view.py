@@ -93,7 +93,7 @@ class KubejsFtbPipelineView(ft.Column):
             options=[],
         )
         self.output_field = kit.text_field(
-            "Overlay 輸出目錄（可選）",
+            "Overlay 輸出目錄（正式發布必填）",
             hint="例如：D:/翻譯輸出/ATM10-overlay",
             mono=True,
             expand=True,
