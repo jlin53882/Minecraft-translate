@@ -17,11 +17,17 @@ import re
 import zipfile
 from pathlib import Path
 
-from translation_tool.core.pack_format_lookup import load_table, parse_version
+from translation_tool.core.pack_format_lookup import load_table
 
 _VERSION_RE = re.compile(r"^[0-9]+(?:\.[0-9]+){1,2}$")
 _DESCRIPTOR_NAMES = frozenset(
-    {"manifest.json", "modrinth.index.json", "mmc-pack.json", "minecraftinstance.json", "instance.cfg"}
+    {
+        "manifest.json",
+        "modrinth.index.json",
+        "mmc-pack.json",
+        "minecraftinstance.json",
+        "instance.cfg",
+    }
 )
 _MAX_DEPTH = 2
 _MAX_ENTRIES = 5000
@@ -81,7 +87,9 @@ def _from_directory(root: Path) -> str | None:
                 if child.is_file() and child.name in _DESCRIPTOR_NAMES:
                     if child.stat().st_size > _MAX_DESCRIPTOR_BYTES:
                         continue
-                    version = _parse_descriptor(child.name, child.read_text(encoding="utf-8", errors="replace"))
+                    version = _parse_descriptor(
+                        child.name, child.read_text(encoding="utf-8", errors="replace")
+                    )
                     if version:
                         return version
                 elif child.is_dir() and not child.is_symlink():
@@ -128,7 +136,9 @@ def known_minecraft_versions() -> list[str]:
     for row in load_table():
         found.add(row.low)
         found.add(row.high)
-    return [".".join(str(part) for part in parts) for parts in sorted(found, reverse=True)]
+    return [
+        ".".join(str(part) for part in parts) for parts in sorted(found, reverse=True)
+    ]
 
 
 __all__ = ["detect_minecraft_version", "known_minecraft_versions"]
