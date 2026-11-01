@@ -94,6 +94,83 @@ def test_kubejs_sync_only_run_never_marks_overlay_stage():
 def test_kubejs_steps_share_one_settings_dialog_and_four_run_buttons():
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
 
-    assert len(view._run_buttons) == 4
+    assert len(view._run_buttons) == 5
     assert view._settings_dialog is not None
     assert view._settings_button is not None
+
+
+def _preview_summary(*, conflicts: int = 0) -> dict:
+    return {
+        "source_root": "/pack",
+        "coverage": {"files_read": 3, "files_seen": 3, "items_found": 9},
+        "sync": {"items_to_sync": 4, "items_unchanged": 5},
+        "output": {
+            "output_root": "/overlay",
+            "entries_applied": 4,
+            "conflicts": [{"path": f"c{i}"} for i in range(conflicts)],
+            "unapplied": [],
+        },
+    }
+
+
+def test_one_click_confirmation_enables_publish_when_preview_is_clean():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+
+    view._offer_publish_confirmation(True, _preview_summary())
+
+    assert view._publish_confirm_button.disabled is False
+
+
+def test_one_click_confirmation_blocks_publish_on_overlay_conflicts():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+
+    view._offer_publish_confirmation(True, _preview_summary(conflicts=2))
+
+    assert view._publish_confirm_button.disabled is True
+
+
+def test_one_click_confirmation_is_not_offered_after_failed_preview():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+
+    view._offer_publish_confirmation(False, _preview_summary())
+
+    assert view._publish_dialog is None
+
+
+class _FinishedPreviewSession:
+    def __init__(self, summary: dict):
+        self._snapshot = {
+            "status": "DONE",
+            "progress": 1.0,
+            "logs": [],
+            "summary": summary,
+        }
+
+    def snapshot(self) -> dict:
+        return self._snapshot
+
+
+def test_one_click_preview_completion_opens_publish_confirmation():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    view._running = True
+    view._one_click_stage = "preview"
+    preview = _preview_summary()
+    preview["state"] = "preview"
+    view.session = _FinishedPreviewSession(preview)
+
+    view._sync_session()
+
+    assert view._one_click_stage is None
+    assert view._publish_dialog is not None
+    assert view._publish_confirm_button.disabled is False
+
+
+def test_plain_preview_completion_does_not_open_publish_confirmation():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    view._running = True
+    view._one_click_stage = None
+    view.session = _FinishedPreviewSession(_preview_summary())
+
+    view._sync_session()
+
+    assert view._publish_dialog is None

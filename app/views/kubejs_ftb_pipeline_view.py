@@ -52,6 +52,9 @@ class KubejsFtbPipelineView(ft.Column):
         self._source_generation = 0
         self._current_dry_run = True
         self._current_publish = False
+        self._one_click_stage: str | None = None
+        self._publish_dialog: ft.AlertDialog | None = None
+        self._publish_confirm_button: ft.Button | None = None
 
         self._build_controls(page)
         self._build_layout()
@@ -128,6 +131,14 @@ class KubejsFtbPipelineView(ft.Column):
     def _build_action_controls(self) -> None:
         """步驟按鈕由步驟卡建立；這裡只保留統一停用用的清單與設定入口。"""
         self._run_buttons: list[ft.Button] = []
+        self._one_click_button = kit.button(
+            "一鍵執行",
+            "gold",
+            icon=ft.Icons.FLASH_ON,
+            size="lg",
+            on_click=self._one_click_clicked,
+        )
+        self._run_buttons.append(self._one_click_button)
         self._settings_button = kit.button(
             "流程設定",
             "secondary",
@@ -149,7 +160,7 @@ class KubejsFtbPipelineView(ft.Column):
             tone="em",
             left_controls=[paths_card, steps_card],
             right_controls=[status_panel, self.progress_panel.container],
-            actions=[self._settings_button],
+            actions=[self._one_click_button, self._settings_button],
         )
         self.controls = [self.workbench_view]
 
@@ -303,6 +314,98 @@ class KubejsFtbPipelineView(ft.Column):
     def _set_run_buttons_disabled(self, disabled: bool) -> None:
         for button in self._run_buttons:
             button.disabled = disabled
+
+    async def _one_click_clicked(self, _e=None) -> None:
+        """一鍵執行：先唯讀預覽，預覽成功後由確認對話框決定是否正式發布。"""
+        if self._running:
+            show_snack(self._page, "已有 KubeJS／FTB 流水線執行中", C.GOLD)
+            return
+        if not (self.source_field.value or "").strip():
+            show_snack(self._page, "請先輸入來源路徑", C.RED)
+            return
+        if not (self.output_field.value or "").strip():
+            show_snack(self._page, "一鍵執行會發布 overlay，請先填寫輸出目的地", C.RED)
+            return
+        self._one_click_stage = "preview"
+        await self._start(dry_run=True, publish=False)
+        if not self._running:
+            self._one_click_stage = None
+
+    def _offer_publish_confirmation(self, success: bool, summary: dict) -> None:
+        """預覽完成後顯示發布確認；有衝突或預覽失敗時不提供確認按鈕。"""
+        if not success or not summary:
+            show_snack(self._page, "預覽未完成，未開始發布", C.GOLD)
+            return
+        output = summary.get("output") or {}
+        conflicts = len(output.get("conflicts") or [])
+        self._publish_dialog = self._build_publish_dialog(
+            summary, blocked=conflicts > 0
+        )
+        present_page_dialog(self._page, self._publish_dialog)
+
+    def _build_publish_dialog(self, summary: dict, *, blocked: bool) -> ft.AlertDialog:
+        """確認發布對話框：列出預覽的來源、同步、翻譯與 overlay 數量，確認後才寫入模組包。"""
+        coverage = summary.get("coverage") or {}
+        sync = summary.get("sync") or {}
+        output = summary.get("output") or {}
+        lines = [
+            f"來源根目錄：{summary.get('source_root', '—')}",
+            (
+                f"來源檔案 {coverage.get('files_read', 0):,}/{coverage.get('files_seen', 0):,}"
+                f"　候選 {coverage.get('items_found', 0):,}"
+                f"　引用 {coverage.get('references_found', 0):,}"
+            ),
+            (
+                f"待同步 {sync.get('items_to_sync', 0):,}"
+                f"　未變更略過 {sync.get('items_unchanged', 0):,}"
+            ),
+            (
+                "LM 翻譯：發布時翻譯待處理條目"
+                if self.translate_missing.value
+                else "LM 翻譯：未啟用"
+            ),
+            f"overlay 輸出目錄：{output.get('output_root', self.output_field.value)}",
+            (
+                f"將套用 {output.get('entries_applied', 0):,}"
+                f"　衝突 {len(output.get('conflicts') or []):,}"
+                f"　未套用 {len(output.get('unapplied') or []):,}"
+            ),
+        ]
+        body = [ft.Text(line, size=13, color=C.TEXT, selectable=True) for line in lines]
+        if blocked:
+            body.append(
+                ft.Text(
+                    "輸出有衝突，請先處理衝突後再發布。",
+                    size=13,
+                    color=C.RED,
+                    weight=ft.FontWeight.W_500,
+                )
+            )
+        # 停用時改用無固定底色的 secondary 樣式，避免 primary 的底色蓋住 Flet 的停用外觀。
+        confirm = dialog_button(
+            "確認執行並發布",
+            self._confirm_publish,
+            role="secondary" if blocked else "primary",
+            icon=ft.Icons.PUBLISH,
+        )
+        confirm.disabled = blocked
+        self._publish_confirm_button = confirm
+        return build_pipeline_dialog(
+            self._page,
+            title="確認發布 overlay",
+            content=ft.Column(body, spacing=10, tight=True),
+            actions=[dialog_button("取消", self._close_publish_dialog), confirm],
+            icon=ft.Icons.PUBLISH,
+            tone="em",
+        )
+
+    def _close_publish_dialog(self, _e=None) -> None:
+        if self._publish_dialog is not None:
+            close_page_dialog(self._page, self._publish_dialog)
+
+    async def _confirm_publish(self, _e=None) -> None:
+        self._close_publish_dialog()
+        await self._start(dry_run=False, publish=True)
 
     async def _pick_source(self, _e=None) -> None:
         result = await self.file_picker.get_directory_path()
@@ -502,6 +605,9 @@ class KubejsFtbPipelineView(ft.Column):
                 dry_run=self._current_dry_run,
             )
             self._render_summary(summary)
+            if self._one_click_stage == "preview":
+                self._one_click_stage = None
+                self._offer_publish_confirmation(success, summary)
         self._safe_update()
 
     def _sync_progress_stage(self, progress: float, status: str) -> None:

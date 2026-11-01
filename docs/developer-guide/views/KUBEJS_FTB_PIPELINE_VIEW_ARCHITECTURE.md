@@ -37,6 +37,10 @@ Web 沒有資料夾選擇器結果時，路徑欄位仍是可用的一級輸入�
 
 ## 生命週期
 
+一鍵執行是兩段式：預覽（`dry_run=True`）完成後，`_sync_session` 依 `_one_click_stage`
+開啟確認對話框；只有確認後才以 `dry_run=False, publish=True` 啟動正式發布。確認對話框
+的數字來自預覽的 summary，有 overlay 衝突時確認按鈕停用。
+
 按鈕 → `launch_page_operation` → 背景 service → `TaskSession` → `PollerHandle` →
 UI 區域更新。`will_unmount` 只停止輪詢，背景工作仍由 operation registry 管理；
 `did_mount` 會重新接續輪詢。取消只在掃描／DB／輸出階段邊界生效，取消後未完成
