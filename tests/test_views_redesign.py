@@ -336,6 +336,21 @@ def test_pipeline_step_row_can_share_primary_and_preview_actions():
     assert action_group.controls == [extract, preview]
 
 
+def test_pipeline_step_row_uses_step_icon_for_execute_button():
+    row = build_pipeline_step_row(
+        PipelineStepSpec(
+            1,
+            "抽取資源",
+            "執行提取",
+            ft.Icons.UNARCHIVE,
+            "dia",
+            on_click=lambda _event: None,
+        )
+    )
+
+    assert row.action_button.icon == ft.Icons.UNARCHIVE
+
+
 def _dashboard(**overrides):
     from app.views.dashboard_view import DashboardView
 

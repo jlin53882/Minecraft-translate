@@ -9,6 +9,7 @@ from app.views.pipeline.pipeline_workbench import (
     build_pipeline_status_card,
     build_pipeline_step_row,
     build_pipeline_steps_card,
+    build_pipeline_input_row,
     build_pipeline_workbench,
 )
 
@@ -72,18 +73,13 @@ class PipelineWidgetsMixin:
                     ft.Column(
                         [
                             kit.section_label("讀取來源（mods 資料夾） *"),
-                            ft.Row(
-                                [
-                                    self.input_path_text,
-                                    kit.pick_button(
-                                        ft.Icons.FOLDER_OPEN,
-                                        "選擇 Mod 來源",
-                                        lambda _: self._page.run_task(
-                                            self._pick_input_dir
-                                        ),
-                                    ),
-                                ],
-                                spacing=8,
+                            build_pipeline_input_row(
+                                self.input_path_text,
+                                kit.pick_button(
+                                    ft.Icons.FOLDER_OPEN,
+                                    "選擇 Mod 來源",
+                                    lambda _: self._page.run_task(self._pick_input_dir),
+                                ),
                             ),
                         ],
                         spacing=6,
@@ -91,18 +87,15 @@ class PipelineWidgetsMixin:
                     ft.Column(
                         [
                             kit.section_label("輸出目的地 *"),
-                            ft.Row(
-                                [
-                                    self.output_path_text,
-                                    kit.pick_button(
-                                        ft.Icons.FOLDER_SPECIAL_OUTLINED,
-                                        "選擇輸出目錄",
-                                        lambda _: self._page.run_task(
-                                            self._pick_output_dir
-                                        ),
+                            build_pipeline_input_row(
+                                self.output_path_text,
+                                kit.pick_button(
+                                    ft.Icons.FOLDER_SPECIAL_OUTLINED,
+                                    "選擇輸出目錄",
+                                    lambda _: self._page.run_task(
+                                        self._pick_output_dir
                                     ),
-                                ],
-                                spacing=8,
+                                ),
                             ),
                         ],
                         spacing=6,

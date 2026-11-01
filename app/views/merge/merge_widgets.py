@@ -15,6 +15,7 @@ from app.ui.sync_text_field import SyncTextField
 from app.views._log import LogView
 from app.views.merge.merge_db_options import MergeDbOptions
 from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_input_row,
     build_pipeline_log_card,
     build_pipeline_status_card,
     build_pipeline_workbench,
@@ -223,16 +224,13 @@ class MergeWidgetsMixin:
         )
         self.folder_panel = ft.Container(
             visible=True,
-            content=ft.Row(
-                [
-                    self.folder_path_field,
-                    kit.pick_button(
-                        ft.Icons.FOLDER_OPEN_OUTLINED,
-                        "選擇資料夾",
-                        self.pick_folder_input,
-                    ),
-                ],
-                spacing=6,
+            content=build_pipeline_input_row(
+                self.folder_path_field,
+                kit.pick_button(
+                    ft.Icons.FOLDER_OPEN_OUTLINED,
+                    "選擇資料夾",
+                    self.pick_folder_input,
+                ),
             ),
         )
 
@@ -515,16 +513,13 @@ class MergeWidgetsMixin:
             "輸出",
             ft.Column(
                 [
-                    ft.Row(
-                        [
-                            self.output_dir_field,
-                            kit.pick_button(
-                                ft.Icons.FOLDER_OPEN_OUTLINED,
-                                "選擇輸出資料夾",
-                                lambda e: self.pick_output_dir(),
-                            ),
-                        ],
-                        spacing=8,
+                    build_pipeline_input_row(
+                        self.output_dir_field,
+                        kit.pick_button(
+                            ft.Icons.FOLDER_OPEN_OUTLINED,
+                            "選擇輸出資料夾",
+                            lambda e: self.pick_output_dir(),
+                        ),
                     ),
                 ],
                 spacing=12,

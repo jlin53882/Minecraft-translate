@@ -6,6 +6,7 @@ from app.services_impl.pack_format_service import QUICK_VERSIONS
 from app.ui import design, kit
 from app.ui.design import C
 from app.views.pipeline.pipeline_workbench import (
+    build_pipeline_input_row,
     build_pipeline_log_card,
     build_pipeline_status_card,
     build_pipeline_workbench,
@@ -97,16 +98,13 @@ class BundlerWidgetsMixin:
                     ft.Column(
                         [
                             kit.section_label("資源包圖片"),
-                            ft.Row(
-                                [
-                                    self.pack_image_field,
-                                    kit.pick_button(
-                                        ft.Icons.IMAGE_SEARCH,
-                                        "選擇圖片",
-                                        self._pick_pack_image,
-                                    ),
-                                ],
-                                spacing=8,
+                            build_pipeline_input_row(
+                                self.pack_image_field,
+                                kit.pick_button(
+                                    ft.Icons.IMAGE_SEARCH,
+                                    "選擇圖片",
+                                    self._pick_pack_image,
+                                ),
                             ),
                         ],
                         spacing=6,
@@ -129,16 +127,13 @@ class BundlerWidgetsMixin:
                     ft.Column(
                         [
                             kit.section_label("翻譯專案根目錄 *"),
-                            ft.Row(
-                                [
-                                    self.root_dir_field,
-                                    kit.pick_button(
-                                        ft.Icons.FOLDER_OPEN,
-                                        "選擇資料夾",
-                                        self._pick_root_dir,
-                                    ),
-                                ],
-                                spacing=8,
+                            build_pipeline_input_row(
+                                self.root_dir_field,
+                                kit.pick_button(
+                                    ft.Icons.FOLDER_OPEN,
+                                    "選擇資料夾",
+                                    self._pick_root_dir,
+                                ),
                             ),
                         ],
                         spacing=6,
@@ -146,16 +141,13 @@ class BundlerWidgetsMixin:
                     ft.Column(
                         [
                             kit.section_label("最終 ZIP 儲存路徑"),
-                            ft.Row(
-                                [
-                                    self.output_zip_field,
-                                    kit.pick_button(
-                                        ft.Icons.SAVE_AS,
-                                        "選擇儲存位置",
-                                        self._pick_output_zip,
-                                    ),
-                                ],
-                                spacing=8,
+                            build_pipeline_input_row(
+                                self.output_zip_field,
+                                kit.pick_button(
+                                    ft.Icons.SAVE_AS,
+                                    "選擇儲存位置",
+                                    self._pick_output_zip,
+                                ),
                             ),
                         ],
                         spacing=6,

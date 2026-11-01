@@ -23,7 +23,8 @@ def page_header(
     icon: str | None = None,
     tone: str = "em",
     actions: Sequence[ft.Control] = (),
-) -> ft.Row:
+    responsive: bool = False,
+) -> ft.Control:
     """頁面標題列：左側圖示 + 標題 / 說明，右側主要動作。"""
     heading = ft.Column(
         [
@@ -37,15 +38,34 @@ def page_header(
     if icon:
         left.append(tone_icon(icon, tone, size=22, box=46, radius=13))
     left.append(heading)
+    left_control = ft.Row(
+        left,
+        spacing=14,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+    action_control = ft.Row(
+        list(actions),
+        spacing=10,
+        run_spacing=8,
+        wrap=responsive,
+        alignment=ft.MainAxisAlignment.END,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+    )
+    if responsive:
+        return ft.ResponsiveRow(
+            [
+                ft.Container(left_control, col={"xs": 12, "md": 7}),
+                ft.Container(
+                    action_control,
+                    col={"xs": 12, "md": 5},
+                    alignment=ft.Alignment(1, 0),
+                ),
+            ],
+            spacing=12,
+            run_spacing=8,
+        )
     return ft.Row(
-        [
-            ft.Row(left, spacing=14, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.Row(
-                list(actions),
-                spacing=10,
-                vertical_alignment=ft.CrossAxisAlignment.CENTER,
-            ),
-        ],
+        [left_control, action_control],
         alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
         vertical_alignment=ft.CrossAxisAlignment.END,
     )

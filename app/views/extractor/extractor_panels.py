@@ -28,6 +28,7 @@ from app.ui.design import C
 from app.views.pipeline.pipeline_workbench import (
     PipelineActionSpec,
     PipelineStepSpec,
+    build_pipeline_input_row,
     build_pipeline_steps_card,
 )
 
@@ -46,10 +47,7 @@ def _build_path_row(view, icon, label, field, pick_target) -> ft.Control:
         spacing=6,
         controls=[
             kit.section_label(label),
-            ft.Row(
-                controls=[field, _build_pick_button(view, pick_target)],
-                spacing=8,
-            ),
+            build_pipeline_input_row(field, _build_pick_button(view, pick_target)),
         ],
     )
 

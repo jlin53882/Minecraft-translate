@@ -291,6 +291,31 @@ def build_pipeline_step_list(
     )
 
 
+def build_pipeline_input_row(
+    field: ft.Control,
+    *actions: ft.Control,
+) -> ft.ResponsiveRow:
+    """建立工作台共用的「輸入框＋操作」列。
+
+    寬版維持輸入框與圖示按鈕同列；窄版先讓輸入框獨占一行，再讓多個
+    操作按鈕平均換行。所有流水線頁面都使用這個契約，避免各自用固定
+    ``Row`` 造成 Web 小視窗溢出或把按鈕擠出畫面。
+    """
+    action_count = len(actions)
+    field_md = max(4, 12 - (action_count * 2)) if action_count else 12
+    action_xs = 12 if action_count <= 1 else 6
+    controls: list[ft.Control] = [ft.Container(field, col={"xs": 12, "md": field_md})]
+    for action in actions:
+        controls.append(
+            ft.Container(
+                action,
+                col={"xs": action_xs, "md": 2},
+                alignment=ft.Alignment(1, 0),
+            )
+        )
+    return ft.ResponsiveRow(controls, spacing=8, run_spacing=8)
+
+
 def build_pipeline_steps_card(
     steps: Sequence[PipelineStepSpec],
     *,
@@ -420,6 +445,7 @@ def build_pipeline_workbench(
                 icon=icon,
                 tone=tone,
                 actions=list(actions),
+                responsive=True,
             ),
             columns,
         ],
@@ -434,6 +460,7 @@ __all__ = [
     "PipelineStepRow",
     "PipelineStepSpec",
     "build_pipeline_log_card",
+    "build_pipeline_input_row",
     "build_pipeline_status_card",
     "build_pipeline_step_list",
     "build_pipeline_step_row",

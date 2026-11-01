@@ -24,6 +24,7 @@ from app.views.pipeline.pipeline_workbench import (
     PipelineStepRow,
     PipelineStepSpec,
     build_pipeline_status_card,
+    build_pipeline_input_row,
     build_pipeline_step_row,
     build_pipeline_workbench,
 )
@@ -453,6 +454,39 @@ def test_pipeline_workbench_uses_responsive_two_column_contract():
     assert [column.col for column in columns] == [
         {"xs": 12, "md": 5},
         {"xs": 12, "md": 7},
+    ]
+
+
+def test_pipeline_workbench_header_wraps_actions_on_narrow_layouts():
+    workbench = build_pipeline_workbench(
+        title="測試工作台",
+        subtitle="測試",
+        icon=ft.Icons.INFO_OUTLINE,
+        tone="em",
+        left_controls=[ft.Text("左")],
+        right_controls=[ft.Text("右")],
+        actions=[ft.Button("預覽"), ft.Button("執行")],
+    )
+
+    header = workbench.controls[0]
+    assert isinstance(header, ft.ResponsiveRow)
+    action_column = header.controls[1]
+    assert action_column.col == {"xs": 12, "md": 5}
+    assert action_column.content.wrap is True
+
+
+def test_pipeline_input_row_wraps_multiple_actions_without_fixed_width():
+    row = build_pipeline_input_row(
+        ft.TextField(value="C:/source"),
+        ft.Button("瀏覽"),
+        ft.Button("分析"),
+    )
+
+    assert isinstance(row, ft.ResponsiveRow)
+    assert [control.col for control in row.controls] == [
+        {"xs": 12, "md": 8},
+        {"xs": 6, "md": 2},
+        {"xs": 6, "md": 2},
     ]
 
 

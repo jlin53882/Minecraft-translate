@@ -29,6 +29,7 @@ from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
     build_pipeline_status_card,
     build_pipeline_steps_card,
+    build_pipeline_input_row,
     build_pipeline_workbench,
 )
 
@@ -69,7 +70,7 @@ class KubejsFtbPipelineView(ft.Column):
             on_change=self._source_changed,
         )
         self.version_field = kit.text_field(
-            "遊戲版本", value="1.21.1", mono=True, width=180
+            "遊戲版本", value="1.21.1", mono=True, expand=True
         )
         self.scan_mode = kit.dropdown(
             label="同步模式",
@@ -181,24 +182,28 @@ class KubejsFtbPipelineView(ft.Column):
         self._safe_update()
 
     def _build_source_panel(self) -> ft.Control:
-        path_row = ft.Row(
-            [
-                self.source_field,
-                kit.pick_button(
-                    ft.Icons.FOLDER_OPEN_OUTLINED,
-                    "選擇資料夾；Web 不支援時請直接輸入路徑",
-                    self._pick_source,
-                ),
-                self.discover_button,
-            ],
-            spacing=8,
+        path_row = build_pipeline_input_row(
+            self.source_field,
+            kit.pick_button(
+                ft.Icons.FOLDER_OPEN_OUTLINED,
+                "選擇資料夾；Web 不支援時請直接輸入路徑",
+                self._pick_source,
+            ),
+            self.discover_button,
         )
         return kit.section_card(
             "來源辨識",
             ft.Column(
                 [
                     path_row,
-                    ft.Row([self.version_field, self.scan_mode], spacing=10),
+                    ft.ResponsiveRow(
+                        [
+                            ft.Container(self.version_field, col={"xs": 12, "md": 4}),
+                            ft.Container(self.scan_mode, col={"xs": 12, "md": 8}),
+                        ],
+                        spacing=10,
+                        run_spacing=8,
+                    ),
                     self.root_dropdown,
                     self.source_summary,
                     kit.hint_text(
