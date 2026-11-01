@@ -42,6 +42,8 @@ class IngestTarget(Protocol):
         self, entry_id: int, source: int, zh_tw: str, zh_cn: str
     ) -> None: ...
 
+    def record_origin(self, item: ScanItem, entry_id: int) -> None: ...
+
 
 def group_scan_items(
     items: Iterable[ScanItem],
@@ -98,6 +100,8 @@ def ingest_groups(
                     known[item.key] = (eid, item.en_us)
                     stats.adopted += 1
                 # 這次沒有原文（item.en_us 為空）時，沿用既有原文，只補譯文
+
+            target.record_origin(item, eid)
 
             added = False
             for src, tw, cn in scan_translations(item, convert):
@@ -210,6 +214,28 @@ class DbIngestTarget:
         )
         self.touched.append(entry_id)
 
+    def record_origin(self, item: ScanItem, entry_id: int) -> None:
+        """保存可回寫來源；傳統 jar 掃描沒有來源 selector，完全不寫入。"""
+        if not item.source_path or not item.source_selector:
+            return
+        self.conn.execute(
+            "INSERT INTO entry_origin "
+            "(entry_id, pack_scope, source_kind, source_path, selector, "
+            "source_hash, format_profile) VALUES (?,?,?,?,?,?,?) "
+            "ON CONFLICT(entry_id, pack_scope, source_kind, source_path, selector) "
+            "DO UPDATE SET source_hash=excluded.source_hash, "
+            "format_profile=excluded.format_profile",
+            (
+                entry_id,
+                item.pack_scope,
+                item.kind,
+                item.source_path,
+                item.source_selector,
+                item.source_hash,
+                item.source_format,
+            ),
+        )
+
 
 class PreviewIngestTarget:
     """預覽：只讀資料庫（``query`` 為 None 表示還沒有資料庫），新增的內容只記在記憶體。
@@ -249,6 +275,9 @@ class PreviewIngestTarget:
     def add_translation(
         self, entry_id: int, source: int, zh_tw: str, zh_cn: str
     ) -> None:
+        return None
+
+    def record_origin(self, item: ScanItem, entry_id: int) -> None:
         return None
 
 

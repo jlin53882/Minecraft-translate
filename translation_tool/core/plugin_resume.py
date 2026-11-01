@@ -27,7 +27,10 @@ from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_info, log_warning
 
-PLUGIN_KINDS = ("ftbquests", "kubejs", "md")
+# Kinds currently shown by the resume dialog. Historical KubeJS/FTB marker
+# names stay separate so cleanup does not make those flows appear resumable.
+PLUGIN_KINDS = ("md",)
+KNOWN_MARKER_KINDS = ("md", "kubejs", "ftbquests")
 
 # 指紋會讀取來源檔案內容；來源資料夾可能是整個 modpack，所以限制檔案種類與規模，
 # 超過上限就不提供續跑（不寫標記），而不是花很久雜湊或誤報。
@@ -198,6 +201,11 @@ def write_marker(kind: str, payload: dict[str, Any]) -> None:
     atomic_write_text(
         marker_path(kind), json.dumps(payload, ensure_ascii=False, sort_keys=True)
     )
+
+
+def discard_marker(kind: str) -> None:
+    """使用者放棄任務時刪除標記；失敗會拋出 ``OSError``，讓對話框保留該任務並顯示錯誤。"""
+    marker_path(kind).unlink(missing_ok=True)
 
 
 def clear_marker(kind: str) -> None:

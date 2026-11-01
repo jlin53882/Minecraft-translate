@@ -12,6 +12,7 @@
 | 語系合併 | `merge` | [merge.md](merge.md) | `app/views/merge_view.py` |
 | 機器翻譯 | `lm` | [lm.md](lm.md) | `app/views/lm_view.py` |
 | 任務翻譯 | `translation` | [translation.md](translation.md) | `app/views/translation_view.py` |
+| KubeJS / FTB 流水線 | `kubejs_ftb_pipeline` | [kubejs_ftb_pipeline.md](kubejs_ftb_pipeline.md) | `app/views/kubejs_ftb_pipeline_view.py` |
 | QC 檢驗 | `qc` | [qc.md](qc.md) | `app/views/qc_view.py` |
 | 翻譯校對 | `icon_preview` | [icon_preview.md](icon_preview.md) | `app/views/icon_preview_view.py` |
 | Mod 資料庫 | `moddb` | [moddb.md](moddb.md) | `app/views/moddb_view.py` |

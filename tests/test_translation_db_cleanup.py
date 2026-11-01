@@ -61,6 +61,9 @@ def test_entry_cleanup_category_by_content_shape():
     assert (
         entry_cleanup_category("lang", "item.a", LICENSE) is None
     )  # 語言檔只用保守規則
+    assert (
+        entry_cleanup_category("kubejs_lang", "item.a", LICENSE) is None
+    )  # KubeJS Lang 同樣遵守語言檔保守規則
     assert entry_cleanup_category("lang", "mirror.left_right", "← →") == "no_letters"
     assert (
         entry_cleanup_category("lang", "attribute.equals", "%s %s") is None

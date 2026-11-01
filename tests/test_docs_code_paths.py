@@ -52,6 +52,7 @@ PAGE_SCOPES: dict[str, tuple[str, ...]] = {
     "lookup": DOC_SCOPES["LOOKUP_VIEW_ARCHITECTURE.md"],
     "bundler": DOC_SCOPES["BUNDLER_VIEW_ARCHITECTURE.md"],
     "config": DOC_SCOPES["CONFIG_VIEW_ARCHITECTURE.md"],
+    "kubejs_ftb_pipeline": DOC_SCOPES["KUBEJS_FTB_PIPELINE_VIEW_ARCHITECTURE.md"],
 }
 # 每份流程文件都可以引用：導覽外殼、頁面註冊表與共用層
 PAGE_SHARED = (*SHARED_SCOPE, "app/view_registry.py")

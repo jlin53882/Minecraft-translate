@@ -11,6 +11,7 @@
 | 語系合併 | [Merge](MERGE_VIEW_ARCHITECTURE.md) |
 | 機器翻譯 | [LM](LM_VIEW_ARCHITECTURE.md) |
 | 任務翻譯 | [Translation](TRANSLATION_VIEW_ARCHITECTURE.md) |
+| KubeJS／FTB 流水線 | [KubeJS／FTB pipeline](KUBEJS_FTB_PIPELINE_VIEW_ARCHITECTURE.md) |
 | QC | [QC](QC_VIEW_ARCHITECTURE.md) |
 | 未翻譯檢查器 | [Untranslated checker](UNTRANSLATED_CHECKER_ARCHITECTURE.md) |
 | 翻譯校對 | [Icon preview](ICON_VIEW_ARCHITECTURE.md) |

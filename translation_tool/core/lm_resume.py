@@ -18,6 +18,7 @@ from typing import Any
 
 from translation_tool.core import lm_translator, plugin_resume
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_warning
 from translation_tool.utils.worker_count import resolve_worker_count
 
 LM_KIND = "lm_directory"
@@ -222,12 +223,33 @@ def check_resume_feasibility(task: InterruptedTask) -> ResumeCheck:
     return ResumeCheck(True)
 
 
+def purge_legacy_plugin_markers() -> list[str]:
+    """啟動時清除無法安全續跑的舊格式插件標記（版本不是 2，沒有可驗證的來源與版本資訊）。
+
+    這類標記不能續跑，只會每次啟動都出現在對話框；翻譯快取不受影響，因此直接清除並記錄。
+    版本正確但內容不符的標記不在此處理，仍會顯示給使用者決定。回傳被清除的 kind。
+    """
+    purged: list[str] = []
+    for kind in plugin_resume.KNOWN_MARKER_KINDS:
+        data = plugin_resume.read_marker(kind)
+        if not isinstance(data, dict) or data.get("version") == 2:
+            continue
+        try:
+            plugin_resume.discard_marker(kind)
+        except OSError as exc:
+            log_warning(f"[Resume] 無法清除舊格式的 {kind} 續跑標記：{exc!r}")
+            continue
+        log_warning(f"[Resume] 已清除無法續跑的舊格式 {kind} 續跑標記（翻譯快取保留）")
+        purged.append(kind)
+    return purged
+
+
 def discard_interrupted_task(task: InterruptedTask | None = None) -> None:
     """使用者選擇放棄：清除標記，不續跑。已寫入快取的譯文會保留。
 
     ``task`` 省略時清除機器翻譯頁的標記（相容 #151 的呼叫方式）。
     """
     if task is not None and task.kind != LM_KIND:
-        plugin_resume.clear_marker(task.kind)
+        plugin_resume.discard_marker(task.kind)
         return
     lm_translator.clear_checkpoint()

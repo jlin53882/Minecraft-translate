@@ -13,7 +13,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from translation_tool.translation_db.models import SmartReviewSnapshot
-from translation_tool.translation_db.schema import SRC_MANUAL
+from translation_tool.translation_db.schema import (
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
+    SRC_MANUAL,
+)
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
@@ -182,7 +186,7 @@ def _build_smart_review_selection(
     order_prefix = ""
     if prioritize_named_keys:
         order_prefix = (
-            "CASE WHEN e.kind='lang' AND ("
+            f"CASE WHEN e.kind IN ('{KIND_LANG}', '{KIND_KUBEJS_LANG}') AND ("
             "e.key LIKE 'item.%' OR e.key LIKE 'block.%' OR "
             "e.key LIKE 'entity.%' OR e.key LIKE 'biome.%' OR "
             "e.key LIKE 'effect.%' OR e.key LIKE 'fluid.%' OR "
@@ -373,9 +377,13 @@ class SmartReviewCandidateSelectionMixin:
         entry_source = "entry e"
         if prioritize_named_keys and self._one(
             "SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?",
-            ("idx_smart_review_named_order",),
+            ("idx_smart_review_named_order_v2",),
         ):
-            entry_source = "entry e INDEXED BY idx_smart_review_named_order"
+            # The v2 expression includes kubejs_lang.  Keep the legacy index
+            # for old databases, but do not force it for the wider ORDER BY:
+            # SQLite would need a temporary sort because its CASE expression
+            # no longer matches the query.
+            entry_source = "entry e INDEXED BY idx_smart_review_named_order_v2"
         query_sql = (
             selection.reference_cte
             + "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "

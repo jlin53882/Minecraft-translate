@@ -1,10 +1,10 @@
 """Shared, immutable diagnostics for translation format contracts.
 
-The scanner deliberately understands only the four formats currently supported
-by Mod DB. New formats can register a policy and analyzer strategy; no parser
-is implied by registration alone. Registered unsupported formats fail
-explicitly, while unregistered legacy database kinds use a marked token-only
-compatibility policy.
+The scanner deliberately understands only formats registered in the policy
+table. New formats can register a policy and analyzer strategy; no parser is
+implied by registration alone. Registered formats therefore have an explicit
+quality contract, while unregistered legacy database kinds use a marked
+token-only compatibility policy.
 """
 
 from __future__ import annotations
@@ -392,6 +392,49 @@ _POLICIES: dict[str, FormatKindPolicy] = {
             "advancement",
             "patchouli",
             "advancement",
+            _analyze_token_format,
+            "hard",
+            analyzer_name="token",
+        )
+    ),
+    # KubeJS literals and FTB text are not ordinary lang values: they can
+    # carry format tokens or hard line boundaries, so register their policy
+    # explicitly instead of silently inheriting the legacy fallback.
+    "kubejs_script": _normalize_policy(
+        FormatKindPolicy(
+            "kubejs_script",
+            "kubejs",
+            "kubejs",
+            _analyze_token_format,
+            "hard",
+            analyzer_name="token",
+        )
+    ),
+    "kubejs_lang": _normalize_policy(
+        FormatKindPolicy(
+            "kubejs_lang",
+            "kubejs",
+            "kubejs",
+            _analyze_token_format,
+            "hard",
+            analyzer_name="token",
+        )
+    ),
+    "ftb_quests": _normalize_policy(
+        FormatKindPolicy(
+            "ftb_quests",
+            "ftbquests",
+            "ftbquests",
+            _analyze_token_format,
+            "hard",
+            analyzer_name="token",
+        )
+    ),
+    "ftb_quest_lang": _normalize_policy(
+        FormatKindPolicy(
+            "ftb_quest_lang",
+            "ftbquests",
+            "ftbquests",
             _analyze_token_format,
             "hard",
             analyzer_name="token",

@@ -2,6 +2,13 @@
 
 `ModDbView`（`app/views/moddb_view.py`）維持資料庫連線與頁籤生命週期；`EntriesPanel`（`app/views/moddb/entries_panel.py`）負責條目篩選、編輯與背景刷新。資料庫查詢與寫入經由 `app/services_impl/moddb_service.py`，核心資料存取由 `translation_tool/translation_db/` 提供。資料清理的重複鍵流程由 `duplicate_cleanup_dialog.py` 負責獨立的預覽／套用／復原更新邊界，不把路徑別名合併邏輯塞回條目面板。
 
+掃描頁的來源契約同時支援 mods 資料夾與模組包根目錄。KubeJS／FTB Quests 由
+`translation_tool.translation_db.pack_sources` 做唯讀、非執行式的靜態擷取，再交給與 jar
+相同的 `scan_ingest` 分類；`entry_origin` 保存 pack scope、相對來源路徑、selector、hash
+與格式 profile。這個 provenance 層是共用資料契約，不把格式專用的回寫器塞進資料庫 repository。
+`resource_pack` 只收可部署的 assets；FTB config 與 KubeJS script 的輸出責任仍由各自 pipeline
+維持，未知或動態內容只進 content issue，不產生可誤用的翻譯列。
+
 ## 查詢快照與分頁
 
 背景 worker 的唯讀連線使用 `translation_tool/translation_db/read_cache.py` 的有界 JSON

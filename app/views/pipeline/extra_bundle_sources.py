@@ -22,6 +22,7 @@ from app.services_impl.pipelines.bundle_service import (
 )
 from app.ui import design, kit
 from app.ui.design import C
+from app.views.pipeline.pipeline_forms import dialog_button
 
 
 def _human_size(size: int) -> str:
@@ -234,12 +235,13 @@ def build_extra_source_controls(
             ),
             ft.Row(
                 [
-                    ft.Button(
+                    dialog_button(
                         picker_label,
                         icon=ft.Icons.FOLDER_OPEN,
                         on_click=on_pick,
+                        role="preview",
                     ),
-                    ft.Button(
+                    dialog_button(
                         "加入手動來源",
                         icon=ft.Icons.ADD,
                         on_click=on_manual_add,

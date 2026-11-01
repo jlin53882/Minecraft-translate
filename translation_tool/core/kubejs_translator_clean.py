@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+from collections import Counter
 from collections.abc import Callable
 from hashlib import sha256
 from pathlib import Path
@@ -18,6 +19,11 @@ from translation_tool.core.kubejs_translator_state import (
     atomic_write_json,
     load_owned_files,
     sync_managed_tree,
+)
+from translation_tool.plugins.kubejs.kubejs_lang_selection import (
+    count_language_values,
+    normalize_locale,
+    select_source_locale,
 )
 from translation_tool.plugins.shared.rich_text_shield import (
     shield_text,
@@ -116,7 +122,10 @@ def clean_kubejs_from_raw_impl(
     log_debug_fn: Callable[..., None],
     log_info_fn: Callable[..., None],
 ) -> dict:
-    """實作：將 KubeJS 原始 lang 檔（en_us/zh_cn/zh_tw）做三方合併，產出待翻譯 en_us 與完成品 zh_tw。
+    """實作：合併 KubeJS 語系，產出待翻譯 en_us 與完成品 zh_tw。
+
+    有可用 en_us 時維持 en_us 為來源；沒有時，依每個 lang 目錄的
+    有效字串數選擇最多的 locale 作為來源，並保留 zh_cn/zh_tw 譯文。
 
     Args:
         base_dir: Modpack 根目錄。
@@ -196,12 +205,16 @@ def clean_kubejs_from_raw_impl(
     previous_final_keys_preserved = 0
     final_outputs: dict[str, dict[str, Any]] = {}
     provenance_conflicts: list[dict[str, str]] = []
+    fallback_source_locales: dict[str, str] = {}
 
     def key_evidence(
-        provenance: dict[str, Any], relative_group: Path, key: str
+        provenance: dict[str, Any],
+        relative_group: Path,
+        key: str,
+        active_locales: tuple[str, ...],
     ) -> dict[str, Any]:
         evidence: dict[str, Any] = {}
-        for language in ("en_us", "zh_cn", "zh_tw"):
+        for language in active_locales:
             relative = (relative_group / f"{language}.json").as_posix()
             file_data = provenance.get(relative, {})
             key_data = file_data.get(key, {}) if isinstance(file_data, dict) else {}
@@ -213,10 +226,31 @@ def clean_kubejs_from_raw_impl(
         return read_json_dict_fn(path)
 
     for group_dir, files_map in groups.items():
-        en = read_json_dict_fn(files_map.get("en_us"))
-        cn = read_json_dict_fn(files_map.get("zh_cn"))
-        tw = read_json_dict_fn(files_map.get("zh_tw"))
+        locale_data = {
+            normalize_locale(locale): read_json_dict_fn(path)
+            for locale, path in files_map.items()
+        }
+        source_locale = select_source_locale(
+            {
+                locale: count_language_values(data)
+                for locale, data in locale_data.items()
+            }
+        )
+        if source_locale is None and "en_us" in locale_data:
+            source_locale = "en_us"
+        en = locale_data.get(source_locale or "en_us", {})
+        cn = locale_data.get("zh_cn", {})
+        tw = locale_data.get("zh_tw", {})
+        active_locales = tuple(
+            dict.fromkeys(
+                locale
+                for locale in (source_locale, "zh_cn", "zh_tw")
+                if locale and locale in locale_data
+            )
+        )
         relative_group = group_dir.relative_to(raw_root)
+        if source_locale and source_locale != "en_us":
+            fallback_source_locales[relative_group.as_posix()] = source_locale
         previous_output = read_final(previous_root / relative_group / "zh_tw.json")
         current_keys = set(en) | set(cn) | set(tw)
         old_final: dict[str, Any] = {}
@@ -249,10 +283,16 @@ def clean_kubejs_from_raw_impl(
 
         for key in current_keys:
             current_evidence = key_evidence(
-                current_source_provenance, relative_group, str(key)
+                current_source_provenance,
+                relative_group,
+                str(key),
+                active_locales,
             )
             previous_evidence = key_evidence(
-                previous_source_provenance, relative_group, str(key)
+                previous_source_provenance,
+                relative_group,
+                str(key),
+                active_locales,
             )
             if (
                 key in previous_output
@@ -294,10 +334,16 @@ def clean_kubejs_from_raw_impl(
         merged_tw: dict[str, Any] = {}
         for key in current_keys:
             current_evidence = key_evidence(
-                current_source_provenance, relative_group, str(key)
+                current_source_provenance,
+                relative_group,
+                str(key),
+                active_locales,
             )
             previous_evidence = key_evidence(
-                previous_source_provenance, relative_group, str(key)
+                previous_source_provenance,
+                relative_group,
+                str(key),
+                active_locales,
             )
             if key in manual_final:
                 merged_tw[key] = manual_final[key]
@@ -368,6 +414,15 @@ def clean_kubejs_from_raw_impl(
     log_info_fn(
         f"[KubeJS-CLEAN] 處理完畢！群組數: {len(groups)} | 產出待翻譯: {pending_lang_written} | 產出完成品: {merged_lang_written} | 複製其他檔案: {copied_other} | 保留舊繁中鍵: {previous_final_keys_preserved} | 清除過期待翻譯: {stale_pending_removed}"
     )
+    if fallback_source_locales:
+        fallback_counts = Counter(fallback_source_locales.values())
+        log_info_fn(
+            "[KubeJS-CLEAN] 以下 namespace 沒有可用 en_us，已依有效字串數選擇基準語系："
+            + "、".join(
+                f"{locale} {count:,} 個"
+                for locale, count in sorted(fallback_counts.items())
+            )
+        )
 
     return {
         "raw_root": str(raw_root),
@@ -382,4 +437,5 @@ def clean_kubejs_from_raw_impl(
         "stale_final_removed": stale_final_removed,
         "write_conflicts": len(pending_conflicts) + len(final_conflicts),
         "provenance_conflicts": provenance_conflicts,
+        "fallback_source_locales": fallback_source_locales,
     }

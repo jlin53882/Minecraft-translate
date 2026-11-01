@@ -79,7 +79,9 @@ def test_ftb_pipeline_runs_export_fake_translate_and_inject(
     assert result["raw_paths"]["written_langs"] == ["en_us"]
     assert result["lm_translate"]["total_keys"] >= 3
     assert result["inject"]["lang"]["patched_keys_changed"] == 1
-    assert result["inject"]["quests"]["patched_keys_changed"] == 2
+    # title + description[0] + description[1] 都是獨立 selector；不能因為
+    # description 原本是 list 就只計一筆，否則進度與實際回寫數會錯位。
+    assert result["inject"]["quests"]["patched_keys_changed"] == 3
     assert 'quest.title: "譯:English title"' in output_lang_text
     assert 'title: "譯:Quest title"' in output_quest_text
     assert '"譯:Line one"' in output_quest_text

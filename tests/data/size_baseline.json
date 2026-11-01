@@ -10,13 +10,14 @@
     "app/shell/app_shell.py:AppShell.__init__": 92,
     "app/shell/task_manager.py:TaskManager._on_session_event": 80,
     "app/ui/snack.py:show_snack": 91,
-    "app/views/bundler_view.py:BundlerView.start_bundling_clicked": 87,
+    "app/views/bundler_view.py:BundlerView.start_bundling_clicked": 88,
     "app/views/cache_manager/cache_overview_panel.py:build_overview_page": 84,
     "app/views/cache_manager/cache_view_query.py:CacheQueryMixin._render_query_results": 84,
     "app/views/cache_manager/cache_view_shard.py:CacheShardMixin._render_shard_detail_keys": 82,
     "app/views/cache_view.py:CacheView.__init__": 84,
     "app/views/config/config_actions.py:_collect_validated_config": 90,
-    "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 80,
+    "app/views/merge/merge_widgets.py:MergeWidgetsMixin._build_merge_output_cards_and_layout": 83,
+    "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 81,
     "app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._build_controls": 102,
     "app/views/moddb/overview_panel.py:OverviewPanel.__init__": 103,
     "app/views/moddb/repair_card.py:create_repair_card": 128,
@@ -29,7 +30,8 @@
     "app/views/pipeline/extra_bundle_sources.py:build_extra_source_controls": 144,
     "app/views/pipeline/extra_bundle_sources.py:refresh_extra_source_preview": 87,
     "app/views/pipeline/pipeline_forms.py:build_version_input": 82,
-    "app/views/pipeline/pipeline_one_click_dialog.py:_one_click__build_step4": 108
+    "app/views/pipeline/pipeline_one_click_dialog.py:_one_click__build_step4": 108,
+    "app/views/pipeline/pipeline_workbench.py:PipelineStepRow._build_content": 81
   },
   "view_files": {
     "app/views/config_view.py": 1022,
@@ -41,7 +43,7 @@
     "app/views/moddb/review_scope_dialog.py": 808,
     "app/views/moddb/smart_review_batch_reviewer.py": 1071,
     "app/views/moddb/smart_review_reviewer.py": 835,
-    "app/views/moddb/smart_review_run_panel.py": 896,
+    "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 855,
     "app/views/moddb/translate_panel.py": 1172,
     "app/views/moddb_view.py": 962

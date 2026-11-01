@@ -41,6 +41,7 @@
 - **token 預算切批（#108）**：依 token 預算切批、學習式預算、`maxOutputTokens`、`finishReason` / 用量診斷；可用 `token_budget_enabled` 關閉。
 
 ### Improvements
+- **流水線頁面與對話框視覺契約**：一鍵流水線、JAR 提取、語系合併、機器翻譯、任務翻譯、KubeJS／FTB 與資源包打包共用頁首、響應式左右工作台、垂直步驟列、`SectionCard` 狀態卡與日誌卡；窄版 Web 自動上下排列。設定／預覽／結果對話框統一標題、可捲動內容區、操作列與路徑／檔案按鈕，避免不同入口各自維護一套外觀與互動契約。
 - **UI 與後台日誌自動同步**：寫進畫面的訊息（`TaskSession.add_log`、`LogView.add`、批次推畫面的提取／打包／QC 路徑）會自動鏡像到後台 log，不必每個呼叫點自己配對 `log_info`。核心流程已經自己 log 過的訊息會去重（`translation_tool/utils/ui_mirror.py`，相同文字每筆後台記錄只抵銷一次），鏡像記錄帶 `ui_mirrored` 標記，UI log handler 會略過，不會在畫面重複。任務開始／結束（狀態、耗時、摘要）也寫入後台。
 - **`app.log` 每一行標示所屬任務**：安裝 LogRecord 工廠，在寫 log 的執行緒把任務（`contextvars`，執行緒池也繼承）帶進記錄；`RedactingFormatter` 自動在 `%(message)s` 前加上 `[task=<任務名稱>/<識別>] `（沒有任務時不加）。同時執行多個任務時，檔案裡交錯的每一行都看得出是哪個任務——不論是核心流程直接寫的、執行緒池內寫的，還是 UI 替任務補寫的訊息。多行訊息與 traceback 的**每個實體行**也帶任務標籤（續行補 `[task=…]`，空行保留標籤）；`log_format` 驗證器與執行期使用同一個 `RedactingFormatter`／記錄欄位契約，自訂格式可以使用 `%(task_tag)s`／`%(task_name)s`／`%(task_id)s`（沒有任務時是空字串），`%(message)-80s` 這類帶寬度／精度的寫法也會自動插入標籤，未知欄位仍被拒絕。
 - **任務終止狀態三邊一致**：`TaskSession.is_finished` 以真正的 lifecycle 判斷（`ERROR` 但尚未 `finish()` 不算結束），`UISessionLogHandler` 清理 routing 時不再誤刪另一個「已標記失敗、仍在收尾」的任務；結束後才 `set_error()`（流水線安全網）會更正 `TaskManager` 最近完成清單的結果，並在後台另寫一筆「任務結果更正」（不重複寫「任務結束」）；`TaskSession.task_id` 每次 `start()` 重新產生，識別的是「這一次執行」。

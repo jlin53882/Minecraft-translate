@@ -1,7 +1,8 @@
 """任務翻譯頁的三個流程面板（FTB / KubeJS / Markdown）。
 
-每個面板：路徑設定 → 流程步驟卡（可勾選）→ 操作列。步驟用 ``kit.StepCard``，
-背後仍是 ``ft.Checkbox``，所以 ``view.ftb_step_export.value`` 這類讀寫維持不變。
+每個面板：路徑設定 → 流程步驟列（可勾選）→ 操作列。步驟使用流水線工作台
+共用的編號列與狀態文字，背後仍是 ``ft.Checkbox``，所以
+``view.ftb_step_export.value`` 這類讀寫維持不變。
 """
 
 from __future__ import annotations
@@ -9,6 +10,10 @@ from __future__ import annotations
 import flet as ft
 
 from app.ui import kit
+from app.views.pipeline.pipeline_workbench import (
+    PipelineStepSpec,
+    build_pipeline_step_list,
+)
 
 
 def build_path_row(view, field: ft.TextField) -> ft.Control:
@@ -64,14 +69,24 @@ def build_action_row(
     )
 
 
-def _step_row(view, steps: list[tuple[ft.Checkbox, str, str, str, str]]) -> ft.Row:
-    """把 (checkbox, 標題, 說明, 圖示, 色組) 排成一列步驟卡。"""
-    cards = [
-        kit.StepCard(box, index, title, desc, icon=icon, tone=tone)
+def _step_row(view, steps: list[tuple[ft.Checkbox, str, str, str, str]]) -> ft.Control:
+    """把可勾選步驟接到工作台共用的縱向步驟列。"""
+    specs = [
+        PipelineStepSpec(
+            number=index,
+            title=title,
+            description=desc,
+            icon=icon,
+            tone=tone,
+            toggle=box,
+        )
         for index, (box, title, desc, icon, tone) in enumerate(steps, start=1)
     ]
-    view._step_cards.extend(cards)  # reset 之後要靠它刷新外觀
-    return ft.Row(cards, spacing=12, vertical_alignment=ft.CrossAxisAlignment.START)
+    rows = build_pipeline_step_list(specs)
+    view._step_cards.extend(
+        control for control in rows.controls if hasattr(control, "refresh")
+    )
+    return rows
 
 
 def _cache_switch(view, attr: str) -> ft.Control:
@@ -87,7 +102,11 @@ def _cache_switch(view, attr: str) -> ft.Control:
 
 
 def _tab(
-    view, paths: list[ft.Control], steps: ft.Row, cache: ft.Control, actions: ft.Control
+    view,
+    paths: list[ft.Control],
+    steps: ft.Control,
+    cache: ft.Control,
+    actions: ft.Control,
 ):
     return ft.Column(
         [
@@ -108,146 +127,6 @@ def _tab(
         spacing=16,
         expand=True,
         scroll=ft.ScrollMode.AUTO,
-    )
-
-
-def build_ftb_tab(view) -> ft.Control:
-    """建立 FTB (Forge 模組包) 翻譯面板的完整 UI。"""
-    view.ftb_in_dir = kit.text_field(
-        "輸入資料夾（模組包根目錄）",
-        hint="例如：./mods",
-        mono=True,
-        expand=True,
-        path=True,
-    )
-    view.ftb_out_dir = kit.text_field(
-        "輸出資料夾（可選）",
-        hint="留空使用 <input>/Output",
-        mono=True,
-        expand=True,
-        path=True,
-    )
-    view.ftb_step_export = ft.Checkbox(value=True)
-    view.ftb_step_clean = ft.Checkbox(value=True)
-    view.ftb_step_translate = ft.Checkbox(value=True)
-    view.ftb_step_inject = ft.Checkbox(value=True)
-    cache = _cache_switch(view, "ftb_write_new_cache")
-    steps = _step_row(
-        view,
-        [
-            (
-                view.ftb_step_export,
-                "匯出",
-                "Export Raw：抽取任務文字",
-                ft.Icons.DOWNLOAD,
-                "dia",
-            ),
-            (
-                view.ftb_step_clean,
-                "清理",
-                "Clean：補洞 / 產生待翻譯",
-                ft.Icons.AUTO_FIX_HIGH,
-                "ench",
-            ),
-            (
-                view.ftb_step_translate,
-                "翻譯",
-                "LM 翻譯（待翻譯 JSON）",
-                ft.Icons.AUTO_AWESOME,
-                "gold",
-            ),
-            (
-                view.ftb_step_inject,
-                "寫回",
-                "Inject：寫回 zh_tw/*.snbt",
-                ft.Icons.UPLOAD,
-                "em",
-            ),
-        ],
-    )
-    actions = build_action_row(
-        view=view,
-        on_start=lambda e: view._run_ftb(dry_run=False),
-        on_dry_run=lambda e: view._run_ftb(dry_run=True),
-        on_reset=lambda e: view._reset_ftb_inputs(),
-    )
-    return _tab(
-        view,
-        [build_path_row(view, view.ftb_in_dir), build_path_row(view, view.ftb_out_dir)],
-        steps,
-        cache,
-        actions,
-    )
-
-
-def build_kjs_tab(view) -> ft.Control:
-    """建立 KubeJS 翻譯面板的完整 UI。"""
-    view.kjs_in_dir = kit.text_field(
-        "輸入資料夾（模組包根目錄）",
-        hint="例如：./mods",
-        mono=True,
-        expand=True,
-        path=True,
-    )
-    view.kjs_out_dir = kit.text_field(
-        "輸出資料夾（可選）",
-        hint="留空使用 <input>/Output",
-        mono=True,
-        expand=True,
-        path=True,
-    )
-    view.kjs_step_extract = ft.Checkbox(value=True)
-    view.kjs_step_translate = ft.Checkbox(value=True)
-    view.kjs_step_inject = ft.Checkbox(value=True)
-    view.kjs_source_mode = ft.Dropdown(
-        label="來源匯入方式",
-        value="fresh",
-        dense=True,
-        options=[
-            ft.dropdown.Option(key="fresh", text="重新整理（僅目前來源）"),
-            ft.dropdown.Option(
-                key="incremental",
-                text="增量匯入（保留來源；衝突時先匯入者優先）",
-            ),
-        ],
-    )
-    cache = _cache_switch(view, "kjs_write_new_cache")
-    steps = _step_row(
-        view,
-        [
-            (
-                view.kjs_step_extract,
-                "匯出與清理",
-                "Export Raw + Clean",
-                ft.Icons.DOWNLOAD,
-                "dia",
-            ),
-            (
-                view.kjs_step_translate,
-                "翻譯",
-                "LM 翻譯（待翻譯 JSON）",
-                ft.Icons.AUTO_AWESOME,
-                "gold",
-            ),
-            (view.kjs_step_inject, "寫回", "Inject 回 scripts", ft.Icons.UPLOAD, "em"),
-        ],
-    )
-    actions = build_action_row(
-        view=view,
-        on_start=lambda e: view._run_kjs(dry_run=False),
-        on_dry_run=lambda e: view._run_kjs(dry_run=True),
-        on_reset=lambda e: view._reset_kjs_inputs(),
-    )
-    return _tab(
-        view,
-        [
-            build_path_row(view, view.kjs_in_dir),
-            build_path_row(view, view.kjs_out_dir),
-            view.kjs_source_mode,
-        ],
-        steps,
-        cache,
-        actions,
     )
 
 
@@ -272,10 +151,11 @@ def build_md_tab(view) -> ft.Control:
     view.md_step_translate = ft.Checkbox(value=True)
     view.md_step_inject = ft.Checkbox(value=True)
     cache = _cache_switch(view, "md_write_new_cache")
-    view.md_lang_mode = ft.Dropdown(
+    view.md_lang_mode = kit.dropdown(
         label="抽取語言模式（lang_mode）",
         value="non_cjk_only",
         dense=True,
+        expand=True,
         options=[
             ft.dropdown.Option(key="non_cjk_only", text="僅抽取非中文（non_cjk_only）"),
             ft.dropdown.Option(key="cjk_only", text="僅抽取中文（cjk_only）"),

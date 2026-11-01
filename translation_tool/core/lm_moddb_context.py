@@ -8,13 +8,21 @@ from typing import Any
 
 from translation_tool.core.lm_batch_budget import BudgetConfig
 from translation_tool.core.lm_session import TranslationSessionState
-from translation_tool.translation_db.schema import KIND_GUIDE, KIND_LANG, KIND_PATCHOULI
+from translation_tool.translation_db.schema import (
+    KIND_FTB_QUESTS,
+    KIND_GUIDE,
+    KIND_KUBEJS_SCRIPT,
+    KIND_LANG,
+    KIND_PATCHOULI,
+)
 from translation_tool.utils.config_manager import load_config
 
 _KIND_BY_CACHE_TYPE = {
     "lang": KIND_LANG,
     "md": KIND_GUIDE,
     "patchouli": KIND_PATCHOULI,
+    "kubejs": KIND_KUBEJS_SCRIPT,
+    "ftbquests": KIND_FTB_QUESTS,
 }
 _MOD_MARKERS = {"lang", "patchouli_books", "advancements", "ftbquests", "kubejs"}
 

@@ -24,6 +24,14 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      - name: Verify JavaScript syntax checker
+        run: node --version
+
       - name: Install Tkinter
         run: sudo apt-get update && sudo apt-get install -y python3-tk
 

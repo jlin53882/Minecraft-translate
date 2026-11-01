@@ -78,8 +78,6 @@ _SHELL_SETTERS = ("set_shell",)
 # 續跑時各種任務要回到的頁面（機器翻譯頁；FTB／KubeJS／MD 都在任務翻譯頁的分頁）
 _RESUME_VIEW_BY_KIND = {
     "lm_directory": "lm",
-    "ftbquests": "translation",
-    "kubejs": "translation",
     "md": "translation",
 }
 

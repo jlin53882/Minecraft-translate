@@ -11,6 +11,7 @@ from translation_tool.core.lm_resume import (
     check_resume_feasibility,
     discard_interrupted_task,
     peek_interrupted_tasks,
+    purge_legacy_plugin_markers,
 )
 
 __all__ = [
@@ -23,7 +24,11 @@ __all__ = [
 
 
 def find_interrupted_tasks() -> list[InterruptedTask]:
-    """上次未完成的翻譯任務（機器翻譯、FTB、KubeJS、MD；沒有則空）。只讀幾個小 JSON。"""
+    """上次未完成的翻譯任務（機器翻譯、Markdown；沒有則空）。
+
+    啟動時先清除無法安全續跑的舊格式標記，之後只讀幾個小 JSON。
+    """
+    purge_legacy_plugin_markers()
     return peek_interrupted_tasks()
 
 

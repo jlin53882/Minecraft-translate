@@ -20,9 +20,9 @@ from app.ui.dialogs import close_overlay_dialog, present_dialog, set_dialog_feed
 from app.views.moddb.lm_db_options import LmDbOptions
 from app.views.pipeline.pipeline_forms import (
     TranslateFormState,
+    build_pipeline_dialog,
     build_translate_form,
     dialog_button,
-    dialog_content,
     dialog_dimensions,
     dialog_text_field,
 )
@@ -67,10 +67,12 @@ def open_translate_dialog(
     _translate_build_option_widgets(ctx)
     content = _translate_build_content(ctx)
 
-    dialog = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("🔄 啟動翻譯設定"),
-        content=dialog_content(page, content),
+    dialog = build_pipeline_dialog(
+        page,
+        title="啟動翻譯設定",
+        icon=ft.Icons.AUTO_AWESOME,
+        tone="gold",
+        content=content,
         actions=[
             dialog_button("取消", lambda e: ctx.close_dialog(dialog)),
             dialog_button(
@@ -169,11 +171,16 @@ def _translate_build_content(ctx):
             ft.Row(
                 [
                     ctx.translate_input_field,
-                    ft.Button(
-                        "選擇資料夾", icon=ft.Icons.FOLDER, on_click=ctx.pick_input_dir
+                    dialog_button(
+                        "選擇資料夾",
+                        icon=ft.Icons.FOLDER,
+                        on_click=ctx.pick_input_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_input_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_input_dir,
                     ),
                 ],
                 wrap=True,
@@ -187,13 +194,16 @@ def _translate_build_content(ctx):
             ft.Row(
                 [
                     ctx.translate_output_field,
-                    ft.Button(
+                    dialog_button(
                         "選擇資料夾",
                         icon=ft.Icons.FOLDER_SPECIAL,
                         on_click=ctx.pick_output_dir,
+                        role="preview",
                     ),
-                    ft.Button(
-                        "瀏覽", icon=ft.Icons.SEARCH, on_click=ctx.browse_output_dir
+                    dialog_button(
+                        "瀏覽",
+                        icon=ft.Icons.SEARCH,
+                        on_click=ctx.browse_output_dir,
                     ),
                 ],
                 wrap=True,

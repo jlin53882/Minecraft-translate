@@ -16,6 +16,8 @@ def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
         _key_row(entry.key),
         _mod_row(entry.mod_id, entry.kind),
         _version_row(entry.mc_version, detail.versions),
+        *(_origin_rows(detail.origins) if detail.origins else []),
+        *(_reference_rows(detail.references) if detail.references else []),
         _time_row(entry),
         *(_source_change(change.new_en) for change in detail.src_changes[:1]),
     ]
@@ -70,6 +72,53 @@ def _time_row(entry) -> ft.Control:
         spacing=8,
         wrap=True,
     )
+
+
+def _origin_rows(origins) -> list[ft.Control]:
+    """顯示可回寫來源；大量引用只展開前幾筆，避免拖慢條目編輯器。"""
+    rows = [
+        ft.Row(
+            [
+                kit.section_label("來源"),
+                ft.Column(
+                    [
+                        kit.mono_text(
+                            f"{origin.source_path}  ·  {origin.selector}", size=11
+                        )
+                        for origin in origins[:5]
+                    ],
+                    spacing=2,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+    ]
+    if len(origins) > 5:
+        rows.append(kit.hint_text(f"另有 {len(origins) - 5:,} 個來源引用未展開"))
+    return rows
+
+
+def _reference_rows(references) -> list[ft.Control]:
+    """顯示引用此語言定義的 FTB／其他格式來源。"""
+    return [
+        ft.Row(
+            [
+                kit.section_label("引用"),
+                ft.Column(
+                    [
+                        kit.mono_text(
+                            f"{reference.source_path}  ·  {reference.selector}", size=11
+                        )
+                        for reference in references[:5]
+                    ],
+                    spacing=2,
+                ),
+            ],
+            spacing=10,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+        )
+    ]
 
 
 def _source_change(new_en: str) -> ft.Control:

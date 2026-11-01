@@ -14,6 +14,7 @@ import requests
 from translation_tool.translation_db import (
     KIND_ADVANCEMENT,
     KIND_GUIDE,
+    KIND_KUBEJS_LANG,
     KIND_LANG,
     KIND_PATCHOULI,
     ScanItem,
@@ -30,6 +31,7 @@ from translation_tool.translation_db.smart_review import (
     run_smart_review,
     smart_review_response_schema,
 )
+from translation_tool.translation_db.smart_review_context import _LocalContextBuilder
 from translation_tool.translation_db.smart_review_history_manifest import (
     ChunkManifestRepository,
 )
@@ -628,6 +630,48 @@ def test_smart_review_glossary_target_beyond_bulk_limit_is_retrievable(db):
         item["en_us"] == "Target Term" and item["zh_tw"] == "目標術語"
         for item in glossary
     )
+
+
+def test_smart_review_bulk_glossary_keeps_global_limit_after_kind_merge():
+    """兩個語系 kind 合併後仍維持 bulk glossary 的 5,000 筆上限。"""
+
+    class _FakeDB:
+        def _q(self, sql, params):
+            kind = params[0]
+            if "e.mc_version<>?" in sql:
+                return []
+            offset = 0 if kind == KIND_LANG else 1
+            return [
+                (
+                    offset + index * 2,
+                    kind,
+                    "1.21.1",
+                    "demo",
+                    f"key_{offset + index * 2}",
+                    f"Source {offset + index * 2}",
+                    f"譯文 {offset + index * 2}",
+                    SRC_JAR_TW,
+                    "reviewed",
+                    1,
+                )
+                for index in range(5000)
+            ]
+
+    builder = _LocalContextBuilder(
+        _FakeDB(),
+        {},
+        entry_id=10001,
+        kind=KIND_PATCHOULI,
+        mc_version="1.21.1",
+        mod_id="demo",
+        key="target",
+        en_us="Target",
+    )
+
+    rows = builder._bulk_glossary_rows()
+
+    assert len(rows) == 5000
+    assert {row[1] for row in rows} == {KIND_LANG, KIND_KUBEJS_LANG}
 
 
 def test_smart_review_candidate_offset_keeps_absolute_ordinals(db):

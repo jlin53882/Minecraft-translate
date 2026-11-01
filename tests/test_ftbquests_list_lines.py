@@ -38,16 +38,9 @@ def test_merge_keeps_non_translatable_lines_in_place():
 def test_merge_handles_line_count_mismatch_without_losing_markers():
     template = _template(_DESC)
     more = ftbquests_snbt_extractor.merge_translated_lines(template, ["a", "b", "c"])
-    assert more == [
-        "a",
-        "",
-        "{image:ftbquests:x.png width:50}",
-        "b",
-        "c",
-        "{@pagebreak}",
-    ]
+    assert more == list(_DESC)
     fewer = ftbquests_snbt_extractor.merge_translated_lines(template, ["a"])
-    assert fewer == ["a", "", "{image:ftbquests:x.png width:50}", "{@pagebreak}"]
+    assert fewer == list(_DESC)
 
 
 def test_lang_patch_keeps_blank_image_and_pagebreak_lines(tmp_path: Path):
@@ -84,6 +77,53 @@ def test_quest_patch_keeps_blank_and_marker_lines(tmp_path: Path):
     assert '""' in text and "{@pagebreak}" in text and "{image:" in text
 
 
+def test_quest_slot_keys_patch_only_the_original_description_ordinal(tmp_path: Path):
+    path = tmp_path / "chapter.snbt"
+    path.write_text(
+        '{\n\tquests: [{\n\t\tid: "AB"\n\t\tdescription: ['
+        + " ".join(json.dumps(x) for x in _DESC)
+        + "]\n\t}]\n}\n",
+        encoding="utf-8",
+    )
+
+    changed, candidates = ftbquests_snbt_inject.patch_quest_snbt_file(
+        str(path),
+        str(path),
+        {
+            "id:AB|description[0]": "第一行",
+            "id:AB|description[3]": "第四行",
+        },
+    )
+
+    assert (changed, candidates) == (2, 2)
+    parsed = snbt.load(path.open("r", encoding="utf-8"))
+    values = [str(item) for item in parsed["quests"][0]["description"]]
+    assert values == [
+        "第一行",
+        "",
+        "{image:ftbquests:x.png width:50}",
+        "第四行",
+        "{@pagebreak}",
+    ]
+
+
+def test_quest_patch_rejects_duplicate_ids_instead_of_patching_both(tmp_path: Path):
+    path = tmp_path / "chapter.snbt"
+    path.write_text(
+        '{quests: [{id:"AB" title:"One"} {id:"AB" title:"Two"}]}',
+        encoding="utf-8",
+    )
+
+    result = ftbquests_snbt_inject.patch_quest_snbt_file(
+        str(path), str(path), {"id:AB|title": "不應猜測"}, return_details=True
+    )
+
+    assert result[0:2] == (0, 0)
+    assert result[2]["skipped"] == ["id:AB|title", "id:AB|title"]
+    text = path.read_text(encoding="utf-8")
+    assert "不應猜測" not in text
+
+
 def test_subtitle_keys_are_extracted_from_lang_file(tmp_path: Path):
     root = snbt.loads(
         '{ quest.A.title: "T" quest.A.quest_subtitle: "Sub" chapter.B.chapter_subtitle: "CS" other: "x" }'
@@ -93,6 +133,19 @@ def test_subtitle_keys_are_extracted_from_lang_file(tmp_path: Path):
         "en_us.snbt|quest.A.title",
         "en_us.snbt|quest.A.quest_subtitle",
         "en_us.snbt|chapter.B.chapter_subtitle",
+    }
+
+
+def test_quest_extractor_preserves_description_slot_identity():
+    root = snbt.loads(
+        '{id:"AB" description:["First" "" "{image:x}" "Fourth" "{@pagebreak}"]}'
+    )
+
+    out = ftbquests_snbt_extractor.extract_quest_file("chapters/a.snbt", root)
+
+    assert out == {
+        "chapters/a.snbt|id:AB|description[0]": "First",
+        "chapters/a.snbt|id:AB|description[3]": "Fourth",
     }
 
 

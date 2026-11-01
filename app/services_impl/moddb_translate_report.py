@@ -25,7 +25,11 @@ from translation_tool.utils.file_replace import replace_with_retry
 QUALITY_STATUS = "QUALITY_REJECTED"
 
 FIELD_NOTES = {
-    "kind": "內容類型：lang（語言檔）、md（手冊／指南）、patchouli（Patchouli 手冊）",
+    "kind": (
+        "內容類型：lang（一般語言檔）、kubejs_lang（KubeJS Lang 語系）、"
+        "kubejs_script（KubeJS 腳本文字）、ftb_quest_lang（FTB Quests Lang 語系）、"
+        "ftb_quests（FTB Quests 任務文字）、md（手冊／指南）、patchouli（Patchouli 手冊）"
+    ),
     "mod_id": "模組代號",
     "key": "條目的鍵（語言檔 key 或手冊路徑）",
     "issues": "品質檢查發現的問題（例如少了或多了某個格式符號、佔位符）",

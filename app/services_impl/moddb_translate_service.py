@@ -950,11 +950,16 @@ def _translate_rows(
 
 
 def run_moddb_translate_service(
-    options: TranslateOptions, session, *, manage_session: bool = True
-) -> None:
+    options: TranslateOptions,
+    session,
+    *,
+    manage_session: bool = True,
+    db_override=None,
+) -> dict | None:
     """批次機翻資料庫未翻譯條目（背景執行；進度與日誌寫入 ``session``）。"""
     ensure_pipeline_logging()
-    db = None
+    db = db_override
+    owns_db = db_override is None
 
     def cancelled() -> bool:
         return bool(getattr(session, "cancel_requested", False))
@@ -964,7 +969,8 @@ def run_moddb_translate_service(
         if manage_session:
             session.start()
         UI_LOG_HANDLER.set_session(session)
-        db = open_database(create=False)
+        if owns_db:
+            db = open_database(create=False)
         if db is None:
             _log(
                 session,
@@ -973,7 +979,7 @@ def run_moddb_translate_service(
                 "error",
             )
             session.set_error()
-            return
+            return None
         scope = f"{len(options.mod_ids)} 個模組" if options.mod_ids else "全部模組"
         _log(
             session,
@@ -986,6 +992,10 @@ def run_moddb_translate_service(
         if rows is not None:
             _translate_rows(session, db, options, report, rows, cancelled)
     except Exception as exc:  # noqa: BLE001 - 背景任務：任何失敗都要回報到 session
+        # 服務層要把例外狀態傳回呼叫端；否則共用流水線會把預設的
+        # ``DONE`` 誤當成翻譯成功，只留下 UI log 而繼續輸出。
+        report.status = "ERROR"
+        report.metrics["error"] = f"{type(exc).__name__}: {exc}"
         logger.error(
             "Mod 資料庫機翻失敗（版本 %s）: %s\n%s",
             options.version,
@@ -1000,10 +1010,11 @@ def run_moddb_translate_service(
         )
         session.set_error()
     finally:
-        if db is not None:
+        if db is not None and owns_db:
             if not options.dry_run:
                 warm_stats_quietly(db)
             db.close()
         UI_LOG_HANDLER.set_session(None)
         if manage_session:
             session.finish()
+    return report.as_dict()

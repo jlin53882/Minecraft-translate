@@ -23,7 +23,7 @@ from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.update_scope import update_regions
 from app.views._log.log_view import LogView
-from app.views.moddb.formatting import format_count
+from app.views.moddb.formatting import format_count, kind_label
 from app.views.moddb.smart_review_context import SmartReviewContext
 from app.views.moddb.smart_review_job import (
     SmartReviewJob,
@@ -272,7 +272,10 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
         self.version_dd.value = current_version if current_version in versions else None
 
         current_kind = self.kind_dd.value
-        kind_options = [("__all__", "全部類型"), *((k, k) for k in kinds)]
+        kind_options = [
+            ("__all__", "全部類型"),
+            *((kind, kind_label(kind)) for kind in kinds),
+        ]
         kit.set_dropdown_options(self.kind_dd, kind_options)
         kind_keys = {key for key, _label in kind_options}
         self.kind_dd.value = current_kind if current_kind in kind_keys else "__all__"

@@ -36,6 +36,10 @@ KIND_LABELS = {
     "patchouli": "Patchouli 手冊",
     "guide": "Guide 指南文字",
     "advancement": "Advancement 進度文字",
+    "kubejs_lang": "KubeJS Lang 語系",
+    "kubejs_script": "KubeJS 腳本文字",
+    "ftb_quests": "FTB Quests 任務文字",
+    "ftb_quest_lang": "FTB Quests Lang 語系",
 }
 
 

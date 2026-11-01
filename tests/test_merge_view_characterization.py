@@ -422,6 +422,34 @@ def test_show_merge_summary_folder_mode_uses_folder_label_and_assets(monkeypatch
     assert any(t.startswith("├─ 「") and "未過濾" in t and "31 個" in t for t in texts)
 
 
+def test_merge_summary_uses_shared_pipeline_dialog_shell(monkeypatch):
+    """完成摘要也必須沿用工作流程共用的標題、內容與操作列。"""
+    monkeypatch.setattr(merge_view, "TaskSession", _Session)
+    monkeypatch.setattr(merge_widgets, "TaskSession", _Session)
+    monkeypatch.setattr(merge_view, "load_config", lambda: {"lang_merger": {}})
+    monkeypatch.setattr(merge_widgets, "load_config", lambda: {"lang_merger": {}})
+    page = mock_page()
+    view = merge_view.MergeView(page, mock_filepicker())
+
+    view._show_merge_summary(
+        {
+            "success_folders": 1,
+            "failed_folders": 0,
+            "failed_folders_list": [],
+            "output_counts": {"assets": 1},
+        }
+    )
+
+    dialog = page.overlay[-1]
+    assert isinstance(dialog.title, ft.Row)
+    assert dialog.title.controls[0].value == "合併完成"
+    assert dialog.title.controls[-1].__class__.__name__ == "Container"
+    assert [button.content for button in dialog.actions] == [
+        "開啟輸出資料夾",
+        "關閉",
+    ]
+
+
 def test_show_merge_summary_zip_mode_keeps_zip_label(monkeypatch):
     """ZIP 模式摘要維持「ZIP」字樣,且 success_zips=0 時不誤讀 folder key。"""
     texts = _show_summary_texts(

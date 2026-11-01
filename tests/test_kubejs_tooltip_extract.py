@@ -231,9 +231,11 @@ def test_extract_preserves_literal_tooltip_calls_for_pipeline_injection(
     )
 
     assert result["errors_count"] == 0
-    assert extracted["test.js|minecraft:dirt.0"] == "Event text"
-    assert extracted["test.js|scene.1"] == "Scene text"
-    assert extracted["test.js|minecraft:stone.tooltip.0"] == "Tooltip text"
+    assert extracted["client_scripts/test.js|minecraft:dirt.0"] == "Event text"
+    assert extracted["client_scripts/test.js|scene.1"] == "Scene text"
+    assert (
+        extracted["client_scripts/test.js|minecraft:stone.tooltip.0"] == "Tooltip text"
+    )
 
 
 def test_extract_uses_short_temp_staging_for_deep_pipeline_outputs(

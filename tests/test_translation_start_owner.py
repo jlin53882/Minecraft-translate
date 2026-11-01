@@ -35,8 +35,6 @@ def _fake_service(*args, **kwargs):
 @pytest.mark.parametrize(
     ("runner", "dir_attr", "service_attr"),
     [
-        (ta.run_ftb, "ftb_in_dir", "run_ftb_translation_service"),
-        (ta.run_kjs, "kjs_in_dir", "run_kubejs_tooltip_service"),
         (ta.run_md, "md_in_dir", "run_md_translation_service"),
     ],
 )
