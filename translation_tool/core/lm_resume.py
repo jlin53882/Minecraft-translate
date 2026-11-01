@@ -228,6 +228,6 @@ def discard_interrupted_task(task: InterruptedTask | None = None) -> None:
     ``task`` 省略時清除機器翻譯頁的標記（相容 #151 的呼叫方式）。
     """
     if task is not None and task.kind != LM_KIND:
-        plugin_resume.clear_marker(task.kind)
+        plugin_resume.discard_marker(task.kind)
         return
     lm_translator.clear_checkpoint()

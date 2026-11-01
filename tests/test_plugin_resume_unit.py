@@ -593,3 +593,21 @@ class TestDiscard:
         )
         lm_resume.discard_interrupted_task()
         assert not Path(lm_translator.CHECKPOINT_FILE).exists()
+
+
+class TestDiscardFailure:
+    def test_a_failed_discard_raises_so_the_task_stays_listed(
+        self, tmp_path, monkeypatch
+    ):
+        """放棄失敗（例如檔案被占用）時不可靜默成功，否則任務會消失卻仍在下次啟動出現。"""
+        monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
+        _write_plugin_marker("md")
+        task = next(t for t in lm_resume.peek_interrupted_tasks() if t.kind == "md")
+
+        def locked(self, *args, **kwargs):
+            raise PermissionError("locked")
+
+        monkeypatch.setattr(Path, "unlink", locked)
+        with pytest.raises(PermissionError):
+            lm_resume.discard_interrupted_task(task)
+        assert plugin_resume.marker_path("md").exists()

@@ -200,6 +200,11 @@ def write_marker(kind: str, payload: dict[str, Any]) -> None:
     )
 
 
+def discard_marker(kind: str) -> None:
+    """使用者放棄任務時刪除標記；失敗會拋出 ``OSError``，讓對話框保留該任務並顯示錯誤。"""
+    marker_path(kind).unlink(missing_ok=True)
+
+
 def clear_marker(kind: str) -> None:
     try:
         marker_path(kind).unlink(missing_ok=True)
