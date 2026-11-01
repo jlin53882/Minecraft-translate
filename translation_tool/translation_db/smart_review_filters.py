@@ -24,6 +24,7 @@ from translation_tool.translation_db.smart_review_prompt import (
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
+    source_locale_sql,
 )
 
 _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE = 128
@@ -39,13 +40,28 @@ def _smart_review_row_group(row: Sequence[Any]) -> tuple[Any, ...]:
     return (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
 
 
+def _smart_review_locale_group(
+    entry_id: int, source_locales: Mapping[int, str | None]
+) -> str | None:
+    """建立安全的同文分組語系身分。
+
+    已知預設語系（例如 ``en_us``）可以互相去重；沒有可信來源的條目則
+    使用自己的 id，避免把兩個 unknown 誤當成同一個來源。非預設語系仍
+    以正規化 token 分組。
+    """
+    locale = source_locales.get(entry_id)
+    if locale is None:
+        return f"unknown:{entry_id}"
+    return trusted_non_default_locale(locale)
+
+
 def _dedupe_same_text_rows(
     rows: Sequence[tuple[Any, ...]],
     source_locales: Mapping[int, str | None] | None = None,
 ) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
     """同版本、模組、種類且原文、目前譯文狀態與來源語系都相同的條目只保留第一筆。
 
-    預設語系與 unknown 視為同一組；不同的非預設語系即使文字相同也不合併。
+    已知預設語系視為同一組；unknown 沒有足夠來源身分，不能和其他條目合併。
     """
     locales = source_locales or {}
     twins: dict[tuple[Any, ...], list[int]] = {}
@@ -54,7 +70,7 @@ def _dedupe_same_text_rows(
         # row: id, kind, mc_version, mod_id, key, en_us, zh_tw, source, status, ...
         group = (
             *_smart_review_row_group(row),
-            trusted_non_default_locale(locales.get(int(row[0]))),
+            _smart_review_locale_group(int(row[0]), locales),
         )
         if group in twins:
             twins[group].append(int(row[0]))
@@ -95,6 +111,7 @@ _SMART_REVIEW_DEDUPE_COLUMNS = (
     "current_zh_tw",
     "effective_source",
     "effective_review",
+    "source_locale",
 )
 
 
@@ -120,6 +137,8 @@ def _smart_review_candidate_cte(
         "e.mod_id AS mod_id, e.key AS entry_key, e.en_us AS en_us, "
         "f.zh_tw AS current_zh_tw, f.source AS effective_source, "
         f"({selection.effective_review}) AS effective_review, "
+        f"{source_locale_sql('e')} "
+        "AS source_locale, "
         "t.revision AS effective_revision, tm.zh_tw AS manual_zh_tw, "
         "tm.checker AS manual_checker, tm.review_status AS manual_review_status, "
         "tm.revision AS manual_revision "
@@ -429,8 +448,8 @@ class SmartReviewCandidateSelectionMixin:
                     tuple(
                         twin
                         for twin in twins
-                        if trusted_non_default_locale(locales.get(twin))
-                        == trusted_non_default_locale(locales.get(int(row[0])))
+                        if _smart_review_locale_group(twin, locales)
+                        == _smart_review_locale_group(int(row[0]), locales)
                     ),
                 )
                 for row, twins in selected_rows

@@ -72,15 +72,16 @@ def seed(path):
     db.ingest(
         "1.21.1",
         [
-            ScanItem(KIND_LANG, "foo", "item.foo.a", "Steel Casing", "鋼製外殼"),
-            ScanItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy"),
-            ScanItem(KIND_LANG, "foo", "item.foo.c", "Line one\n"),
-            ScanItem(KIND_LANG, "bar", "item.bar.a", "Bronze Gear"),
+            _known_lang_item("foo", "item.foo.a", "Steel Casing", "鋼製外殼"),
+            _known_lang_item("foo", "item.foo.b", "Infused Alloy"),
+            _known_lang_item("foo", "item.foo.c", "Line one\n"),
+            _known_lang_item("bar", "item.bar.a", "Bronze Gear"),
         ],
     )
     # 另一版本已有 bar.a 的譯文 → 應被沿用，不必呼叫 AI
     db.ingest(
-        "1.20.1", [ScanItem(KIND_LANG, "bar", "item.bar.a", "Bronze Gear", "青銅齒輪")]
+        "1.20.1",
+        [_known_lang_item("bar", "item.bar.a", "Bronze Gear", "青銅齒輪")],
     )
     db.close()
 
@@ -92,6 +93,29 @@ def fake_engine(monkeypatch, translator):
         return [{**it, "text": translator(it["source_text"])} for it in batch], "DONE"
 
     monkeypatch.setattr(moddb_translate_service, "translate_batch_smart", fake_batch)
+
+
+def _known_lang_item(
+    mod_id: str,
+    key: str,
+    en_us: str,
+    zh_tw: str = "",
+    *,
+    source: int | None = None,
+    source_locale: str = "en_us",
+) -> ScanItem:
+    """建立帶有可驗證 en_us 來源身分的 lang fixture。"""
+    return ScanItem(
+        KIND_LANG,
+        mod_id,
+        key,
+        en_us,
+        zh_tw,
+        source=source,
+        source_path=f"assets/{mod_id}/lang/{source_locale}.json",
+        source_selector=f"lang:{key}",
+        source_locale=source_locale,
+    )
 
 
 def run(options):
@@ -1590,7 +1614,7 @@ def test_preview_shows_how_many_would_be_reused_and_excludes_them(db_path, monke
     # 其他版本同鍵值但「原文不同」→ 不能沿用
     db.ingest(
         "1.20.1",
-        [ScanItem(KIND_LANG, "foo", "item.foo.b", "Infused Alloy v1", "舊版譯文")],
+        [_known_lang_item("foo", "item.foo.b", "Infused Alloy v1", "舊版譯文")],
     )
     assert db.count_reusable("1.21.1") == 1  # 只有 bar.a（原文相同）
     assert [r[3] for r in db.untranslated_entries("1.21.1", exclude_reusable=True)] == [
@@ -1785,15 +1809,38 @@ def test_db_flush_permanent_failure_is_error(db_path, monkeypatch):
 def test_reuse_skips_conflicting_other_versions(db_path):
     """P2-4：其他版本譯文不一致時不自動沿用。"""
     db = TranslationDB(db_path)
-    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Gear")])
-    db.ingest("1.20.1", [ScanItem(KIND_LANG, "m", "k", "Gear", "齒輪")])
-    db.ingest("1.19.2", [ScanItem(KIND_LANG, "m", "k", "Gear", "傳動輪")])
+    db.ingest("1.21.1", [_known_lang_item("m", "k", "Gear")])
+    db.ingest("1.20.1", [_known_lang_item("m", "k", "Gear", "齒輪")])
+    db.ingest("1.19.2", [_known_lang_item("m", "k", "Gear", "傳動輪")])
     assert db.count_reusable("1.21.1") == 0
     assert db.reuse_from_other_versions("1.21.1") == 0
-    db.ingest("1.18.2", [ScanItem(KIND_LANG, "n", "k", "Gear")])
-    db.ingest("1.17.1", [ScanItem(KIND_LANG, "n", "k", "Gear", "齒輪")])
-    db.ingest("1.16.5", [ScanItem(KIND_LANG, "n", "k", "Gear", "齒輪")])
+    db.ingest("1.18.2", [_known_lang_item("n", "k", "Gear")])
+    db.ingest("1.17.1", [_known_lang_item("n", "k", "Gear", "齒輪")])
+    db.ingest("1.16.5", [_known_lang_item("n", "k", "Gear", "齒輪")])
     assert db.reuse_from_other_versions("1.18.2") == 1
+    db.close()
+
+
+def test_reuse_requires_matching_source_locale(db_path):
+    """不同來源語系即使 key 與原文相同，也不能跨語系沿用翻譯。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [_known_lang_item("m", "item.gift", "Gift", source_locale="pt_br")],
+    )
+    db.ingest(
+        "1.20.1",
+        [_known_lang_item("m", "item.gift", "Gift", "禮物", source_locale="en_us")],
+    )
+    db.ingest(
+        "1.19.2",
+        [_known_lang_item("m", "item.gift", "Gift", "Presente", source_locale="pt_br")],
+    )
+
+    assert db.count_reusable("1.21.1") == 1
+    assert db.reuse_from_other_versions("1.21.1") == 1
+    row = {item.key: item for item in db.list_entries("1.21.1")[0]}["item.gift"]
+    assert row.zh_tw == "Presente"
     db.close()
 
 
@@ -1862,11 +1909,12 @@ def test_reuse_picks_highest_priority_source_not_min_code(db_path):
     from translation_tool.translation_db.schema import SRC_MANUAL
 
     db = TranslationDB(db_path)
-    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Gear")])
+    db.ingest("1.21.1", [_known_lang_item("m", "k", "Gear")])
     db.ingest(
-        "1.20.1", [ScanItem(KIND_LANG, "m", "k", "Gear", "齒輪", source=SRC_MANUAL)]
+        "1.20.1",
+        [_known_lang_item("m", "k", "Gear", "齒輪", source=SRC_MANUAL)],
     )
-    db.ingest("1.19.2", [ScanItem(KIND_LANG, "m", "k", "Gear", "齒輪", source=SRC_AI)])
+    db.ingest("1.19.2", [_known_lang_item("m", "k", "Gear", "齒輪", source=SRC_AI)])
     assert db.reuse_from_other_versions("1.21.1") == 1
     row = db._q(
         "SELECT t.source FROM translation t JOIN entry e ON e.id=t.entry_id "

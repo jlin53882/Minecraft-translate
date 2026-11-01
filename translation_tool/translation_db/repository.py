@@ -117,6 +117,7 @@ from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
+    source_locale_sql,
     translation_review_sql,
 )
 from translation_tool.utils.cache_registry import register_cache
@@ -3305,11 +3306,17 @@ class TranslationDB(
     def source_locales_for_entries(
         self, entry_ids: Sequence[int]
     ) -> dict[int, str | None]:
-        """每個條目的可信來源語系（由 ``entry_origin`` 的來源 selector 還原；無法確定為 ``None``）。
+        """每個條目的可信來源語系（由持久化來源身分還原；無法確定為 ``None``）。
 
-        以 ``json_each`` 分段批次查詢，不逐筆 N+1；沒有來源紀錄的條目（例如 jar 掃描）為 ``None``。
+        新資料優先使用 ``entry_origin.source_locale``；舊資料則以 selector／來源
+        路徑一次回填式解析。以 ``json_each`` 分段批次查詢，不逐筆 N+1；沒有來源
+        紀錄的條目（例如 jar 掃描）為 ``None``。
         """
-        from translation_tool.core.source_locale import resolve_source_locale
+        from translation_tool.core.source_locale import (
+            locale_from_source_path,
+            locale_from_source_selector,
+            normalize_source_locale,
+        )
 
         ids = [int(entry_id) for entry_id in entry_ids]
         result: dict[int, str | None] = {entry_id: None for entry_id in ids}
@@ -3317,16 +3324,47 @@ class TranslationDB(
         for start in range(0, len(ids), chunk_size):
             chunk = ids[start : start + chunk_size]
             rows = self._q(
-                "SELECT eo.entry_id, eo.selector FROM entry_origin eo "
+                "SELECT eo.entry_id, eo.source_locale, eo.selector, eo.source_path "
+                "FROM entry_origin eo "
                 "WHERE eo.entry_id IN (SELECT value FROM json_each(?))",
                 (json.dumps(chunk),),
             )
-            selectors: dict[int, list[str]] = {}
-            for entry_id, selector in rows:
-                selectors.setdefault(int(entry_id), []).append(str(selector))
+            origins: dict[int, list[tuple[str | None, str, str]]] = {}
+            for entry_id, stored_locale, selector, source_path in rows:
+                origins.setdefault(int(entry_id), []).append(
+                    (
+                        normalize_source_locale(stored_locale),
+                        str(selector),
+                        str(source_path),
+                    )
+                )
             for entry_id in chunk:
-                if entry_id in selectors:
-                    result[entry_id] = resolve_source_locale(selectors[entry_id])
+                source_origins = origins.get(entry_id)
+                if not source_origins:
+                    continue
+                locales: set[str] = set()
+                unknown = False
+                for stored_locale, selector, source_path in source_origins:
+                    if stored_locale is not None:
+                        # 新掃描明確保存的是「選定的原文 locale」。即使是
+                        # zh_tw/zh_cn fallback，也不能再當成伴隨譯文丟掉。
+                        locale = stored_locale
+                    else:
+                        # 舊 schema 沒有角色資訊；只有從 selector/path 還原
+                        # 到非翻譯 locale 才能安全採用，中文來源在舊資料中
+                        # 無法判斷是原文還是伴隨譯文，保守視為 unknown。
+                        locale = locale_from_source_selector(selector)
+                        if locale is None:
+                            locale = locale_from_source_path(source_path)
+                        if locale in {"zh_tw", "zh_cn"}:
+                            locale = None
+                    if locale is None:
+                        unknown = True
+                        continue
+                    locales.add(locale)
+                result[entry_id] = (
+                    next(iter(locales)) if not unknown and len(locales) == 1 else None
+                )
         return result
 
     def entry_origins(self, entry_id: int) -> list[EntryOrigin]:
@@ -3339,6 +3377,7 @@ class TranslationDB(
                 selector=selector,
                 source_hash=source_hash,
                 format_profile=format_profile,
+                source_locale=source_locale,
             )
             for (
                 pack_scope,
@@ -3347,9 +3386,10 @@ class TranslationDB(
                 selector,
                 source_hash,
                 format_profile,
+                source_locale,
             ) in self._q(
                 "SELECT pack_scope, source_kind, source_path, selector, "
-                "source_hash, format_profile FROM entry_origin "
+                "source_hash, format_profile, source_locale FROM entry_origin "
                 "WHERE entry_id=? ORDER BY source_path, selector",
                 (entry_id,),
             )
@@ -3367,7 +3407,7 @@ class TranslationDB(
         rows = self._q(
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, "
             "eo.pack_scope, eo.source_kind, eo.source_path, eo.selector, "
-            "eo.source_hash, eo.format_profile "
+            "eo.source_hash, eo.format_profile, eo.source_locale "
             "FROM entry e JOIN effective f ON f.entry_id=e.id "
             "JOIN entry_origin eo ON eo.entry_id=e.id "
             "WHERE e.mc_version=? AND eo.pack_scope=? "
@@ -3390,6 +3430,7 @@ class TranslationDB(
                     selector=row[9],
                     source_hash=row[10],
                     format_profile=row[11],
+                    source_locale=row[12],
                 ),
             )
             for row in rows
@@ -5008,15 +5049,30 @@ class TranslationDB(
 
     # 其他版本已有「類型／模組／鍵值／原文都相同」的生效譯文（可直接沿用，不必呼叫 AI）
     # 其他版本的譯文必須一致才算（有衝突時不自動沿用，交給 AI 或人工，避免任意挑一版）
-    _REUSABLE_SQL = """(
-        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-        WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version) = 1"""
+    @staticmethod
+    def _reusable_peers_sql() -> str:
+        """建立帶來源語系邊界的跨版本重用查詢。"""
+        return (
+            "(SELECT COUNT(DISTINCT f2.zh_tw) "
+            "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
+            "WHERE e2.kind=u.kind AND e2.mod_id=u.mod_id AND e2.key=u.key "
+            "AND e2.en_us=u.en_us "
+            "AND u.source_locale<>'' "
+            f"AND {source_locale_sql('e2')}=u.source_locale)"
+        )
 
-    _REUSABLE_PEERS_SQL = """(
-        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-        WHERE e2.kind = u.kind AND e2.mod_id = u.mod_id AND e2.key = u.key
-          AND e2.en_us = u.en_us)"""
+    @staticmethod
+    def _reusable_sql() -> str:
+        """建立單筆跨版本重用條件；unknown 來源不可自動沿用。"""
+        source_locale = source_locale_sql("e")
+        return (
+            "(SELECT COUNT(DISTINCT f2.zh_tw) "
+            "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
+            "WHERE e2.kind=e.kind AND e2.mod_id=e.mod_id AND e2.key=e.key "
+            "AND e2.en_us=e.en_us AND e2.mc_version<>e.mc_version "
+            f"AND {source_locale}<>'' "
+            f"AND {source_locale_sql('e2')}={source_locale})=1"
+        )
 
     def _untranslated_candidates_cte(
         self, version: str, mod_ids: Sequence[str] | None, *, ordered: bool = True
@@ -5035,7 +5091,8 @@ class TranslationDB(
             params.extend(mod_ids)
         sql = (
             "WITH u AS MATERIALIZED ("
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
+            f"{source_locale_sql('e')} AS source_locale "
             "FROM (SELECT i.id FROM entry i WHERE i.mc_version = ?"
             f"{mod_filter} AND i.id NOT IN (SELECT entry_id FROM effective)) c "
             "JOIN entry e ON e.id = c.id WHERE e.en_us <> ''"
@@ -5046,7 +5103,8 @@ class TranslationDB(
     def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
         cte, params = self._untranslated_candidates_cte(version, mod_ids, ordered=False)
-        sql = f"{cte}SELECT COUNT(*) FROM u WHERE {self._REUSABLE_PEERS_SQL} = 1"
+        reusable_peers = self._reusable_peers_sql()
+        sql = f"{cte}SELECT COUNT(*) FROM u WHERE {reusable_peers} = 1"
         return self._cached_count(sql, params)
 
     def count_untranslated(
@@ -5085,9 +5143,10 @@ class TranslationDB(
         """
         if exclude_reusable:
             cte, params = self._untranslated_candidates_cte(version, mod_ids)
+            reusable_peers = self._reusable_peers_sql()
             sql = (
                 f"{cte}SELECT id, kind, mod_id, key, en_us FROM u "
-                f"WHERE {self._REUSABLE_PEERS_SQL} <> 1 ORDER BY kind, mod_id, key"
+                f"WHERE {reusable_peers} <> 1 ORDER BY kind, mod_id, key"
             )
         else:
             where, extra = self._untranslated_where(mod_ids)
@@ -5289,8 +5348,10 @@ class TranslationDB(
                 "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
                 "AND e2.key = e.key AND e2.en_us = e.en_us "
                 "AND e2.mc_version <> e.mc_version "
+                f"AND {source_locale_sql('e2')}={source_locale_sql('e')} "
                 "JOIN effective f2 ON f2.entry_id = e2.id "
-                f"WHERE {where} AND {self._REUSABLE_SQL} ORDER BY e.id, f2.rowid",
+                f"WHERE {where} AND {self._reusable_sql()} "
+                "ORDER BY e.id, f2.rowid",
                 [version, *extra],
             ).fetchall()
             # 譯文已確認一致；來源標記取目前優先序最高者（不可用代碼大小，人工不該被降成 AI）
@@ -5330,16 +5391,30 @@ class TranslationDB(
         )
 
         def load() -> list[list[str]]:
+            pack_scope = None
+            if mod_id.startswith(("kubejs@", "ftbquests@")):
+                pack_scope = mod_id.split("@", 1)[1]
+
             def load_kind(kind: str) -> list[tuple[int, str, str, str, str]]:
                 clauses = [
-                    "e.mod_id = ?",
                     "e.kind = ?",
                     "f.review_status = 'reviewed'",
                     "e.en_us <> ''",
                     "f.zh_tw <> ''",
                     "e.en_us <> f.zh_tw",
                 ]
-                params: list[object] = [mod_id, kind]
+                params: list[object] = [kind]
+                if (kind == KIND_KUBEJS_LANG and mod_id.startswith("kubejs@")) or (
+                    kind == KIND_FTB_QUEST_LANG and mod_id.startswith("ftbquests@")
+                ):
+                    clauses.append(
+                        "EXISTS (SELECT 1 FROM entry_origin eo "
+                        "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"
+                    )
+                    params.append(pack_scope)
+                else:
+                    clauses.append("e.mod_id = ?")
+                    params.append(mod_id)
                 if mc_version:
                     clauses.append("e.mc_version = ?")
                     params.append(mc_version)
@@ -5358,9 +5433,11 @@ class TranslationDB(
             # scans and create a temporary ORDER BY tree.  Each kind has an
             # index-friendly stream; merge the already ordered streams in
             # Python so the glossary cache keeps the no-temp-sort contract.
+            kinds = [KIND_LANG, KIND_KUBEJS_LANG]
+            if mod_id == "ftbquests" or mod_id.startswith("ftbquests@"):
+                kinds.append(KIND_FTB_QUEST_LANG)
             rows = heapq.merge(
-                load_kind(KIND_LANG),
-                load_kind(KIND_KUBEJS_LANG),
+                *(load_kind(kind) for kind in kinds),
                 key=lambda row: (str(row[2]), int(row[0])),
             )
             return [

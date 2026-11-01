@@ -161,16 +161,25 @@ def test_dedupe_does_not_merge_different_locales():
     rows = [row(1), row(2), row(3), row(4), row(5)]
     locales = {1: "pt_br", 2: "de_de", 3: "pt_br", 4: None, 5: "en_us"}
     kept = _dedupe_same_text_rows(rows, locales)
-    assert [(r[0], twins) for r, twins in kept] == [(1, (3,)), (2, ()), (4, (5,))]
-    # 沒有語系資訊時維持原行為
-    assert [(r[0], t) for r, t in _dedupe_same_text_rows(rows)] == [(1, (2, 3, 4, 5))]
+    assert [(r[0], twins) for r, twins in kept] == [
+        (1, (3,)),
+        (2, ()),
+        (4, ()),
+        (5, ()),
+    ]
+    # 沒有語系資訊時，每個條目都是獨立的 unknown，不能互相合併。
+    assert [(r[0], t) for r, t in _dedupe_same_text_rows(rows)] == [
+        (entry_id, ()) for entry_id in range(1, 6)
+    ]
 
 
 def _origin(db, entry_id: int, selector: str) -> None:
+    locale = selector.split(":", 2)[1]
     db._conn.execute(
-        "INSERT INTO entry_origin (entry_id, source_kind, source_path, selector) "
-        "VALUES (?, 'kubejs', 'kubejs/assets/m/lang/x.json', ?)",
-        (entry_id, selector),
+        "INSERT INTO entry_origin "
+        "(entry_id, source_kind, source_path, selector, source_locale) "
+        "VALUES (?, 'kubejs', 'kubejs/assets/m/lang/x.json', ?, ?)",
+        (entry_id, selector, locale),
     )
     db._conn.commit()
 
@@ -185,6 +194,7 @@ def db(tmp_path):
             WriteBackItem(KIND_LANG, "m", "b_pt", "Olá", "你好"),
             WriteBackItem(KIND_LANG, "m", "c_de", "Olá", "你好"),
             WriteBackItem(KIND_LANG, "m", "d_plain", "Olá", "你好"),
+            WriteBackItem(KIND_LANG, "m", "e_plain", "Olá", "你好"),
         ],
         fill_other_versions=False,
     )
@@ -205,12 +215,19 @@ def test_candidates_carry_locale_and_split_twins(db):
     assert by_key["a_pt"].source_locale == "pt_br"
     assert by_key["c_de"].source_locale == "de_de"
     assert by_key["d_plain"].source_locale is None
-    assert len(snaps) == 3  # a_pt+b_pt 合併；c_de、d_plain 各自獨立
+    assert by_key["e_plain"].source_locale is None
+    assert len(snaps) == 4  # a_pt+b_pt 合併；c_de、d_plain、e_plain 各自獨立
     assert len(by_key["a_pt"].twin_entry_ids) == 1
+    assert not by_key["d_plain"].twin_entry_ids
+    assert not by_key["e_plain"].twin_entry_ids
+    assert db.count_smart_review_candidates() == len(snaps)
 
 
 def test_run_sends_homogeneous_requests_with_supplement(db, monkeypatch):
     calls = []
+    expected_ids = {
+        str(snapshot.ordinal) for snapshot in db.smart_review_candidates(limit=50)
+    }
 
     def fake_call(**kwargs):
         items = kwargs["payload"]["items"]
@@ -238,6 +255,8 @@ def test_run_sends_homogeneous_requests_with_supplement(db, monkeypatch):
     )
     run_smart_review(db, model_name="gemini-test", api_key="k", limit=50)
     assert len(calls) == 3
+    sent_ids = {str(item["id"]) for _, items in calls for item in items}
+    assert sent_ids == expected_ids
     for prompt, items in calls:
         locales = {item.get("source_locale") for item in items}
         assert len(locales) == 1

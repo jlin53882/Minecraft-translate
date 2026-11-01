@@ -225,7 +225,10 @@ def build_items(
     """資料庫條目轉成引擎項目；``check`` 可在每列轉換前執行 deadline/cancel 檢查。
 
     ``source_locales`` 是每個條目可信的來源語系（見 ``TranslationDB.source_locales_for_entries``）。
-    只有非預設語系會寫入 ``source_locale`` 並加入批次分組；預設語系與 unknown 維持原本的項目形狀。
+    來源身份與 Prompt 補充分離：只要資料庫能確認 locale，就把它保存到
+    ``source_locale``；只有非預設語系會加入額外批次分組，Prompt 是否補充
+    由共用來源語系策略另外決定。無法確認時也保留 ``None``，讓快取層能
+    明確拒絕把 unknown 當成已知語系重用。
     """
     items = []
     for eid, kind, mod_id, key, en_us in rows:
@@ -248,8 +251,9 @@ def build_items(
             "_kind": kind,
             "_mod_id": mod_id,
         }
-        if not is_default_source_locale(locale):
+        if source_locales is not None:
             item["source_locale"] = locale
+        if not is_default_source_locale(locale):
             item["_batch_group"] = (str(mod_id), str(kind), str(locale))
         items.append(item)
     return items

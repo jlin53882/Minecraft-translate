@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import walk_snbt_file
 from translation_tool.plugins.ftbquests.ftbquests_snbt_inject import (
     patch_lang_snbt_file,
@@ -43,7 +44,6 @@ from translation_tool.translation_db.schema import (
     KIND_LANG,
 )
 
-_LOCALES = {"en_us", "zh_cn", "zh_tw"}
 _OUTPUT_OWNERSHIP_MARKER = ".minecraft-translate-overlay.json"
 _OUTPUT_OWNERSHIP_SCHEMA = "minecraft_translate.pack_overlay.v1"
 _QUEST_FIELD = re.compile(r"(?:^|\.)(title|subtitle|description(?:\[\d+\])?)$")
@@ -789,7 +789,12 @@ def _quest_update_key(item: EffectivePackTranslation) -> str | None:
 def _ftb_lang_update_key(selector: str) -> str | None:
     if not selector.startswith("lang:"):
         return None
-    return selector[5:]
+    value = selector[5:]
+    parts = value.split(":", 1)
+    if len(parts) == 2 and normalize_source_locale(parts[0]) is not None:
+        return parts[1]
+    # 舊版資料庫的 FTB selector 沒有 locale；保留讀取相容性。
+    return value
 
 
 def _ftb_lang_target(source_path: str) -> str:
@@ -797,11 +802,11 @@ def _ftb_lang_target(source_path: str) -> str:
     parts = list(PurePosixPath(relative).parts)
     if not parts or parts[0].lower() != "lang":
         return relative
-    if len(parts) >= 2 and parts[1].lower() in _LOCALES:
+    if len(parts) >= 2 and normalize_source_locale(parts[1]) is not None:
         parts[1] = "zh_tw"
     elif len(parts) == 2:
         stem = Path(parts[1]).stem.lower()
-        if stem in _LOCALES:
+        if normalize_source_locale(stem) is not None:
             parts[1] = "zh_tw" + Path(parts[1]).suffix
     return "/".join(parts)
 

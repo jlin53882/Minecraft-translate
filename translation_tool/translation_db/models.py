@@ -487,6 +487,7 @@ class SmartReviewCandidate:
     applied_batch: str | None = None
     applied_at: str | None = None
     ai_status: str | None = None
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -570,6 +571,7 @@ class ScanItem:
     source_hash: str = ""
     source_format: str = ""
     pack_scope: str = ""
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -582,6 +584,7 @@ class EntryOrigin:
     selector: str
     source_hash: str = ""
     format_profile: str = ""
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)

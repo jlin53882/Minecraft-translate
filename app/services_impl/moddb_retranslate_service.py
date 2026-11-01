@@ -8,7 +8,7 @@ import time
 import traceback
 import uuid
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -648,8 +648,12 @@ def _limited_repair_snapshot(db, options, deadline):
         eligible += 1
         if limit is None or len(chosen) < limit:
             chosen.append(entry)
+    source_locales = db.source_locales_for_entries([entry.entry_id for entry in chosen])
     items = _group_retranslation_items_by_cache_type(
-        _build_retranslation_items(chosen, deadline=deadline), deadline=deadline
+        _build_retranslation_items(
+            chosen, source_locales=source_locales, deadline=deadline
+        ),
+        deadline=deadline,
     )
     rows_by_key = {
         (entry.entry_id, int(entry.source_id or SRC_AI)): entry for entry in chosen
@@ -696,7 +700,12 @@ def preview_same_source_ai_retranslation(
     else:
         raise ValueError(f"未知既有譯文修復條件：{mode}")
     _raise_preview_timeout(deadline)
-    items = _build_retranslation_items(entries, deadline=deadline)
+    source_locales = db.source_locales_for_entries(
+        [entry.entry_id for entry in entries]
+    )
+    items = _build_retranslation_items(
+        entries, source_locales=source_locales, deadline=deadline
+    )
     attach_moddb_context(
         items,
         operation_id=f"retranslate-preview:{id(db)}",
@@ -770,7 +779,10 @@ def preview_same_source_ai_retranslation_from_path(
 
 
 def _build_retranslation_items(
-    entries: Sequence[SameSourceAIEntry], *, deadline: float | None = None
+    entries: Sequence[SameSourceAIEntry],
+    *,
+    source_locales: Mapping[int, str | None] | None = None,
+    deadline: float | None = None,
 ) -> list[dict[str, Any]]:
     rows = []
     for row in entries:
@@ -779,6 +791,11 @@ def _build_retranslation_items(
     items = build_items(rows, check=lambda: _raise_preview_timeout(deadline))
     for item, row in zip(items, entries, strict=True):
         _raise_preview_timeout(deadline)
+        locale = (source_locales or {}).get(row.entry_id)
+        if source_locales is not None:
+            item["source_locale"] = locale
+        if locale not in (None, "", "en_us", "zh_tw", "zh_cn"):
+            item["_batch_group"] = (str(row.mod_id), str(row.kind), locale)
         item["_expected_old_zh_tw"] = row.current_ai_translation
         item["_expected_version"] = row.mc_version
         item["_source_id"] = row.source_id if row.source_id is not None else SRC_AI
@@ -2064,7 +2081,10 @@ def _initialize_snapshot_run(db, entries, session, report, options):
         entries, skipped_newline_only = _filter_newline_only_repair_entries(entries)
         report.skipped_newline_only_candidates += skipped_newline_only
         report.candidates = len(entries)
-    candidates = _build_retranslation_items(entries)
+    source_locales = db.source_locales_for_entries(
+        [entry.entry_id for entry in entries]
+    )
+    candidates = _build_retranslation_items(entries, source_locales=source_locales)
     attach_moddb_context(
         candidates,
         operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",

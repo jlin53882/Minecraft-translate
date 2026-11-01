@@ -611,6 +611,44 @@ def test_export_maps_single_file_ftb_locale_to_zh_tw(tmp_path: Path):
         db.close()
 
 
+def test_export_maps_non_default_ftb_locale_directory_to_zh_tw(tmp_path: Path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang" / "pt_br"
+    lang.mkdir(parents=True)
+    (lang / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind='ftb_quest_lang' AND eo.source_locale='pt_br' "
+            "AND eo.pack_scope=? LIMIT 1",
+            (scope,),
+        )[0]
+        db.save_manual(entry_id, "繁體標題", propagate=False)
+        output = tmp_path.parent / "ftb-pt-br-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw/chapter.snbt").open(
+                encoding="utf-8"
+            )
+        )
+        assert str(translated["quest.title"]) == "繁體標題"
+    finally:
+        db.close()
+
+
 def test_export_preserves_existing_ftb_zh_tw_keys_not_managed_by_db(tmp_path: Path):
     quests = tmp_path / "config" / "ftbquests" / "quests" / "lang"
     quests.mkdir(parents=True)

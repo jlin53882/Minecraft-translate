@@ -65,6 +65,26 @@ def locale_from_source_selector(selector: str) -> str | None:
     return normalize_source_locale(match.group(1))
 
 
+def locale_from_source_path(source_path: str) -> str | None:
+    """從語系來源的相對路徑還原 locale。
+
+    FTB Quests 舊版 selector 只有 ``lang:<key>``，無法攜帶 locale；
+    這類來源仍可由 ``lang/<locale>/...`` 或 ``lang/<locale>.snbt``
+    的檔案契約安全還原。只檢查 ``lang`` 目錄下的下一段，避免把任意
+    檔名誤當成語系。
+    """
+    parts = [part for part in re.split(r"[/\\]+", str(source_path or "")) if part]
+    for index, part in enumerate(parts[:-1]):
+        if part.casefold() != "lang":
+            continue
+        candidate = parts[index + 1]
+        stem = candidate.rsplit(".", 1)[0] if "." in candidate else candidate
+        locale = normalize_source_locale(stem)
+        if locale is not None:
+            return locale
+    return None
+
+
 def resolve_source_locale(selectors: Iterable[str]) -> str | None:
     """依同一條目的所有來源 selector 決定來源語系。
 

@@ -14,12 +14,14 @@ from translation_tool.core.source_locale import (
     SOURCE_LOCALE_SUPPLEMENT_TEMPLATE,
     SourceLocaleError,
     batch_source_locale,
+    locale_from_source_path,
     locale_from_source_selector,
     normalize_source_locale,
     resolve_source_locale,
     source_locale_supplement,
 )
 from translation_tool.translation_db import (
+    KIND_FTB_QUEST_LANG,
     KIND_KUBEJS_LANG,
     KIND_LANG,
     ScanItem,
@@ -75,6 +77,12 @@ def test_selector_locale_is_read_from_json_and_js_lang_selectors():
     assert locale_from_source_selector("") is None
 
 
+def test_locale_is_read_from_lang_path_when_selector_has_no_locale():
+    assert locale_from_source_path("config/ftbquests/quests/lang/pt_br.snbt") == "pt_br"
+    assert locale_from_source_path("assets/demo/lang/de_de/items.json") == "de_de"
+    assert locale_from_source_path("assets/demo/textures/item.png") is None
+
+
 def test_resolve_ignores_translation_locales_and_requires_one_source_locale():
     assert resolve_source_locale(["lang:pt_br:a", "lang:zh_tw:a"]) == "pt_br"
     assert resolve_source_locale(["lang:en_us:a"]) == "en_us"
@@ -106,12 +114,12 @@ def test_supplement_substitutes_only_the_validated_locale():
 
 
 # ---------------------------------------------------------------- 批次邊界
-def test_default_locale_rows_keep_the_original_item_shape_and_grouping():
+def test_default_locale_rows_keep_prompt_compatibility_but_preserve_identity():
     rows = [(1, KIND_LANG, "foo", "a", "Iron"), (2, KIND_LANG, "foo", "b", "Gold")]
     plain = build_items(rows)
     with_default = build_items(rows, source_locales={1: "en_us", 2: None})
-    assert plain == with_default
-    assert all("source_locale" not in item for item in with_default)
+    assert all("source_locale" not in item for item in plain)
+    assert [item["source_locale"] for item in with_default] == ["en_us", None]
     assert all(item["_batch_group"] == ("foo", KIND_LANG) for item in with_default)
 
 
@@ -144,7 +152,7 @@ def test_non_default_locales_are_grouped_separately_and_never_mixed():
 def test_unknown_locale_is_not_treated_as_a_supplement_source():
     rows = [(1, KIND_KUBEJS_LANG, "ns@s", "a", "Iron")]
     item = build_items(rows, source_locales={1: None})[0]
-    assert "source_locale" not in item
+    assert item["source_locale"] is None
     assert item["_batch_group"] == ("ns@s", KIND_KUBEJS_LANG)
 
 
@@ -230,6 +238,44 @@ def test_source_locale_survives_reopen_and_matches_scanned_origin(tmp_path):
         reopened.close()
 
 
+def test_schema_v16_backfills_legacy_ftb_locale_from_source_path(tmp_path):
+    """舊版 FTB selector 沒有 locale 時，遷移仍由可信路徑回填。"""
+    db_path = tmp_path / "legacy-ftb.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_FTB_QUEST_LANG,
+                "ftbquests@scope",
+                "chapters/a|lang:quest.title",
+                "Quest title",
+                "",
+                "",
+                SRC_CUSTOM,
+                source_path="config/ftbquests/quests/lang/pt_br/chapters/a.snbt",
+                source_selector="lang:quest.title",
+                source_hash="legacy-ftb",
+                source_format="ftb-snbt-lang",
+                pack_scope="scope",
+            )
+        ],
+    )
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    db._conn.execute(
+        "UPDATE entry_origin SET source_locale=NULL WHERE entry_id=?", (entry_id,)
+    )
+    db._conn.execute("UPDATE meta SET value='15' WHERE key='schema_version'")
+    db._conn.commit()
+    db.close()
+
+    reopened = TranslationDB(db_path)
+    try:
+        assert reopened.source_locales_for_entries([entry_id]) == {entry_id: "pt_br"}
+    finally:
+        reopened.close()
+
+
 def test_shared_cache_key_isolates_non_default_locales_and_keeps_default_keys():
     from translation_tool.core.lm_translator_shared_cache import CacheRule
 
@@ -280,6 +326,36 @@ def test_ru_only_json_namespace_is_written_and_keeps_ru_source_in_db(tmp_path):
         assert set(locales.values()) == {"ru_ru"}
     finally:
         db.close()
+
+
+@pytest.mark.parametrize("source_locale", ["zh_cn", "zh_tw"])
+def test_explicit_chinese_fallback_locale_survives_reopen(tmp_path, source_locale):
+    """明確選定的中文 fallback 是原文身份，不應被當成伴隨譯文丟失。"""
+    import json
+
+    from translation_tool.translation_db.pack_sources import scan_pack_sources
+
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / f"{source_locale}.json").write_text(
+        json.dumps({"item.demo.widget": "示例元件"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    assert result.locale_fallbacks == {"demo": source_locale}
+
+    db = TranslationDB(tmp_path / "fallback.db")
+    db.ingest("1.21.1", result.items)
+    entry_id = db._one("SELECT id FROM entry LIMIT 1")[0]
+    db.close()
+
+    reopened = TranslationDB(tmp_path / "fallback.db")
+    try:
+        assert reopened.source_locales_for_entries([entry_id]) == {
+            entry_id: source_locale
+        }
+    finally:
+        reopened.close()
 
 
 def test_js_lang_script_with_non_whitelisted_locale_is_reported_not_written(tmp_path):

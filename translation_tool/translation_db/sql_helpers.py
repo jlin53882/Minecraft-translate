@@ -46,4 +46,32 @@ def translation_review_sql(alias: str, has_review_state: bool) -> str:
     return f"CASE WHEN {alias}.source={SRC_MANUAL} THEN 'legacy_unknown' END"
 
 
-__all__ = ["effective_review_sql", "like_pattern", "translation_review_sql"]
+def source_locale_sql(entry_alias: str) -> str:
+    """回傳持久化來源語系的 SQL 摘要。
+
+    ``unknown:<entry_id>`` 是查詢內部的唯一哨兵值：來源不存在、包含無法
+    還原的來源，或同一條目混有多個語系時，都不能只以空字串與其他 unknown
+    條目合併。已知的單一來源語系則直接回傳正規化 token。新掃描明確保存的
+    ``zh_tw``／``zh_cn`` 可能就是實際選定的 fallback 原文，不能因為語系名稱
+    常被用作譯文而一律排除；舊資料的遷移會把無法確認角色的來源保留為 NULL，
+    讓這裡保守回傳 unknown。
+    """
+    entry_id = f"CAST({entry_alias}.id AS TEXT)"
+    unknown = f"'unknown:' || {entry_id}"
+    return (
+        "COALESCE((SELECT CASE "
+        "WHEN EXISTS (SELECT 1 FROM entry_origin eo0 "
+        f"WHERE eo0.entry_id={entry_alias}.id AND eo0.source_locale IS NULL) "
+        f"THEN {unknown} "
+        "WHEN COUNT(DISTINCT eo.source_locale)=1 THEN MAX(eo.source_locale) "
+        f"ELSE {unknown} END FROM entry_origin eo "
+        f"WHERE eo.entry_id={entry_alias}.id), {unknown})"
+    )
+
+
+__all__ = [
+    "effective_review_sql",
+    "like_pattern",
+    "source_locale_sql",
+    "translation_review_sql",
+]

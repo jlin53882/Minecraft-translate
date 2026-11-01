@@ -21,6 +21,7 @@ from typing import Any
 import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List
 
+from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     is_extractable_line,
     is_lang_key_ref,
@@ -618,6 +619,7 @@ def _append_kubejs_lang_item(
             version=version,
             source_format="kubejs-js",
             translated_locale=locale,
+            source_locale=locale,
         )
     )
 
@@ -724,6 +726,11 @@ def _scan_kubejs_scenes(
         _record_kubejs_reason(text_expr, reason, rel, digest, scope, selector, result)
         if value is None:
             continue
+        # ``source_locale`` is the selected source snapshot, even when it is
+        # a non-English fallback.  Other locale files can still be companion
+        # translations, so do not use ``translated_locale`` here: doing so
+        # would clear ``en_us`` (the DB's source-text compatibility column)
+        # whenever a fallback pack also contains zh_tw/zh_cn.
         result.items.append(
             _make_item(
                 kind=KIND_KUBEJS_SCRIPT,
@@ -901,6 +908,7 @@ def _append_kubejs_lang_items(
                         # A zh_cn/zh_tw file selected as the fallback source is
                         # the source snapshot, not an already translated value.
                         translated_locale=locale if locale != source_locale else "",
+                        source_locale=source_locale,
                     )
                 )
 
@@ -953,6 +961,16 @@ def _scan_ftb_quests(
                 )
                 continue
             locale = _locale_for_lang_file(path, lang_root)
+            if not locale:
+                result.issues.append(
+                    _issue(
+                        path,
+                        "ftb_lang_locale_invalid",
+                        "無法從 lang 路徑辨識合法語系，已略過以避免誤當成來源",
+                        status="unsupported",
+                    )
+                )
+                continue
             rel = _lang_relative(path, lang_root, locale)
             source_path = path.relative_to(root).as_posix()
             _record_lang_references(
@@ -965,13 +983,27 @@ def _scan_ftb_quests(
             for key, value in _top_level_lang(data):
                 locale_values[(rel, key)][locale] = (value, digest, source_path)
             result.mark_source("ftb_quests", path.relative_to(root).as_posix())
+    fallback_locale = select_source_locale(
+        {
+            locale: sum(1 for values in locale_values.values() if values.get(locale))
+            for locale in {
+                locale for values in locale_values.values() for locale in values
+            }
+        }
+    )
+    if fallback_locale and fallback_locale != "en_us":
+        result.locale_fallbacks["ftbquests"] = fallback_locale
     for (rel, lang_key), locales in sorted(locale_values.items()):
-        source_entry = (
-            locales.get("en_us") or locales.get("zh_cn") or locales.get("zh_tw")
+        source_locale = (
+            "en_us"
+            if locales.get("en_us")
+            else fallback_locale
+            if fallback_locale and locales.get(fallback_locale)
+            else select_source_locale({locale: 1 for locale in locales})
         )
-        if source_entry is None:
+        if source_locale is None:
             continue
-        source, source_digest, source_path = source_entry
+        source, source_digest, source_path = locales[source_locale]
         if not source:
             continue
         digest = hashlib.sha256(
@@ -985,7 +1017,7 @@ def _scan_ftb_quests(
                 scope=scope,
                 source_kind=KIND_FTB_QUEST_LANG,
                 source_path=source_path,
-                selector=f"lang:{lang_key}",
+                selector=f"lang:{source_locale or 'unknown'}:{lang_key}",
                 text=source,
                 digest=source_digest,
             )
@@ -997,7 +1029,7 @@ def _scan_ftb_quests(
                 key=f"{rel}|lang:{lang_key}",
                 text=source,
                 rel=source_path,
-                selector=f"lang:{lang_key}",
+                selector=f"lang:{source_locale or 'unknown'}:{lang_key}",
                 digest=source_digest,
                 scope=scope,
                 version=version,
@@ -1005,18 +1037,19 @@ def _scan_ftb_quests(
                 # are companion translations.  Mark a translated locale only
                 # for a locale-only file; otherwise _make_item would clear the
                 # English source while keeping the existing translation.
-                translated_locale=(
+                translated_locale="",
+                zh_cn=(
                     ""
-                    if "en_us" in locales
-                    else "zh_tw"
-                    if "zh_tw" in locales
-                    else "zh_cn"
-                    if "zh_cn" in locales
-                    else ""
+                    if source_locale == "zh_cn"
+                    else locales.get("zh_cn", ("", ""))[0]
                 ),
-                zh_cn=locales.get("zh_cn", ("", ""))[0],
-                zh_tw=locales.get("zh_tw", ("", ""))[0],
+                zh_tw=(
+                    ""
+                    if source_locale == "zh_tw"
+                    else locales.get("zh_tw", ("", ""))[0]
+                ),
                 source_format="ftb-snbt-lang",
+                source_locale=source_locale,
             )
         )
     for path in _iter_files(root, (".snbt",), result):
@@ -1275,9 +1308,8 @@ def _append_references(
 
 def _locale_for_lang_file(path: Path, root: Path) -> str:
     relative = path.relative_to(root).parts
-    if len(relative) > 1 and relative[0].lower() in {"en_us", "zh_cn", "zh_tw"}:
-        return relative[0].lower()
-    return path.stem.lower()
+    raw_locale = relative[0] if len(relative) > 1 else path.stem
+    return normalize_source_locale(Path(raw_locale).stem) or ""
 
 
 def _lang_relative(path: Path, root: Path, locale: str) -> str:
@@ -1312,6 +1344,7 @@ def _make_item(
     zh_tw: str = "",
     zh_cn: str = "",
     source_format: str = "",
+    source_locale: str | None = None,
 ) -> ScanItem:
     if not zh_tw and translated_locale == "zh_tw":
         zh_tw = text
@@ -1339,6 +1372,7 @@ def _make_item(
             else "lang-json"
         ),
         pack_scope=scope,
+        source_locale=source_locale,
     )
 
 

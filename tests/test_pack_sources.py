@@ -425,6 +425,57 @@ def test_ftb_single_file_locale_identity_is_shared(tmp_path):
     assert items[0].source_path == "lang/en_us.snbt"
 
 
+def test_ftb_non_default_locale_is_source_and_keeps_locale_identity(tmp_path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang" / "pt_br"
+    lang.mkdir(parents=True)
+    (lang / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+
+    assert len(items) == 1
+    assert result.locale_fallbacks == {"ftbquests": "pt_br"}
+    assert items[0].source_locale == "pt_br"
+    assert items[0].source_selector == "lang:pt_br:quest.title"
+    assert items[0].source_path == "lang/pt_br/chapter.snbt"
+
+
+def test_ftb_fallback_source_keeps_companion_zh_tw_translation(tmp_path):
+    """非英文 fallback 仍是原文；同時存在的 zh_tw 只作為既有譯文。"""
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    (lang / "pt_br").mkdir(parents=True)
+    (lang / "zh_tw").mkdir(parents=True)
+    (lang / "pt_br" / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+    (lang / "zh_tw" / "chapter.snbt").write_text(
+        '{quest.title:"繁體標題"}', encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+
+    assert len(items) == 1
+    assert items[0].source_locale == "pt_br"
+    assert items[0].en_us == "Título em português"
+    assert items[0].zh_tw == "繁體標題"
+
+
+def test_ftb_invalid_locale_path_is_reported_and_not_used_as_source(tmp_path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "README.snbt").write_text(
+        '{quest.title:"Not a locale file"}', encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    assert not [item for item in result.items if item.kind == "ftb_quest_lang"]
+    assert any(issue["reason"] == "ftb_lang_locale_invalid" for issue in result.issues)
+
+
 def test_ftb_component_json_is_not_sent_as_plain_text(tmp_path):
     quests = tmp_path / "config" / "ftbquests" / "quests"
     quests.mkdir(parents=True)

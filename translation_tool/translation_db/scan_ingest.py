@@ -14,6 +14,11 @@ import sqlite3
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
+from translation_tool.core.source_locale import (
+    locale_from_source_path,
+    locale_from_source_selector,
+    normalize_source_locale,
+)
 from translation_tool.translation_db.identity import canonical_entry_key
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
@@ -218,13 +223,19 @@ class DbIngestTarget:
         """保存可回寫來源；傳統 jar 掃描沒有來源 selector，完全不寫入。"""
         if not item.source_path or not item.source_selector:
             return
+        source_locale = normalize_source_locale(item.source_locale)
+        if source_locale is None:
+            source_locale = locale_from_source_selector(item.source_selector)
+        if source_locale is None:
+            source_locale = locale_from_source_path(item.source_path)
         self.conn.execute(
             "INSERT INTO entry_origin "
             "(entry_id, pack_scope, source_kind, source_path, selector, "
-            "source_hash, format_profile) VALUES (?,?,?,?,?,?,?) "
+            "source_hash, format_profile, source_locale) VALUES (?,?,?,?,?,?,?,?) "
             "ON CONFLICT(entry_id, pack_scope, source_kind, source_path, selector) "
             "DO UPDATE SET source_hash=excluded.source_hash, "
-            "format_profile=excluded.format_profile",
+            "format_profile=excluded.format_profile, "
+            "source_locale=excluded.source_locale",
             (
                 entry_id,
                 item.pack_scope,
@@ -233,6 +244,7 @@ class DbIngestTarget:
                 item.source_selector,
                 item.source_hash,
                 item.source_format,
+                source_locale,
             ),
         )
 

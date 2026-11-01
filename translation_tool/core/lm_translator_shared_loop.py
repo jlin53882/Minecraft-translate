@@ -499,7 +499,11 @@ def translate_items_with_cache_loop(
                 continue
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
-            cache_key = rule.make_key({"path": pth, "source_text": src})
+            cache_identity = {"path": pth, "source_text": src}
+            for identity_field in ("source_locale", "pack_scope", "_entry_id"):
+                if identity_field in it:
+                    cache_identity[identity_field] = it[identity_field]
+            cache_key = rule.make_key(cache_identity)
             cache_started = time.monotonic()
             try:
                 cache_written = cache_add(ctype, cache_key, src, cache_storage_text(it))

@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -260,6 +260,7 @@ CREATE TABLE IF NOT EXISTS entry_origin (
     selector       TEXT NOT NULL,
     source_hash    TEXT NOT NULL DEFAULT '',
     format_profile TEXT NOT NULL DEFAULT '',
+    source_locale  TEXT,
     created_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (entry_id, pack_scope, source_kind, source_path, selector)
 );
@@ -346,6 +347,10 @@ def init_schema(conn: sqlite3.Connection) -> None:
     while version < SCHEMA_VERSION:
         version = _run_next_migration(conn, version)
     conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entry_origin_locale "
+        "ON entry_origin (entry_id, source_locale)"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
         "ON effective (source, review_status)"
     )
@@ -414,6 +419,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_source_reference_migration(conn)
     if next_version == 15:
         return _backup_before_entry_origin_scope_migration(conn)
+    if next_version == 16:
+        return _backup_before_entry_origin_locale_migration(conn)
     return None
 
 
@@ -465,6 +472,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_source_reference_v14(conn)
     elif next_version == 15:
         _migrate_entry_origin_scope_v15(conn)
+    elif next_version == 16:
+        _migrate_entry_origin_locale_v16(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -1121,6 +1130,71 @@ def _migrate_entry_origin_scope_v15(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX idx_entry_origin_scope "
         "ON entry_origin (pack_scope, source_kind, source_path)"
+    )
+
+
+def _backup_before_entry_origin_locale_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在保存來源語系身分前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v16-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_entry_origin_locale_v16(conn: sqlite3.Connection) -> None:
+    """保存可驗證的來源語系，並回填舊版來源的 locale。
+
+    舊版 origin 沒有記錄該檔案是選定原文還是伴隨譯文，因此先以整個
+    entry 的非中文來源判斷；只有唯一且沒有未知來源時，才把同一 entry
+    的所有 origin 回填成該 locale。只有中文來源的舊資料角色無法重建，
+    保留 NULL，避免把伴隨譯文假裝成可信原文。
+    """
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(entry_origin)").fetchall()
+    }
+    if "source_locale" not in columns:
+        conn.execute("ALTER TABLE entry_origin ADD COLUMN source_locale TEXT")
+
+    from translation_tool.core.source_locale import (
+        locale_from_source_path,
+        locale_from_source_selector,
+    )
+
+    rows = conn.execute(
+        "SELECT id, entry_id, selector, source_path "
+        "FROM entry_origin WHERE source_locale IS NULL"
+    ).fetchall()
+    by_entry: dict[int, list[tuple[int, str | None]]] = {}
+    for origin_id, entry_id, selector, source_path in rows:
+        locale = locale_from_source_selector(str(selector))
+        if locale is None:
+            locale = locale_from_source_path(str(source_path))
+        if locale in {"zh_tw", "zh_cn"}:
+            locale = None
+        by_entry.setdefault(int(entry_id), []).append((int(origin_id), locale))
+
+    updates: list[tuple[str, int]] = []
+    for origins in by_entry.values():
+        locales = {locale for _origin_id, locale in origins if locale is not None}
+        has_unknown = any(locale is None for _origin_id, locale in origins)
+        if has_unknown or len(locales) != 1:
+            continue
+        locale = next(iter(locales))
+        updates.extend((locale, origin_id) for origin_id, _ in origins)
+    if updates:
+        conn.executemany("UPDATE entry_origin SET source_locale=? WHERE id=?", updates)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_entry_origin_locale "
+        "ON entry_origin (entry_id, source_locale)"
     )
 
 
