@@ -271,9 +271,11 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
     )
     if options_are_filtered and db is not None and version:
         filtered_mods, filtered_sources = db.filter_option_values(criteria)
+        filtered_kinds = db.kind_option_values(criteria)
         # 選值在進階條件下沒有符合條目時，仍要保留原選值；
-        # 清空它會把條件放寬成其他模組／來源，讓使用者看到錯誤範圍的結果。
+        # 清空它會把條件放寬成其他模組／來源／類型，讓使用者看到錯誤範圍的結果。
         mods = sorted(set(filtered_mods) | ({mod_id} if mod_id is not None else set()))
+        kinds = sorted(set(filtered_kinds) | ({kind} if kind is not None else set()))
         source_codes = tuple(
             sorted(set(filtered_sources) | ({source} if source is not None else set()))
         )

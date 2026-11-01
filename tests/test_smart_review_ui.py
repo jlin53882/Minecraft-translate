@@ -2392,6 +2392,7 @@ def test_bulk_review_prefills_entry_scope_without_running_preview(monkeypatch):
         drafts={},
         version="1.21.1",
         mod_id="accessories",
+        kind="lang",
         source_filter=SimpleNamespace(code=7),
         db=lambda: object(),
         _after_batch_replace=lambda: None,
@@ -2415,6 +2416,7 @@ def test_bulk_review_prefills_entry_scope_without_running_preview(monkeypatch):
 
     assert captured == {
         "mod_id": "accessories",
+        "kind": "lang",
         "effective_source": 7,
         "opened": True,
     }

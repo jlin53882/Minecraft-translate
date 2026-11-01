@@ -637,12 +637,15 @@ def test_changed_options_redraw_only_the_changed_dropdowns(view, monkeypatch):
     regions = _record_regions(monkeypatch)
     entries = view.entries
 
-    entries._on_state("none")  # 沒有未翻譯條目：模組與來源選項縮減
+    kinds_before = [option.key for option in entries.kind_dd.options]
+    entries._on_state("none")  # 沒有未翻譯條目：模組、類型與來源選項縮減
     _settle(view._page)
 
     assert entries.mod_dd in regions
     assert entries.filter_card not in regions  # 只更新有變的下拉選單，不重畫整張篩選列
-    assert entries.kind_dd not in regions
+    # 類型選項跟著條件縮減（沒有未翻譯條目的類型不再列出），所以類型選單要重畫
+    assert [option.key for option in entries.kind_dd.options] != kinds_before
+    assert entries.kind_dd in regions
     assert entries.version_dd not in regions
 
 

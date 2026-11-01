@@ -468,6 +468,7 @@ def open_bulk_review(panel, _e=None) -> None:
         panel.version,
         panel._after_batch_replace,
         mod_id=panel.mod_id,
+        kind=panel.kind,
         effective_source=panel.source_filter.code,
     ).open()
 

@@ -1690,7 +1690,12 @@ class TranslationDB(
                     params,
                 )
             else:
-                pair_rows = self._cached_quality_option_pairs(option_criteria)
+                pair_rows = {
+                    (mod_id, source_code)
+                    for mod_id, source_code, _kind in self._cached_quality_option_pairs(
+                        option_criteria
+                    )
+                }
         else:
             condition, params = self._filter_sql(option_criteria)
             source = self._candidate_source(f"{condition} f.source")
@@ -1720,6 +1725,39 @@ class TranslationDB(
             )
         )
         return mods, sources
+
+    def kind_option_values(self, criteria: EntryFilter) -> tuple[str, ...]:
+        """目前條件下有條目的類型（排除類型本身的選擇；模組與來源的選擇仍會縮小清單）。
+
+        與 :meth:`filter_option_values` 使用同一套條件語意，列出的類型一定有符合條件的條目，
+        不會留下只在已排除的條件下才出現的空選項。
+        """
+        base = replace(criteria, kind=None, sort_by="default")
+        with self._lock:
+            if base.quality.active:
+                kinds = {
+                    kind
+                    for _mod, _source, kind in self._cached_quality_option_pairs(base)
+                }
+            elif (
+                option_facets.summary_eligible(base)
+                and base.source is None
+                and self._stat_summary_ready()
+            ):
+                sql, params = option_facets.kind_summary_sql(base)
+                kinds = {str(row[0]) for row in self._q(sql, params)}
+            else:
+                condition, params = self._filter_sql(base)
+                source = self._candidate_source(f"{condition} f.source")
+                sql = f"SELECT DISTINCT e.kind {source} WHERE {condition}"
+                kinds = set(
+                    self._cached(
+                        self._facet_key("kind-options", sql, params),
+                        lambda: [str(row[0]) for row in self._q(sql, params)],
+                        persist=False,
+                    )
+                )
+        return tuple(sorted(kinds))
 
     def _facet_key(self, kind: str, *parts: Any) -> str:
         digest = hashlib.sha1(
@@ -1851,7 +1889,7 @@ class TranslationDB(
 
     def _cached_quality_option_pairs(
         self, criteria: EntryFilter
-    ) -> set[tuple[str, int | None]]:
+    ) -> set[tuple[str, int | None, str]]:
         """:meth:`_quality_option_pairs` 的結果依資料世代快取（逐列判斷品質的掃描很貴）。"""
         condition, params = self._filter_sql(criteria)
         key = self._facet_key(
@@ -1862,11 +1900,11 @@ class TranslationDB(
             lambda: [list(pair) for pair in self._quality_option_pairs(criteria)],
             persist=False,
         )
-        return {(str(mod_id), source) for mod_id, source in pairs}
+        return {(str(mod_id), source, str(kind)) for mod_id, source, kind in pairs}
 
     def _quality_option_pairs(
         self, criteria: EntryFilter
-    ) -> set[tuple[str, int | None]]:
+    ) -> set[tuple[str, int | None, str]]:
         """以窄投影掃描非精確品質條件，只保留選項所需的唯一配對。
 
         品質條件的方向或 token 類別不是「全部」時，不能完全交給 qflags
@@ -1877,7 +1915,7 @@ class TranslationDB(
         prefilter = self._quality_prefilter_sql(
             criteria.quality, self._quality_flags_ready()
         )
-        pairs: set[tuple[str, int | None]] = set()
+        pairs: set[tuple[str, int | None, str]] = set()
         with self._lock:
             owns_transaction = not self._conn.in_transaction
             if owns_transaction:
@@ -1900,7 +1938,7 @@ class TranslationDB(
                             key,
                             kind=kind,
                         ):
-                            pairs.add((str(mod_id), source))
+                            pairs.add((str(mod_id), source, str(kind)))
             except sqlite3.OperationalError:
                 if is_cancelled():
                     raise TaskCancelled() from None

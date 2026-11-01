@@ -27,13 +27,14 @@ from app.ui.dialogs import (
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
-from app.views.moddb.formatting import format_count, shorten
+from app.views.moddb.formatting import format_count, kind_label, shorten
 from app.views.moddb.operation_summaries import bulk_review_result_text
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
 ACTOR = "使用者"
 ALL_MODS = "__all__"
+ALL_KINDS = "__all__"
 ALL_SOURCES = "__all__"
 PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認批量審核範圍後才能執行。"
 
@@ -49,9 +50,10 @@ class BulkReviewDialog:
         on_complete,
         *,
         mod_id: str | None = None,
+        kind: str | None = None,
         effective_source: int | None = None,
     ):
-        """初始化對話框，必要時預填條目頁的模組與目前生效來源。
+        """初始化對話框，必要時預填條目頁的模組、類型與目前生效來源。
 
         預填只設定控制項值，不會自動產生預覽，也不會開始批量審核。
         """
@@ -74,6 +76,7 @@ class BulkReviewDialog:
         self._build_controls(
             version,
             initial_mod_id=mod_id,
+            initial_kind=kind,
             initial_effective_source=effective_source,
         )
         self._build_dialog()
@@ -85,6 +88,7 @@ class BulkReviewDialog:
         version: str | None,
         *,
         initial_mod_id: str | None = None,
+        initial_kind: str | None = None,
         initial_effective_source: int | None = None,
     ) -> None:
         """建立篩選控制項，並套用開啟對話框時傳入的初始範圍。"""
@@ -111,8 +115,22 @@ class BulkReviewDialog:
             + ([(initial_mod, initial_mod)] if initial_mod != ALL_MODS else []),
         )
         self.mod_dd.value = initial_mod
+        self.kind_dd = kit.dropdown(
+            label="類型", dense=True, width=180, on_select=self._on_kind
+        )
+        initial_kind_key = initial_kind or ALL_KINDS
+        kit.set_dropdown_options(
+            self.kind_dd,
+            [(ALL_KINDS, "全部類型")]
+            + (
+                [(initial_kind_key, kind_label(initial_kind_key))]
+                if initial_kind_key != ALL_KINDS
+                else []
+            ),
+        )
+        self.kind_dd.value = initial_kind_key
         self.source_dd = kit.dropdown(
-            label="目前生效來源", dense=True, width=260, on_select=self._invalidate
+            label="目前生效來源", dense=True, width=260, on_select=self._on_source
         )
         initial_source = (
             str(initial_effective_source)
@@ -200,7 +218,12 @@ class BulkReviewDialog:
                             selectable=True,
                         ),
                         ft.Row(
-                            [self.version_dd, self.mod_dd, self.source_dd],
+                            [
+                                self.version_dd,
+                                self.mod_dd,
+                                self.kind_dd,
+                                self.source_dd,
+                            ],
                             spacing=12,
                             wrap=True,
                         ),
@@ -252,28 +275,53 @@ class BulkReviewDialog:
         self._generation += 1
 
     # ------------------------------------------------------------------ 選項
-    def _scope_query(self, version: str | None, quality_pass_only: bool):
-        """在背景工作中讀取版本與需要審核的模組／來源對照。"""
+    def _selected_scope(self) -> tuple[str | None, str | None, int | None]:
+        """目前選擇的（模組, 類型, 來源）；「全部」轉成 None。"""
+        mod, kind, source = self.mod_dd.value, self.kind_dd.value, self.source_dd.value
+        return (
+            None if mod in (None, "", ALL_MODS) else str(mod),
+            None if kind in (None, "", ALL_KINDS) else str(kind),
+            None if source in (None, "", ALL_SOURCES) else int(source),
+        )
+
+    def _scope_query(
+        self,
+        version: str | None,
+        quality_pass_only: bool,
+        mod_id: str | None,
+        kind: str | None,
+        source: int | None,
+    ):
+        """在背景工作中讀取版本與需要審核的模組、來源與類型對照（依目前選擇互相縮小）。"""
         db = self.get_db()
         if db is None or not version:
-            return [], (), {None: ()}
+            return [], (), {None: ()}, ()
         return (
             list(db.versions()),
             *db.bulk_review_scope_options(
                 version,
                 quality_pass_only=quality_pass_only,
+                kind=kind,
+                source=source,
+            ),
+            db.bulk_review_kind_options(
+                version,
+                quality_pass_only=quality_pass_only,
+                mod_id=mod_id,
+                source=source,
             ),
         )
 
     def _start_scope_options_load(self) -> None:
-        """背景載入需要審核的版本、模組與來源選項，不阻塞下拉選單事件。"""
+        """背景載入需要審核的版本、模組、來源與類型選項，不阻塞下拉選單事件。"""
         self._scope_seq += 1
         seq = self._scope_seq
         version = self.version_dd.value
         quality_pass_only = bool(self.quality_check.value)
+        mod_id, kind, source = self._selected_scope()
         self._scope_loading = True
         self.status.visible = True
-        self.status.value = "正在更新需要審核的模組與來源選單…"
+        self.status.value = "正在更新需要審核的模組、來源與類型選單…"
         if self._opened:
             self._safe_update()
 
@@ -281,7 +329,9 @@ class BulkReviewDialog:
             """執行範圍唯讀查詢，完成後只回傳精簡選單資料。"""
             result = error = None
             try:
-                result = self._scope_query(version, quality_pass_only)
+                result = self._scope_query(
+                    version, quality_pass_only, mod_id, kind, source
+                )
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("Mod 資料庫批量審核範圍選單載入失敗")
@@ -311,20 +361,33 @@ class BulkReviewDialog:
             if self._opened:
                 self._safe_update()
             return
-        versions, modules, sources_by_mod = result
+        versions, modules, sources_by_mod, kinds = result
         current_version = self.version_dd.value
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         self.version_dd.value = current_version if current_version in versions else None
         self._scope_modules = tuple(modules)
+        self._scope_kinds = tuple(kinds)
         self._scope_sources_by_mod = {
             key: tuple(values) for key, values in sources_by_mod.items()
         }
         self._refresh_mods()
+        self._refresh_kinds()
         self._refresh_sources()
         if not self._busy:
             self.status.visible = False
         if self._opened:
             self._safe_update()
+
+    def _refresh_kinds(self) -> None:
+        """只顯示目前模組與來源下有未審核候選的類型，並保持目前選擇值有效。"""
+        options = [
+            (ALL_KINDS, "全部類型"),
+            *((kind, kind_label(kind)) for kind in self._scope_kinds),
+        ]
+        kit.set_dropdown_options(self.kind_dd, options)
+        keys = {key for key, _label in options}
+        if self.kind_dd.value not in keys:
+            self.kind_dd.value = ALL_KINDS
 
     def _refresh_mods(self) -> None:
         """只顯示目前有未審核候選的模組，並保持目前選擇值有效。"""
@@ -354,16 +417,27 @@ class BulkReviewDialog:
             self.source_dd.value = ALL_SOURCES
 
     def _on_version(self, _e=None) -> None:
-        """版本選擇變更時重載需要審核的模組與來源，並使舊預覽失效。"""
+        """版本選擇變更時重載需要審核的模組、類型與來源，並使舊預覽失效。"""
         self.mod_dd.value = ALL_MODS
+        self.kind_dd.value = ALL_KINDS
         self.source_dd.value = ALL_SOURCES
         self._invalidate()
         self._start_scope_options_load()
 
     def _on_mod(self, _e=None) -> None:
-        """模組選擇變更時只保留該模組可用來源，並使舊預覽失效。"""
-        self._refresh_sources()
+        """模組選擇變更時重算可用類型與來源，並使舊預覽失效。"""
         self._invalidate()
+        self._start_scope_options_load()
+
+    def _on_kind(self, _e=None) -> None:
+        """類型選擇變更時重算可用模組與來源，並使舊預覽失效。"""
+        self._invalidate()
+        self._start_scope_options_load()
+
+    def _on_source(self, _e=None) -> None:
+        """來源選擇變更時重算可用模組與類型，並使舊預覽失效。"""
+        self._invalidate()
+        self._start_scope_options_load()
 
     def _on_quality_change(self, _e=None) -> None:
         """品質條件變更時重新計算需要審核的模組與來源清單。"""
@@ -398,7 +472,7 @@ class BulkReviewDialog:
             return
         source = None if source_value == ALL_SOURCES else int(source_value)
         source_text = "全部來源" if source is None else str(source)
-        mod_id = self.mod_dd.value if self.mod_dd.value != ALL_MODS else None
+        mod_id, kind, _source = self._selected_scope()
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
         generation = self._generation
@@ -412,6 +486,7 @@ class BulkReviewDialog:
                     version,
                     source,
                     mod_id=mod_id,
+                    kind=kind,
                     quality_pass_only=quality,
                     propagate=propagate,
                 )

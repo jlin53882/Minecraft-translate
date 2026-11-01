@@ -107,42 +107,64 @@ def scan_species_candidates(
     return SpeciesScanResult(tuple(c for c in candidates if c is not None))
 
 
-def species_scope_options(
-    db: TranslationDB | None,
-    version: str | None,
-    *,
-    kind: str | None = None,
-    require_key_hint: bool = True,
-) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
-    """取得含學名候選的模組與目前生效來源對照。
-
-    ``None`` 模組鍵代表全部模組；模組清單沿用掃描的品質預篩，
-    來源只列出候選實際具有的目前生效來源，沒有生效譯文的候選仍保留在模組清單。
-    """
-    if db is None or not version:
-        return (), {None: ()}
+def _species_scope_triples(
+    db: TranslationDB, version: str, require_key_hint: bool
+) -> list[tuple[str, int | None, str]]:
+    """範圍選單用的學名候選（模組, 目前生效來源, 類型）；不限類型，讓各下拉選單互相縮小。"""
     criteria = EntryFilter(
         version=version,
-        kind=kind,
         quality=QualityFilter(
             status="species_name" if require_key_hint else "species_format"
         ),
     )
     rows, _total = db.list_entries(criteria=criteria, limit=None)
-    modules: list[str] = []
+    return [
+        (
+            str(row.mod_id),
+            int(row.source) if row.source is not None else None,
+            str(row.kind),
+        )
+        for row in rows
+        if _candidate_from_row(row, require_key_hint=require_key_hint) is not None
+    ]
+
+
+def species_scope_options(
+    db: TranslationDB | None,
+    version: str | None,
+    *,
+    kind: str | None = None,
+    source: int | None = None,
+    require_key_hint: bool = True,
+) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
+    """取得含學名候選的模組與目前生效來源對照。
+
+    ``None`` 模組鍵代表全部模組。類型會縮小模組與來源清單；來源選擇只縮小模組清單。
+    來源只列出候選實際具有的目前生效來源，沒有生效譯文的候選仍保留在模組清單。
+    """
+    if db is None or not version:
+        return (), {None: ()}
+    in_kind = [
+        (mod_id, source_code)
+        for mod_id, source_code, kind_value in _species_scope_triples(
+            db, version, require_key_hint
+        )
+        if kind is None or kind_value == kind
+    ]
+    modules = sorted(
+        {
+            mod_id
+            for mod_id, source_code in in_kind
+            if source is None or source_code == source
+        }
+    )
     sources_by_mod: dict[str, set[int]] = {}
     all_sources: set[int] = set()
-    for row in rows:
-        if _candidate_from_row(row, require_key_hint=require_key_hint) is None:
-            continue
-        mod_id = str(row.mod_id)
-        if mod_id not in sources_by_mod:
-            modules.append(mod_id)
-            sources_by_mod[mod_id] = set()
-        if row.source is not None:
-            source = int(row.source)
-            sources_by_mod[mod_id].add(source)
-            all_sources.add(source)
+    for mod_id, source_code in in_kind:
+        sources = sources_by_mod.setdefault(mod_id, set())
+        if source_code is not None:
+            sources.add(source_code)
+            all_sources.add(source_code)
     return (
         tuple(modules),
         {
@@ -152,6 +174,31 @@ def species_scope_options(
                 for mod_id, sources in sources_by_mod.items()
             },
         },
+    )
+
+
+def species_kind_options(
+    db: TranslationDB | None,
+    version: str | None,
+    *,
+    mod_id: str | None = None,
+    source: int | None = None,
+    require_key_hint: bool = True,
+) -> tuple[str, ...]:
+    """目前模組與來源選擇下，仍有學名候選的類型（類型本身的選擇不限制）。"""
+    if db is None or not version:
+        return ()
+    return tuple(
+        sorted(
+            {
+                kind_value
+                for mod_value, source_code, kind_value in _species_scope_triples(
+                    db, version, require_key_hint
+                )
+                if (mod_id is None or mod_value == mod_id)
+                and (source is None or source_code == source)
+            }
+        )
     )
 
 
@@ -171,5 +218,6 @@ __all__ = [
     "lookup_species",
     "lookup_species_name",
     "scan_species_candidates",
+    "species_kind_options",
     "species_scope_options",
 ]

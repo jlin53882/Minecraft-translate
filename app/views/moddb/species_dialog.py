@@ -16,6 +16,7 @@ from app.services_impl.moddb_service import (
     SpeciesScanResult,
     cached_species_lookup,
     scan_species_candidates,
+    species_kind_options,
     species_scope_options,
 )
 from app.tasks.operation_registry import (
@@ -44,6 +45,7 @@ from translation_tool.utils.log_unit import log_exception
 # 候選列表每頁顯示幾筆（候選數量不設上限，用頁碼切換）。
 PAGE_SIZE = 50
 ALL_MODS = "__all__"
+ALL_KINDS = "__all__"
 ALL_SOURCES = "__all__"
 # 批次查詢時畫面最多每隔這麼久才重繪一次。
 UI_FLUSH_INTERVAL_SECONDS = 0.25
@@ -110,6 +112,7 @@ class SpeciesCandidateDialog:
         self._closed = False
         self._opened = False
         self._scope_modules: tuple[str, ...] = ()
+        self._scope_kinds: tuple[str, ...] = ()
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
         self._source_catalog = getattr(self.get_db(), "source_catalog", None)
         self.job = bulk.bulk_lookup_for(page)
@@ -148,6 +151,23 @@ class SpeciesCandidateDialog:
             width=260,
             on_select=self._on_source,
         )
+        self.kind_dd = kit.dropdown(
+            label="類型",
+            dense=True,
+            width=200,
+            on_select=self._on_kind,
+        )
+        initial_kind = self.kind or ALL_KINDS
+        kit.set_dropdown_options(
+            self.kind_dd,
+            [(ALL_KINDS, "全部類型")]
+            + (
+                [(initial_kind, kind_label(initial_kind))]
+                if initial_kind != ALL_KINDS
+                else []
+            ),
+        )
+        self.kind_dd.value = initial_kind
         self.loose_check = ft.Checkbox(
             label="包含沒有學名 key 的候選（雜訊較多）",
             value=False,
@@ -236,22 +256,33 @@ class SpeciesCandidateDialog:
         self.background_btn.visible = False
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
-    def _scope_query(self, require_key_hint: bool):
-        """在背景工作中讀取學名候選的模組與來源對照。"""
-        return species_scope_options(
-            self.get_db(),
+    def _scope_query(self, require_key_hint: bool, kind, mod_id, source):
+        """在背景工作中讀取學名候選的模組、來源與類型對照（依目前選擇互相縮小）。"""
+        db = self.get_db()
+        modules, sources_by_mod = species_scope_options(
+            db,
             self.version,
-            kind=self.kind,
+            kind=kind,
+            source=source,
             require_key_hint=require_key_hint,
         )
+        kinds = species_kind_options(
+            db,
+            self.version,
+            mod_id=mod_id,
+            source=source,
+            require_key_hint=require_key_hint,
+        )
+        return modules, sources_by_mod, kinds
 
     def _start_scope_options_load(self) -> None:
         """背景載入學名篩選選項，避免開啟或切換條件時阻塞 UI。"""
         self._scope_seq += 1
         seq = self._scope_seq
         require_key_hint = not bool(self.loose_check.value)
+        kind, mod_id, source = self.kind, self.mod_id, self.effective_source
         self._scope_loading = True
-        self.status.value = "正在更新學名候選的模組與來源選單…"
+        self.status.value = "正在更新學名候選的模組、來源與類型選單…"
         if self._opened:
             self._flush(force=True)
 
@@ -259,7 +290,7 @@ class SpeciesCandidateDialog:
             """執行範圍唯讀查詢，只回傳下拉選單需要的資料。"""
             result = error = None
             try:
-                result = self._scope_query(require_key_hint)
+                result = self._scope_query(require_key_hint, kind, mod_id, source)
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("Mod 資料庫學名掃描範圍選單載入失敗")
@@ -275,16 +306,14 @@ class SpeciesCandidateDialog:
                 if self._opened:
                     self._flush(force=True)
                 return
-            modules, sources_by_mod = result
+            modules, sources_by_mod, kinds = result
             self._scope_modules = tuple(modules)
             self._scope_sources_by_mod = {
                 key: tuple(values) for key, values in sources_by_mod.items()
             }
-            current_mod = self.mod_dd.value
-            known_mods = {ALL_MODS, *self._scope_modules}
-            selected_mod = current_mod if current_mod in known_mods else ALL_MODS
-            self.mod_dd.value = selected_mod
-            self.mod_id = None if selected_mod == ALL_MODS else str(selected_mod)
+            self._scope_kinds = tuple(kinds)
+            self._refresh_mod_options()
+            self._refresh_kind_options()
             self._refresh_source_options()
             if not self._busy:
                 self.status.value = "尚未掃描"
@@ -297,8 +326,30 @@ class SpeciesCandidateDialog:
             presentation=OperationPresentation.MAINTENANCE,
         )
 
+    def _refresh_mod_options(self) -> None:
+        """模組選單只列目前類型與來源下有學名候選的模組；選擇失效時改回全部模組。"""
+        options = [(ALL_MODS, "全部模組"), *((mod, mod) for mod in self._scope_modules)]
+        kit.set_dropdown_options(self.mod_dd, options)
+        keys = {key for key, _label in options}
+        selected = self.mod_dd.value if self.mod_dd.value in keys else ALL_MODS
+        self.mod_dd.value = selected
+        self.mod_id = None if selected == ALL_MODS else str(selected)
+
+    def _refresh_kind_options(self) -> None:
+        """類型選單只列目前模組與來源下有學名候選的類型；選擇失效時改回全部類型。"""
+        options = [
+            (ALL_KINDS, "全部類型"),
+            *((kind, kind_label(kind)) for kind in self._scope_kinds),
+        ]
+        kit.set_dropdown_options(self.kind_dd, options)
+        keys = {key for key, _label in options}
+        selected = self.kind_dd.value if self.kind_dd.value in keys else ALL_KINDS
+        self.kind_dd.value = selected
+        self.kind = None if selected == ALL_KINDS else str(selected)
+        self.scope.value = self._scope_text()
+
     def _refresh_source_options(self) -> None:
-        """依目前選定模組重建學名掃描的目前生效來源清單。"""
+        """依目前選定模組與類型的學名候選重建目前生效來源清單。"""
         mod_key = self.mod_id or None
         codes = self._scope_sources_by_mod.get(mod_key, ())
         catalog = self._source_catalog
@@ -320,18 +371,27 @@ class SpeciesCandidateDialog:
         self.scope.value = self._scope_text()
 
     def _on_mod(self, _e=None) -> None:
-        """模組變更時更新來源選單，並要求使用者重新掃描。"""
+        """模組變更時重算類型與來源選單，並要求使用者重新掃描。"""
         value = self.mod_dd.value
         self.mod_id = None if value in (None, "", ALL_MODS) else str(value)
-        self._refresh_source_options()
         self._invalidate_scan()
+        self._start_scope_options_load()
+
+    def _on_kind(self, _e=None) -> None:
+        """類型變更時重算模組與來源選單，並要求使用者重新掃描。"""
+        value = self.kind_dd.value
+        self.kind = None if value in (None, "", ALL_KINDS) else str(value)
+        self.scope.value = self._scope_text()
+        self._invalidate_scan()
+        self._start_scope_options_load()
 
     def _on_source(self, _e=None) -> None:
-        """目前生效來源變更時更新掃描範圍，不自動開始掃描。"""
+        """目前生效來源變更時重算模組與類型選單，不自動開始掃描。"""
         value = self.source_dd.value
         self.effective_source = None if value in (None, "", ALL_SOURCES) else int(value)
         self.scope.value = self._scope_text()
         self._invalidate_scan()
+        self._start_scope_options_load()
 
     def _on_loose_change(self, _e=None) -> None:
         """切換寬鬆學名條件時重新過濾模組與來源，但不自動掃描。"""
@@ -349,7 +409,7 @@ class SpeciesCandidateDialog:
                         self.scope,
                         self.hint,
                         ft.Row(
-                            [self.mod_dd, self.source_dd],
+                            [self.mod_dd, self.kind_dd, self.source_dd],
                             spacing=10,
                             wrap=True,
                         ),

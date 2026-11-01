@@ -391,7 +391,7 @@ def test_dialog_filters_preview_by_module(db, monkeypatch):
     assert {option.key for option in dialog.mod_dd.options} == {"__all__", "foo", "bar"}
     dialog.mod_dd.value = "foo"
     dialog._on_mod()
-    assert len(scope_calls) == 1
+    _drain(page)
     assert [option.key for option in dialog.source_dd.options] == [
         ALL_SOURCES,
         str(SRC_JAR_TW),

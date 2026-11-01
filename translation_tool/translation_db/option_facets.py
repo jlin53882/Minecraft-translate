@@ -46,8 +46,8 @@ def _source_sums(codes: Sequence[int], column: str, weight: str) -> str:
     )
 
 
-def summary_sql(criteria: EntryFilter, codes: Sequence[int]) -> tuple[str, list]:
-    """由 ``stat_src`` 計算分面的 SQL 與參數（需先確認 :func:`summary_eligible`）。"""
+def _summary_where(criteria: EntryFilter) -> tuple[list[str], list]:
+    """版本、類型、無譯文與審核狀態在 ``stat_src`` 上的條件（需先確認 :func:`summary_eligible`）。"""
     where = ["mc_version = ?"]
     params: list = [criteria.version]
     if criteria.kind:
@@ -62,6 +62,12 @@ def summary_sql(criteria: EntryFilter, codes: Sequence[int]) -> tuple[str, list]
     elif criteria.review_status is not None:
         where.append("review = ?")
         params.append(criteria.review_status)
+    return where, params
+
+
+def summary_sql(criteria: EntryFilter, codes: Sequence[int]) -> tuple[str, list]:
+    """由 ``stat_src`` 計算分面的 SQL 與參數（需先確認 :func:`summary_eligible`）。"""
+    where, params = _summary_where(criteria)
     sql = (
         "SELECT mod_id, SUM(cnt), "
         f"SUM(CASE WHEN source <> {NO_SOURCE} THEN cnt ELSE 0 END){_source_sums(codes, 'source', 'cnt')} "
@@ -69,6 +75,22 @@ def summary_sql(criteria: EntryFilter, codes: Sequence[int]) -> tuple[str, list]
         "GROUP BY mod_id HAVING SUM(cnt) > 0"
     )
     return sql, [*codes, *params]
+
+
+def kind_summary_sql(criteria: EntryFilter) -> tuple[str, list]:
+    """由 ``stat_src`` 列出條件下有條目的類型（需先確認 :func:`summary_eligible`，且 ``criteria.kind`` 已清空）。
+
+    模組選擇會縮小類型清單；類型本身不限制，所以選了某個類型後其他類型仍會列出。
+    """
+    where, params = _summary_where(criteria)
+    if criteria.mod_id:
+        where.append("mod_id = ?")
+        params.append(criteria.mod_id)
+    sql = (
+        f"SELECT kind FROM stat_src WHERE {' AND '.join(where)} "
+        "GROUP BY kind HAVING SUM(cnt) > 0"
+    )
+    return sql, params
 
 
 def scan_sql(

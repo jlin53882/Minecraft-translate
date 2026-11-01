@@ -703,6 +703,8 @@ class BulkReviewPlan:
     # (候選 entry_id, 會被寫入的其他版本筆數, 其中目前譯文不同（會被取代）的筆數, 狀態摘要)
     # 摘要涵蓋所有原文相同的其他版本的譯文、來源與審核狀態，確認時逐筆比對
     sibling_info: tuple[tuple[int, int, int, str], ...] = ()
+    # 類型範圍（None 代表全部類型）；放在最後是為了保留既有欄位的位置參數順序
+    kind: str | None = None
 
     def sibling_totals(self, excluded: Iterable[int] = ()) -> tuple[int, int]:
         """扣掉被排除的條目後，同步會寫入的其他版本筆數與其中會取代不同譯文的筆數。"""
