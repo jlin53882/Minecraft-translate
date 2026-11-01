@@ -12,10 +12,12 @@ from collections.abc import Sequence
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import (
+    MARKUP_ORDER_CATEGORY,
     FormatDiagnostic,
     FormatDiagnosticsResult,
     FormatSpan,
     analyze_format_diagnostics,
+    diagnostic_action,
 )
 from app.ui import design, kit
 from app.ui.design import C
@@ -38,15 +40,22 @@ def _count_cell(text: str, **style) -> ft.Text:
 def _diagnostic_row(issue: FormatDiagnostic) -> ft.Row:
     """One table row for a structured diagnostic, with the cause spelled out."""
     tone = C.RED if issue.direction == "extra" else C.GOLD
-    action = "缺少" if issue.direction == "missing" else "多出"
-    detail: list[ft.Control] = [
-        _table_cell(
-            f"{action} {abs(issue.delta)} 個", color=tone, weight=ft.FontWeight.W_600
-        ),
-        ft.Text(
+    if issue.category == MARKUP_ORDER_CATEGORY:
+        tone = C.GOLD
+        count_text = "順序不同"
+        advice = "譯文的標記順序與原文不同；若是合理的語序調整可保留，否則請調整。"
+    else:
+        action = diagnostic_action(issue)
+        count_text = f"{action} {abs(issue.delta)} 個"
+        advice = (
             "譯文少了原文有的標記，請補回。"
             if issue.direction == "missing"
-            else "譯文多出原文沒有的標記，請移除。",
+            else "譯文多出原文沒有的標記，請移除。"
+        )
+    detail: list[ft.Control] = [
+        _table_cell(count_text, color=tone, weight=ft.FontWeight.W_600),
+        ft.Text(
+            advice,
             size=11,
             color=C.MUTED,
             no_wrap=False,

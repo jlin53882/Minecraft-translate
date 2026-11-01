@@ -52,3 +52,46 @@ def test_placeholders_still_checked_alongside_markup_tags():
         "<imp>Level %s<r>", "<imp>等級<r>", kind="kubejs_script"
     )
     assert "少了 1 個「%s」" in issues
+
+
+def test_same_tag_order_passes():
+    assert (
+        translation_issues("<imp>A<r> B", "<imp>甲<r> 乙", kind="kubejs_script") == []
+    )
+
+
+def test_swapped_tag_order_is_reported():
+    issues = translation_issues(
+        "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="kubejs_script"
+    )
+    assert issues == ["標記順序與原文不同"]
+
+
+def test_order_is_not_reported_when_tags_are_also_missing():
+    # 數量已經不同時只回報數量問題，避免同一個錯誤被重複計算
+    issues = translation_issues(
+        "<imp>A<r> <item>B<r>", "<imp>甲<r>", kind="kubejs_script"
+    )
+    assert "標記順序與原文不同" not in issues
+    assert "少了 1 個「<item>」" in issues
+
+
+def test_order_diagnostic_has_its_own_action_wording():
+    from translation_tool.core.format_diagnostics import diagnostic_action
+
+    result = analyze_format_diagnostics(
+        "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="kubejs_script"
+    )
+    order = [d for d in result.diagnostics if d.category == "markup_order"]
+    assert len(order) == 1
+    assert diagnostic_action(order[0]) == "順序不同"
+    assert order[0].summary == "標記順序與原文不同"
+
+
+def test_order_check_is_scoped_to_kubejs_script():
+    assert (
+        translation_issues(
+            "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="lang"
+        )
+        == []
+    )
