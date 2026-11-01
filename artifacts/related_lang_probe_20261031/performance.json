@@ -1,0 +1,71 @@
+{
+  "db": "lang_v2.db (jar-derived ATM10 lang, 158,317 entries)",
+  "gate_note": "70k = 70,000 distinct targets on a 158k-entry DB; not a 70k-entry DB; no index build; retrieval only, no AI and no UI",
+  "sample_1000_pass1": {
+    "targets": 1000,
+    "total_s": 6.68,
+    "p50_ms": 4.82,
+    "p95_ms": 19.42,
+    "p99_ms": 25.1,
+    "max_ms": 29.51,
+    "zero_evidence": 56,
+    "max_per_target": 5,
+    "mean_per_target": 4.52,
+    "counts": {
+      "('lexical', 'low')": 4361,
+      "targets_with_structural": 115,
+      "('structural_suffix', 'medium')": 88,
+      "with_zh": 904,
+      "untranslated_reference": 73,
+      "('structural_suffix', 'low')": 27,
+      "('sibling_variant', 'low')": 45
+    }
+  },
+  "sample_1000_pass2": {
+    "targets": 1000,
+    "total_s": 6.47,
+    "p50_ms": 4.25,
+    "p95_ms": 19.68,
+    "p99_ms": 24.01,
+    "max_ms": 29.37,
+    "zero_evidence": 38,
+    "max_per_target": 5,
+    "mean_per_target": 4.62,
+    "counts": {
+      "('lexical', 'low')": 4477,
+      "targets_with_structural": 103,
+      "with_zh": 911,
+      "('structural_suffix', 'medium')": 86,
+      "untranslated_reference": 80,
+      "('sibling_variant', 'low')": 35,
+      "('structural_suffix', 'low')": 17
+    }
+  },
+  "gate_70k": {
+    "targets": 70000,
+    "total_s": 444.84,
+    "p50_ms": 4.21,
+    "p95_ms": 18.38,
+    "p99_ms": 24.59,
+    "max_ms": 192.59,
+    "zero_evidence": 3663,
+    "max_per_target": 5,
+    "mean_per_target": 4.55,
+    "counts": {
+      "('lexical', 'low')": 308308,
+      "targets_with_structural": 7771,
+      "with_zh": 62984,
+      "('structural_suffix', 'medium')": 6179,
+      "('sibling_variant', 'low')": 2565,
+      "untranslated_reference": 5677,
+      "('structural_suffix', 'low')": 1602
+    }
+  },
+  "peak_rss_mb": 32.2,
+  "db_unchanged": {
+    "size_before": 199708672,
+    "size_after": 199708672,
+    "mtime_before": 1793543970.7762601,
+    "mtime_after": 1793543970.7762601
+  }
+}

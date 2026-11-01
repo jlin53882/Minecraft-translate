@@ -1,0 +1,1019 @@
+"sample_no","stratum","entry_id","mod_id","mc_version","kind","key","target_en_us","target_zh_tw_existing","target_review_status","A_context_summary","B_top5_candidates","relevance_reasons","candidate_confidence_and_limitations","relation_label","same_entity","evidence_helps_disambiguate","term_conflict_label","expected_translation_or_rule","reviewer_notes"
+"1","structural","98475","mekanismgenerators","1.21.1","lang","configuration.mekanismgenerators.server.turbine.rate.disperser","Dispersion Rate","","none","5 candidates; structural=1","[1] configuration.mekanismgenerators.server.turbine.rate.disperser.tooltip | EN: The rate in mB/t at which steam is dispersed into the turbine. | ZH:  | structural_suffix
+[2] alias.mekanismgenerators.multiblock.turbine | EN: Turbine Multiblock Component | ZH: 工業渦輪多方塊組件 | lexical
+[3] block.mekanismgenerators.turbine_casing | EN: Turbine Casing | ZH: 渦輪外殼 | lexical
+[4] block.mekanismgenerators.turbine_rotor | EN: Turbine Rotor | ZH: 渦輪轉子 | lexical
+[5] block.mekanismgenerators.turbine_valve | EN: Turbine Valve | ZH: 渦輪閥門 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['turbine']
+[3] lexical overlap on ['turbine']
+[4] lexical overlap on ['turbine']
+[5] lexical overlap on ['turbine']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"2","structural","99092","mekanismtools","1.21.1","lang","configuration.mekanismtools.startup.materials.refined_glowstone.attack_speed.hoe.tooltip","Attack speed of Refined Glowstone hoes.","","none","5 candidates; structural=1","[1] configuration.mekanismtools.startup.materials.refined_glowstone.attack_speed.hoe | EN: Hoe Attack Speed | ZH:  | structural_suffix
+[2] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.boots | EN: Boots Chance | ZH:  | lexical
+[3] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.boots.tooltip | EN: The chance that mobs can spawn with Refined Glowstone boots. | ZH:  | lexical
+[4] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.chestplate | EN: Chestplate Chance | ZH:  | lexical
+[5] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.chestplate.tooltip | EN: The chance that mobs can spawn with Refined Glowstone chestplates. | ZH:  | lexical","[1] structural: same identifier 'configuration.mekanismtools.startup.materials.refined_glowstone.attack_speed.hoe' with a different suffix
+[2] lexical overlap on ['glowstone']
+[3] lexical overlap on ['glowstone']
+[4] lexical overlap on ['glowstone']
+[5] lexical overlap on ['glowstone']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"3","structural","10998","ars_elemental","1.21.1","lang","effect.ars_elemental.repel.description","The target is repelled from one or more places by a magic force.","魔法力量會將受影響實體推離一個或多個地點。","none","1 candidates; structural=1","[1] effect.ars_elemental.repel | EN: Repelled | ZH: 排斥 | structural_suffix","[1] structural: same identifier 'effect.ars_elemental.repel' with a different suffix","[1] medium; review=none; unreviewed or unknown review status: not authoritative","","","","","",""
+"4","structural","86915","journeymap","1.21.1","lang","jm.theme.labelsource.region.tooltip","Shows the current Region Coordinates","顯示目前區域座標","none","5 candidates; structural=1","[1] jm.theme.labelsource.region | EN: Region | ZH: 區域 | structural_suffix
+[2] jm.common.automap_region_chunks | EN: Chunks mapped: %1$s | ZH: 已繪製的區塊：%1$s | lexical
+[3] jm.common.automap_region_complete | EN: Auto-Mapped | ZH: 自動繪製已完成 | lexical
+[4] jm.common.automap_region_start | EN: Auto-Mapping | ZH: 自動繪製中... | lexical
+[5] jm.common.delete_region_status_done | EN: Region deleted. | ZH: 區域已被刪除。 | lexical","[1] structural: same identifier 'jm.theme.labelsource.region' with a different suffix
+[2] lexical overlap on ['region']
+[3] lexical overlap on ['region']
+[4] lexical overlap on ['region']
+[5] lexical overlap on ['region']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"5","structural","96424","mekanism","1.21.1","lang","configuration.mekanism.storage.chemical_crystallizer.energy","Chemical Crystallizer Energy Storage","","none","5 candidates; structural=1","[1] configuration.mekanism.storage.chemical_crystallizer.energy.tooltip | EN: Base energy storage in Joules of: Chemical Crystallizer | ZH:  | structural_suffix
+[2] advancements.mekanism.chemical_crystallizer.description | EN: Craft a Chemical Crystallizer, Dissolution Chamber and Washer | ZH: 製作一臺化學結晶器, 化學溶解室和化學清洗機 | lexical
+[3] advancements.mekanism.chemical_crystallizer.title | EN: The Most Bang for Your Buck | ZH: 物超所值 | lexical
+[4] advancements.mekanism.chemical_tank.description | EN: Craft a place to store (almost) all your chemicals | ZH: 製作一個可以儲存(幾乎)所有化學物質的地方 | lexical
+[5] advancements.mekanism.chemical_tank.title | EN: Inhalation Not Recommended | ZH: 不建議吸入 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['chemical', 'crystallizer']
+[3] lexical overlap on ['chemical', 'crystallizer']
+[4] lexical overlap on ['chemical']
+[5] lexical overlap on ['chemical']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"6","structural","98889","mekanismtools","1.21.1","lang","configuration.mekanismtools.startup.materials.bronze.efficiency.paxel.tooltip","Efficiency of Bronze paxels.","","none","5 candidates; structural=1","[1] configuration.mekanismtools.startup.materials.bronze.efficiency.paxel | EN: Paxel Efficiency | ZH:  | structural_suffix
+[2] advancements.mekanismtools.paxel.description | EN: Craft any Paxel (Pickaxe, Axe, Shovel) | ZH: 製作任一種鎬尖斧(鎬子, 斧頭, 鏟子) | lexical
+[3] advancements.mekanismtools.paxel.title | EN: Multi-Tool | ZH: 多功能工具 | lexical
+[4] configuration.mekanismtools.server.gear_spawn_chance.bronze.chance.boots | EN: Boots Chance | ZH:  | lexical
+[5] configuration.mekanismtools.server.gear_spawn_chance.bronze.chance.boots.tooltip | EN: The chance that mobs can spawn with Bronze boots. | ZH:  | lexical","[1] structural: same identifier 'configuration.mekanismtools.startup.materials.bronze.efficiency.paxel' with a different suffix
+[2] lexical overlap on ['paxel']
+[3] lexical overlap on ['paxel']
+[4] lexical overlap on ['bronze']
+[5] lexical overlap on ['bronze']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"7","structural","51197","computercraft","1.21.1","lang","gui.computercraft.config.monitor_renderer","Monitor renderer","","none","5 candidates; structural=1","[1] gui.computercraft.config.monitor_renderer.tooltip | EN: The renderer to use for monitors. Generally this should be kept at ""best"" - if
+monitors have performance issues, you may wish to experiment with alternative
+renderers.
+Allowed Values: BEST, TBO, VBO | ZH:  | structural_suffix
+[2] block.computercraft.monitor_advanced | EN: Advanced Monitor | ZH:  | lexical
+[3] block.computercraft.monitor_normal | EN: Monitor | ZH:  | lexical
+[4] gui.computercraft.config.monitor_distance | EN: Monitor distance | ZH:  | lexical
+[5] gui.computercraft.config.monitor_distance.tooltip | EN: The maximum distance monitors will render at. This defaults to the standard tile
+entity limit, but may be extended if you wish to build larger monitors.
+Range: 16 ~ 1024 | ZH:  | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['monitor']
+[3] lexical overlap on ['monitor']
+[4] lexical overlap on ['monitor']
+[5] lexical overlap on ['monitor']","[1] low; review=none; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"8","structural","86300","journeymap","1.21.1","lang","jm.common.map_filter.sepia_3.tooltip","Sepia color filter","深褐色色彩濾鏡","none","5 candidates; structural=1","[1] jm.common.map_filter.sepia_3 | EN: Sepia Variant 3 | ZH: 深褐色變體 3 | structural_suffix
+[2] controlify.binding.journeymap.category | EN: JourneyMap | ZH: JourneyMap | lexical
+[3] controlify.binding.journeymap.create_waypoint | EN: Create Waypoint at cursor | ZH: Create Waypoint at cursor | lexical
+[4] controlify.binding.journeymap.open_context | EN: Open Context Menu | ZH: Open Context Menu | lexical
+[5] controlify.binding.journeymap.pan_down | EN: Pan Down | ZH: Pan Down | lexical","[1] structural: same identifier 'jm.common.map_filter.sepia_3' with a different suffix
+[2] lexical overlap on ['map']
+[3] lexical overlap on ['map']
+[4] lexical overlap on ['map']
+[5] lexical overlap on ['map']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; untranslated_reference: zh_tw repeats the English, not a translation
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; untranslated_reference: zh_tw repeats the English, not a translation
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; untranslated_reference: zh_tw repeats the English, not a translation
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; untranslated_reference: zh_tw repeats the English, not a translation","","","","","",""
+"9","structural","115277","occultism","1.21.1","lang","item.occultism.ritual_dummy.possess_witch","Ritual: Summon Possessed Witch","","none","5 candidates; structural=1","[1] item.occultism.ritual_dummy.possess_witch.tooltip | EN: The Possessed Witch will drop a special filled bottle. | ZH:  | structural_suffix
+[2] block.occultism.skeleton_skull_dummy | EN: Skeleton Skull | ZH:  | lexical
+[3] block.occultism.wither_skeleton_skull_dummy | EN: Wither Skeleton Skull | ZH:  | lexical
+[4] book.occultism.dictionary_of_spirits.crafting_rituals.apprentice_ritual_satchel.about.text | EN: A ritual satchel can hold items needed to create pentacles for rituals.
+An item with durability will be used until only 1 durability remains, which will stop the glint effect.
+Other items cannot be placed in the satchel.
+\
+The satchel allows to speed up setting pentacles by automatically choosing the right items from the satchel, instead of manually selecting chalks, candles and other items to place them.
+ | ZH:  | lexical
+[5] book.occultism.dictionary_of_spirits.crafting_rituals.apprentice_ritual_satchel.about.title | EN: About | ZH:  | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['dummy']
+[3] lexical overlap on ['dummy']
+[4] lexical overlap on ['ritual']
+[5] lexical overlap on ['ritual']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"10","structural","9211","apothic_enchanting","1.21.1","lang","enchantment.apothic_enchanting.icy_thorns.desc","Slows attackers.","","none","1 candidates; structural=1","[1] enchantment.apothic_enchanting.icy_thorns | EN: Icy Thorns | ZH:  | structural_suffix","[1] structural: same identifier 'enchantment.apothic_enchanting.icy_thorns' with a different suffix","[1] medium; review=none; unreviewed or unknown review status: not authoritative","","","","","",""
+"11","structural","146876","supplementaries","1.21.1","lang","supplementaries.configuration.general.configs_button","Configs Button","","none","5 candidates; structural=1","[1] supplementaries.configuration.general.configs_button.description | EN: Enable Quark style config button on main menu | ZH:  | structural_suffix
+[2] commands.supplementaries.configs | EN: Install Configured to access configs | ZH: Install Configured to access configs | lexical
+[3] commands.supplementaries.configs_reloaded | EN: Supplementaries Configs reloaded! | ZH: 《補充物》的配置設定已重新載入！ | lexical
+[4] supplementaries.configuration.general | EN: General | ZH:  | lexical
+[5] supplementaries.configuration.general.dynamic_assets_generation_mode | EN: Dynamic Assets Generation Mode | ZH:  | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['configs']
+[3] lexical overlap on ['configs']
+[4] lexical overlap on ['general']
+[5] lexical overlap on ['general']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; untranslated_reference: zh_tw repeats the English, not a translation
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"12","structural","89627","mahoutsukai","1.21.1","lang","advancements.breadcrumbs.description","Killed your first villager with Morgan.","","none","1 candidates; structural=1","[1] advancements.breadcrumbs.title | EN: How many breads have you eaten in your life? | ZH:  | structural_suffix","[1] structural: same identifier 'advancements.breadcrumbs' with a different suffix","[1] medium; review=none; unreviewed or unknown review status: not authoritative","","","","","",""
+"13","structural","143208","sophisticatedbackpacks","1.21.1","lang","item.sophisticatedbackpacks.mob_catcher_upgrade","Mob Catcher Upgrade","","none","5 candidates; structural=1","[1] item.sophisticatedbackpacks.mob_catcher_upgrade.tooltip | EN: Captures passive mobs into backpack storage slots with sneak right-click | ZH:  | structural_suffix
+[2] item.sophisticatedbackpacks.upgrade_base | EN: Upgrade Base | ZH: 基礎升級 | lexical
+[3] item.sophisticatedbackpacks.pickup_upgrade | EN: Pickup Upgrade | ZH: 拾取升級 | lexical
+[4] item.sophisticatedbackpacks.pickup_upgrade.tooltip | EN: Makes backpack pickup items | ZH: 使背包撿起物品 | lexical
+[5] item.sophisticatedbackpacks.advanced_pickup_upgrade | EN: Advanced Pickup Upgrade | ZH: 高級拾取升級 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['upgrade']
+[3] lexical overlap on ['upgrade']
+[4] lexical overlap on ['upgrade']
+[5] lexical overlap on ['upgrade']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"14","structural","148205","the_bumblezone","1.21.1","lang","advancements.the_bumblezone.bee_stinger_paralysis.description","Paralyze a mob by shooting them non-stop with Bee Stingers from Bows/Crossbows","","none","5 candidates; structural=1","[1] advancements.the_bumblezone.bee_stinger_paralysis.title | EN: Endless Stinging | ZH:  | structural_suffix
+[2] block.the_bumblezone.beehive_beeswax | EN: Beehive Beeswax | ZH:  | lexical
+[3] block.minecraft.banner.the_bumblezone.bee.red | EN: Red Bee | ZH:  | lexical
+[4] block.minecraft.banner.the_bumblezone.bee.orange | EN: Orange Bee | ZH:  | lexical
+[5] block.minecraft.banner.the_bumblezone.bee.yellow | EN: Yellow Bee | ZH:  | lexical","[1] structural: same identifier 'advancements.the_bumblezone.bee_stinger_paralysis' with a different suffix
+[2] lexical overlap on ['bee']
+[3] lexical overlap on ['bee']
+[4] lexical overlap on ['bee']
+[5] lexical overlap on ['bee']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"15","structural","148270","the_bumblezone","1.21.1","lang","advancements.the_bumblezone.the_queens_desire.journeys_end.title","Journey's End","","none","5 candidates; structural=1","[1] advancements.the_bumblezone.the_queens_desire.journeys_end.description | EN: Complete all Queen's Desire advancements! Right click the Bee Queen for a grand final reward! | ZH:  | structural_suffix
+[2] block.the_bumblezone.string_curtain.extending_clarification | EN: Use String to extend String Curtains! | ZH:  | lexical
+[3] entity.the_bumblezone.beehemoth_friendship_progress | EN: Friendship: %s/1000 | ZH:  | lexical
+[4] buzzing_briefcase.the_bumblezone.bee_typing.agender_bee | EN: Agender Bee | ZH:  | lexical
+[5] command.the_bumblezone.queens_desired_not_active | EN: %s needs to start Queens Desire advancement first for this command to make sense... | ZH:  | lexical","[1] structural: same identifier 'advancements.the_bumblezone.the_queens_desire.journeys_end' with a different suffix
+[2] lexical overlap on ['end']
+[3] lexical overlap on ['end']
+[4] lexical overlap on ['end']
+[5] lexical overlap on ['desire', 'queens']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"16","structural","86821","journeymap","1.21.1","lang","jm.server.edit.option.all","All","全部","none","5 candidates; structural=1","[1] jm.server.edit.option.all.tooltip | EN: Enabled for Everyone | ZH: 對所有人啟用 | structural_suffix
+[2] jm.colorpalette.copy_all | EN: Copy all and replace existing | ZH: 複製全部並取代現有 | lexical
+[3] jm.colorpalette.delete_all | EN: Delete all | ZH: 全部刪除 | lexical
+[4] jm.colorpalette.delete_all_dialog | EN: Are you sure you want to remove all colors from this palette? | ZH: 您確定要從此調色板中移除所有顏色嗎？ | lexical
+[5] jm.colorpalette.domain_all | EN: All | ZH: 全部 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['all']
+[3] lexical overlap on ['all']
+[4] lexical overlap on ['all']
+[5] lexical overlap on ['all']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"17","structural","96733","mekanism","1.21.1","lang","configuration.mekanism.usage.modification_station.energy.tooltip","Energy per operation in Joules of: Modification Station","","none","5 candidates; structural=1","[1] configuration.mekanism.usage.modification_station.energy | EN: Modification Station Energy Usage | ZH:  | structural_suffix
+[2] advancements.mekanism.energy_cube.description | EN: Build an Energy Cube to store your excess power | ZH: 合成一個能量立方來儲存多餘的電力 | lexical
+[3] advancements.mekanism.energy_cube.title | EN: Save it for Later | ZH: 有備無患 | lexical
+[4] advancements.mekanism.energy_transport.description | EN: Craft a Universal Cable | ZH: 製作通用線纜 | lexical
+[5] advancements.mekanism.energy_transport.title | EN: Electron Super Highway | ZH: 電子高速公路 | lexical","[1] structural: same identifier 'configuration.mekanism.usage.modification_station.energy' with a different suffix
+[2] lexical overlap on ['energy']
+[3] lexical overlap on ['energy']
+[4] lexical overlap on ['energy']
+[5] lexical overlap on ['energy']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"18","structural","40009","cataclysm","1.21.1","lang","item.cataclysm.wrath_of_the_desert.desc","Fires three cursed sandstorms","發射三個沙咒旋風","none","5 candidates; structural=1","[1] item.cataclysm.wrath_of_the_desert | EN: Wrath of the Desert | ZH: 怒沙風弓 | structural_suffix
+[2] item.cataclysm.necklace_of_the_desert.desc | EN: It looks like you can wake something up...... | ZH: 似乎可以用來喚醒某個東西... | lexical
+[3] item.cataclysm.desert_eye | EN: Eye of Desert | ZH: 沙漠之眼 | lexical
+[4] item.cataclysm.necklace_of_the_desert | EN: Necklace of the desert | ZH: 沙漠項鍊 | lexical
+[5] entity.cataclysm.ancient_desert_stele | EN: Ancient Desert Stele | ZH: 落砂岩碑 | lexical","[1] structural: same identifier 'item.cataclysm.wrath_of_the_desert' with a different suffix
+[2] lexical overlap on ['desert']
+[3] lexical overlap on ['desert']
+[4] lexical overlap on ['desert']
+[5] lexical overlap on ['desert']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"19","structural","64968","evilcraft","1.21.1","lang","enchantment.evilcraft.vengeance.desc","Using a tool will spawn Vengeance Spirits","","none","5 candidates; structural=1","[1] enchantment.evilcraft.vengeance | EN: Curse of Vengeance | ZH:  | structural_suffix
+[2] subtitles.evilcraft.effect.vengeancebeam.base | EN: Vengeance Beam | ZH:  | lexical
+[3] subtitles.evilcraft.effect.vengeancebeam.start | EN: Vengeance Beam Start | ZH:  | lexical
+[4] subtitles.evilcraft.effect.vengeancebeam.stop | EN: Vengeance Beam Stop | ZH:  | lexical
+[5] subtitles.evilcraft.mob.vengeancespirit.ambient | EN: Vengeance Spirit Growl | ZH:  | lexical","[1] structural: same identifier 'enchantment.evilcraft.vengeance' with a different suffix
+[2] lexical overlap on ['vengeance']
+[3] lexical overlap on ['vengeance']
+[4] lexical overlap on ['vengeance']
+[5] lexical overlap on ['vengeance']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"20","structural","150280","theurgy","1.21.1","lang","item.theurgy.alchemical_sulfur_cabbage.tooltip","Alchemical Sulfur crafted from %s %s %s.","","none","5 candidates; structural=1","[1] item.theurgy.alchemical_sulfur_cabbage | EN: Alchemical Sulfur %s | ZH:  | structural_suffix
+[2] block.theurgy.incubator_sulfur_vessel | EN: Incubator Sulfur Vessel | ZH:  | lexical
+[3] block.theurgy.incubator_sulfur_vessel.tooltip | EN: A vessel to hold Sulfur for the Incubator. | ZH:  | lexical
+[4] block.theurgy.incubator_sulfur_vessel.tooltip.usage | EN: Place horizontally next to the incubator.
+§aRight-Click§r§7 with Alchemical Sulfur to fill the vessel to allow the Incubator to process it.
+ | ZH:  | lexical
+[5] block.theurgy.sulfuric_flux_emitter | EN: Sulfuric Flux Emitter | ZH:  | lexical","[1] structural: same identifier 'item.theurgy.alchemical_sulfur_cabbage' with a different suffix
+[2] lexical overlap on ['sulfur']
+[3] lexical overlap on ['sulfur']
+[4] lexical overlap on ['sulfur']
+[5] lexical overlap on ['sulfur']","[1] low; review=none; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"21","structural","67612","fancymenu","1.21.1","lang","fancymenu.element.fading.fade_out.desc","Fade-Out will NOT fade-out elements before opening a new menu!
+It is meant to be used when elements change
+their visibility via loading requirements.","","none","5 candidates; structural=1","[1] fancymenu.element.fading.fade_out | EN: Fade-Out: %s | ZH:  | structural_suffix
+[2] fancymenu.actions.disable_layout | EN: Disable Layout | ZH:  | lexical
+[3] fancymenu.actions.disable_layout.desc | EN: Disable a layout by its name. | ZH:  | lexical
+[4] fancymenu.actions.disable_layout.value.desc | EN: Layout Name | ZH:  | lexical
+[5] fancymenu.actions.enable_layout | EN: Enable Layout | ZH:  | lexical","[1] structural: same identifier 'fancymenu.element.fading.fade_out' with a different suffix
+[2] lexical overlap on ['out']
+[3] lexical overlap on ['out']
+[4] lexical overlap on ['out']
+[5] lexical overlap on ['out']","[1] low; review=none; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"22","structural","153353","twilightforest","1.21.1","lang","advancement.twilightforest.magic_map","I Can See Forever","我有千里眼","none","5 candidates; structural=1","[1] advancement.twilightforest.magic_map.desc | EN: Craft the %s | ZH: 合成%s | structural_suffix
+[2] advancement.twilightforest.magic_map_focus | EN: With Fire It Writes | ZH: 用火書寫 | lexical
+[3] advancement.twilightforest.magic_map_focus.desc | EN: Craft the %s with a %s, %s, and %s | ZH: 用%s、%s和%s合成%s | lexical
+[4] advancement.twilightforest.maze_map | EN: And Now, to Find the Exit | ZH: 現在，尋找出口 | lexical
+[5] advancement.twilightforest.maze_map.desc | EN: Craft the %s after obtaining the focus from the labyrinth | ZH: 在迷宮中獲取迷宮核心，並用它來合成%s | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['magic', 'map']
+[3] lexical overlap on ['magic', 'map']
+[4] lexical overlap on ['map']
+[5] lexical overlap on ['map']","[1] low; review=none; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"23","structural","83610","irons_spellbooks","1.21.1","lang","item.irons_spellbooks.infernal_sorcerer_chestplate","Infernal Sorcerer Chestplate","煉獄巫師胸甲","none","5 candidates; structural=1","[1] item.irons_spellbooks.infernal_sorcerer_chestplate.desc | EN: Dealing Fire Spell Damage adds a stack of Immolation to the creature | ZH: 造成熾焰法術傷害時，會額外給予目標一層熾焰獻祭效果。 | structural_suffix
+[2] item.irons_spellbooks.wandering_magician_chestplate | EN: Wandering Magician Robe | ZH: 流浪法師法袍 | lexical
+[3] item.irons_spellbooks.pyromancer_chestplate | EN: Pyromancer Robe | ZH: 熾焰術士法袍 | lexical
+[4] item.irons_spellbooks.electromancer_chestplate | EN: Electromancer Robe | ZH: 雷霆術士法袍 | lexical
+[5] item.irons_spellbooks.cultist_chestplate | EN: Cultist Armor | ZH: 猩紅教徒法袍 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['chestplate']
+[3] lexical overlap on ['chestplate']
+[4] lexical overlap on ['chestplate']
+[5] lexical overlap on ['chestplate']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"24","structural","96358","mekanism","1.21.1","lang","configuration.mekanism.general.tep.capacity.output","Output Tank Capacity","","none","5 candidates; structural=1","[1] configuration.mekanism.general.tep.capacity.output.tooltip | EN: Amount of output fluid (mB) that the evaporation plant can store. | ZH:  | structural_suffix
+[2] alias.mekanism.auto_step | EN: Auto-Step | ZH: 自動上坡 | lexical
+[3] alias.mekanism.step_assist | EN: Step Assist | ZH: 步行輔助 | lexical
+[4] boiler.mekanism.capacity | EN: Boil Capacity: %1$s mB/t | ZH: 蒸汽容量: %1$s mB/t | lexical
+[5] boiler.mekanism.valve_mode_output_coolant | EN: output coolant | ZH: 輸出冷卻液 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['tep']
+[3] lexical overlap on ['tep']
+[4] lexical overlap on ['capacity']
+[5] lexical overlap on ['output']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"25","structural","113116","occultism","1.21.1","lang","advancements.occultism.familiar.cthulhu.description","Make your cthulhu familiar sad","","none","5 candidates; structural=1","[1] advancements.occultism.familiar.cthulhu.title | EN: You Monster! | ZH:  | structural_suffix
+[2] advancements.occultism.familiar.bat.description | EN: Lure a normal bat near your bat familiar | ZH:  | lexical
+[3] advancements.occultism.familiar.bat.title | EN: Cannibalism | ZH:  | lexical
+[4] advancements.occultism.familiar.beaver_woodchop.description | EN: Let your Beaver familiar chop down a tree | ZH:  | lexical
+[5] advancements.occultism.familiar.beaver_woodchop.title | EN: Woodchopper | ZH:  | lexical","[1] structural: same identifier 'advancements.occultism.familiar.cthulhu' with a different suffix
+[2] lexical overlap on ['familiar']
+[3] lexical overlap on ['familiar']
+[4] lexical overlap on ['familiar']
+[5] lexical overlap on ['familiar']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"26","structural","102081","minecolonies","1.21.1","lang","advancements.minecolonies.build.stone_smeltery.description","Build a Brick Yard to automate the forging of stone and more for other crafters","Build a Brick Yard to automate the forging of stone and more for other crafters","none","5 candidates; structural=1","[1] advancements.minecolonies.build.stone_smeltery.title | EN: It's Getting Hot in Here! | ZH: 越來越熱 | structural_suffix
+[2] minecolonies.config.neighborbuildingrendering | EN: Neighbor Building Rendering | ZH: 渲染鄰近的建物 | lexical
+[3] minecolonies.config.neighborbuildingrendering.comment | EN: By default, when placing a schematic near other buildings, the already-placed buildings will show as if they were at level 5 and have a blue outline around them. You can disable that by setting this to false. | ZH: 默認情況下，將示意圖放置在其他建築物附近時，已放置的建築物將顯示為第 5 級，並在其周圍有藍色外框。 您可以將此設定為 false ，以停用該設定。 | lexical
+[4] minecolonies.config.neighborbuildingrange | EN: Neighbor Building Range | ZH: 鄰居建築物範圍 | lexical
+[5] minecolonies.config.neighborbuildingrange.comment | EN: How close a building needs to be to another to be considered a neighbor, in blocks. -1 = intersecting, 0 = touching | ZH: 將建築視為相鄰所需的最小間距，以一方塊為單位。 -1 = 重合，0 = 接觸 | lexical","[1] structural: same identifier 'advancements.minecolonies.build.stone_smeltery' with a different suffix
+[2] lexical overlap on ['build']
+[3] lexical overlap on ['build']
+[4] lexical overlap on ['build']
+[5] lexical overlap on ['build']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"27","structural","14558","betterdeserttemples","1.21.1","lang","betterdeserttemples.advancements.temple_entry.title","An Ancient Tomb","","none","5 candidates; structural=1","[1] betterdeserttemples.advancements.temple_entry.description | EN: Discover a Better Desert Temple | ZH:  | structural_suffix
+[2] betterdeserttemples.advancements.root.title | EN: YUNG's Better Desert Temples | ZH:  | lexical
+[3] betterdeserttemples.advancements.root.description | EN: Somewhere deep in the desert... | ZH:  | lexical
+[4] betterdeserttemples.advancements.temple_clear.title | EN: Eternal Slumber | ZH:  | lexical
+[5] betterdeserttemples.advancements.temple_clear.description | EN: Slay the Pharaoh and free the Temple from his curse | ZH:  | lexical","[1] structural: same identifier 'betterdeserttemples.advancements.temple_entry' with a different suffix
+[2] lexical overlap on ['temple']
+[3] lexical overlap on ['temple']
+[4] lexical overlap on ['temple']
+[5] lexical overlap on ['temple']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"28","structural","69160","fancymenu","1.21.1","lang","fancymenu.placeholders.world.current_dimension","Current Dimension","","none","5 candidates; structural=1","[1] fancymenu.placeholders.world.current_dimension.desc | EN: Returns the dimension the player is in.
+Set ""as_key"" to true (minecraft:overworld) or false (Overworld).
+Non-vanilla dimensions fall back to their key. | ZH:  | structural_suffix
+[2] fancymenu.actions.edit_minecraft_option.edit.current_value | EN: Current Option Value: %s | ZH:  | lexical
+[3] fancymenu.actions.errors.cannot_join_world_while_in_world | EN: §x§lJoining World or Server Failed!§r
+
+You tried to join a world or server while you're already in a world or on a server, which is not possible.
+
+§lYou need to leave the current world or server first. | ZH:  | lexical
+[4] fancymenu.actions.join_last_world | EN: Enter/Join Last World/Server | ZH:  | lexical
+[5] fancymenu.actions.join_last_world.desc | EN: Enter/Join the last world/server. | ZH:  | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['current']
+[3] lexical overlap on ['world']
+[4] lexical overlap on ['world']
+[5] lexical overlap on ['world']","[1] low; review=none; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"29","structural","152654","tombstone","1.21.1","lang","tombstone.advancement.use_true_sight.title","I see clearly now","","none","5 candidates; structural=1","[1] tombstone.advancement.use_true_sight.desc | EN: You used True Sight Magic | ZH:  | structural_suffix
+[2] tombstone.item.scroll_buff.use1 | EN: Right click on a Grave Soul to enchant | ZH:  | lexical
+[3] tombstone.item.scroll_buff.use2 | EN: Hold right click to cast this spell | ZH:  | lexical
+[4] tombstone.item.grave_key.use1 | EN: Right click on a Grave Soul for teleportation | ZH:  | lexical
+[5] tombstone.item.grave_key.use2 | EN: Hold right click to teleport to your grave | ZH:  | lexical","[1] structural: same identifier 'tombstone.advancement.use_true_sight' with a different suffix
+[2] lexical overlap on ['use']
+[3] lexical overlap on ['use']
+[4] lexical overlap on ['use']
+[5] lexical overlap on ['use']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"30","structural","148167","the_bumblezone","1.21.1","lang","advancements.the_bumblezone.stinger_spear_poisoning.description","Inflict poison on a victim by using a Neurotoxin enchanted Stinger Spear!","","none","5 candidates; structural=1","[1] advancements.the_bumblezone.stinger_spear_poisoning.title | EN: Being the Bee! | ZH:  | structural_suffix
+[2] item.the_bumblezone.buzzing_briefcase_stinger_1 | EN: Consume §6Bee Stinger | ZH:  | lexical
+[3] item.the_bumblezone.buzzing_briefcase_stinger_2 | EN: to put stinger back on | ZH:  | lexical
+[4] item.the_bumblezone.buzzing_briefcase_stinger_missing_item | EN: No §6Bee Stinger§f in inventory | ZH:  | lexical
+[5] item.the_bumblezone.bee_stinger | EN: Bee Stinger | ZH:  | lexical","[1] structural: same identifier 'advancements.the_bumblezone.stinger_spear_poisoning' with a different suffix
+[2] lexical overlap on ['stinger']
+[3] lexical overlap on ['stinger']
+[4] lexical overlap on ['stinger']
+[5] lexical overlap on ['stinger']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"31","structural","153051","tombstone","1.21.1","lang","tombstone.compendium.magic_books.title","Magic Books","","none","5 candidates; structural=1","[1] tombstone.compendium.magic_books.desc | EN: They must be used in offhand, with the aid of a Grave Soul, in order to apply their effect to the item in the main hand.
+The book is destroyed when the effect occurs.
+The perk Scribe enhances the effect of books. | ZH:  | structural_suffix
+[2] tombstone.item.book_of_magic_impregnation | EN: Book of Magic Impregnation | ZH:  | lexical
+[3] tombstone.item.book_of_magic_impregnation.desc | EN: Strengthens with magic an item | ZH:  | lexical
+[4] tombstone.item.book_of_magic_impregnation.use | EN: Right click on a Grave Soul with this book in the offhand and an enchantable item in the mainhand | ZH:  | lexical
+[5] tombstone.item.magic_scroll | EN: Magic Scroll | ZH:  | lexical","[1] structural: same identifier 'tombstone.compendium.magic_books' with a different suffix
+[2] lexical overlap on ['magic']
+[3] lexical overlap on ['magic']
+[4] lexical overlap on ['magic']
+[5] lexical overlap on ['magic']","[1] low; review=none; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"32","structural","98779","mekanismtools","1.21.1","lang","configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.multiple_piece.tooltip","The chance that after each piece of Refined Glowstone armor a mob spawns with no more pieces will be added. Order of pieces tried is boots, leggings, chestplate, helmet.","","none","5 candidates; structural=1","[1] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.multiple_piece | EN: Multiple Pieces Chance | ZH:  | structural_suffix
+[2] configuration.mekanismtools.server.gear_spawn_chance | EN: Mob Gear Spawn Chance | ZH:  | lexical
+[3] configuration.mekanismtools.server.gear_spawn_chance.armor | EN: Armor Chance | ZH:  | lexical
+[4] configuration.mekanismtools.server.gear_spawn_chance.armor.tooltip | EN: The chance that Mekanism: Tools' armor can spawn on mobs. This is multiplied modified by the chunk's difficulty modifier. Vanilla uses 0.15 for its armor spawns, we use 0.1 as default to lower chances of mobs getting some vanilla and some mek armor. | ZH:  | lexical
+[5] configuration.mekanismtools.server.gear_spawn_chance.bronze.chance.boots | EN: Boots Chance | ZH:  | lexical","[1] structural: same identifier 'configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.multiple_piece' with a different suffix
+[2] lexical overlap on ['chance', 'gear']
+[3] lexical overlap on ['chance', 'gear']
+[4] lexical overlap on ['chance', 'gear']
+[5] lexical overlap on ['chance', 'gear']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"33","structural","99114","mekanismtools","1.21.1","lang","configuration.mekanismtools.startup.materials.refined_glowstone.damage.tooltip","Base attack damage of Refined Glowstone items.","","none","5 candidates; structural=1","[1] configuration.mekanismtools.startup.materials.refined_glowstone.damage | EN: Base Damage | ZH:  | structural_suffix
+[2] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.boots | EN: Boots Chance | ZH:  | lexical
+[3] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.boots.tooltip | EN: The chance that mobs can spawn with Refined Glowstone boots. | ZH:  | lexical
+[4] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.chestplate | EN: Chestplate Chance | ZH:  | lexical
+[5] configuration.mekanismtools.server.gear_spawn_chance.refined_glowstone.chance.chestplate.tooltip | EN: The chance that mobs can spawn with Refined Glowstone chestplates. | ZH:  | lexical","[1] structural: same identifier 'configuration.mekanismtools.startup.materials.refined_glowstone.damage' with a different suffix
+[2] lexical overlap on ['glowstone', 'refined']
+[3] lexical overlap on ['glowstone', 'refined']
+[4] lexical overlap on ['glowstone', 'refined']
+[5] lexical overlap on ['glowstone', 'refined']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"34","structural","63606","eternal_starlight","1.21.1","lang","item.eternal_starlight.music_disc_sacred_desert.desc","Binke - Sacred Desert","","none","5 candidates; structural=1","[1] item.eternal_starlight.music_disc_sacred_desert | EN: Music Disc | ZH:  | structural_suffix
+[2] block.eternal_starlight.desert_amethysia | EN: Desert Amethysia | ZH:  | lexical
+[3] block.eternal_starlight.potted_desert_amethysia | EN: Potted Desert Amethysia | ZH:  | lexical
+[4] block.eternal_starlight.withered_desert_amethysia | EN: Withered Desert Amethysia | ZH:  | lexical
+[5] block.eternal_starlight.potted_withered_desert_amethysia | EN: Potted Withered Desert Amethysia | ZH:  | lexical","[1] structural: same identifier 'item.eternal_starlight.music_disc_sacred_desert' with a different suffix
+[2] lexical overlap on ['desert']
+[3] lexical overlap on ['desert']
+[4] lexical overlap on ['desert']
+[5] lexical overlap on ['desert']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"35","structural","154567","twilightforest","1.21.1","lang","item.twilightforest.knightmetal_sword","Knightmetal Sword","騎士劍","none","5 candidates; structural=1","[1] item.twilightforest.knightmetal_sword.desc | EN: Extra damage to armored targets | ZH: 對有護甲的目標造成額外傷害 | structural_suffix
+[2] advancement.twilightforest.glass_sword | EN: One Hit Wonder | ZH: 會心一擊 | lexical
+[3] advancement.twilightforest.glass_sword.desc | EN: Hope you made good use of that. | ZH: 願善加利用 | lexical
+[4] block.twilightforest.knightmetal_block | EN: Block of Knightmetal | ZH: 騎士金屬塊 | lexical
+[5] block.twilightforest.knightmetal_block.desc | EN: Deals strong contact damage | ZH: 就像是加強版的仙人掌 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['sword']
+[3] lexical overlap on ['sword']
+[4] lexical overlap on ['knightmetal']
+[5] lexical overlap on ['knightmetal']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"36","structural","157676","xycraft_machines","1.21.1","lang","item.xycraft_machines.module_mining_mk1","Mining Module","","none","5 candidates; structural=1","[1] item.xycraft_machines.module_mining_mk1.tooltip | EN: Improves mining speed | ZH:  | structural_suffix
+[2] item.xycraft_machines.module_archon_affinity | EN: Archon Affinity Specialization Module | ZH:  | lexical
+[3] item.xycraft_machines.module_area_survey | EN: Area Survey Module | ZH:  | lexical
+[4] item.xycraft_machines.module_area_survey.tooltip | EN: Unlocks a toggleable 3x3 mining ability | ZH:  | lexical
+[5] item.xycraft_machines.module_auto_smelt | EN: Vulcanization Module | ZH:  | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['module']
+[3] lexical overlap on ['module']
+[4] lexical overlap on ['module']
+[5] lexical overlap on ['module']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"37","structural","96243","mekanism","1.21.1","lang","configuration.mekanism.general.laser.energy.damage","Energy Per Damage","","none","5 candidates; structural=1","[1] configuration.mekanism.general.laser.energy.damage.tooltip | EN: Energy used per half heart of damage being transferred to entities. | ZH:  | structural_suffix
+[2] advancements.mekanism.energy_cube.description | EN: Build an Energy Cube to store your excess power | ZH: 合成一個能量立方來儲存多餘的電力 | lexical
+[3] advancements.mekanism.energy_cube.title | EN: Save it for Later | ZH: 有備無患 | lexical
+[4] advancements.mekanism.energy_transport.description | EN: Craft a Universal Cable | ZH: 製作通用線纜 | lexical
+[5] advancements.mekanism.energy_transport.title | EN: Electron Super Highway | ZH: 電子高速公路 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['energy']
+[3] lexical overlap on ['energy']
+[4] lexical overlap on ['energy']
+[5] lexical overlap on ['energy']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"38","structural","66599","fancymenu","1.21.1","lang","fancymenu.actions.quitgame","Quit Minecraft","","none","1 candidates; structural=1","[1] fancymenu.actions.quitgame.desc | EN: Stops the Minecraft client and begins its normal shutdown sequence. | ZH:  | structural_suffix","[1] structural: target is the identifier of a companion '.desc/.title/...' key","[1] medium; review=none; unreviewed or unknown review status: not authoritative","","","","","",""
+"39","structural","40140","cataclysm","1.21.1","lang","item.cataclysm.wrath_of_the_desert","Wrath of the Desert","怒沙風弓","none","5 candidates; structural=1","[1] item.cataclysm.wrath_of_the_desert.desc | EN: Fires three cursed sandstorms | ZH: 發射三個沙咒旋風 | structural_suffix
+[2] item.cataclysm.necklace_of_the_desert.desc | EN: It looks like you can wake something up...... | ZH: 似乎可以用來喚醒某個東西... | lexical
+[3] item.cataclysm.desert_eye | EN: Eye of Desert | ZH: 沙漠之眼 | lexical
+[4] item.cataclysm.necklace_of_the_desert | EN: Necklace of the desert | ZH: 沙漠項鍊 | lexical
+[5] entity.cataclysm.ancient_desert_stele | EN: Ancient Desert Stele | ZH: 落砂岩碑 | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['desert']
+[3] lexical overlap on ['desert']
+[4] lexical overlap on ['desert']
+[5] lexical overlap on ['desert']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"40","structural","66461","fancymenu","1.21.1","lang","fancymenu.actions.close_remote_server_connection","Close Remote Server Connection","","none","5 candidates; structural=1","[1] fancymenu.actions.close_remote_server_connection.desc | EN: Closes a specific remote server connection by its request ID. | ZH:  | structural_suffix
+[2] fancymenu.actions.close_all_remote_server_connections | EN: Close All Remote Server Connections | ZH:  | lexical
+[3] fancymenu.actions.close_all_remote_server_connections.desc | EN: Closes all currently active remote server connections that were opened by FancyMenu. | ZH:  | lexical
+[4] fancymenu.actions.close_remote_server_connection.value | EN: Connection Request ID | ZH:  | lexical
+[5] fancymenu.actions.close_screen | EN: Close Screen | ZH:  | lexical","[1] structural: target is the identifier of a companion '.desc/.title/...' key
+[2] lexical overlap on ['close', 'connection', 'remote', 'server']
+[3] lexical overlap on ['close', 'connection', 'remote', 'server']
+[4] lexical overlap on ['close', 'connection', 'remote', 'server']
+[5] lexical overlap on ['close']","[1] medium; review=none; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"41","lexical_only","80154","integrateddynamics","1.21.1","lang","parttype.integrateddynamics.world_reader.info","Reads things related to the world, blocks and entities","","none","5 candidates; structural=0","[1] general.integrateddynamics.info.none | EN: None | ZH:  | lexical
+[2] gui.integrateddynamics.button.copy.info | EN: Copy to clipboard | ZH:  | lexical
+[3] gui.integrateddynamics.partsettings.channel.disabledinfo | EN: Network energy consumption is disabled on this server. | ZH:  | lexical
+[4] gui.integrateddynamics.logicprogrammer.info.create | EN: §lBind new§r Variable Card | ZH:  | lexical
+[5] gui.integrateddynamics.logicprogrammer.info.modify | EN: §lModify§r Variable Card | ZH:  | lexical","[1] lexical overlap on ['info']
+[2] lexical overlap on ['info']
+[3] lexical overlap on ['info']
+[4] lexical overlap on ['info']
+[5] lexical overlap on ['info']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"42","lexical_only","63424","eternal_starlight","1.21.1","lang","item.eternal_starlight.smithing_template.pungency_fruit_upgrade.additions_slot_description","Add Pungency Fruit","","none","5 candidates; structural=0","[1] block.eternal_starlight.carved_lunaris_cactus_fruit | EN: Carved Lunaris Cactus Fruit | ZH:  | lexical
+[2] block.eternal_starlight.lunaris_cactus_fruit_lantern | EN: Lunaris Cactus Fruit Lantern | ZH:  | lexical
+[3] block.eternal_starlight.pungency_fruit_vines | EN: Pungency Fruit Vines | ZH:  | lexical
+[4] item.eternal_starlight.lunaris_cactus_fruit | EN: Lunaris Cactus Fruit | ZH:  | lexical
+[5] item.eternal_starlight.abyssal_fruit | EN: Abyssal Fruit | ZH:  | lexical","[1] lexical overlap on ['fruit']
+[2] lexical overlap on ['fruit']
+[3] lexical overlap on ['fruit', 'pungency']
+[4] lexical overlap on ['fruit']
+[5] lexical overlap on ['fruit']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"43","lexical_only","19083","bibliobiomes","1.21.1","lang","block.bibliocraft.white_biomesoplenty_willow_display_case","White Willow Display Case","","none","5 candidates; structural=0","[1] block.bibliocraft.biomesoplenty_dead_bookcase | EN: Dead Bookcase | ZH:  | lexical
+[2] block.bibliocraft.biomesoplenty_dead_fancy_armor_stand | EN: Dead Fancy Armor Stand | ZH:  | lexical
+[3] block.bibliocraft.biomesoplenty_dead_fancy_clock | EN: Dead Fancy Clock | ZH:  | lexical
+[4] block.bibliocraft.biomesoplenty_dead_fancy_crafter | EN: Dead Fancy Crafter | ZH:  | lexical
+[5] block.bibliocraft.biomesoplenty_dead_fancy_sign | EN: Dead Fancy Sign | ZH:  | lexical","[1] lexical overlap on ['biomesoplenty', 'case']
+[2] lexical overlap on ['biomesoplenty']
+[3] lexical overlap on ['biomesoplenty']
+[4] lexical overlap on ['biomesoplenty']
+[5] lexical overlap on ['biomesoplenty']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"44","lexical_only","134354","refinedtypes","1.21.1","lang","block.refinedtypes.32768k_soul_storage_block","32768K Soul Storage Block","","none","5 candidates; structural=0","[1] item.refinedtypes.64k_energy_storage_part | EN: 64K Energy Storage Part | ZH:  | lexical
+[2] item.refinedtypes.256k_energy_storage_part | EN: 256K Energy Storage Part | ZH:  | lexical
+[3] item.refinedtypes.1024k_energy_storage_part | EN: 1024K Energy Storage Part | ZH:  | lexical
+[4] item.refinedtypes.8192k_energy_storage_part | EN: 8192K Energy Storage Part | ZH:  | lexical
+[5] item.refinedtypes.65536k_energy_storage_part | EN: 65536K Energy Storage Part | ZH:  | lexical","[1] lexical overlap on ['storage']
+[2] lexical overlap on ['storage']
+[3] lexical overlap on ['storage']
+[4] lexical overlap on ['storage']
+[5] lexical overlap on ['storage']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"45","lexical_only","10714","ars_elemental","1.21.1","lang","ars_elemental.page.everfull_urn","This magic urn converts Source into water. Link a cauldron or an Apothecary to the urn using a dominion wand and it will be refilled for a cheap amount of source.","這個神奇的甕將源轉化為水。使用統治魔杖將大鍋或藥劑師連接到骨灰盒上，它將被重新填充以獲得廉價的來源。","none","5 candidates; structural=0","[1] ars_elemental.adv.desc.everfull_urn | EN: Acquire an Urn of Endless Waters | ZH: 獲得無盡之水的甕 | lexical
+[2] ars_elemental.adv.title.everfull_urn | EN: Filled with tears of Nostalgia | ZH: 充滿了懷舊的淚水 | lexical
+[3] ars_nouveau.connections.fail.urn | EN: This block is not compatible with the urn. | ZH: 此塊與骨灰盒不兼容。 | lexical
+[4] ars_nouveau.page.everfull_urn | EN: This magic urn converts Source into water. Link a cauldron or an Apothecary to the urn using a dominion wand and it will be refilled for a cheap amount of source. | ZH: 這個魔法甕能將魔源轉換成水。使用支配之杖將其與煉藥鍋或花葯臺連接，消耗少量魔源即可注水。 | lexical
+[5] block.ars_elemental.everfull_urn | EN: Urn of Endless Waters | ZH: 無盡水甕 | lexical","[1] lexical overlap on ['everfull', 'urn']
+[2] lexical overlap on ['everfull', 'urn']
+[3] lexical overlap on ['urn']
+[4] lexical overlap on ['everfull', 'urn']
+[5] lexical overlap on ['everfull', 'urn']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"46","lexical_only","54720","create","1.21.1","lang","create.schedule.condition.threshold.place_item_3","Leave empty to match any","留空以相符任合物品","none","5 candidates; structural=0","[1] block.create.clipboard.tooltip.condition1 | EN: When R-Clicked | ZH: 右擊時 | lexical
+[2] block.create.clipboard.tooltip.condition2 | EN: When Used on Blocks | ZH: 對方塊使用時 | lexical
+[3] block.create.copycat_panel.tooltip.condition1 | EN: When R-Clicked | ZH: 右擊時 | lexical
+[4] block.create.copycat_step.tooltip.condition1 | EN: When R-Clicked | ZH: 右擊時 | lexical
+[5] block.create.creative_crate.tooltip.condition1 | EN: When Item in Filter Slot | ZH: 標記了物品時 | lexical","[1] lexical overlap on ['condition']
+[2] lexical overlap on ['condition']
+[3] lexical overlap on ['condition']
+[4] lexical overlap on ['condition']
+[5] lexical overlap on ['condition']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"47","lexical_only","64779","evilcraft","1.21.1","lang","multiblock.evilcraft.colossalbloodchest.error.prefix","EvilCraft","","none","3 candidates; structural=0","[1] block.evilcraft.spirit_furnace.help.invalid.caught_error | EN: Invalid mob spirit. Contact mod dev(s). | ZH:  | lexical
+[2] multiblock.evilcraft.colossalbloodchest.error.prefix.info | EN: Colossal Blood Chest multiblock structure error | ZH:  | lexical
+[3] multiblock.evilcraft.colossalbloodchest.error.unexpected | EN: Unexpected Colossal Blood Chest structure error. | ZH:  | lexical","[1] lexical overlap on ['error']
+[2] lexical overlap on ['colossalbloodchest', 'error', 'prefix']
+[3] lexical overlap on ['colossalbloodchest', 'error']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"48","lexical_only","124740","productivetrees","1.21.1","lang","block.productivetrees.cherry_plum_bookshelf","Cherry Plum Bookshelf","","none","5 candidates; structural=0","[1] block.productivetrees.advanced_black_cherry_beehive | EN: Advanced Black Cherry Beehive | ZH:  | lexical
+[2] block.productivetrees.advanced_cherry_plum_beehive | EN: Advanced Cherry Plum Beehive | ZH:  | lexical
+[3] block.productivetrees.advanced_plum_beehive | EN: Advanced Plum Beehive | ZH:  | lexical
+[4] block.productivetrees.advanced_sour_cherry_beehive | EN: Advanced Sour Cherry Beehive | ZH:  | lexical
+[5] block.productivetrees.advanced_sparkle_cherry_beehive | EN: Advanced Sparkle Cherry Beehive | ZH:  | lexical","[1] lexical overlap on ['cherry']
+[2] lexical overlap on ['cherry', 'plum']
+[3] lexical overlap on ['plum']
+[4] lexical overlap on ['cherry']
+[5] lexical overlap on ['cherry']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"49","lexical_only","57980","draconicevolution","1.21.1","lang","entity.draconicevolution.guardian_crystal","Guardian Crystal","","none","5 candidates; structural=0","[1] block.draconicevolution.basic_io_crystal | EN: Basic Energy I/O Crystal | ZH:  | lexical
+[2] block.draconicevolution.basic_relay_crystal | EN: Basic Energy Relay Crystal | ZH:  | lexical
+[3] block.draconicevolution.basic_wireless_crystal | EN: Basic Wireless Energy Crystal | ZH:  | lexical
+[4] block.draconicevolution.chaos_crystal | EN: Chaos Crystal | ZH:  | lexical
+[5] block.draconicevolution.draconic_io_crystal | EN: Draconic Energy I/O Crystal | ZH:  | lexical","[1] lexical overlap on ['crystal']
+[2] lexical overlap on ['crystal']
+[3] lexical overlap on ['crystal']
+[4] lexical overlap on ['crystal']
+[5] lexical overlap on ['crystal']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"50","lexical_only","41559","chipped","1.21.1","lang","block.chipped.circular_yellow_stained_glass_pane","Circular Yellow Stained Glass Pane","","none","5 candidates; structural=0","[1] block.chipped.acacia_planks_panel | EN: Acacia Planks Panel | ZH:  | lexical
+[2] block.chipped.arched_black_stained_glass_pane_pillar | EN: Arched Black Stained Glass Pane Pillar | ZH:  | lexical
+[3] block.chipped.arched_black_stained_glass_pillar | EN: Arched Black Stained Glass Pillar | ZH:  | lexical
+[4] block.chipped.arched_blue_stained_glass_pane_pillar | EN: Arched Blue Stained Glass Pane Pillar | ZH:  | lexical
+[5] block.chipped.arched_blue_stained_glass_pillar | EN: Arched Blue Stained Glass Pillar | ZH:  | lexical","[1] lexical overlap on ['pane']
+[2] lexical overlap on ['glass', 'pane', 'stained']
+[3] lexical overlap on ['glass', 'stained']
+[4] lexical overlap on ['glass', 'pane', 'stained']
+[5] lexical overlap on ['glass', 'stained']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"51","lexical_only","28286","bibliowoods","1.21.1","lang","block.bibliocraft.green_forbidden_arcanus_fungyss_seat","Green Fungyss Seat","","none","5 candidates; structural=0","[1] block.bibliocraft.black_forbidden_arcanus_aurum_display_case | EN: Black Aurum Display Case | ZH:  | lexical
+[2] block.bibliocraft.black_forbidden_arcanus_aurum_seat | EN: Black Aurum Seat | ZH:  | lexical
+[3] block.bibliocraft.black_forbidden_arcanus_aurum_seat_back | EN: Black Aurum Seat Back | ZH:  | lexical
+[4] block.bibliocraft.black_forbidden_arcanus_aurum_wall_display_case | EN: Black Aurum Display Case | ZH:  | lexical
+[5] block.bibliocraft.black_forbidden_arcanus_edelwood_display_case | EN: Black Edelwood Display Case | ZH:  | lexical","[1] lexical overlap on ['arcanus', 'forbidden']
+[2] lexical overlap on ['arcanus', 'forbidden']
+[3] lexical overlap on ['arcanus', 'forbidden']
+[4] lexical overlap on ['arcanus', 'forbidden']
+[5] lexical overlap on ['arcanus', 'forbidden']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"52","lexical_only","150276","theurgy","1.21.1","lang","item.theurgy.alchemical_sulfur_broccoli.tooltip.extended","Sulfur represents the ""idea"" or ""soul"" of an object","","none","5 candidates; structural=0","[1] block.theurgy.calcination_oven.tooltip.extended | EN: Salt represents the ""body"" or ""physical matter"" of an object. | ZH:  | lexical
+[2] block.theurgy.caloric_flux_emitter.tooltip.extended | EN: Caloric Flux is energy in the form of raw heat, and as such a derivative of Mercury Flux. | ZH:  | lexical
+[3] block.theurgy.deepslate_sal_ammoniac_ore.tooltip.extended | EN: Ore that yields Sal Ammoniac Crystals for use in a Sal Ammoniac Accumulator. | ZH:  | lexical
+[4] block.theurgy.digestion_vat.tooltip.extended | EN: Digestion is fundamental the conversion between tiers of matter (such as between common and rare [e.g. iron and gold]). | ZH:  | lexical
+[5] block.theurgy.distiller.tooltip.extended | EN: Mercury represents the ""energy"" of an object. It has applications both as an energy source and as a catalyst. | ZH:  | lexical","[1] lexical overlap on ['extended']
+[2] lexical overlap on ['extended']
+[3] lexical overlap on ['extended']
+[4] lexical overlap on ['extended']
+[5] lexical overlap on ['extended']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"53","lexical_only","153831","twilightforest","1.21.1","lang","block.twilightforest.mining_planks","Minewood Planks","礦石木板","none","5 candidates; structural=0","[1] block.twilightforest.canopy_planks | EN: Canopy Planks | ZH: 蒼穹木板 | lexical
+[2] block.twilightforest.dark_planks | EN: Darkwood Planks | ZH: 黑木木板 | lexical
+[3] block.twilightforest.hollow_mining_log_climbable | EN: Hollow Minewood Log | ZH: 空心礦石原木 | lexical
+[4] block.twilightforest.hollow_mining_log_horizontal | EN: Hollow Minewood Log | ZH: 空心礦石原木 | lexical
+[5] block.twilightforest.hollow_mining_log_vertical | EN: Hollow Minewood Log | ZH: 空心礦石原木 | lexical","[1] lexical overlap on ['planks']
+[2] lexical overlap on ['planks']
+[3] lexical overlap on ['mining']
+[4] lexical overlap on ['mining']
+[5] lexical overlap on ['mining']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"54","lexical_only","8556","apotheosis","1.21.1","lang","item.apotheosis.gem.apotheosis:the_nether/inferno","Gem of the Incandescent Inferno","","none","5 candidates; structural=0","[1] key.categories.apotheosis | EN: Apotheosis | ZH:  | lexical
+[2] text.apotheosis.world_tier.haven | EN: Haven | ZH:  | lexical
+[3] text.apotheosis.world_tier.haven.desc | EN: The start of your journey | ZH:  | lexical
+[4] text.apotheosis.world_tier.frontier | EN: Frontier | ZH:  | lexical
+[5] text.apotheosis.world_tier.frontier.desc | EN: Venture forth into the dangerous world | ZH:  | lexical","[1] lexical overlap on ['apotheosis']
+[2] lexical overlap on ['apotheosis']
+[3] lexical overlap on ['apotheosis']
+[4] lexical overlap on ['apotheosis']
+[5] lexical overlap on ['apotheosis']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"55","lexical_only","70920","framedblocks","1.21.1","lang","block.framedblocks.framed_item_frame","Framed Item Frame","","none","5 candidates; structural=0","[1] block.framedblocks.framed_activator_rail_slope | EN: Framed Activator Rail Slope | ZH:  | lexical
+[2] block.framedblocks.framed_adj_double_copycat_panel | EN: Framed Adjustable Double Copycat Panel | ZH:  | lexical
+[3] block.framedblocks.framed_adj_double_copycat_slab | EN: Framed Adjustable Double Copycat Slab | ZH:  | lexical
+[4] block.framedblocks.framed_adj_double_panel | EN: Framed Adjustable Double Panel | ZH:  | lexical
+[5] block.framedblocks.framed_adj_double_slab | EN: Framed Adjustable Double Slab | ZH:  | lexical","[1] lexical overlap on ['frame', 'framed']
+[2] lexical overlap on ['frame', 'framed']
+[3] lexical overlap on ['frame', 'framed']
+[4] lexical overlap on ['frame', 'framed']
+[5] lexical overlap on ['frame', 'framed']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"56","lexical_only","59916","dyenamicsandfriends","1.21.1","lang","block.dyenamicsandfriends.cookingforblockheads_bubblegum_kitchen_floor","Bubblegum Kitchen Floor","","none","5 candidates; structural=0","[1] block.dyenamicsandfriends.another_furniture_bubblegum_curtain | EN: Bubblegum Curtain | ZH:  | lexical
+[2] block.dyenamicsandfriends.another_furniture_bubblegum_lamp | EN: Bubblegum Lamp | ZH:  | lexical
+[3] block.dyenamicsandfriends.another_furniture_bubblegum_sofa | EN: Bubblegum Sofa | ZH:  | lexical
+[4] block.dyenamicsandfriends.another_furniture_bubblegum_stool | EN: Bubblegum Stool | ZH:  | lexical
+[5] block.dyenamicsandfriends.another_furniture_bubblegum_tall_stool | EN: Bubblegum Tall Stool | ZH:  | lexical","[1] lexical overlap on ['bubblegum']
+[2] lexical overlap on ['bubblegum']
+[3] lexical overlap on ['bubblegum']
+[4] lexical overlap on ['bubblegum']
+[5] lexical overlap on ['bubblegum']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"57","lexical_only","20733","bibliobiomes","1.21.1","lang","item.bibliocraft.cyan_regions_unexplored_willow_fancy_seat_back","Cyan Willow Fancy Seat Back","","none","5 candidates; structural=0","[1] block.bibliocraft.biomesoplenty_dead_fancy_armor_stand | EN: Dead Fancy Armor Stand | ZH:  | lexical
+[2] block.bibliocraft.biomesoplenty_dead_fancy_clock | EN: Dead Fancy Clock | ZH:  | lexical
+[3] block.bibliocraft.biomesoplenty_dead_fancy_crafter | EN: Dead Fancy Crafter | ZH:  | lexical
+[4] block.bibliocraft.biomesoplenty_dead_fancy_sign | EN: Dead Fancy Sign | ZH:  | lexical
+[5] block.bibliocraft.biomesoplenty_dead_wall_fancy_clock | EN: Dead Fancy Clock | ZH:  | lexical","[1] lexical overlap on ['fancy']
+[2] lexical overlap on ['fancy']
+[3] lexical overlap on ['fancy']
+[4] lexical overlap on ['fancy']
+[5] lexical overlap on ['fancy']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"58","lexical_only","59997","dyenamicsandfriends","1.21.1","lang","block.dyenamicsandfriends.cookingforblockheads_peach_oven","Peach Oven","","none","5 candidates; structural=0","[1] block.dyenamicsandfriends.another_furniture_peach_curtain | EN: Peach Curtain | ZH:  | lexical
+[2] block.dyenamicsandfriends.another_furniture_peach_lamp | EN: Peach Lamp | ZH:  | lexical
+[3] block.dyenamicsandfriends.another_furniture_peach_sofa | EN: Peach Sofa | ZH:  | lexical
+[4] block.dyenamicsandfriends.another_furniture_peach_stool | EN: Peach Stool | ZH:  | lexical
+[5] block.dyenamicsandfriends.another_furniture_peach_tall_stool | EN: Peach Tall Stool | ZH:  | lexical","[1] lexical overlap on ['peach']
+[2] lexical overlap on ['peach']
+[3] lexical overlap on ['peach']
+[4] lexical overlap on ['peach']
+[5] lexical overlap on ['peach']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"59","lexical_only","147656","the_bumblezone","1.21.1","lang","item.the_bumblezone.honey_compass_mystery_structure","Honey Compass - Mystery Structure","","none","5 candidates; structural=0","[1] block.the_bumblezone.porous_honeycomb_block | EN: Porous Honeycomb Block | ZH:  | lexical
+[2] block.the_bumblezone.filled_porous_honeycomb_block | EN: Filled Porous Honeycomb Block | ZH:  | lexical
+[3] block.the_bumblezone.empty_honeycomb_brood_block | EN: Empty Honeycomb Brood Block | ZH:  | lexical
+[4] block.the_bumblezone.honeycomb_brood_block | EN: Honeycomb Brood Block | ZH:  | lexical
+[5] block.the_bumblezone.sticky_honey_residue | EN: Sticky Honey Residue | ZH:  | lexical","[1] lexical overlap on ['honey']
+[2] lexical overlap on ['honey']
+[3] lexical overlap on ['honey']
+[4] lexical overlap on ['honey']
+[5] lexical overlap on ['honey']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"60","lexical_only","124535","productivetrees","1.21.1","lang","block.productivetrees.bull_pine_fence_gate","Bull Pine Fence Gate","","none","5 candidates; structural=0","[1] block.productivetrees.advanced_bull_pine_beehive | EN: Advanced Bull Pine Beehive | ZH:  | lexical
+[2] block.productivetrees.advanced_loblolly_pine_beehive | EN: Advanced Loblolly Pine Beehive | ZH:  | lexical
+[3] block.productivetrees.alder_fence | EN: Alder Fence | ZH:  | lexical
+[4] block.productivetrees.alder_fence_gate | EN: Alder Fence Gate | ZH:  | lexical
+[5] block.productivetrees.allspice_fence | EN: Allspice Fence | ZH:  | lexical","[1] lexical overlap on ['bull', 'pine']
+[2] lexical overlap on ['pine']
+[3] lexical overlap on ['fence']
+[4] lexical overlap on ['fence', 'gate']
+[5] lexical overlap on ['fence']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"61","lexical_only","47883","chipped","1.21.1","lang","tag.item.chipped.redstone_block","Redstone Blocks","","none","5 candidates; structural=0","[1] block.chipped.acacia_barrel | EN: Acacia Barrel | ZH:  | lexical
+[2] block.chipped.acacia_crate | EN: Acacia Crate | ZH:  | lexical
+[3] block.chipped.acacia_planks_mosaic | EN: Acacia Planks Mosaic | ZH:  | lexical
+[4] block.chipped.acacia_planks_panel | EN: Acacia Planks Panel | ZH:  | lexical
+[5] block.chipped.acacia_planks_shavings | EN: Acacia Planks Shavings | ZH:  | lexical","[1] lexical overlap on ['chipped']
+[2] lexical overlap on ['chipped']
+[3] lexical overlap on ['chipped']
+[4] lexical overlap on ['chipped']
+[5] lexical overlap on ['chipped']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"62","lexical_only","94281","mcwstairs","1.21.1","lang","block.mcwstairs.mossy_stone_brick_balcony","Mossy Stone Brick Balcony","","none","5 candidates; structural=0","[1] mcwstairs.balcony.desc | EN: Can be placed up to 4 times on the same block. Use shears to change style | ZH:  | lexical
+[2] block.mcwstairs.oak_balcony | EN: Oak Balcony | ZH:  | lexical
+[3] block.mcwstairs.spruce_balcony | EN: Spruce Balcony | ZH:  | lexical
+[4] block.mcwstairs.birch_balcony | EN: Birch Balcony | ZH:  | lexical
+[5] block.mcwstairs.jungle_balcony | EN: Jungle Balcony | ZH:  | lexical","[1] lexical overlap on ['balcony']
+[2] lexical overlap on ['balcony']
+[3] lexical overlap on ['balcony']
+[4] lexical overlap on ['balcony']
+[5] lexical overlap on ['balcony']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"63","lexical_only","62817","eternal_starlight","1.21.1","lang","block.eternal_starlight.dimslag","Dimslag","","none","1 candidates; structural=0","[1] block.eternal_starlight.suspicious_dimslag | EN: Suspicious Dimslag | ZH:  | lexical","[1] lexical overlap on ['dimslag']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"64","lexical_only","27802","bibliowoods","1.21.1","lang","block.bibliocraft.expandeddelight_cinnamon_fancy_armor_stand","Cinnamon Fancy Armor Stand","","none","5 candidates; structural=0","[1] block.bibliocraft.aether_skyroot_fancy_armor_stand | EN: Skyroot Fancy Armor Stand | ZH:  | lexical
+[2] block.bibliocraft.aether_skyroot_fancy_clock | EN: Skyroot Fancy Clock | ZH:  | lexical
+[3] block.bibliocraft.aether_skyroot_fancy_crafter | EN: Skyroot Fancy Crafter | ZH:  | lexical
+[4] block.bibliocraft.aether_skyroot_fancy_sign | EN: Skyroot Fancy Sign | ZH:  | lexical
+[5] block.bibliocraft.aether_skyroot_wall_fancy_clock | EN: Skyroot Fancy Clock | ZH:  | lexical","[1] lexical overlap on ['armor', 'fancy']
+[2] lexical overlap on ['fancy']
+[3] lexical overlap on ['fancy']
+[4] lexical overlap on ['fancy']
+[5] lexical overlap on ['fancy']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"65","lexical_only","111008","neovitae","1.21.1","lang","book.neovitae.guide.tabula_vitae.flask_levitation.description","Reverses gravity's pull, sending the body skyward.","","none","5 candidates; structural=0","[1] advancements.neovitae.tabula_aetherea.description | EN: Craft a Tabula Aetherea | ZH:  | lexical
+[2] advancements.neovitae.tabula_aetherea.title | EN: Tabula Aetherea | ZH:  | lexical
+[3] advancements.neovitae.tabula_animata.description | EN: Craft a Tabula Animata | ZH:  | lexical
+[4] advancements.neovitae.tabula_animata.title | EN: Tabula Animata | ZH:  | lexical
+[5] advancements.neovitae.tabula_rasa.description | EN: Inscribe your first slate | ZH:  | lexical","[1] lexical overlap on ['tabula']
+[2] lexical overlap on ['tabula']
+[3] lexical overlap on ['tabula']
+[4] lexical overlap on ['tabula']
+[5] lexical overlap on ['tabula']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"66","lexical_only","41767","chipped","1.21.1","lang","block.chipped.cracked_disordered_stone_bricks","Cracked Disordered Stone Bricks","","none","5 candidates; structural=0","[1] block.chipped.amethyst_block_bricks | EN: Amethyst Block Bricks | ZH:  | lexical
+[2] block.chipped.ancient_debris_bricks | EN: Ancient Debris Bricks | ZH:  | lexical
+[3] block.chipped.andesite_bricks | EN: Andesite Bricks | ZH:  | lexical
+[4] block.chipped.andesite_pointed_dripstone | EN: Andesite Pointed Dripstone | ZH:  | lexical
+[5] block.chipped.angled_mud_bricks | EN: Angled Mud Bricks | ZH:  | lexical","[1] lexical overlap on ['bricks']
+[2] lexical overlap on ['bricks']
+[3] lexical overlap on ['bricks']
+[4] lexical overlap on ['stone']
+[5] lexical overlap on ['bricks']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"67","lexical_only","108775","mysticalagriculture","1.21.1","lang","augmentType.mysticalagriculture.shovel","Shovel","鍬","none","5 candidates; structural=0","[1] item.mysticalagriculture.inferium_shovel | EN: Inferium Shovel | ZH: 下級精華鍬 | lexical
+[2] item.mysticalagriculture.prudentium_shovel | EN: Prudentium Shovel | ZH: 初級精華鍬 | lexical
+[3] item.mysticalagriculture.tertium_shovel | EN: Tertium Shovel | ZH: 中級精華鍬 | lexical
+[4] item.mysticalagriculture.imperium_shovel | EN: Imperium Shovel | ZH: 高級精華鍬 | lexical
+[5] item.mysticalagriculture.supremium_shovel | EN: Supremium Shovel | ZH: 終極精華鍬 | lexical","[1] lexical overlap on ['shovel']
+[2] lexical overlap on ['shovel']
+[3] lexical overlap on ['shovel']
+[4] lexical overlap on ['shovel']
+[5] lexical overlap on ['shovel']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"68","lexical_only","140747","sgearmetalworks","1.21.1","lang","item.sgearmetalworks.sword_cast","Sword Cast","","none","5 candidates; structural=0","[1] item.sgearmetalworks.arrow_cast | EN: Arrow Cast | ZH:  | lexical
+[2] item.sgearmetalworks.axe_cast | EN: Axe Cast | ZH:  | lexical
+[3] item.sgearmetalworks.boots_cast | EN: Boots Cast | ZH:  | lexical
+[4] item.sgearmetalworks.bow_cast | EN: Bow Cast | ZH:  | lexical
+[5] item.sgearmetalworks.bracelet_cast | EN: Bracelet Cast | ZH:  | lexical","[1] lexical overlap on ['cast']
+[2] lexical overlap on ['cast']
+[3] lexical overlap on ['cast']
+[4] lexical overlap on ['cast']
+[5] lexical overlap on ['cast']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"69","lexical_only","95327","mekanism","1.21.1","lang","alias.mekanism.raw_tin","Raw Tin Block","錫原礦塊","none","5 candidates; structural=0","[1] advancements.mekanism.automated_crafting.description | EN: Craft a machine to do the crafting for you | ZH: 製作一臺機器來為你合成物品 | lexical
+[2] advancements.mekanism.automated_crafting.title | EN: A Smart Crafting Table | ZH: 智能工作台 | lexical
+[3] advancements.mekanism.painting_machine.description | EN: Craft a Painting Machine to change the color of items | ZH: 製作一臺噴塗機來改變物品的顏色 | lexical
+[4] advancements.mekanism.painting_machine.title | EN: Lets Paint! | ZH: 快來畫畫！ | lexical
+[5] alias.mekanism.bin.drawer | EN: Drawer | ZH: 抽屜 | lexical","[1] lexical overlap on ['tin']
+[2] lexical overlap on ['tin']
+[3] lexical overlap on ['tin']
+[4] lexical overlap on ['tin']
+[5] lexical overlap on ['raw']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"70","lexical_only","101586","minecolonies","1.21.1","lang","item.supplycampdeployer.invalid.water_block_needed","Placing a Supply Ship requires water under the ship. These blocks must be water: %s.","只能水面上放置補給船，這些地方必須有水: %s.","none","5 candidates; structural=0","[1] block.blockhuttownhall.messageinvalidworld | EN: You can't place a Town Hall in this world type | ZH: 你無法在這個世界類型中放置市政中心. | lexical
+[2] com.minecolonies.command.raid.colony_type.invalid | EN: Invalid raid event type %s | ZH: Invalid raid event type %s | lexical
+[3] com.minecolonies.coremod.gui.townhall.invalidrankname | EN: This rank name is invalid | ZH: 此等級名稱無效 | lexical
+[4] item.supplycampdeployer.invalid | EN: Requires a flat ground at least 16*17 blocks without grass, flowers, or holes! | ZH: 需要一片16格*17格平坦且無花無草無坑洞的地！ | lexical
+[5] item.supplycampdeployer.invalid.lava_block_needed | EN: Placing a Supply Ship in the Nether requires lava under the ship. These blocks must be lava: %s. | ZH: 將補給船放置在地獄需要在船下放置岩漿。這些方塊必須是岩漿：%s。 | lexical","[1] lexical overlap on ['invalid']
+[2] lexical overlap on ['invalid']
+[3] lexical overlap on ['invalid']
+[4] lexical overlap on ['invalid']
+[5] lexical overlap on ['invalid', 'needed']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; untranslated_reference: zh_tw repeats the English, not a translation
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"71","lexical_only","97894","mekanism","1.21.1","lang","qio.mekanism.sort_descending","Descending","","none","5 candidates; structural=0","[1] advancements.mekanism.logistical_sorter.description | EN: Filter which items you are sending to where | ZH: 分選出要送到不同地方的物品 | lexical
+[2] advancements.mekanism.logistical_sorter.title | EN: Pick and Place | ZH: 選擇並放置 | lexical
+[3] auto.mekanism.sort | EN: Auto-sort | ZH: 自動整理 | lexical
+[4] block.mekanism.logistical_sorter | EN: Logistical Sorter | ZH: 物流整理機 | lexical
+[5] configuration.mekanism.client.qio.sort.direction | EN: Sort Direction | ZH:  | lexical","[1] lexical overlap on ['sort']
+[2] lexical overlap on ['sort']
+[3] lexical overlap on ['sort']
+[4] lexical overlap on ['sort']
+[5] lexical overlap on ['sort']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"72","lexical_only","103472","minecolonies","1.21.1","lang","item.minecolonies.mint_tea","Mint Tea","Mint Tea","none","5 candidates; structural=0","[1] minecolonies.config.colonyteamborders | EN: Show Colony Borders in Team Colors | ZH: 以隊伍顏色顯示殖民地邊界 | lexical
+[2] minecolonies.config.colonyteamborders.comment | EN: When true, the colony borders shown when holding the build tool will be in the colony's team color. When false, the colony you're inside will be white and any other colony will be red. | ZH: 當啟用時，殖民地邊界將在拿著建築工具時以隊伍顏色顯示；當禁用時，你所在的殖民地邊界將會變白，其他殖民地邊界則會變紅。 | lexical
+[3] minecolonies.config.minthleveltoteleport | EN: Town Hall Teleport | ZH: 市政廳-傳送 | lexical
+[4] minecolonies.config.minthleveltoteleport.comment | EN: The minimum level a Town Hall has to be to allow teleportation to allied colonies. | ZH: 市政廳必須達到要求的等級才允許其傳送至盟友殖民地。 | lexical
+[5] com.minecolonies.command.deleteable.success | EN: Changed deletable flag of colony ID %s. It is now set to %s. | ZH: 已改變殖民地ID%s的可刪除旗幟。現已改設為%s。 | lexical","[1] lexical overlap on ['tea']
+[2] lexical overlap on ['tea']
+[3] lexical overlap on ['mint']
+[4] lexical overlap on ['mint']
+[5] lexical overlap on ['tea']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"73","lexical_only","30669","bibliowoods","1.21.1","lang","block.bibliocraft.red_garnished_nut_wall_display_case","Red Nut Display Case","","none","5 candidates; structural=0","[1] block.bibliocraft.aether_skyroot_bookcase | EN: Skyroot Bookcase | ZH:  | lexical
+[2] block.bibliocraft.allthemodium_ancient_bookcase | EN: Ancient Bookcase | ZH:  | lexical
+[3] block.bibliocraft.allthemodium_demonic_bookcase | EN: Demonic Bookcase | ZH:  | lexical
+[4] block.bibliocraft.allthemodium_soul_bookcase | EN: Soul Bookcase | ZH:  | lexical
+[5] block.bibliocraft.ars_nouveau_archwood_bookcase | EN: Archwood Bookcase | ZH:  | lexical","[1] lexical overlap on ['case']
+[2] lexical overlap on ['case']
+[3] lexical overlap on ['case']
+[4] lexical overlap on ['case']
+[5] lexical overlap on ['case']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"74","lexical_only","144095","sophisticatedstorage","1.21.1","lang","gui.sophisticatedstorage.barrel_part.top_all","All Top","","none","5 candidates; structural=0","[1] block.sophisticatedstorage.barrel | EN: %s%sBarrel | ZH:  | lexical
+[2] block.sophisticatedstorage.copper_barrel | EN: %s%sCopper Barrel | ZH:  | lexical
+[3] block.sophisticatedstorage.iron_barrel | EN: %s%sIron Barrel | ZH:  | lexical
+[4] block.sophisticatedstorage.gold_barrel | EN: %s%sGold Barrel | ZH:  | lexical
+[5] block.sophisticatedstorage.diamond_barrel | EN: %s%sDiamond Barrel | ZH:  | lexical","[1] lexical overlap on ['barrel']
+[2] lexical overlap on ['barrel']
+[3] lexical overlap on ['barrel']
+[4] lexical overlap on ['barrel']
+[5] lexical overlap on ['barrel']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"75","lexical_only","65999","extendedae","1.21.1","lang","gui.extendedae.crystal_assembler.tank_empty","Empty","","none","5 candidates; structural=0","[1] block.extendedae.ex_molecular_assembler | EN: Extended Molecular Assembler | ZH:  | lexical
+[2] block.extendedae.crystal_fixer | EN: Crystal Fixer | ZH:  | lexical
+[3] block.extendedae.crystal_assembler | EN: Crystal Assembler | ZH:  | lexical
+[4] block.extendedae.assembler_matrix_frame | EN: Assembler Matrix Frame | ZH:  | lexical
+[5] block.extendedae.assembler_matrix_wall | EN: Assembler Matrix Wall | ZH:  | lexical","[1] lexical overlap on ['assembler']
+[2] lexical overlap on ['crystal']
+[3] lexical overlap on ['assembler', 'crystal']
+[4] lexical overlap on ['assembler']
+[5] lexical overlap on ['assembler']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"76","lexical_only","48667","chisel","1.21.1","lang","item.chisel.mosaic.light_blue_concrete","Mosaic Light Blue Concrete","","none","5 candidates; structural=0","[1] item.chisel.array.black_concrete | EN: Array Black Concrete | ZH:  | lexical
+[2] item.chisel.array.blue_concrete | EN: Array Blue Concrete | ZH:  | lexical
+[3] item.chisel.array.brown_concrete | EN: Array Brown Concrete | ZH:  | lexical
+[4] item.chisel.array.cyan_concrete | EN: Array Cyan Concrete | ZH:  | lexical
+[5] item.chisel.array.gray_concrete | EN: Array Gray Concrete | ZH:  | lexical","[1] lexical overlap on ['concrete']
+[2] lexical overlap on ['blue', 'concrete']
+[3] lexical overlap on ['concrete']
+[4] lexical overlap on ['concrete']
+[5] lexical overlap on ['concrete']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"77","lexical_only","11426","ars_nouveau","1.21.1","lang","ars_nouveau.augment_desc.glyph_gravity_glyph_aoe","Increases the radius of targeted blocks.","增加範圍。","none","5 candidates; structural=0","[1] ars_nouveau.adv.desc.ritual_gravity | EN: Be affected by a Ritual of Gravity | ZH: 受重力儀式影響 | lexical
+[2] ars_nouveau.adv.title.ritual_gravity | EN: You're Grounded | ZH: 你被禁足了 | lexical
+[3] ars_nouveau.all_glyphs | EN: All Glyphs | ZH: 所有符文 | lexical
+[4] ars_nouveau.augment_desc.glyph_animate_block_glyph_duration_down | EN: Reduces the duration of the summon. | ZH: 減少召喚持續時間。 | lexical
+[5] ars_nouveau.augment_desc.glyph_animate_block_glyph_extend_time | EN: Extends the duration of the summon. | ZH: 延長召喚持續時間。 | lexical","[1] lexical overlap on ['gravity']
+[2] lexical overlap on ['gravity']
+[3] lexical overlap on ['glyph']
+[4] lexical overlap on ['glyph']
+[5] lexical overlap on ['glyph']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"78","lexical_only","113713","occultism","1.21.1","lang","book.occultism.dictionary_of_spirits.getting_started.candle.tallow.text","Key ingredient for large candles. Kill large animals like pigs, cows or sheep with a [](item://occultism:butcher_knife)
+to harvest [](item://occultism:tallow).
+","","none","5 candidates; structural=0","[1] block.occultism.large_candle | EN: Large Candle | ZH:  | lexical
+[2] block.occultism.large_candle_black | EN: Large Black Candle | ZH:  | lexical
+[3] block.occultism.large_candle_blue | EN: Large Blue Candle | ZH:  | lexical
+[4] block.occultism.large_candle_brown | EN: Large Brown Candle | ZH:  | lexical
+[5] block.occultism.large_candle_cyan | EN: Large Cyan Candle | ZH:  | lexical","[1] lexical overlap on ['candle']
+[2] lexical overlap on ['candle']
+[3] lexical overlap on ['candle']
+[4] lexical overlap on ['candle']
+[5] lexical overlap on ['candle']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative; format tokens differ: not used as same-text evidence","","","","","",""
+"79","lexical_only","19718","bibliobiomes","1.21.1","lang","item.bibliocraft.black_regions_unexplored_baobab_fancy_seat_back","Black Baobab Fancy Seat Back","","none","5 candidates; structural=0","[1] block.bibliocraft.biomesoplenty_dead_fancy_armor_stand | EN: Dead Fancy Armor Stand | ZH:  | lexical
+[2] block.bibliocraft.biomesoplenty_dead_fancy_clock | EN: Dead Fancy Clock | ZH:  | lexical
+[3] block.bibliocraft.biomesoplenty_dead_fancy_crafter | EN: Dead Fancy Crafter | ZH:  | lexical
+[4] block.bibliocraft.biomesoplenty_dead_fancy_sign | EN: Dead Fancy Sign | ZH:  | lexical
+[5] block.bibliocraft.biomesoplenty_dead_wall_fancy_clock | EN: Dead Fancy Clock | ZH:  | lexical","[1] lexical overlap on ['fancy']
+[2] lexical overlap on ['fancy']
+[3] lexical overlap on ['fancy']
+[4] lexical overlap on ['fancy']
+[5] lexical overlap on ['fancy']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"80","lexical_only","75352","iceandfire","1.21.1","lang","block.iceandfire.dragonforge_lightning_input","Dragonforge Lightning Aperture","","none","5 candidates; structural=0","[1] bestiary.dragonforge | EN: Dragon Forge | ZH:  | lexical
+[2] bestiary.lightningdragon | EN: Lightning Dragon | ZH:  | lexical
+[3] bestiary.lightningdragonegg | EN: Lightning Dragon Eggs | ZH:  | lexical
+[4] block.iceandfire.dragonforge_fire_brick | EN: Dragonforge Fire Brick | ZH:  | lexical
+[5] block.iceandfire.dragonforge_fire_core | EN: Dragonforge Fire Core | ZH:  | lexical","[1] lexical overlap on ['dragonforge']
+[2] lexical overlap on ['lightning']
+[3] lexical overlap on ['lightning']
+[4] lexical overlap on ['dragonforge']
+[5] lexical overlap on ['dragonforge']","[1] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[2] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[3] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[4] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative
+[5] low; review=none; lexical only: a shared word is not proof of the same entity; unreviewed or unknown review status: not authoritative","","","","","",""
+"81","none","128259","quarryplus","1.21.1","lang","tof.bottom","Go to BOTTOM","翻到底部","none","0 candidates; structural=0","","","","","","","","",""
+"82","none","119274","pamhc2foodextended","1.21.1","lang","item.pamhc2foodextended.steakandchipsitem","Steak and Chips","","none","0 candidates; structural=0","","","","","","","","",""
+"83","none","57210","curios","1.21.1","lang","curios.networking.failed","Curios Networking Failure","","none","0 candidates; structural=0","","","","","","","","",""
+"84","none","39710","buildinggadgets2","1.21.1","lang","buildinggadgets2.tooltips.mode","Mode: %s","","none","0 candidates; structural=0","","","","","","","","",""
+"85","none","84905","jade","1.21.1","lang","jade.nextEgg","Next egg: %s","下次生蛋：%s","none","0 candidates; structural=0","","","","","","","","",""
+"86","none","144501","stevescarts","1.21.1","lang","arcade.stevescarts.instructionRestart","Restart","","none","0 candidates; structural=0","","","","","","","","",""
+"87","none","73329","gateways","1.21.1","lang","reward.gateways.entity","%s %s Loot Rolls","","none","0 candidates; structural=0","","","","","","","","",""
+"88","none","103118","minecolonies","1.21.1","lang","minecolonies:deliveryman.skills.desc","Affects walking speed and concurrent request fulfillment capacity.","Affects walking speed and concurrent request fulfillment capacity.","none","0 candidates; structural=0","","","","","","","","",""
+"89","none","91369","mahoutsukai","1.21.1","lang","mahoutsukai.holiday3greeting3","I SWEAR I SAW A LEPRECHAUN JUST THE OTHER DAY I'M NOT LYING!","","none","0 candidates; structural=0","","","","","","","","",""
+"90","none","2966","ae2","1.21.1","lang","chat.ae2.NoLastTransition","This plot doesn't have a last known transition.","","none","0 candidates; structural=0","","","","","","","","",""
+"91","none","77447","immersiveengineering","1.21.1","lang","block.immersiveengineering.turntable","Turntable","","none","0 candidates; structural=0","","","","","","","","",""
+"92","none","51103","computercraft","1.21.1","lang","commands.computercraft.desc","The /computercraft command provides various debugging and administrator tools for controlling and interacting with computers.","","none","0 candidates; structural=0","","","","","","","","",""
+"93","none","109378","neo_auth","1.21.1","lang","neo_auth.configuration.port","OAuth2 Callback Url Port","","none","0 candidates; structural=0","","","","","","","","",""
+"94","none","153087","tombstone","1.21.1","lang","readable_scroll.elyra_diary.title","Elyra's Diary","","none","0 candidates; structural=0","","","","","","","","",""
+"95","none","11299","ars_nouveau","1.21.1","lang","ars_nouveau.alias.spellbook","Spellbook","","none","0 candidates; structural=0","","","","","","","","",""
+"96","none","129005","railcraft","1.21.1","lang","looking_at.railcraft.switched","Switched: ","","none","0 candidates; structural=0","","","","","","","","",""
+"97","none","118767","pamhc2foodextended","1.21.1","lang","item.pamhc2foodextended.elderberrypieitem","Elderberry Pie","","none","0 candidates; structural=0","","","","","","","","",""
+"98","none","57986","draconicevolution","1.21.1","lang","fusion_status.draconicevolution.canceled","Craft Canceled","","none","0 candidates; structural=0","","","","","","","","",""
+"99","none","107875","moonlight","1.21.1","lang","commands.moonlight.blockstate_stats","Total blocks: %1$s, total BlockStates: %2$s. Additional info saved at %3$s","","none","0 candidates; structural=0","","","","","","","","",""
+"100","none","71907","ftbquests","1.21.1","lang","ftbquests.rarity.rare","Rare","稀有","none","0 candidates; structural=0","","","","","","","","",""
