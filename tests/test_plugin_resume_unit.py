@@ -611,3 +611,22 @@ class TestDiscardFailure:
         with pytest.raises(PermissionError):
             lm_resume.discard_interrupted_task(task)
         assert plugin_resume.marker_path("md").exists()
+
+
+class TestPurgeLegacyMarkers:
+    def test_legacy_markers_are_purged_and_current_ones_are_kept(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("MCT_DATA_DIR", str(tmp_path))
+        legacy = plugin_resume.marker_path("md")
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(
+            json.dumps({"plugin": "md", "processed": 2, "total": 7}), encoding="utf-8"
+        )
+
+        assert lm_resume.purge_legacy_plugin_markers() == ["md"]
+        assert not legacy.exists()
+
+        _write_plugin_marker("md")
+        assert lm_resume.purge_legacy_plugin_markers() == []
+        assert plugin_resume.marker_path("md").exists()

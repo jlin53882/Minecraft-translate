@@ -16,6 +16,10 @@ from app.services_impl.pack_pipeline_service import (
     discover_kubejs_ftb_pack_candidates,
     run_kubejs_ftb_pipeline_service,
 )
+from app.services_impl.pack_version_service import (
+    detect_minecraft_version,
+    known_minecraft_versions,
+)
 from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
@@ -98,8 +102,20 @@ class KubejsFtbPipelineView(ft.Column):
             path=True,
             on_change=self._source_changed,
         )
-        self.version_field = kit.text_field(
-            "遊戲版本", value="1.21.1", mono=True, width=260
+        # 版本由來源自動帶入（分析來源時）；使用者也可直接輸入，輸入時依前綴過濾選項。
+        self._version_auto = False
+        self.version_hint = kit.hint_text(
+            "分析來源後會自動帶入版本，也可手動選擇或輸入。"
+        )
+        self.version_field = ft.Dropdown(
+            label="遊戲版本",
+            options=[ft.dropdown.Option(v) for v in known_minecraft_versions()],
+            editable=True,
+            enable_filter=True,
+            enable_search=True,
+            width=260,
+            on_text_change=self._version_typed,
+            on_select=self._version_selected,
         )
         self.scan_mode = kit.dropdown(
             label="同步模式",
@@ -187,10 +203,43 @@ class KubejsFtbPipelineView(ft.Column):
         )
         self.controls = [self.workbench_view]
 
+    def _version_typed(self, e=None) -> None:
+        """使用者手動輸入版本：視為手動值，之後分析來源不會覆蓋它。"""
+        text = (getattr(e, "data", None) or self.version_field.value or "").strip()
+        self.version_field.value = text or None
+        self._version_auto = False
+
+    def _version_selected(self, e=None) -> None:
+        self._version_auto = False
+
+    def _apply_detected_version(self, version: str | None) -> None:
+        """依來源偵測結果帶入版本；手動輸入過的版本不會被覆蓋。"""
+        manual = bool(self.version_field.value) and not self._version_auto
+        if version is None:
+            if self._version_auto:
+                self.version_field.value = None
+                self._version_auto = False
+            self.version_hint.value = "未偵測到版本，請手動選擇或輸入。"
+            return
+        if version not in {option.key for option in self.version_field.options}:
+            self.version_field.options.append(ft.dropdown.Option(version))
+        if manual:
+            self.version_hint.value = (
+                f"來源偵測到 {version}，目前保留你手動輸入的版本。"
+            )
+            return
+        self.version_field.value = version
+        self._version_auto = True
+        self.version_hint.value = f"已自動偵測：{version}（可手動改）"
+
     def _source_changed(self, _e=None) -> None:
         """來源路徑變更後清除舊候選，避免執行時沿用前一個模組包根目錄。"""
         self._source_generation += 1
         self._candidates = []
+        if self._version_auto:
+            # 自動帶入的版本屬於舊來源，換來源後等待重新偵測。
+            self.version_field.value = None
+            self._version_auto = False
         self.root_dropdown.value = None
         kit.set_dropdown_options(self.root_dropdown, [])
         self.source_summary.value = "來源已變更，請重新分析來源。"
@@ -408,6 +457,8 @@ class KubejsFtbPipelineView(ft.Column):
             self.source_summary.color = C.RED
             self._safe_update()
             return
+        detected = await asyncio.to_thread(detect_minecraft_version, source)
+        self._apply_detected_version(detected)
         generation = self._source_generation
         self._set_run_buttons_disabled(True)
         self.source_summary.value = "分析有限深度來源候選中…"
@@ -476,6 +527,8 @@ class KubejsFtbPipelineView(ft.Column):
             return "已有 KubeJS／FTB 流水線執行中", C.GOLD
         if not (self.source_field.value or "").strip():
             return "請先輸入來源路徑", C.RED
+        if not (self.version_field.value or "").strip():
+            return "請先選擇或輸入遊戲版本", C.RED
         if not (self.include_kubejs.value or self.include_ftb.value):
             return "至少選擇 KubeJS 或 FTB Quests", C.RED
         if publish and not (self.output_field.value or "").strip():

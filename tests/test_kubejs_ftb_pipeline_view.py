@@ -114,6 +114,8 @@ def test_wizard_blocks_next_until_sources_are_analyzed_and_selected():
     view.include_ftb.value = False
     assert wizard._step_problem(1) is not None  # 來源類型都未選
     view.include_kubejs.value = True
+    assert wizard._step_problem(1) is not None  # 版本未填
+    view.version_field.value = "1.21"
     assert wizard._step_problem(1) is None
 
 

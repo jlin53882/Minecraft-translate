@@ -113,6 +113,7 @@ class KubejsFtbWizard:
                     "多個候選時必須明確選擇；尚未分析來源時請先在主頁面按「分析來源」。"
                 ),
                 ft.Row([view.version_field, view.scan_mode], spacing=12, wrap=True),
+                view.version_hint,
                 ft.Row([view.include_kubejs, view.include_ftb], spacing=16, wrap=True),
             ],
             spacing=12,
@@ -205,6 +206,8 @@ class KubejsFtbWizard:
                 return "來源有多個候選，請先選擇有效來源根目錄", C.GOLD
             if not (view.include_kubejs.value or view.include_ftb.value):
                 return "至少選擇 KubeJS 或 FTB Quests", C.RED
+            if not (view.version_field.value or "").strip():
+                return "請先選擇或輸入遊戲版本", C.RED
         if step == 3 and not (view.output_field.value or "").strip():
             return "一鍵執行會發布 overlay，請先填寫輸出目錄", C.RED
         return None
