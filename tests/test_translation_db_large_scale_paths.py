@@ -114,10 +114,7 @@ def test_smart_review_twin_completion_starts_from_the_page_groups(tmp_path):
     d = TranslationDB(tmp_path / "twins.db")
     d.ingest(
         VERSION,
-        [
-            _trusted_lang_item(f"k.{i}", "Same Text", "相同")
-            for i in range(6)
-        ]
+        [_trusted_lang_item(f"k.{i}", "Same Text", "相同") for i in range(6)]
         + [_trusted_lang_item("z.other", "Other", "其他")],
     )
     statements = _plans(d, "selected_groups AS")
