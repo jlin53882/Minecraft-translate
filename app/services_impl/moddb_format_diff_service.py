@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from translation_tool.core.format_diagnostics import (
+    MARKUP_ORDER_CATEGORY,
     FormatDiagnostic,
     FormatDiagnosticsResult,
     FormatSpan,
     analyze_format_diagnostics,
+    diagnostic_action,
 )
 from translation_tool.core.format_diagnostics import (
     FormatDiagnostic as FormatDiffIssue,
@@ -37,6 +39,7 @@ def compare_format_diff(
 
 
 __all__ = [
+    "MARKUP_ORDER_CATEGORY",
     "FormatDiagnostic",
     "FormatDiagnosticsResult",
     "FormatDiffIssue",
@@ -45,5 +48,6 @@ __all__ = [
     "FormatTokenOccurrence",
     "analyze_format_diagnostics",
     "compare_format_diff",
+    "diagnostic_action",
     "format_token_label",
 ]

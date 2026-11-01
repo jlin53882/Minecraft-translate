@@ -24,6 +24,7 @@ from translation_tool.core.terminology_model import (
 )
 from translation_tool.translation_db.quality import quality_state
 from translation_tool.translation_db.schema import (
+    KIND_FTB_QUEST_LANG,
     KIND_KUBEJS_LANG,
     KIND_LANG,
     SRC_JAR_TW,
@@ -35,7 +36,7 @@ _REVIEWED_ENTRY_COLUMNS = (
     "f.zh_tw, f.source, f.review_status, f.revision "
     "FROM entry e JOIN translation f ON f.entry_id=e.id "
 )
-_LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG)
+_LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
 
 
 class _LocalContextBuilder:

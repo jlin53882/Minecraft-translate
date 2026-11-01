@@ -9,6 +9,7 @@ token-only compatibility policy.
 
 from __future__ import annotations
 
+import re
 from bisect import bisect_left
 from collections import Counter
 from collections.abc import Callable
@@ -68,6 +69,8 @@ class FormatDiagnostic:
 
     @property
     def legacy_message(self) -> str:
+        if self.category == MARKUP_ORDER_CATEGORY:
+            return "標記順序與原文不同"
         action = "少了" if self.direction == "missing" else "多了"
         return f"{action} {abs(self.delta)} 個「{self.display_token}」"
 
@@ -75,6 +78,8 @@ class FormatDiagnostic:
     def summary(self) -> str:
         if self.category == "newline" and self.identifier == "\n":
             return f"換行數量不一致：原文 {self.source_count}、譯文 {self.target_count}"
+        if self.category == MARKUP_ORDER_CATEGORY:
+            return "標記順序與原文不同"
         action = "缺少" if self.direction == "missing" else "多出"
         location = (
             "位置無法可靠判定"
@@ -242,6 +247,19 @@ def _token_diagnostics(
     return tuple(diagnostics)
 
 
+def _structure_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    """Markup tags, tag order and color codes.  Empty source has no structure to compare."""
+    if not source:
+        return ()
+    return (
+        *_markup_tag_diagnostics(source, translated),
+        *_markup_order_diagnostics(source, translated),
+        *_color_code_diagnostics(source, translated),
+    )
+
+
 def _analyze_token_format(
     source: str,
     translated: str,
@@ -252,12 +270,106 @@ def _analyze_token_format(
     return FormatAnalysis(
         source_occurrences=source_occurrences,
         target_occurrences=target_occurrences,
-        diagnostics=_token_diagnostics(
-            source,
-            translated,
-            source_occurrences,
-            target_occurrences,
-            newline_policy=newline_policy,
+        diagnostics=(
+            *_token_diagnostics(
+                source,
+                translated,
+                source_occurrences,
+                target_occurrences,
+                newline_policy=newline_policy,
+            ),
+            *_structure_diagnostics(source, translated),
+        ),
+    )
+
+
+# KubeJS 腳本文字可能帶有遊戲內的自訂標記（例如 <imp>、<r>、<item>）。這類標記不是
+# token 分析器認得的格式，若只看一般 token，標記被丟掉、改名或翻譯也會被當成正常譯文。
+_MARKUP_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9_.:-]*\s*/?>")
+MARKUP_ORDER_CATEGORY = "markup_order"
+# Legacy "&" color codes (e.g. &2, &r) used by FTB Quests text. Only lowercase
+# codes are matched so that words such as "Q&A" are not treated as codes.
+_COLOR_CODE_RE = re.compile(r"&[0-9a-fk-or]")
+
+
+def _color_code_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    source_counts = Counter(m.group(0) for m in _COLOR_CODE_RE.finditer(source))
+    target_counts = Counter(m.group(0) for m in _COLOR_CODE_RE.finditer(translated))
+    diagnostics: list[FormatDiagnostic] = []
+    for code in sorted(set(source_counts) | set(target_counts)):
+        delta = target_counts[code] - source_counts[code]
+        if not delta:
+            continue
+        diagnostics.append(
+            FormatDiagnostic(
+                identifier=code,
+                category="color",
+                direction="extra" if delta > 0 else "missing",
+                source_count=source_counts[code],
+                target_count=target_counts[code],
+                delta=delta,
+                display_label=code,
+            )
+        )
+    return tuple(diagnostics)
+
+
+def diagnostic_action(issue: FormatDiagnostic) -> str:
+    """顯示用的動作詞：缺少、多出，或標記順序不同（不是數量問題）。"""
+    if issue.category == MARKUP_ORDER_CATEGORY:
+        return "順序不同"
+    return "缺少" if issue.direction == "missing" else "多出"
+
+
+def _markup_tag_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    """依數量比對自訂標記；標記的順序與開闔配對目前不檢查，只比對數量。"""
+    source_counts = Counter(m.group(0) for m in _MARKUP_TAG_RE.finditer(source))
+    target_counts = Counter(m.group(0) for m in _MARKUP_TAG_RE.finditer(translated))
+    diagnostics: list[FormatDiagnostic] = []
+    for tag in sorted(set(source_counts) | set(target_counts)):
+        delta = target_counts[tag] - source_counts[tag]
+        if not delta:
+            continue
+        diagnostics.append(
+            FormatDiagnostic(
+                identifier=tag,
+                category="markup",
+                direction="extra" if delta > 0 else "missing",
+                source_count=source_counts[tag],
+                target_count=target_counts[tag],
+                delta=delta,
+                display_label=tag,
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _markup_order_diagnostics(
+    source: str, translated: str
+) -> tuple[FormatDiagnostic, ...]:
+    """標記的數量相同但先後順序不同時回報一筆。
+
+    注意：這可能是合理的語序調整，所以這是需要人工確認的提醒，不是硬性錯誤。
+    """
+    source_tags = _MARKUP_TAG_RE.findall(source)
+    target_tags = _MARKUP_TAG_RE.findall(translated)
+    if len(source_tags) < 2 or Counter(source_tags) != Counter(target_tags):
+        return ()
+    if source_tags == target_tags:
+        return ()
+    return (
+        FormatDiagnostic(
+            identifier="order",
+            category=MARKUP_ORDER_CATEGORY,
+            direction="missing",
+            source_count=len(source_tags),
+            target_count=len(target_tags),
+            delta=1,
+            display_label="標記順序",
         ),
     )
 
@@ -523,6 +635,7 @@ def analyze_format_diagnostics(
 
 
 __all__ = [
+    "MARKUP_ORDER_CATEGORY",
     "DiagnosticDirection",
     "FormatAnalysis",
     "FormatAnalyzer",
@@ -532,6 +645,7 @@ __all__ = [
     "FormatSpan",
     "LocationConfidence",
     "analyze_format_diagnostics",
+    "diagnostic_action",
     "format_identifier_label",
     "format_kind_policy",
     "register_format_kind",

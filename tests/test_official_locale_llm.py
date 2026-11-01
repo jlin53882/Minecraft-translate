@@ -862,3 +862,29 @@ def test_item_matches_cache_distinguishes_key_and_source() -> None:
 
     assert [m.target_text for m in a] == ["甲"]
     assert [m.target_text for m in b] == ["乙"]
+
+
+def test_moddb_reviewed_lang_glossary_is_injected_for_kubejs_and_ftb_profiles() -> None:
+    item = {
+        "path": "item.example",
+        "source_text": "Copper Gate",
+        "text": "Copper Gate",
+        "_reviewed_glossary": [{"en_us": "Copper Gate", "zh_tw": "銅製閘門"}],
+    }
+    for profile in ("kubejs", "ftb"):
+        assert "Copper Gate → 銅製閘門" in build_translation_prompt(
+            "基礎", [{**item}], profile=profile
+        ), profile
+
+
+def test_reviewed_lang_glossary_is_injected_for_every_translation_profile() -> None:
+    item = {
+        "path": "item.example",
+        "source_text": "Copper Gate",
+        "text": "Copper Gate",
+        "_reviewed_glossary": [{"en_us": "Copper Gate", "zh_tw": "銅製閘門"}],
+    }
+    for profile in ("lang", "patch", "md", "kubejs", "ftb", "guide", "advancement"):
+        assert "Copper Gate → 銅製閘門" in build_translation_prompt(
+            "基礎", [{**item}], profile=profile
+        ), profile
