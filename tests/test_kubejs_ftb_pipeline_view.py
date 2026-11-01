@@ -21,7 +21,7 @@ def test_kubejs_pipeline_uses_one_click_workbench_layout():
     assert isinstance(body, ft.ResponsiveRow)
     assert len(body.controls) == 2
     assert all(isinstance(column, ft.Column) for column in body.controls)
-    assert len(body.controls[0].controls) == 4
+    assert len(body.controls[0].controls) == 2
     assert len(body.controls[1].controls) == 2
     assert view.progress_panel.container.visible is False
     assert view.log_view is view.progress_panel.log_view
@@ -68,6 +68,7 @@ def test_shared_pipeline_steps_card_uses_the_same_row_contract_without_actions()
 def test_kubejs_pipeline_maps_session_progress_to_workflow_stage():
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
     view._running = True
+    view._current_publish = True
 
     view._sync_progress_stage(0.1, "RUNNING")
     assert view.progress_panel.steps[0].status == "running"
@@ -77,3 +78,22 @@ def test_kubejs_pipeline_maps_session_progress_to_workflow_stage():
     assert view.progress_panel.steps[2].status == "running"
     view._sync_progress_stage(0.98, "RUNNING")
     assert view.progress_panel.steps[3].status == "running"
+
+
+def test_kubejs_sync_only_run_never_marks_overlay_stage():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    view._running = True
+    view._current_publish = False
+
+    view._sync_progress_stage(0.98, "RUNNING")
+
+    assert view.progress_panel.steps[2].status == "running"
+    assert view.progress_panel.steps[3].status != "running"
+
+
+def test_kubejs_steps_share_one_settings_dialog_and_four_run_buttons():
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+
+    assert len(view._run_buttons) == 4
+    assert view._settings_dialog is not None
+    assert view._settings_button is not None
