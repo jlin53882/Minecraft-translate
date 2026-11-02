@@ -389,6 +389,19 @@ def _provider_attempt(event: Mapping[str, Any], prefix: str, operation: str) -> 
     )
 
 
+def _context_escalation(event: Mapping[str, Any], prefix: str, operation: str) -> str:
+    """needs_context 條目補上相鄰鍵證據後的第二次判斷。"""
+    if event.get("kind") == "context_escalation_start":
+        return (
+            f"{prefix} 補 context 重判開始：{event.get('expected_count', 0)} 筆"
+            "需補 context 的條目已加入相鄰鍵資料。"
+        )
+    return (
+        f"{prefix} 補 context 重判完成：{event.get('expected_count', 0)} 筆中"
+        f"改判 {event.get('resolved_count', 0)} 筆。"
+    )
+
+
 def _validation_repair(event: Mapping[str, Any], prefix: str, operation: str) -> str:
     """只針對 validation invalid 條目的受限修復流程。"""
     kind = event.get("kind")
@@ -544,6 +557,10 @@ _FORMATTERS: Final[dict[str, Callable[[Mapping[str, Any], str, str], str]]] = {
     "provider_attempt_success": _provider_attempt,
     "provider_attempt_failure": _provider_attempt,
     **dict.fromkeys(_REPAIR_KINDS, _validation_repair),
+    **dict.fromkeys(
+        ("context_escalation_start", "context_escalation_complete"),
+        _context_escalation,
+    ),
     **dict.fromkeys(
         ("retry_wait", "retry_resume", "rate_limit_wait", "rate_limit_resume"),
         _retry,

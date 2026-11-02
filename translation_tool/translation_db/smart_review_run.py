@@ -21,6 +21,9 @@ from translation_tool.translation_db.models import (
     SmartReviewSnapshot,
 )
 from translation_tool.translation_db.schema import SRC_AI
+from translation_tool.translation_db.smart_review_escalation import (
+    escalate_needs_context_results,
+)
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
 from translation_tool.translation_db.smart_review_planner import (
     SmartReviewPlanInput,
@@ -223,6 +226,16 @@ class _SmartReviewBatchRunner:
         if results is None:
             return True
         results = repair_invalid_results(
+            session,
+            state,
+            batch_ctx,
+            batch,
+            results,
+            retry_runtime,
+            outcome.attempt,
+        )
+        results = escalate_needs_context_results(
+            self.db,
             session,
             state,
             batch_ctx,
