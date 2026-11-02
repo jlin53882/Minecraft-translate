@@ -239,6 +239,7 @@ def _select_reviewed_exact_rows(
             break
     return result
 
+
 _QUALITY_PAGE_BUFFER_LIMIT = 10_000
 _BATCH_REPLACE_STRIP_CHARS = "".join(
     chr(codepoint)
@@ -5630,9 +5631,7 @@ class TranslationDB(
         if kind not in _REVIEWED_EXACT_KINDS:
             return []
 
-        scope_clauses, scope_params = _reviewed_exact_scope(
-            mod_id, mc_version, kind
-        )
+        scope_clauses, scope_params = _reviewed_exact_scope(mod_id, mc_version, kind)
         rows: list[tuple[int, str, str, str]] = []
         for start in range(0, len(normalized_sources), _CHUNK):
             chunk = normalized_sources[start : start + _CHUNK]

@@ -99,9 +99,7 @@ def _attach_reviewed_context(
     reviewed_glossary_loader: Callable[..., list[dict[str, str]]] | None,
     reviewed_exact_loader: Callable[..., list[dict[str, str]]] | None,
     source_texts_by_context: dict[tuple[str, str | None], dict[str, None]],
-    source_texts_by_kind_context: dict[
-        tuple[str, str | None, str], dict[str, None]
-    ],
+    source_texts_by_kind_context: dict[tuple[str, str | None, str], dict[str, None]],
     glossaries: dict[tuple[str, str | None], list[dict[str, str]]],
     exact_glossaries: dict[tuple[str, str | None, str], list[dict[str, str]]],
 ) -> None:
@@ -146,9 +144,8 @@ def attach_moddb_context(
     estimator = BudgetConfig.from_config(
         lm_config if isinstance(lm_config, dict) else {}
     ).token_estimator
-    if (
-        isinstance(lm_config, dict)
-        and not lm_config.get("moddb_reviewed_glossary", True)
+    if isinstance(lm_config, dict) and not lm_config.get(
+        "moddb_reviewed_glossary", True
     ):
         reviewed_glossary_loader = None
         reviewed_exact_loader = None
