@@ -1743,7 +1743,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 16
+    assert SCHEMA_VERSION == 17
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1758,6 +1758,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v11-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v15-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v16-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v17-*.bak"))
     assert db._q(
         "SELECT name FROM sqlite_schema WHERE type='table' "
         "AND name IN ('smart_review_run', 'smart_review_candidate') "
@@ -1771,6 +1772,36 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     backups_after = sorted(tmp_path.glob("legacy.db.pre-schema-v*.bak"))
     assert backups_after == backups_before
     db.close()
+
+
+@pytest.mark.parametrize("stored_version", [15, 16])
+def test_entry_origin_locale_schema_gap_is_repaired(tmp_path, stored_version):
+    """舊版來源表缺欄位時，migration 必須先補欄位再建立索引。"""
+    path = tmp_path / f"entry-origin-v{stored_version}.db"
+    db = TranslationDB(path)
+    db.close()
+
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP INDEX IF EXISTS idx_entry_origin_locale")
+        conn.execute("ALTER TABLE entry_origin DROP COLUMN source_locale")
+        conn.execute(
+            "UPDATE meta SET value=? WHERE key='schema_version'",
+            (str(stored_version),),
+        )
+
+    migrated = TranslationDB(path)
+    try:
+        columns = {row[1] for row in migrated._q("PRAGMA table_info(entry_origin)")}
+        assert "source_locale" in columns
+        assert migrated._one("SELECT value FROM meta WHERE key='schema_version'") == (
+            str(SCHEMA_VERSION),
+        )
+        assert migrated._one(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='index' AND name='idx_entry_origin_locale'"
+        ) == (1,)
+    finally:
+        migrated.close()
 
 
 def test_readonly_v1_database_reports_legacy_unknown_without_migrating(tmp_path):

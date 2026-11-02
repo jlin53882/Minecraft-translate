@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -267,8 +267,9 @@ CREATE TABLE IF NOT EXISTS entry_origin (
 CREATE INDEX IF NOT EXISTS idx_entry_origin_entry ON entry_origin (entry_id);
 CREATE INDEX IF NOT EXISTS idx_entry_origin_scope
     ON entry_origin (pack_scope, source_kind, source_path);
-CREATE INDEX IF NOT EXISTS idx_entry_origin_locale
-    ON entry_origin (entry_id, source_locale);
+-- idx_entry_origin_locale 會在所有來源語系 migration 完成後建立。
+-- 不可在這裡建立：舊版 entry_origin 尚未有 source_locale 時，
+-- CREATE INDEX 會先於 v16 migration 失敗，導致 migration 永遠無法開始。
 
 -- 跨格式引用（例如 FTB Quests 的 {my_pack.quest.start}）不建立重複 entry；
 -- 只保存來源位置、目標 key 與目前可否解析到語言定義。
@@ -427,6 +428,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_entry_origin_scope_migration(conn)
     if next_version == 16:
         return _backup_before_entry_origin_locale_migration(conn)
+    if next_version == 17:
+        return _backup_before_entry_origin_locale_repair_migration(conn)
     return None
 
 
@@ -480,6 +483,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_entry_origin_scope_v15(conn)
     elif next_version == 16:
         _migrate_entry_origin_locale_v16(conn)
+    elif next_version == 17:
+        _migrate_entry_origin_locale_repair_v17(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -1156,6 +1161,23 @@ def _backup_before_entry_origin_locale_migration(
     return _create_migration_backup(conn, source_path, backup_path)
 
 
+def _backup_before_entry_origin_locale_repair_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在修復來源語系 schema invariant 前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v17-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
 def _migrate_entry_origin_locale_v16(conn: sqlite3.Connection) -> None:
     """保存可驗證的來源語系，並回填舊版來源的 locale。
 
@@ -1202,6 +1224,16 @@ def _migrate_entry_origin_locale_v16(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_entry_origin_locale "
         "ON entry_origin (entry_id, source_locale)"
     )
+
+
+def _migrate_entry_origin_locale_repair_v17(conn: sqlite3.Connection) -> None:
+    """修復版本標記已更新但來源語系欄位未完成的資料庫。
+
+    這個 migration 必須保持冪等，因為舊版程式可能已先寫入 schema version，
+    但在建立來源語系索引前中斷。v16 migration 本身會檢查欄位、回填可判定
+    的 locale 並建立索引，因此可安全重用其修復行為。
+    """
+    _migrate_entry_origin_locale_v16(conn)
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
