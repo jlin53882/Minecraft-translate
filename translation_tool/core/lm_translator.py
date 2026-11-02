@@ -29,7 +29,10 @@ from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,  # noqa: F401 - retained for existing test seams
 )
-from translation_tool.core.lm_moddb_context import strip_runtime_context
+from translation_tool.core.lm_moddb_context import (
+    attach_reviewed_glossary,
+    strip_runtime_context,
+)
 from translation_tool.core.lm_translator_db import (
     DirectoryDbContext,
     directory_db,
@@ -390,6 +393,20 @@ def _cache_saving_enabled() -> bool:
     return bool(load_config().get("translator", {}).get("enable_cache_saving", True))
 
 
+def _inject_reviewed_glossary(
+    items: list[dict[str, Any]], db_ctx: DirectoryDbContext | None
+) -> None:
+    """資料庫已開啟時，送給模型的項目也要帶入同模組已審核的術語與完整句參考。"""
+    if db_ctx is None:
+        return
+    attach_reviewed_glossary(
+        items,
+        mc_version=db_ctx.version,
+        reviewed_glossary_loader=db_ctx.db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db_ctx.db, "reviewed_exact_glossary", None),
+    )
+
+
 def _note_directory_checkpoint(
     fingerprint: str,
     *,
@@ -612,6 +629,7 @@ def _run_directory_translation(
     event_task_id: str | None = None,
 ) -> tuple[Any, list[dict[str, Any]], list[dict[str, Any]], int]:
     """執行目錄翻譯 phase，集中 callback、輸出、checkpoint 與終態契約。"""
+    _inject_reviewed_glossary(items_to_translate, db_ctx)
     _note_directory_checkpoint(
         checkpoint_fingerprint, cache_saving=write_checkpoint, db_choice=db_choice
     )

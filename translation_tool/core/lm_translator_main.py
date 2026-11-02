@@ -2172,6 +2172,12 @@ def _call_quality_retry_with_recovery(request_kwargs: dict) -> str:
             ):
                 raise
             wait_sec = _QUALITY_RETRY_TRANSIENT_WAIT_SEC * attempt
+            # OpenAI 文件：回應帶有 Retry-After 時至少等那麼久（429 與 503 皆適用）。
+            retry_after = getattr(exc, "retry_after", None)
+            if isinstance(retry_after, (int, float)) and retry_after > 0:
+                wait_sec = max(
+                    wait_sec, min(float(retry_after), CHATGPT_MAX_RETRY_AFTER_SEC)
+                )
             log_warning(
                 f"[品質重試] 暫時性故障，{wait_sec:g} 秒後重送"
                 f"（第 {attempt}/{_QUALITY_RETRY_TRANSIENT_ATTEMPTS - 1} 次；"

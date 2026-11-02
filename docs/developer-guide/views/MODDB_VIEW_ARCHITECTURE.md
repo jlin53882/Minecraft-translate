@@ -167,6 +167,8 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 `panel_refresh._load_translate_snapshot` 在背景刷新時只讀取版本／模組清單、未翻譯筆數與可沿用筆數，避免每次範圍變更都載入整個版本並建立翻譯 session。`TranslatePanel` 以這些數字顯示快速批次估算；按下預覽或開始機翻後，`moddb_translate_service` 才建立完整 items、附加同模組 session 與已審核術語，並由共用 planner 產生精確批次數。預覽與實際翻譯仍使用相同的批次規劃路徑；格式修復的即時進度會快取剩餘 canonical plan，只有批次容量、token 預算或 session history 使下一批大小改變時才重新規劃剩餘範圍。
 
+Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_gate`（`_repair_validation_issues`），翻譯端的品質重試因此使用與寫回驗證相同的規則；重試結果由 `_count_quality_retry` 累計到報告。
+
 `TranslatePanel` 依 `summary["status"]` 顯示結果：`CANCELLED` 為「已取消」、`DONE_WITH_WARNINGS` 為「機翻完成（有警告）」（有品質拒絕、來源回填、MAX_TOKENS、回應格式錯誤或未解決的品質重試時）、其他非 `DONE` 為「未完成（狀態）」。`TaskSession.status` 仍只有 `DONE`／`ERROR`。畫面日誌每批一行，完整品質清單由 `moddb_translate_report` 寫入 `logging.log_dir` 下的報告檔，畫面只顯示數量與路徑。
 
 - `app/services_impl/moddb_species_service.py` 不依賴 Flet，只處理候選資料結構、資料庫分頁與學名規則。

@@ -1050,3 +1050,26 @@ def test_item_quality_gate_hook_drives_the_retry(monkeypatch, configure_batch):
     assert status == "AUTO"
     assert len(calls) == 2
     assert result[0]["text"] == "你好"
+
+
+def test_chatgpt_5xx_recovery_waits_for_retry_after(monkeypatch, configure_batch):
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    configure_batch()
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    item = _item("Minecraft", 0)
+    err = ChatGPTAPIError("overloaded", status=503, retry_after=12)
+    result, _status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {}),
+            err,
+            lambda call: _reply(call, {"Minecraft": "我的世界"}),
+        ],
+    )
+
+    assert len(calls) == 3
+    assert 12 in waits
+    assert result[0]["text"] == "我的世界"

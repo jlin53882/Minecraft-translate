@@ -9,6 +9,9 @@
 - 等級由 `batch_event_level` 決定：`attempt_failure`、`retry_wait`、`network_failure`、`network_retry_wait`、
   `provider_attempt_failure`、`validation_repair_start`、`validation_repair_failure` 為 warning；
   `validation_repair_complete`（有修復後仍無效的筆數）與 `batch_complete`（`invalid_count > 0`）為 warning；其餘為 info。
+- 智慧校對的 `needs_context` 升級會送出 `context_escalation_start`、`context_escalation_complete`
+  （`expected_count`、`resolved_count`），等級皆為 info；對應 metrics 為 `context_escalation_attempts`、
+  `context_escalation_items`、`context_escalation_resolved`、`context_escalation_request_errors`。
 - formatter 不認得的事件種類（例如 `cancelled`、尚未寫 formatter 的新 kind）回傳 `None`，**不顯示**，
   避免產生只有 kind 名稱的通用行；取消與失敗結果由各流程自己的狀態訊息呈現。
 - Mod DB 機翻（`moddb_translate_service`）與譯文修復（`moddb_retranslate_service`）都走同一組規則。

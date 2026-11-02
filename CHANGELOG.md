@@ -11,6 +11,12 @@
 
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
+### 翻譯品質重試與智慧校對補 context
+- 所有翻譯請求（Mod DB 機翻、譯文修復、目錄翻譯）的品質重試判定改用與寫回前驗證相同的格式診斷；譯文修復以 `_quality_gate` 帶入自己的驗證規則。標記順序等先前只會被驗證擋下、從不重試的問題現在會先重送。
+- 品質重試最多兩輪，每輪只重送仍不合格的項目；重試請求遇到 5xx／逾時／連線中斷時就地重送（最多 3 次，尊重 `Retry-After`）。譯文修復摘要新增「品質重試 N 筆（修正／仍未通過）」。
+- 智慧校對 `needs_context` 條目會補上相鄰鍵（父鍵、子鍵、同父鍵手足）後再判斷一次；新增 `context_escalation_*` 事件與 metrics。第一次請求 payload 不變，歷史重用不受影響。
+- 開啟資料庫的目錄翻譯也會注入同模組已審核的術語與完整句（`attach_reviewed_glossary`，遵守 `moddb_reviewed_glossary`）。
+
 ### Mod 掃描、資料庫與資源包流水線
 - `TranslationDB` schema 升至 v17；修復舊資料庫 `entry_origin.source_locale` 欄位與索引的 migration ordering，讓實體 schema 不完整時可冪等修復並保留 migration backup，避免預翻譯資料庫因 `no such column: source_locale` 被略過。SQLite 的 WAL／SHM sidecar 仍由 SQLite 管理，不以手動刪除取代 migration。
 - 統一 ModDB、圖示／內容預覽、JAR 提取與 LM 目錄掃描的巢狀 JAR 來源辨識；保留來源鏈、深度／大小／讀取預算與取消／部分失敗狀態，避免 `META-INF/jarjar` 等內嵌模組被漏掃或被當成空結果。

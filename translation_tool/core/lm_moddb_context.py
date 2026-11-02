@@ -190,6 +190,43 @@ def attach_moddb_context(
         )
 
 
+def attach_reviewed_glossary(
+    items: list[dict[str, Any]],
+    *,
+    mc_version: str | None,
+    reviewed_glossary_loader: Callable[..., list[dict[str, str]]] | None,
+    reviewed_exact_loader: Callable[..., list[dict[str, str]]] | None = None,
+) -> None:
+    """只注入已審核術語與完整句參考，不改批次分組與翻譯 session。
+
+    給沒有 Mod DB 批次流程、但有開啟資料庫的目錄翻譯使用；範圍與
+    ``attach_moddb_context`` 相同（模組／版本／種類），並遵守 ``moddb_reviewed_glossary`` 設定。
+    """
+    lm_config = load_config().get("lm_translator", {})
+    if isinstance(lm_config, dict) and not lm_config.get(
+        "moddb_reviewed_glossary", True
+    ):
+        _clear_reviewed_context(items)
+        return
+    glossaries: dict[tuple[str, str | None], list[dict[str, str]]] = {}
+    exact_glossaries: dict[tuple[str, str | None, str], list[dict[str, str]]] = {}
+    by_context, by_kind_context = _source_text_contexts(items, mc_version)
+    for item in items:
+        mod_id, version, kind = _item_context(item, mc_version)
+        _attach_reviewed_context(
+            item,
+            mod_id=mod_id,
+            version=version,
+            kind=kind,
+            reviewed_glossary_loader=reviewed_glossary_loader,
+            reviewed_exact_loader=reviewed_exact_loader,
+            source_texts_by_context=by_context,
+            source_texts_by_kind_context=by_kind_context,
+            glossaries=glossaries,
+            exact_glossaries=exact_glossaries,
+        )
+
+
 # 只存在於記憶體的執行期欄位（物件無法 JSON 序列化）：翻譯 session、已審核 glossary、
 # 指南／Markdown／任務段落的行內保護（``ShieldedText``）。
 _RUNTIME_ONLY_KEYS = frozenset(
@@ -207,4 +244,4 @@ def strip_runtime_context(item: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in item.items() if key not in _RUNTIME_ONLY_KEYS}
 
 
-__all__ = ["attach_moddb_context", "strip_runtime_context"]
+__all__ = ["attach_moddb_context", "attach_reviewed_glossary", "strip_runtime_context"]

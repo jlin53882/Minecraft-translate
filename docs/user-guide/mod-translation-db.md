@@ -116,7 +116,9 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 
 條目校對工具列的「智慧校對」沿用目前面板的版本、模組、類型、目前生效來源與搜尋條件，預設只選未審核且有生效譯文的條目；可設定模型、筆數上限（預設 1000）與批次大小（預設 20，上限 50）。預估與實跑使用同一個不可變 scope 輸入；預估是快速唯讀模式，只比對 CAS 欄位、不建立完整 local context，畫面會明確標示為「估算送 AI」，不能視為實際送出數量。按開始後，背景作業會在真正送出前重新以同版本最近兩份歷史與完整 local context 執行精確規劃，實際執行 log、run metrics 與結果才是權威數量；模型再由既有 provider 分批接收 structured JSON，只判斷既有譯文是 `no_change`、`suggest_revision` 或 `needs_context`。
 
-- local context 只來自本機資料庫與 bundled official locale。`db:<entry_id>` 可追溯到實際資料列，`official:<key>` 可追溯到內建 locale；同 key 的 reviewed reference 必須同時符合 kind、模組、key 與英文原文，跨版本英文不同只能標為 context。Patchouli、指南與 Advancement 也會收到同模組的 reviewed lang 術語；衝突證據會明確標示為低信心／需人工決定。**未做網路查證**，AI 仍可能誤判。
+- local context 只來自本機資料庫與 bundled official locale。`db:<entry_id>` 可追溯到實際資料列，`official:<key>` 可追溯到內建 locale；同 key 的 reviewed reference 必須同時符合 kind、模組、key 與英文原文，跨版本英文不同只能標為 context。Patchouli、指南與 Advancement 也會收到同模組的 reviewed lang 術語；衝突證據會明確標示為低信心／需人工決定。**未做網路查證**，AI 仍可能誤判。 第一次回覆「需補 context」的條目，會在同一批次內補上相鄰鍵（父鍵、子鍵、同父鍵的其他欄位，未審核者會標明）再判斷一次；仍缺資料時維持「需補 context」。
+
+翻譯與修復都會自動帶入同模組、同版本已審核的術語與完整句：Mod DB 機翻、譯文修復，以及開啟資料庫的目錄翻譯皆然（設定 `moddb_reviewed_glossary` 可關閉）。每個翻譯請求都有品質重試：格式或術語不合格的項目最多重送兩輪，暫時性故障（5xx、逾時）會就地重送；譯文修復的摘要會顯示「品質重試 N 筆（修正 X、仍未通過 Y）」。
 - 每筆回應都必須有具體 `reason`，不得放外部 URL；另驗證同批 ID 是否完整唯一、decision／issue type／evidence ID、信心值與格式 token。格式錯誤與 API 請求失敗分別保留為 `invalid` 與 `request_failed`，不寫入翻譯。
 - 候選列顯示版本、kind、來源、審核狀態、reason、evidence 與 canonical format diagnostics；`ready` 候選可編輯並儲存 `draft_zh_tw`。套用以草稿為準，會重新比對條目、effective、revision 與既有 manual 快照；若既有人工列已審核，會阻擋並要求回到人工編輯流程。
 - 候選每頁最多 50 筆，可上一筆／下一筆／跳過；視窗可取消後續批次。run 與 candidate 狀態會持久化為 `completed`、`partial`、`cancelled`、`failed`，可輸入 `run_id` 重新載入歷史批次，晚到結果不會污染新 scope。
