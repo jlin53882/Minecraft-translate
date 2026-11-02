@@ -193,6 +193,10 @@ def _reviewed_exact_scope(
         and mod_id.startswith("ftbquests@")
     )
     if scoped_pack:
+        # Pack scope isolates the instance; mod_id still isolates KubeJS
+        # namespaces within that instance.
+        clauses.append("e.mod_id = ?")
+        params.append(mod_id)
         clauses.append(
             "EXISTS (SELECT 1 FROM entry_origin eo "
             "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"

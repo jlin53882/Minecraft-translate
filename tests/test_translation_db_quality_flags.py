@@ -23,6 +23,7 @@ from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.read_cache import ReadCache
 from translation_tool.translation_db.schema import (
     KIND_GUIDE,
+    KIND_KUBEJS_LANG,
     KIND_PATCHOULI,
     SRC_AI,
     SRC_JAR_CN,
@@ -634,6 +635,45 @@ def test_reviewed_exact_glossary_is_kind_and_conflict_scoped(db):
             "zh_tw": "壓力室會處理空氣。",
         }
     ]
+
+
+def test_reviewed_exact_glossary_does_not_cross_kubejs_namespace(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "namespace_a@pack-a",
+                "same.key",
+                "Same sentence",
+                "甲句",
+                source_path="kubejs/client_scripts/a.js",
+                source_selector="lang:en_us:same.key",
+                source_hash="hash-a",
+                pack_scope="pack-a",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "namespace_b@pack-a",
+                "same.key",
+                "Same sentence",
+                "乙句",
+                source_path="kubejs/client_scripts/b.js",
+                source_selector="lang:en_us:same.key",
+                source_hash="hash-b",
+                pack_scope="pack-a",
+            ),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=20)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_exact_glossary(
+        "namespace_a@pack-a",
+        "1.21.1",
+        KIND_KUBEJS_LANG,
+        ("Same sentence",),
+    ) == [{"key": "same.key", "en_us": "Same sentence", "zh_tw": "甲句"}]
 
 
 def test_reviewed_lang_glossary_loads_each_language_kind_once(db, monkeypatch):
