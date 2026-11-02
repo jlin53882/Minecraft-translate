@@ -12,6 +12,7 @@
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
 ### Mod 掃描、資料庫與資源包流水線
+- `TranslationDB` schema 升至 v17；修復舊資料庫 `entry_origin.source_locale` 欄位與索引的 migration ordering，讓實體 schema 不完整時可冪等修復並保留 migration backup，避免預翻譯資料庫因 `no such column: source_locale` 被略過。SQLite 的 WAL／SHM sidecar 仍由 SQLite 管理，不以手動刪除取代 migration。
 - 統一 ModDB、圖示／內容預覽、JAR 提取與 LM 目錄掃描的巢狀 JAR 來源辨識；保留來源鏈、深度／大小／讀取預算與取消／部分失敗狀態，避免 `META-INF/jarjar` 等內嵌模組被漏掃或被當成空結果。
 - 新增書本格式 profile 與安全 JSON 處理：標準 Patchouli 只在明確存在語系資料夾時轉換 `en_us` → `zh_tw`，中性 custom book 保留原路徑；非法或無法分類內容改以 `parse_failed`／`pending`／`excluded` 留存來源與原因，不靜默丟棄。
 - 收斂掃描匯入與一鍵流水線的內容分類、provenance、manifest 與 Resource Pack staging；ZIP 只輸出合法 `assets/` 與根目錄 `pack.mcmeta`，不把 `data/`、未翻譯內容、未知格式或抽取包裝資料夾誤當成資源包內容。
