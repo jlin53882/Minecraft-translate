@@ -74,6 +74,15 @@ def _reply(call, by_value):
     )
 
 
+def _lang_cache_key(item):
+    """快取鍵由 CacheRule 產生（含模組身分，v3 結構化鍵）。"""
+    from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+    return CacheRule("path").make_key(
+        {"path": item["path"], "_mod_id": item["_mod_id"]}
+    )
+
+
 def _item(text, index, **extra):
     return {
         "path": f"sample.key.{index}",
@@ -937,5 +946,5 @@ def test_cache_receives_only_the_final_retry_translation(
 
     assert result.status == "DONE"
     assert result.processed == 1
-    assert writes == [("lang", item["path"], "Pressure Chamber", expected)]
+    assert writes == [("lang", _lang_cache_key(item), "Pressure Chamber", expected)]
     assert saves == ["lang"]
