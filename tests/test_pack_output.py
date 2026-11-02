@@ -216,6 +216,60 @@ def test_kubejs_lang_script_zh_cn_fallback_emits_zh_tw_selector(tmp_path: Path):
         db.close()
 
 
+@pytest.mark.parametrize("source_locale", ["en_us", "zh_cn"])
+def test_kubejs_lang_script_updates_existing_zh_tw_without_duplicate(
+    tmp_path: Path, source_locale: str
+):
+    """既有 zh_tw key 應更新，不可追加第二個同 key overlay。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        f"ClientEvents.lang('{source_locale}', event => {{\n"
+        "  event.add('demo', 'item.demo.machine', 'Original');\n"
+        "});\n"
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '舊翻譯');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind=? AND e.key=? AND eo.pack_scope=? "
+            "AND eo.selector LIKE ? LIMIT 1",
+            (
+                KIND_KUBEJS_LANG,
+                "item.demo.machine",
+                scope,
+                f"%ClientEvents.lang[{source_locale}]%",
+            ),
+        )[0]
+        db.save_manual(entry_id, "新翻譯", propagate=False)
+
+        output = tmp_path.parent / f"kubejs-existing-zh-tw-{source_locale}"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok
+        emitted = (output / "kubejs/client_scripts/lang.js").read_text(encoding="utf-8")
+        assert emitted.count("item.demo.machine") == 2
+        assert emitted.count("ClientEvents.lang('zh_tw'") == 1
+        assert "舊翻譯" not in emitted
+        assert "新翻譯" in emitted
+        assert report.entries_rescan_verified == report.entries_applied
+    finally:
+        db.close()
+
+
 def test_rescan_identity_uses_one_index_and_reports_duplicate_conflicts():
     """大批量重掃描不可退化成每筆計畫線性掃描。"""
     scope = "pack-scope"

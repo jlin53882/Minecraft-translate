@@ -1054,11 +1054,22 @@ def _collect_ftb_lang_values(
 def _ftb_source_locale(
     locales: dict[str, tuple[str, str, str]], fallback_locale: str | None
 ) -> str | None:
-    if locales.get("en_us"):
+    # ``locales.get`` only checks that the tuple exists.  A present but empty
+    # en_us file must not hide a valid fallback locale such as pt_br.
+    if locales.get("en_us") and locales["en_us"][0].strip():
         return "en_us"
-    if fallback_locale and locales.get(fallback_locale):
+    if (
+        fallback_locale
+        and locales.get(fallback_locale)
+        and locales[fallback_locale][0].strip()
+    ):
         return fallback_locale
-    return select_source_locale({locale: 1 for locale in locales})
+    usable = {
+        locale: 1
+        for locale, (value, _digest, _source_path) in locales.items()
+        if value.strip()
+    }
+    return select_source_locale(usable)
 
 
 def _append_ftb_lang_item(

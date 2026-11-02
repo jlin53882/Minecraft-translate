@@ -313,7 +313,7 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
     ]
     output_text = (output / "client_scripts/lang.js").read_text(encoding="utf-8")
     assert "'demo', 'item.demo.machine', 'Machine'" in output_text
-    assert 'event.add("demo", "item.demo.machine", "機器翻譯");' in output_text
+    assert "event.add('demo', 'item.demo.machine', \"機器翻譯\");" in output_text
 
 
 def test_kubejs_script_locale_fallback_uses_most_common_locale(tmp_path):
@@ -371,7 +371,8 @@ def test_kubejs_script_locale_only_fallback_is_a_translation_candidate(
     assert item.source_locale == locale
     assert (item.en_us, item.zh_cn, item.zh_tw) == ("机器", "", "")
 
-    db = TranslationDB(tmp_path / f"kubejs-{locale}-only.db")
+    db_path = tmp_path / f"kubejs-{locale}-only.db"
+    db = TranslationDB(db_path)
     try:
         db.ingest("1.21.1", result.items)
         row = db._one(
@@ -379,6 +380,15 @@ def test_kubejs_script_locale_only_fallback_is_a_translation_candidate(
             ("demo@" + result.pack_scope, "item.demo.machine"),
         )
         assert row is not None and row[0] == "机器"
+        db.close()
+        db = TranslationDB(db_path)
+        persisted = db._one(
+            "SELECT e.en_us, eo.source_locale FROM entry e "
+            "JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind='kubejs_lang' AND e.mod_id=? AND e.key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert persisted == ("机器", locale)
     finally:
         db.close()
 
@@ -493,6 +503,40 @@ def test_kubejs_lang_writer_does_not_fallback_for_unsupported_locale(tmp_path):
     assert "不應套用" not in output_text
 
 
+def test_kubejs_lang_writer_rejects_ambiguous_existing_zh_tw_key(tmp_path):
+    """多個既有繁中目標不可猜測套用，避免產生不一致 overlay。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.same', 'Original');\n"
+        "});\n"
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.same', '舊一');\n"
+        "  event.add('demo', 'item.same', '舊二');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo].event.add[1]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="zh_tw key 不唯一"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
 def test_ftb_single_file_locale_identity_is_shared(tmp_path):
     lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
     lang.mkdir(parents=True)
@@ -542,6 +586,26 @@ def test_ftb_fallback_source_keeps_companion_zh_tw_translation(tmp_path):
     assert items[0].source_locale == "pt_br"
     assert items[0].en_us == "Título em português"
     assert items[0].zh_tw == "繁體標題"
+
+
+def test_ftb_empty_en_us_uses_non_empty_fallback_source(tmp_path):
+    """空的 en_us 不可遮蔽可用的 pt_br 原文。"""
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    (lang / "pt_br").mkdir(parents=True)
+    (lang / "en_us").mkdir(parents=True)
+    (lang / "pt_br" / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+    (lang / "en_us" / "chapter.snbt").write_text('{quest.title:""}', encoding="utf-8")
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+
+    assert len(items) == 1
+    assert result.locale_fallbacks == {"ftbquests": "pt_br"}
+    assert items[0].source_locale == "pt_br"
+    assert items[0].en_us == "Título em português"
+    assert items[0].source_path == "lang/pt_br/chapter.snbt"
 
 
 def test_ftb_invalid_locale_path_is_reported_and_not_used_as_source(tmp_path):
