@@ -1070,10 +1070,20 @@ def test_remote_error_detail_shows_server_message_without_secrets():
 def test_service_writes_translation_cache_by_default_and_can_skip(
     db_path, monkeypatch, fake_cache
 ):
+    from translation_tool.core.lm_translator_shared_cache import CacheRule
+
     seed(db_path)
     fake_engine(monkeypatch, lambda t: "翻:" + t)
     run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
-    assert ("lang", "item.foo.b", "Infused Alloy", "翻:Infused Alloy") in fake_cache
+    expected_key = CacheRule("path").make_key(
+        {
+            "path": "item.foo.b",
+            "source_text": "Infused Alloy",
+            "_mod_id": "foo",
+            "source_locale": "en_us",
+        }
+    )
+    assert ("lang", expected_key, "Infused Alloy", "翻:Infused Alloy") in fake_cache
 
     fake_cache.clear()
     db = TranslationDB(db_path)
