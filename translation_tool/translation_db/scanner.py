@@ -4,7 +4,7 @@
 
 - 以 ``zipfile`` 直接讀 jar，沿用 ``zip_safety`` 的大小與成員數預算（防 ZIP bomb）。
 - 內嵌 jar（``META-INF/jarjar``、``META-INF/jars``）會遞迴掃描，最多 3 層。
-- 只處理 JSON 格式（1.13 以後）；``.lang`` 舊格式不處理。
+- 支援 JSON 與舊版 ``key=value`` `.lang` 格式；同一語系同時存在時，依既有優先規則選擇來源。
 - 沒有繁中、只有簡中時，以 OpenCC（s2twp）轉換後標記為「簡中轉繁」。
 - 大量 jar 以行程池並行讀取（見 ``scan_pool``），寫入資料庫在呼叫端執行緒進行（SQLite 單一寫入者），
   每累積一批才提交一次交易。

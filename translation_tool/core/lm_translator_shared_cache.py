@@ -33,12 +33,6 @@ def source_locale_key_suffix(item: Mapping[str, Any]) -> str:
     return f"@unknown:{entry_id}" if entry_id else "@unknown"
 
 
-def pack_scope_key_suffix(item: Mapping[str, Any]) -> str:
-    """回傳舊版相容的 pack scope 後綴（僅供未使用結構化鍵的呼叫者）。"""
-    scope = str(item.get("pack_scope") or "").strip()
-    return f"@pack:{scope}" if scope else ""
-
-
 def _scoped_cache_key(
     *,
     key_mode: str,

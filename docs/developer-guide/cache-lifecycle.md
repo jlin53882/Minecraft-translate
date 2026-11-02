@@ -14,6 +14,24 @@
 
 模組在 import 時登錄自己的快取，所以 `clear_all_caches()` 只會清除已載入模組的快取。
 
+## 版本邊界與失效方式
+
+快取或衍生資料的「版本」不是單一全域數字。修改時要先確認資料的擁有者，再依下表
+更新對應版本與測試；不要用清除所有快取或刪除資料庫檔案來掩蓋版本不一致。
+
+| 契約 | 擁有者 | 目前版本 | 版本變更時的處理 |
+|---|---|---:|---|
+| 翻譯 LM 語意快取鍵 | `core/lm_translator_shared_cache.py` | `v3` | 只在鍵欄位／命中語意改變時升版，保留舊鍵相容策略並補碰撞測試 |
+| 品質旗標 | `translation_db/quality_flags.py` | `9` | 可寫開啟時標記待重算並分批重建；唯讀時退回逐列判斷 |
+| 統計摘要 | `translation_db/stat_summary.py` | `3` | 可寫開啟時驗證並重算衍生摘要 |
+| 條目活動 | `translation_db/entry_activity.py` | `2` | 缺少或失效時由可寫開啟安裝並重算 |
+| 生效譯文衍生欄位 | `translation_db/effective_columns.py` | `2` | 依有效旗標重建，讀取端保留關聯查詢 fallback |
+| Smart Review 歷史 | `translation_db/smart_review_history_codec.py` | `1`／`chunked_json_v1` | 依 codec 對帳與分片規則讀寫，不與 LM 快取鍵版本混用 |
+
+品質旗標的版本只描述 `qflags` 的判定規則；它與 `schema_version`、統計摘要版本及 LM
+快取鍵版本彼此獨立。任何新增 `kind`、來源語系、模組包身分或格式診斷規則，都要檢查
+觸發器、重算、唯讀 fallback、快取命中與文件是否仍遵守同一個版本契約。
+
 ## 已登錄的快取
 
 | 名稱 | 位置 | 內容 |

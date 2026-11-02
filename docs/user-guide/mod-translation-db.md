@@ -9,7 +9,7 @@
 
 | 資料表 | 說明 |
 |---|---|
-| `entry` | 某遊戲版本中的一個可翻譯項目：`(kind, mc_version, mod_id, key) → en_us`。`kind` 為 `lang` 或 `patchouli`。另有衍生欄位 `qflags`：該條目目前符合的品質狀態（每個狀態一個位元），供品質篩選沿索引分頁 |
+| `entry` | 某遊戲版本中的一個可翻譯項目：`(kind, mc_version, mod_id, key) → en_us`。`kind` 包含 `lang`、`patchouli`、`guide`、`advancement`、`kubejs_lang`、`kubejs_script`、`ftb_quest_lang` 與 `ftb_quests`；後四種保留 KubeJS／FTB Quests 的獨立來源身分。另有衍生欄位 `qflags`：該條目目前符合的品質狀態（每個狀態一個位元），供品質篩選沿索引分頁 |
 | `translation` | 掛在 entry 上的譯文，每個來源最多一筆（唯一：`entry_id + source`）；`review_status`（`unreviewed`／`reviewed`／`legacy_unknown`）與來源各自獨立，任何來源都可標為已審核；非人工來源沒有狀態時視為未審核 |
 | `effective` | 每個 entry 依已審核狀態與來源優先序選出的生效譯文，並帶出人工審核狀態；寫入時維護，讀取不必重算。另有三個由觸發器維護的衍生欄位：`mc_version`（條目版本）、`diff`（「版本不同」）、`upd`（生效來源那一筆譯文的 `updated_at`） |
 | `history` | 手動儲存、人工審核、批次取代、AI 舊譯文重翻與還原的異動記錄（保存舊人工譯文、checker、審核狀態及修訂序號；同步版本共用 `batch`）；一般每個條目只保留最新 5 筆，尚未完成 JSON 對帳的 `smart_review_apply` marker 會暫時保留，對帳完成後才可被清理 |
@@ -63,7 +63,7 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 - **lang**：`assets/<模組>/lang/en_us.json` 的頂層鍵值。
 - **patchouli**：`(assets|data)/<模組>/<書籍目錄>/…/<語言>/…/檔案.json` 內的欄位，鍵值為
   「去掉 assets/data 與語言資料夾的相對路徑 + `#` + JSON 路徑」。書籍放在 `assets` 或 `data`、不同語言資料夾，都得到相同身分。
-- 1.12 以前的 `.lang` 格式**不處理**。
+- 1.12 以前的 `.lang` 格式會使用舊版 `key=value` parser 匯入；同一語系同時有 JSON 與 `.lang` 時，依既有優先規則選擇 JSON，避免同一來源重複匯入。
 
 ## 寫入規則
 
@@ -98,6 +98,7 @@ jar 自帶的 `zh_tw`／`zh_cn` 與「語系合併」使用同一套判斷與函
 - 右側「各來源譯文」仍列出所有已保存來源；主清單篩選只看 effective，與明細中的歷史／低優先序 row 各自有明確用途。
 - 「其他譯文」表示目前有生效譯文且來源不是人工；其原有分類條件不變，與「人工」互斥。
 - 篩選可與搜尋、模組、類型及狀態組合；總筆數與分頁列使用同一組條件。
+- 「類型」選單使用資料庫實際 `kind` facet，不只列一般 `lang`／`patchouli`；因此可以直接篩選 `guide`、`advancement`、`kubejs_lang`、`kubejs_script`、`ftb_quest_lang` 與 `ftb_quests`。模組、類型、目前生效來源與品質條件變更時，選單與條目清單必須使用同一組 predicate；沒有交集時顯示 0 筆，不可偷偷清除條件或放寬查詢範圍。
 - 資料量大時，改變搜尋、狀態、來源或進階條件會先顯示符合的清單與總筆數，模組／來源下拉選項稍後才補上（條件穩定後才計算，輸入中不會反覆重算）；搜尋框停筆約 0.2 秒才查詢，條件又改變時，尚未完成的舊查詢會被中斷。補上選項之前，選項仍是上一次的內容，清單與總筆數已是新條件的結果。
 
 ### 進階時間與品質篩選、批次字面取代
@@ -257,9 +258,15 @@ Schema v9 將 `history` 的一般保留政策固定為「每個條目最新 5 �
 
 `entry_activity`（`meta.activity_schema_version`、`activity_valid`）與 `effective` 的衍生欄位（`meta.effective_columns_schema_version`、`effective_columns_valid`）同樣不屬於 `schema_version`，可寫開啟時缺少、無效或觸發器定義不同就在單一交易中安裝並重算，不建立備份檔。整批重建生效譯文時以 `meta.effective_columns_frozen` 暫停衍生欄位的觸發器，完成後一次重算。唯讀開啟沒有這些資料的舊資料庫、或標記無效時，清單改用原本的關聯子查詢與排序，結果相同。
 
-品質旗標（`entry.qflags`；`meta.quality_schema_version`、`quality_valid`）也不屬於 `schema_version`。可寫開啟時缺少、定義版本不同或觸發器定義不同，就在一個交易中加入欄位、索引與觸發器並把全部條目標成待重算，再每 2 萬筆提交一次地重算；中途關閉時，下次開啟從剩下的待重算條目接續。品質判斷規則改變時遞增 `quality_schema_version`，開啟時全部重算。
+品質旗標（`entry.qflags`；`meta.quality_schema_version`、`quality_valid`）也不屬於 `schema_version`。可寫開啟時缺少、定義版本不同或觸發器定義不同，就在一個交易中加入欄位、索引與觸發器並把全部條目標成待重算，再每 2 萬筆提交一次地重算；中途關閉時，下次開啟從剩下的待重算條目接續。品質判斷規則改變時遞增 `quality_schema_version`，開啟時全部重算。品質旗標目前為版本 9；KubeJS 語系／腳本文字與 FTB Quests 語系／任務的格式種類也納入同一套旗標，但不會與一般 `lang` 條目混用。
 
-**升級後第一次開啟較久**：品質旗標定義（`quality_schema_version` 8）與統計摘要（`stats_schema_version` 3）的版本與舊資料庫不同時，第一次可寫開啟會重算全部條目的旗標並重建統計摘要，資料量大的資料庫需要等較久；這是一次性的衍生資料重建，不改動譯文、來源與審核狀態，之後開啟不再重算。中途關閉程式時，品質旗標從剩下的待重算條目接續。
+**升級後第一次開啟較久**：品質旗標定義（`quality_schema_version` 9）與統計摘要（`stats_schema_version` 3）的版本與舊資料庫不同時，第一次可寫開啟會重算全部條目的旗標並重建統計摘要，資料量大的資料庫需要等較久；這是一次性的衍生資料重建，不改動譯文、來源與審核狀態，之後開啟不再重算。中途關閉程式時，品質旗標從剩下的待重算條目接續。
+
+目前資料庫核心 schema 為 v17。v16/v17 的來源語系遷移會把 `entry_origin` 的來源語系
+與既有來源身分補齊，並修正 migration 的欄位／索引建立順序；可寫開啟時以交易方式完成，
+唯讀開啟不會修改資料庫。資料庫旁的 `-wal`／`-shm` 是 SQLite WAL 模式的運作檔案，必須
+與主資料庫一起保留與備份，不應手動當成索引刪除；若資料庫來自舊版或缺少來源語系欄位，
+應讓程式執行遷移或顯示明確錯誤，而不是靜默略過預翻譯資料庫。
 
 ## 安全與失敗契約
 
