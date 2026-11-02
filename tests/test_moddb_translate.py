@@ -2321,6 +2321,8 @@ def test_translation_same_as_source_still_writes_cache_and_database(
     db_path, monkeypatch, fake_cache
 ):
     """譯文與原文相同不是失敗：照常寫快取與資料庫、計入已翻譯，不重送 AI。"""
+    from translation_tool.core.lm_translator_shared_cache import CacheRule
+
     seed(db_path)
     calls: list[list[str]] = []
 
@@ -2341,7 +2343,15 @@ def test_translation_same_as_source_still_writes_cache_and_database(
     assert summary["translated"] == 2 and summary["written"] == 2
     assert len(calls) == 1  # 一批就完成，沒有因為「與原文相同」而重送
     # 快取照常寫入（否則下次遇到同一文字又會送 AI）
-    assert ("lang", "item.foo.b", "Infused Alloy", "Infused Alloy") in fake_cache
+    expected_key = CacheRule("path").make_key(
+        {
+            "path": "item.foo.b",
+            "source_text": "Infused Alloy",
+            "_mod_id": "foo",
+            "source_locale": "en_us",
+        }
+    )
+    assert ("lang", expected_key, "Infused Alloy", "Infused Alloy") in fake_cache
     # 資料庫照常寫入，而且來源是 AI 機翻
     db = TranslationDB(db_path)
     row = next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.b")
