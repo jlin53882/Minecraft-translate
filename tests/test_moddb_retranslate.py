@@ -1913,7 +1913,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     instructions = panel.repair_explainer.value
     assert "目前生效來源為 AI 機翻" in instructions
     assert "只更新 AI 來源" in instructions
-    assert panel.repair_start_btn.disabled is False
+    assert panel.repair_start_btn.disabled is True
     panel.confirm_retranslation()
     assert "請先按「預覽候選譯文」" in snacks[-1]
     assert page.overlay == []
@@ -1954,7 +1954,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel.mod_dd.value = "foo"
     panel._on_scope_changed()
     assert panel._repair_preview is None
-    assert panel.repair_start_btn.disabled is False
+    assert panel.repair_start_btn.disabled is True
     panel.confirm_retranslation()
     assert "請先按「預覽候選譯文」" in snacks[-1]
     panel.preview_retranslation()
@@ -1963,7 +1963,7 @@ def test_preview_confirmation_cancel_and_scope_invalidation(db_path, monkeypatch
     panel._get_db = lambda: None
     panel.preview_retranslation()
     assert panel._repair_preview is None
-    assert panel.repair_start_btn.disabled is False
+    assert panel.repair_start_btn.disabled is True
     panel.confirm_retranslation()
     assert "請先按「預覽候選譯文」" in snacks[-1]
     db.close()
@@ -2498,6 +2498,35 @@ def test_repair_card_newline_switch_is_off_by_default_and_follows_mode():
     assert quality.newline_row.value is False
     assert quality.newline_row.visible is True
     assert same_source.newline_row.visible is False
+    assert quality.preview_kind_filter.label == "內容類型"
+
+
+def test_repair_preview_kind_filter_matches_guide_and_lang_groups():
+    from types import SimpleNamespace
+
+    def row(kind):
+        return SimpleNamespace(
+            kind=kind,
+            source_id=0,
+            mc_version="1.21.1",
+            mod_id="mod",
+            key=f"{kind}.key",
+            en_us="Source",
+            current_ai_translation="譯文",
+        )
+
+    guide_group = [("guide", row("guide"))]
+    lang_group = [("lang", row("lang"))]
+
+    assert retranslation_controller._preview_group_matches(
+        guide_group, "", "guide", "__all__", "all"
+    )
+    assert not retranslation_controller._preview_group_matches(
+        guide_group, "", "lang", "__all__", "all"
+    )
+    assert retranslation_controller._preview_group_matches(
+        lang_group, "", "__all__", "__all__", "all"
+    )
 
 
 def test_translate_panel_builds_newline_option_only_for_quality_mode(db_path):

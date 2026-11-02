@@ -391,6 +391,7 @@ class TranslatePanel(ft.Column):
         self.repair_explainer = controls.explainer
         self.repair_samples = controls.samples
         self.repair_preview_search = controls.preview_search
+        self.repair_preview_kind_filter = controls.preview_kind_filter
         self.repair_preview_source_filter = controls.preview_source_filter
         self.repair_preview_issue_filter = controls.preview_issue_filter
         self.repair_preview_count = controls.preview_count

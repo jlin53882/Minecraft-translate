@@ -8,6 +8,7 @@ from translation_tool.core.format_diagnostics import (
     analyze_format_diagnostics,
     format_identifier_label,
     format_kind_policy,
+    has_format_structure_marks,
 )
 from translation_tool.core.format_tokens import (
     format_token_spans,
@@ -15,7 +16,11 @@ from translation_tool.core.format_tokens import (
     token_category,
 )
 from translation_tool.core.guide_format import guide_issues
-from translation_tool.translation_db.models import QualityFilter, QualityIssueDelta
+from translation_tool.translation_db.models import (
+    QUALITY_TOKEN_CATEGORIES,
+    QualityFilter,
+    QualityIssueDelta,
+)
 from translation_tool.utils.species_names import (
     is_potential_species_name,
     is_species_candidate,
@@ -271,7 +276,7 @@ def matches_quality(
 
     policy = format_kind_policy(kind)
     if not policy.has_structured_marks and not (
-        format_token_spans(source) or format_token_spans(translated)
+        has_format_structure_marks(source) or has_format_structure_marks(translated)
     ):
         return status == "consistent"
 
@@ -284,10 +289,16 @@ def matches_quality(
     if direction not in {"all", "missing", "extra"}:
         raise ValueError(f"未知 token 不一致方向：{direction}")
     category = criteria.token_category
-    if category not in {"all", "placeholder", "minecraft", "patchouli", "newline"}:
+    if category not in QUALITY_TOKEN_CATEGORIES:
         raise ValueError(f"未知 token 類別：{category}")
-    if structure_issues and direction == "all" and category == "all":
-        return True
+    if structure_issues and category in {"all", "guide"}:
+        # Guide structure diagnostics do not have a separate FormatDiagnostic
+        # direction.  They describe missing/invalid structure, so they belong
+        # to the "少了 token" side when the user narrows the direction.
+        if category == "guide":
+            return direction in {"all", "missing"}
+        if direction in {"all", "missing"}:
+            return True
 
     def selected(direction_name: str) -> bool:
         return any(

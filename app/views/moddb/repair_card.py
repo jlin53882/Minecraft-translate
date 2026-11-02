@@ -22,6 +22,7 @@ class RepairCardControls:
     samples: ft.Control
     summary: ft.Text
     preview_search: ft.TextField
+    preview_kind_filter: ft.Dropdown
     preview_source_filter: ft.Dropdown
     preview_issue_filter: ft.Dropdown
     preview_count: ft.Text
@@ -95,6 +96,7 @@ def create_repair_card(
         "primary",
         icon=ft.Icons.AUTO_AWESOME,
         on_click=on_confirm,
+        disabled=True,
     )
     scope_hint = kit.hint_text(SCOPE_HINT)
     default_text, explanation = repair_copy(mode)
@@ -123,6 +125,11 @@ def create_repair_card(
     )
     preview_source_filter = kit.dropdown(
         label="翻譯來源",
+        width=190,
+        on_select=on_filter_change,
+    )
+    preview_kind_filter = kit.dropdown(
+        label="內容類型",
         width=190,
         on_select=on_filter_change,
     )
@@ -157,7 +164,12 @@ def create_repair_card(
                 ft.Row([preview_button, start_button], spacing=10, wrap=True),
                 preview_text,
                 ft.Row(
-                    [preview_search, preview_source_filter, preview_issue_filter],
+                    [
+                        preview_search,
+                        preview_kind_filter,
+                        preview_source_filter,
+                        preview_issue_filter,
+                    ],
                     spacing=8,
                     wrap=True,
                 ),
@@ -181,6 +193,7 @@ def create_repair_card(
         samples,
         summary,
         preview_search,
+        preview_kind_filter,
         preview_source_filter,
         preview_issue_filter,
         preview_count,

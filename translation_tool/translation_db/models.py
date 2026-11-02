@@ -14,6 +14,22 @@ from translation_tool.translation_db.smart_review_status import (
     SmartReviewStatus,
 )
 
+# Keep the accepted values in the storage model so the DB matcher and every UI
+# that exposes this filter cannot silently drift apart when a new format kind
+# adds a diagnostic category.
+QUALITY_TOKEN_CATEGORIES: tuple[str, ...] = (
+    "all",
+    "placeholder",
+    "minecraft",
+    "patchouli",
+    "newline",
+    "color",
+    "markup",
+    "markup_order",
+    "guide",
+    "other",
+)
+
 
 @dataclass(frozen=True)
 class EntryRow:
@@ -156,13 +172,7 @@ class QualityFilter:
             raise ValueError(f"未知翻譯品質狀態：{self.status}")
         if self.direction not in {"all", "missing", "extra"}:
             raise ValueError(f"未知 token 不一致方向：{self.direction}")
-        if self.token_category not in {
-            "all",
-            "placeholder",
-            "minecraft",
-            "patchouli",
-            "newline",
-        }:
+        if self.token_category not in QUALITY_TOKEN_CATEGORIES:
             raise ValueError(f"未知 token 類別：{self.token_category}")
 
     @property

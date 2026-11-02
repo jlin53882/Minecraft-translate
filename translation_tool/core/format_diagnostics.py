@@ -292,6 +292,15 @@ MARKUP_ORDER_CATEGORY = "markup_order"
 _COLOR_CODE_RE = re.compile(r"&[0-9a-fk-or]")
 
 
+def has_format_structure_marks(text: str) -> bool:
+    """Return whether text needs the full token/markup/color diagnostics pass."""
+    return bool(
+        format_token_spans(text)
+        or _MARKUP_TAG_RE.search(text)
+        or _COLOR_CODE_RE.search(text)
+    )
+
+
 def _color_code_diagnostics(
     source: str, translated: str
 ) -> tuple[FormatDiagnostic, ...]:
@@ -648,5 +657,6 @@ __all__ = [
     "diagnostic_action",
     "format_identifier_label",
     "format_kind_policy",
+    "has_format_structure_marks",
     "register_format_kind",
 ]
