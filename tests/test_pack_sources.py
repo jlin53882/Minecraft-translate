@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from translation_tool.plugins.kubejs.kubejs_tooltip_inject import inject
 from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.pack_sources import scan_pack_sources
@@ -333,6 +335,52 @@ def test_kubejs_script_locale_fallback_uses_most_common_locale(tmp_path):
 
     assert len(items) == 3
     assert {item.source_locale for item in items} == {"zh_tw"}
+    assert {(item.en_us, item.zh_tw, item.zh_cn) for item in items} == {
+        ("機器", "", ""),
+        ("機器二", "", ""),
+        ("", "", "机器"),
+    }
+
+    db = TranslationDB(tmp_path / "kubejs-fallback.db")
+    try:
+        db.ingest("1.21.1", result.items)
+        row = db._one(
+            "SELECT en_us FROM entry WHERE kind='kubejs_lang' AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert row is not None and row[0] in {"機器", "機器二"}
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("locale", ["zh_cn", "zh_tw"])
+def test_kubejs_script_locale_only_fallback_is_a_translation_candidate(
+    tmp_path, locale
+):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        f"ClientEvents.lang('{locale}', event => {{\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    item = next(item for item in result.items if item.key == "item.demo.machine")
+    assert item.source_locale == locale
+    assert (item.en_us, item.zh_cn, item.zh_tw) == ("机器", "", "")
+
+    db = TranslationDB(tmp_path / f"kubejs-{locale}-only.db")
+    try:
+        db.ingest("1.21.1", result.items)
+        row = db._one(
+            "SELECT en_us FROM entry WHERE kind='kubejs_lang' AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert row is not None and row[0] == "机器"
+    finally:
+        db.close()
 
 
 def test_kubejs_lang_dynamic_value_keeps_scan_and_writer_occurrence_aligned(

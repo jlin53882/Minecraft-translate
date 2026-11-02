@@ -530,9 +530,26 @@ def _normalize_kubejs_script_source_locales(result: PackScanResult) -> None:
         source_locale = select_source_locale(locale_counts)
         if source_locale is None:
             continue
-        for index, _locale in entries:
+        for index, locale in entries:
+            item = result.items[index]
+            if locale == source_locale:
+                # The selected fallback file is the source snapshot, not an
+                # existing translation.  ``en_us`` is the database's source
+                # text column even when the actual source language is zh_cn or
+                # zh_tw; keep the original selector locale for the writer.
+                source_text = item.en_us or item.zh_tw or item.zh_cn
+                result.items[index] = replace(
+                    item,
+                    en_us=source_text,
+                    zh_tw="",
+                    zh_cn="",
+                    source=None,
+                    source_locale=source_locale,
+                )
+                continue
             result.items[index] = replace(
-                result.items[index], source_locale=source_locale
+                item,
+                source_locale=source_locale,
             )
 
 

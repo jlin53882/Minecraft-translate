@@ -193,13 +193,18 @@ def _make_plan(
     for item in items:
         if not item.zh_tw.strip() or item.zh_tw == item.en_us:
             continue
-        # KubeJS 的 effective translation 會同時帶入同一 entry 的 en_us／
-        # zh_tw origins。輸出必須以英文定義作為來源，從 zh_tw origin 重複
-        # 產生計畫會讓 writer 把既有語系當成新的來源事件。
-        if _is_kubejs_js_origin(item.origin) and _kubejs_lang_locale(
-            item.origin.selector
-        ) not in {None, "en_us"}:
-            continue
+        # KubeJS 的 effective translation 會同時帶入同一 entry 的來源／
+        # 翻譯 origins。一般情況下只由 en_us selector 產生計畫，避免把
+        # 既有語系當成新的來源事件；但沒有 en_us 的模組包會把選出的
+        # zh_cn／zh_tw selector 提升為資料庫原文，此時 source_locale 會
+        # 與 selector locale 相同，必須保留它作為可輸出的來源。
+        if _is_kubejs_js_origin(item.origin):
+            selector_locale = _kubejs_lang_locale(item.origin.selector)
+            source_locale = normalize_source_locale(item.origin.source_locale or "")
+            if selector_locale not in {None, "en_us"} and (
+                not source_locale or source_locale != selector_locale
+            ):
+                continue
         target = _target_for(item)
         if target is None:
             report.unsupported.append(
@@ -737,11 +742,16 @@ def _find_rescanned_items(
 
 
 def _kubejs_emitted_selector(selector: str) -> str:
-    """把英文 ClientEvents.lang identity 對應到 writer 產生的 zh_tw identity。"""
+    """把來源 ClientEvents.lang identity 對應到 writer 產生的 zh_tw identity。"""
     match = _KUBEJS_LANG_SELECTOR.match(selector)
-    if match is None or match.group("locale").lower() != "en_us":
+    if match is None or match.group("locale").lower() == "zh_tw":
         return selector
-    return selector.replace("ClientEvents.lang[en_us]", "ClientEvents.lang[zh_tw]", 1)
+    return re.sub(
+        r"ClientEvents\.lang\[[^\]]+\]",
+        "ClientEvents.lang[zh_tw]",
+        selector,
+        count=1,
+    )
 
 
 def _kubejs_normalized_selector(selector: str) -> str:

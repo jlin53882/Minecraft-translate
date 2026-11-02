@@ -369,9 +369,9 @@ def _append_kubejs_lang_translations(
 ) -> str:
     """以 locale-aware 方式輸出 KubeJS LangEventJS 翻譯。
 
-    英文來源事件永遠保持原樣；翻譯會追加成 ``zh_tw`` 事件。若來源本身
-    已是 ``zh_tw``，只在同一個精確 selector 上更新 value。這避免把英文
-    腳本誤當成繁中輸出，也避免對檔案中其他 API 的 ``event.add`` 做全文替換。
+    非 ``zh_tw`` 的來源事件永遠保持原樣；翻譯會追加成 ``zh_tw`` 事件。
+    若來源本身已是 ``zh_tw``，只在同一個精確 selector 上更新 value。這避免
+    把來源腳本誤當成繁中輸出，也避免對檔案中其他 API 的 ``event.add`` 做全文替換。
     """
     ranges = _clientevents_lang_ranges(content)
     if not ranges:
@@ -420,10 +420,12 @@ def _append_kubejs_lang_translations(
 
         selected_key, translated = selected
         used_keys.add(selected_key)
-        if locale == "en_us":
+        # 英文或 fallback 語系來源都保留原事件，並追加統一的 zh_tw
+        # overlay；只有既有 zh_tw 來源直接更新原事件，避免重複追加。
+        if locale != "zh_tw":
             additions.append((namespace, key, translated, explicit_namespace))
             continue
-        if locale != "zh_tw" or translated == current_value:
+        if translated == current_value:
             continue
 
         new_parts = list(parts)

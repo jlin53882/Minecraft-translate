@@ -176,6 +176,46 @@ def test_kubejs_lang_script_round_trip_maps_en_us_to_emitted_zh_tw_selector(
         db.close()
 
 
+def test_kubejs_lang_script_zh_cn_fallback_emits_zh_tw_selector(tmp_path: Path):
+    """只有 zh_cn 的 JS 來源仍可翻譯，輸出時改寫成 zh_tw selector。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo.key', 'Original');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT e.id FROM entry e JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind=? AND e.key=? AND eo.pack_scope=? LIMIT 1",
+            (KIND_KUBEJS_LANG, "demo.key", scope),
+        )[0]
+        db.save_manual(entry_id, "翻譯後", propagate=False)
+
+        output = tmp_path.parent / "kubejs-zh-cn-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok
+        emitted = (output / "kubejs/client_scripts/lang.js").read_text(encoding="utf-8")
+        assert "ClientEvents.lang('zh_tw'" in emitted
+        assert "翻譯後" in emitted
+        assert report.entries_rescan_verified == report.entries_applied
+    finally:
+        db.close()
+
+
 def test_rescan_identity_uses_one_index_and_reports_duplicate_conflicts():
     """大批量重掃描不可退化成每筆計畫線性掃描。"""
     scope = "pack-scope"
