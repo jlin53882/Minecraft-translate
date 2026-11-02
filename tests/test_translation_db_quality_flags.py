@@ -643,7 +643,7 @@ def test_reviewed_exact_glossary_does_not_cross_kubejs_namespace(db):
         [
             ScanItem(
                 KIND_KUBEJS_LANG,
-                "namespace_a@pack-a",
+                "kubejs@pack-a",
                 "same.key",
                 "Same sentence",
                 "甲句",
@@ -669,17 +669,58 @@ def test_reviewed_exact_glossary_does_not_cross_kubejs_namespace(db):
         db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
 
     assert db.reviewed_exact_glossary(
-        "namespace_a@pack-a",
+        "kubejs@pack-a",
         "1.21.1",
         KIND_KUBEJS_LANG,
         ("Same sentence",),
     ) == [{"key": "same.key", "en_us": "Same sentence", "zh_tw": "甲句"}]
     assert (
         db.reviewed_exact_glossary(
-            "namespace_a@pack-a",
+            "kubejs@pack-a",
             None,
             KIND_KUBEJS_LANG,
             ("Same sentence",),
+        )
+        == []
+    )
+
+
+def test_reviewed_lang_glossary_does_not_cross_kubejs_namespace(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "demo@pack-a",
+                "demo.key",
+                "Pressure Chamber",
+                "演示室",
+                source_path="kubejs/client_scripts/demo.js",
+                source_selector="lang:en_us:demo.key",
+                source_hash="hash-demo",
+                pack_scope="pack-a",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "kubejs@pack-a",
+                "other.key",
+                "Other term",
+                "其他詞",
+                source_path="kubejs/client_scripts/kube.js",
+                source_selector="lang:en_us:other.key",
+                source_hash="hash-kube",
+                pack_scope="pack-a",
+            ),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=20)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert (
+        db.reviewed_lang_glossary(
+            "kubejs@pack-a",
+            "1.21.1",
+            ("The Pressure Chamber processes air.",),
         )
         == []
     )

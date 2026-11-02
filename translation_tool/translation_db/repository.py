@@ -5516,6 +5516,12 @@ class TranslationDB(
                 if (kind == KIND_KUBEJS_LANG and mod_id.startswith("kubejs@")) or (
                     kind == KIND_FTB_QUEST_LANG and mod_id.startswith("ftbquests@")
                 ):
+                    # Pack scope identifies the instance, while ``mod_id``
+                    # identifies the namespace within that instance.  Both
+                    # are required so a sibling KubeJS/FTB namespace cannot
+                    # leak terminology into this prompt.
+                    clauses.append("e.mod_id = ?")
+                    params.append(mod_id)
                     clauses.append(
                         "EXISTS (SELECT 1 FROM entry_origin eo "
                         "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"
