@@ -82,17 +82,32 @@ def repair_input_issues_for_kind(
     source: str, previous_translation: str, *, kind: str | None = None
 ) -> tuple[bool, tuple[str, ...], bool]:
     """Return repair eligibility, hard issues, and mixed-newline status."""
-    wanted = format_tokens(source)
-    previous = format_tokens(previous_translation)
-    if not format_kind_policy(kind).has_structured_marks:
-        return repair_input_issues_from_counts(wanted, previous)
-    # 指南類的實際換行可重排，只有硬結構（標記、元件、前綴）不符才需要修復
-    issues = (
-        *token_issues_for_kind(source, previous_translation, kind=kind),
-        *guide_structure_issues(source, previous_translation, kind=kind),
+    # 修復預覽、套用 CAS 與 ModDB 品質篩選必須共用同一套格式診斷。
+    # 舊版只呼叫 format_tokens，會漏掉 FTB Quests 的 ``&2``／``&l`` 色碼與
+    # KubeJS 的自訂標記，造成資料庫可篩出條目，但修復預覽把它們當成正常譯文。
+    policy = format_kind_policy(kind)
+    result = analyze_format_diagnostics(
+        source,
+        previous_translation,
+        kind=kind or "lang",
+        repair=True,
     )
-    newline_mismatch = wanted["\n"] != previous["\n"]
-    return bool(issues), issues, bool(newline_mismatch and issues)
+    newline_mismatch = dict(result.source_counts).get("\n", 0) != dict(
+        result.target_counts
+    ).get("\n", 0)
+    hard_issues = tuple(
+        issue.legacy_message
+        for issue in result.diagnostics
+        if issue.category != "newline"
+    ) + tuple(result.extra_guide_issues)
+
+    # Hard-newline formats keep the old behaviour: a newline-only mismatch is a
+    # candidate that the caller may deliberately skip or include.  Guide and
+    # Patchouli use soft newlines, so reflow alone is not a repair candidate.
+    eligible = bool(hard_issues) or (
+        newline_mismatch and policy.newline_policy == "hard"
+    )
+    return eligible, hard_issues, bool(newline_mismatch and hard_issues)
 
 
 def repair_input_issues_from_counts(

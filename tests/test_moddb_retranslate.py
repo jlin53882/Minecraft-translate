@@ -33,7 +33,9 @@ from translation_tool.translation_db import (
     TranslationDB,
     WriteBackItem,
 )
+from translation_tool.translation_db.models import EntryFilter, QualityFilter
 from translation_tool.translation_db.schema import (
+    KIND_FTB_QUEST_LANG,
     KIND_LANG,
     KIND_PATCHOULI,
     SRC_AI,
@@ -2098,6 +2100,37 @@ def test_retranslation_preview_shows_one_card_per_key_and_filters(db_path):
     assert panel.repair_samples.controls == []
     assert panel.repair_samples.visible is False
     assert "沒有符合目前篩選條件" in panel.repair_preview_count.value
+    db.close()
+
+
+def test_quality_repair_preview_includes_ftb_color_mismatch(db_path):
+    db = TranslationDB(db_path)
+    _ingest(
+        db,
+        "1.21.1",
+        "ftbquests@pack",
+        "quest.desc",
+        SRC_AI,
+        "你 x foo ",
+        en="You &2x &lfoo &r",
+        kind=KIND_FTB_QUEST_LANG,
+    )
+
+    filtered, filtered_count = db.list_entries(
+        criteria=EntryFilter(
+            version="1.21.1",
+            quality=QualityFilter(status="mismatch", token_category="color"),
+        )
+    )
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+
+    assert filtered_count == 1
+    assert filtered[0].kind == KIND_FTB_QUEST_LANG
+    assert preview.total_candidates == 1
+    assert preview.selected_count == 1
+    assert preview.entries[0].kind == KIND_FTB_QUEST_LANG
     db.close()
 
 

@@ -13,6 +13,7 @@ import pytest
 
 from translation_tool.translation_db import (
     KIND_ADVANCEMENT,
+    KIND_FTB_QUEST_LANG,
     KIND_LANG,
     KIND_PATCHOULI,
     ScanItem,
@@ -35,6 +36,7 @@ from translation_tool.translation_db.models import (
 from translation_tool.translation_db.quality import (
     format_tokens,
     repair_input_issues,
+    repair_input_issues_for_kind,
     repair_output_issues,
     token_issues,
 )
@@ -1443,6 +1445,22 @@ def test_repair_newline_policy_is_scoped_and_keeps_literal_backslash_n_strict():
     assert repair_output_issues("Use %s\\nnext", "使用 %s\nnext")
     # 一般品質診斷會刻意保留精確的換行數量。
     assert "換行" in " ".join(token_issues("a\nb", "甲"))
+
+
+def test_repair_input_issues_uses_common_ftb_color_diagnostics():
+    eligible, issues, mixed = repair_input_issues_for_kind(
+        "You &2x &lfoo &r",
+        "你 x foo ",
+        kind=KIND_FTB_QUEST_LANG,
+    )
+
+    assert eligible is True
+    assert issues == (
+        "少了 1 個「&2」",
+        "少了 1 個「&l」",
+        "少了 1 個「&r」",
+    )
+    assert mixed is False
 
 
 def test_quality_repair_history_does_not_count_as_manual_activity(db):
