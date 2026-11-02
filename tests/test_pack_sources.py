@@ -600,6 +600,39 @@ def test_kubejs_lang_writer_rejects_dynamic_zh_tw_duplicate_key(tmp_path):
         )
 
 
+def test_kubejs_lang_writer_rejects_dynamic_zh_tw_target_from_english_source(tmp_path):
+    """英文來源不可覆寫唯一但動態的既有繁中目標。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.same', 'Original');\n"
+        "});\n"
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.same', getTranslatedValue());\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo].event.add[1]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="不是可安全回寫的靜態字串"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
 def test_ftb_single_file_locale_identity_is_shared(tmp_path):
     lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
     lang.mkdir(parents=True)

@@ -533,12 +533,14 @@ def _append_kubejs_lang_translations(
                 f"{source_file}:{call.namespace}:{call.key} "
                 f"({len(matching_targets)} 個目標)"
             )
-        if call.locale == "zh_tw":
-            target = _zh_tw_update_target(call, translated, source_file)
+        if matching_targets:
+            # Existing zh_tw targets must always pass the same safe-write
+            # validation, even when the translated source is en_us/zh_cn.
+            # Otherwise a unique dynamic target could be overwritten with a
+            # static translation and lose its runtime expression.
+            target = _zh_tw_update_target(matching_targets[0], translated, source_file)
             if target is None:
                 continue
-        elif matching_targets:
-            target = matching_targets[0]
         else:
             _add_kubejs_overlay(additions, call, translated, source_file)
             continue
