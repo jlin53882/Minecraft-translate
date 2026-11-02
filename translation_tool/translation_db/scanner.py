@@ -1175,11 +1175,12 @@ def _ingest_pack_result(
         return preview_ingest_many(preview, [result.items], convert)[0]
     if db is None:
         raise ValueError("模組包來源需要資料庫才能寫入")
-    stats = (
-        db.ingest_many(version, [result.items], convert)[0]
-        if result.items
-        else IngestStats()
-    )
+    stats = db.ingest_many(
+        version,
+        [result.items],
+        convert,
+        stale_origins=result.stale_origins,
+    )[0]
     db.record_source_references(
         version,
         result.references,

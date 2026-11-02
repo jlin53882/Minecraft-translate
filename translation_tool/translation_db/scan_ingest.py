@@ -20,7 +20,7 @@ from translation_tool.core.source_locale import (
     normalize_source_locale,
 )
 from translation_tool.translation_db.identity import canonical_entry_key
-from translation_tool.translation_db.models import IngestStats, ScanItem
+from translation_tool.translation_db.models import EntryOrigin, IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
 
 # (kind, mod_id) → 該模組既有條目 {key: (entry_id, en_us)} 與既有譯文 {(entry_id, source)}
@@ -48,6 +48,8 @@ class IngestTarget(Protocol):
     ) -> None: ...
 
     def record_origin(self, item: ScanItem, entry_id: int) -> None: ...
+
+    def remove_origins(self, origins: Iterable[EntryOrigin]) -> None: ...
 
 
 def group_scan_items(
@@ -248,6 +250,20 @@ class DbIngestTarget:
             ),
         )
 
+    def remove_origins(self, origins: Iterable[EntryOrigin]) -> None:
+        """清除本次完整重掃描確認已失效的精確來源。"""
+        for origin in origins:
+            self.conn.execute(
+                "DELETE FROM entry_origin WHERE pack_scope=? AND source_kind=? "
+                "AND source_path=? AND selector=?",
+                (
+                    origin.pack_scope,
+                    origin.source_kind,
+                    origin.source_path,
+                    origin.selector,
+                ),
+            )
+
 
 class PreviewIngestTarget:
     """預覽：只讀資料庫（``query`` 為 None 表示還沒有資料庫），新增的內容只記在記憶體。
@@ -290,6 +306,9 @@ class PreviewIngestTarget:
         return None
 
     def record_origin(self, item: ScanItem, entry_id: int) -> None:
+        return None
+
+    def remove_origins(self, origins: Iterable[EntryOrigin]) -> None:
         return None
 
 

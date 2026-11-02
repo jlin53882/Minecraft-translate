@@ -353,6 +353,88 @@ def test_kubejs_script_locale_fallback_uses_most_common_locale(tmp_path):
         db.close()
 
 
+def test_kubejs_lang_skips_blank_values_but_keeps_occurrence_alignment(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.empty', '');\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    items = [item for item in result.items if item.kind == "kubejs_lang"]
+    assert [item.key for item in items] == ["item.demo.machine"]
+    assert "event.add[2]|item.demo.machine" in items[0].source_selector
+    assert len(result.stale_origins) == 1
+    assert result.stale_origins[0].selector.endswith("event.add[1]|item.demo.empty")
+
+
+def test_moddb_rescan_removes_legacy_blank_kubejs_origin(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '');\n"
+        "});\n"
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    "kubejs_lang",
+                    "demo@" + result.pack_scope,
+                    "item.demo.machine",
+                    "",
+                    source_path="client_scripts/lang.js",
+                    source_selector=(
+                        "ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine"
+                    ),
+                    source_hash="legacy",
+                    source_format="kubejs-js",
+                    pack_scope=result.pack_scope,
+                    source_locale="en_us",
+                )
+            ],
+        )
+
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+
+        row = db._one(
+            "SELECT id, en_us FROM entry WHERE kind='kubejs_lang' "
+            "AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert row is not None and row[1] == "机器"
+        assert db._one(
+            "SELECT COUNT(*) FROM entry_origin WHERE pack_scope=? "
+            "AND source_kind='kubejs_lang' AND source_path=? "
+            "AND selector LIKE '%[en_us][demo].event.add[1]|%'",
+            (result.pack_scope, "client_scripts/lang.js"),
+        ) == (0,)
+        assert db.source_locales_for_entries([row[0]]) == {row[0]: "zh_cn"}
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("locale", ["zh_cn", "zh_tw"])
 def test_kubejs_script_locale_only_fallback_is_a_translation_candidate(
     tmp_path, locale

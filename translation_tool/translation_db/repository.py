@@ -680,28 +680,36 @@ class TranslationDB(
         version: str,
         items: Iterable[ScanItem],
         convert: Callable[[str], str] | None = None,
+        *,
+        stale_origins: Iterable[EntryOrigin] = (),
     ) -> IngestStats:
         """寫入掃描結果。只新增、不覆蓋；原文已變動者只記錄。
 
         ``convert`` 把簡中轉成繁中（沒有繁中、只有簡中時用）；None 表示不轉換。
         """
-        return self.ingest_many(version, [items], convert)[0]
+        return self.ingest_many(version, [items], convert, stale_origins=stale_origins)[
+            0
+        ]
 
     def ingest_many(
         self,
         version: str,
         batches: Sequence[Iterable[ScanItem]],
         convert: Callable[[str], str] | None = None,
+        *,
+        stale_origins: Iterable[EntryOrigin] = (),
     ) -> list[IngestStats]:
         """在單一交易內寫入多份掃描結果（例如多個 jar），回傳每一份各自的統計。
 
         一個交易只提交一次（每次提交的 WAL 寫入與檢查點是掃描的固定成本）。結果與逐份呼叫 :meth:`ingest` 相同；任何一份失敗整個交易回復。
         """
         grouped = [group_scan_items(items) for items in batches]
+        stale_origins = tuple(stale_origins)
         touched: list[int] = []
         with self._tx() as conn:
             target = DbIngestTarget(conn, version, touched)
             results = [ingest_groups(target, groups, convert) for groups in grouped]
+            target.remove_origins(stale_origins)
             self._refresh(conn, touched)
         return results
 

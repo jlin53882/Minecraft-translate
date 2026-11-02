@@ -42,7 +42,11 @@ from translation_tool.plugins.kubejs.kubejs_tooltip_extract import (
     parse_client_lang_add,
     split_js_args,
 )
-from translation_tool.translation_db.models import ScanItem, SourceReference
+from translation_tool.translation_db.models import (
+    EntryOrigin,
+    ScanItem,
+    SourceReference,
+)
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUEST_LANG,
     KIND_FTB_QUESTS,
@@ -160,6 +164,9 @@ class PackScanResult:
 
     pack_scope: str = ""
     items: list[ScanItem] = field(default_factory=list)
+    # 目前掃描確認為空白的 KubeJS lang 事件；若舊版掃描曾建立 origin，
+    # 匯入時只移除該精確來源，不刪除條目或其他來源。
+    stale_origins: list[EntryOrigin] = field(default_factory=list)
     references: list[SourceReference] = field(default_factory=list)
     issues: list[dict[str, str]] = field(default_factory=list)
     files_seen: int = 0
@@ -654,6 +661,22 @@ def _append_kubejs_lang_item(
     value = _literal(value_expr)
     if not key or value is None:
         return
+    selector = f"ClientEvents.lang[{locale}][{namespace}].event.add[{occurrence}]|{key}"
+    if not value.strip():
+        # 空白值不是可翻譯條目。保留 occurrence 由呼叫端遞增，並留下
+        # 精確來源讓重掃描可以清除舊版曾寫入的錯誤 origin。
+        result.stale_origins.append(
+            EntryOrigin(
+                pack_scope=scope,
+                source_kind=KIND_KUBEJS_LANG,
+                source_path=rel,
+                selector=selector,
+                source_hash=digest,
+                format_profile="kubejs-js",
+                source_locale=normalize_source_locale(locale),
+            )
+        )
+        return
     result.items.append(
         _make_item(
             kind=KIND_KUBEJS_LANG,
@@ -663,10 +686,7 @@ def _append_kubejs_lang_item(
             key=key,
             text=value,
             rel=rel,
-            selector=(
-                f"ClientEvents.lang[{locale}][{namespace}]"
-                f".event.add[{occurrence}]|{key}"
-            ),
+            selector=selector,
             digest=digest,
             scope=scope,
             version=version,
