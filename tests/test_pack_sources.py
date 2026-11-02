@@ -283,14 +283,12 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
     try:
         db.ingest("1.21.1", result.items)
         entry_id = db._one(
-            "SELECT id FROM entry WHERE kind='kubejs_lang' "
-            "AND mod_id=? AND key=?",
+            "SELECT id FROM entry WHERE kind='kubejs_lang' AND mod_id=? AND key=?",
             ("demo@" + result.pack_scope, "item.demo.machine"),
         )[0]
         assert db.source_locales_for_entries([entry_id]) == {entry_id: "en_us"}
     finally:
         db.close()
-
 
     translated = tmp_path / "translated" / "client_scripts" / "lang.json"
     translated.parent.mkdir(parents=True)

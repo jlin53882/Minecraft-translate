@@ -45,6 +45,15 @@ def db_path(tmp_path, monkeypatch):
     return path
 
 
+def _foo_cache_key(path):
+    """模組 foo 的 en_us 來源快取鍵（與 translate 流程的 identity 欄位一致）。"""
+    from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+    return CacheRule("path").make_key(
+        {"path": path, "_mod_id": "foo", "source_locale": "en_us"}
+    )
+
+
 @pytest.fixture(autouse=True)
 def fake_cache(monkeypatch):
     """不碰真正的翻譯快取：記錄 add_to_cache 被呼叫的內容。"""
@@ -1073,7 +1082,12 @@ def test_service_writes_translation_cache_by_default_and_can_skip(
     seed(db_path)
     fake_engine(monkeypatch, lambda t: "翻:" + t)
     run(TranslateOptions(version="1.21.1", mod_ids=("foo",)))
-    assert ("lang", "item.foo.b", "Infused Alloy", "翻:Infused Alloy") in fake_cache
+    assert (
+        "lang",
+        _foo_cache_key("item.foo.b"),
+        "Infused Alloy",
+        "翻:Infused Alloy",
+    ) in fake_cache
 
     fake_cache.clear()
     db = TranslationDB(db_path)
@@ -2331,7 +2345,12 @@ def test_translation_same_as_source_still_writes_cache_and_database(
     assert summary["translated"] == 2 and summary["written"] == 2
     assert len(calls) == 1  # 一批就完成，沒有因為「與原文相同」而重送
     # 快取照常寫入（否則下次遇到同一文字又會送 AI）
-    assert ("lang", "item.foo.b", "Infused Alloy", "Infused Alloy") in fake_cache
+    assert (
+        "lang",
+        _foo_cache_key("item.foo.b"),
+        "Infused Alloy",
+        "Infused Alloy",
+    ) in fake_cache
     # 資料庫照常寫入，而且來源是 AI 機翻
     db = TranslationDB(db_path)
     row = next(r for r in db.list_entries("1.21.1")[0] if r.key == "item.foo.b")

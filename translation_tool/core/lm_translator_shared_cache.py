@@ -88,7 +88,9 @@ class CacheRule:
         locale = normalize_source_locale(item.get("source_locale"))
         entry_id = str(item.get("_entry_id") or "").strip()
         locale_identity = locale or (
-            f"unknown:{entry_id}" if has_locale and entry_id else "unknown"
+            f"unknown:{entry_id}"
+            if has_locale and entry_id
+            else "unknown"
             if has_locale
             else ""
         )

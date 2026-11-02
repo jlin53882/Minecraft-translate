@@ -248,9 +248,9 @@ def test_sql_and_python_dedupe_keep_known_default_locales_distinct(db):
     )
 
     assert len(candidates) == 2
-    assert db.count_smart_review_candidates(
-        version="1.20.1", mod_id="default-locale"
-    ) == 2
+    assert (
+        db.count_smart_review_candidates(version="1.20.1", mod_id="default-locale") == 2
+    )
     assert all(not candidate.twin_entry_ids for candidate in candidates)
 
 
