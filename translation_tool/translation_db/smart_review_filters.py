@@ -12,14 +12,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import (
     KIND_KUBEJS_LANG,
     KIND_LANG,
     SRC_MANUAL,
-)
-from translation_tool.translation_db.smart_review_prompt import (
-    trusted_non_default_locale,
 )
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
@@ -42,17 +40,17 @@ def _smart_review_row_group(row: Sequence[Any]) -> tuple[Any, ...]:
 
 def _smart_review_locale_group(
     entry_id: int, source_locales: Mapping[int, str | None]
-) -> str | None:
+) -> str:
     """建立安全的同文分組語系身分。
 
-    已知預設語系（例如 ``en_us``）可以互相去重；沒有可信來源的條目則
-    使用自己的 id，避免把兩個 unknown 誤當成同一個來源。非預設語系仍
-    以正規化 token 分組。
+    所有可確認的 locale 都是來源身分的一部分，包含 ``en_us``、``zh_cn``
+    與 ``zh_tw``。這必須與 SQL 的 ``source_locale`` 分組完全一致；沒有
+    可信來源的條目則使用自己的 id，避免把兩個 unknown 誤當成同一個來源。
     """
-    locale = source_locales.get(entry_id)
+    locale = normalize_source_locale(source_locales.get(entry_id))
     if locale is None:
         return f"unknown:{entry_id}"
-    return trusted_non_default_locale(locale)
+    return locale
 
 
 def _dedupe_same_text_rows(
@@ -61,7 +59,8 @@ def _dedupe_same_text_rows(
 ) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
     """同版本、模組、種類且原文、目前譯文狀態與來源語系都相同的條目只保留第一筆。
 
-    已知預設語系視為同一組；unknown 沒有足夠來源身分，不能和其他條目合併。
+    已知來源語系必須相同才可合併；unknown 沒有足夠來源身分，不能和其他
+    條目合併。
     """
     locales = source_locales or {}
     twins: dict[tuple[Any, ...], list[int]] = {}

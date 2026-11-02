@@ -223,6 +223,37 @@ def test_candidates_carry_locale_and_split_twins(db):
     assert db.count_smart_review_candidates() == len(snaps)
 
 
+def test_sql_and_python_dedupe_keep_known_default_locales_distinct(db):
+    """SQL count 與 Python twin 補查都不能合併不同的已知預設語系。"""
+    db.write_back(
+        "1.20.1",
+        [
+            WriteBackItem(KIND_LANG, "default-locale", "en", "Hello", "你好"),
+            WriteBackItem(KIND_LANG, "default-locale", "cn", "Hello", "你好"),
+        ],
+        fill_other_versions=False,
+    )
+    ids = {
+        key: db._one(
+            "SELECT id FROM entry WHERE mod_id=? AND key=?",
+            ("default-locale", key),
+        )[0]
+        for key in ("en", "cn")
+    }
+    _origin(db, ids["en"], "lang:en_us:en")
+    _origin(db, ids["cn"], "lang:zh_cn:cn")
+
+    candidates = db.smart_review_candidates(
+        version="1.20.1", mod_id="default-locale", limit=0
+    )
+
+    assert len(candidates) == 2
+    assert db.count_smart_review_candidates(
+        version="1.20.1", mod_id="default-locale"
+    ) == 2
+    assert all(not candidate.twin_entry_ids for candidate in candidates)
+
+
 def test_run_sends_homogeneous_requests_with_supplement(db, monkeypatch):
     calls = []
     expected_ids = {
