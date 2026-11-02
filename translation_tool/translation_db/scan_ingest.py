@@ -255,12 +255,16 @@ class DbIngestTarget:
         for origin in origins:
             self.conn.execute(
                 "DELETE FROM entry_origin WHERE pack_scope=? AND source_kind=? "
-                "AND source_path=? AND selector=?",
+                "AND source_path=? AND selector=? "
+                "AND entry_id IN ("
+                "SELECT id FROM entry WHERE mc_version=?"
+                ")",
                 (
                     origin.pack_scope,
                     origin.source_kind,
                     origin.source_path,
                     origin.selector,
+                    self.version,
                 ),
             )
 

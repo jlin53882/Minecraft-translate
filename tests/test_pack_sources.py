@@ -435,6 +435,67 @@ def test_moddb_rescan_removes_legacy_blank_kubejs_origin(tmp_path):
         db.close()
 
 
+def test_moddb_rescan_scopes_legacy_origin_cleanup_to_version(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '');\n"
+        "});\n"
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        legacy_item = ScanItem(
+            "kubejs_lang",
+            "demo@" + result.pack_scope,
+            "item.demo.machine",
+            "",
+            source_path="client_scripts/lang.js",
+            source_selector=(
+                "ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine"
+            ),
+            source_hash="legacy",
+            source_format="kubejs-js",
+            pack_scope=result.pack_scope,
+            source_locale="en_us",
+        )
+        db.ingest("1.20.1", [legacy_item])
+        db.ingest("1.21.1", [legacy_item])
+
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+
+        rows = db._q(
+            "SELECT e.mc_version, COUNT(eo.id) "
+            "FROM entry e LEFT JOIN entry_origin eo ON eo.entry_id=e.id "
+            "AND eo.pack_scope=? AND eo.source_kind='kubejs_lang' "
+            "AND eo.source_path=? AND eo.selector LIKE '%[en_us][demo].event.add[1]|%' "
+            "WHERE e.kind='kubejs_lang' AND e.mod_id=? AND e.key=? "
+            "GROUP BY e.mc_version ORDER BY e.mc_version",
+            (
+                result.pack_scope,
+                "client_scripts/lang.js",
+                "demo@" + result.pack_scope,
+                "item.demo.machine",
+            ),
+        )
+        assert rows == [("1.20.1", 1), ("1.21.1", 0)]
+    finally:
+        db.close()
+
+
 @pytest.mark.parametrize("locale", ["zh_cn", "zh_tw"])
 def test_kubejs_script_locale_only_fallback_is_a_translation_candidate(
     tmp_path, locale
