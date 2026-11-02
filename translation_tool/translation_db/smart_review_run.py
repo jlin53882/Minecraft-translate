@@ -605,6 +605,8 @@ def _open_run_state(
             "planning_ms": round(planning_seconds * 1000),
             "run_record_ms": round(run_record_seconds * 1000),
         },
+        # 讓畫面的「範圍搜尋完成」摘要讀得到規劃筆數與歷史重用筆數
+        metrics=state.metrics,
     )
     return state
 

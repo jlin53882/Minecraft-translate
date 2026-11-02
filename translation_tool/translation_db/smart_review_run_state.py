@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import copy
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -204,8 +205,13 @@ class SmartReviewRunState:
         message: str | None = None,
         timing: dict[str, Any] | None = None,
         event: dict[str, Any] | None = None,
+        metrics: dict[str, Any] | None = None,
     ) -> None:
-        """回報目前已處理數量、階段、使用者訊息與可診斷的耗時。"""
+        """回報目前已處理數量、階段、使用者訊息與可診斷的耗時。
+
+        ``metrics`` 只在需要讓回呼端讀到規劃統計的階段（``selection_complete``）附帶，
+        以深層複本交出，回呼端修改它不會影響核心的帳本。
+        """
         if self.progress is None:
             return
         snapshot: dict[str, Any] = {
@@ -230,6 +236,8 @@ class SmartReviewRunState:
             snapshot["timing"] = to_legacy_event(timing)
         if event is not None:
             snapshot["event"] = to_legacy_event(event)
+        if metrics is not None:
+            snapshot["metrics"] = copy.deepcopy(metrics)
         self.progress(snapshot)
 
     def _count_event_metrics(self, kind: str, fields: dict[str, Any]) -> None:

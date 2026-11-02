@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -1765,6 +1766,94 @@ def test_job_logs_preparation_stages_once_and_keeps_stage_visible(
     assert "執行批次已建立，開始送出第一批…" in texts
     assert job.state.stage == "selection_complete"
     assert job.state.stage_message == "執行批次已建立，開始送出第一批…"
+
+
+def test_job_selection_summary_shows_planned_and_reused_counts(tmp_path, monkeypatch):
+    """「範圍搜尋完成」摘要顯示核心回報的規劃筆數與歷史重用筆數，而不是 0。"""
+    import app.views.moddb.smart_review_job as job_module
+
+    def fake_run(*_args, progress=None, **_kwargs):
+        progress(
+            {
+                "run_id": "run-plan",
+                "phase": "selection_complete",
+                "selected": 38136,
+                "processed": 0,
+                "timing": {"selection_seconds": 6.19, "run_record_seconds": 2.31},
+                "metrics": {"planned_ai_count": 38136, "reused_count": 12},
+            }
+        )
+        return _Result()
+
+    monkeypatch.setattr(job_module, "run_moddb_smart_review_from_path", fake_run)
+    monkeypatch.setattr(
+        job_module,
+        "get_moddb_smart_review_run_breakdown_from_path",
+        lambda *_a, **_k: {"status": {}, "errors": []},
+    )
+    job = SmartReviewJob(_sync_page())
+    assert job.start(_request(tmp_path)) is None
+
+    texts = [entry.text for entry in job.session.snapshot()["logs"]]
+    summary = next(text for text in texts if "範圍搜尋完成" in text)
+    assert "選取 38,136 筆" in summary
+    assert "精確規劃送 AI 38,136 筆" in summary
+    assert "歷史重用 12 筆" in summary
+
+
+def test_job_selection_summary_matches_a_real_core_run(db, tmp_path, monkeypatch):
+    """真實核心搭配真實 job：摘要的筆數與實際規劃一致，不再顯示 0。"""
+    import app.views.moddb.smart_review_job as job_module
+    from translation_tool.translation_db.smart_review_run import run_smart_review
+
+    def fake_provider(**kwargs):
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                        "reason": "目前譯文可保留。",
+                    }
+                    for item in kwargs["payload"]["items"]
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
+        fake_provider,
+    )
+
+    def real_run(*_args, progress=None, **_kwargs):
+        return run_smart_review(
+            db,
+            model_name="gemini-test",
+            api_key="test-key",
+            limit=2,
+            batch_size=1,
+            effective_source=None,
+            progress=progress,
+        )
+
+    monkeypatch.setattr(job_module, "run_moddb_smart_review_from_path", real_run)
+    monkeypatch.setattr(
+        job_module,
+        "get_moddb_smart_review_run_breakdown_from_path",
+        lambda *_a, **_k: {"status": {}, "errors": []},
+    )
+    job = SmartReviewJob(_sync_page())
+    assert job.start(_request(tmp_path)) is None
+
+    texts = [entry.text for entry in job.session.snapshot()["logs"]]
+    summary = next(text for text in texts if "範圍搜尋完成" in text)
+    assert "選取 2 筆" in summary
+    assert "精確規劃送 AI 2 筆" in summary
+    assert "歷史重用 0 筆" in summary
 
 
 def test_resume_job_logs_snapshot_counts_and_current_progress(tmp_path, monkeypatch):

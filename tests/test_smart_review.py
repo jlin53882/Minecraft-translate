@@ -1651,6 +1651,37 @@ def test_smart_review_reports_search_and_api_timing(db, monkeypatch):
     )
 
 
+def test_selection_complete_snapshot_carries_plan_metrics(db, monkeypatch):
+    """「範圍搜尋完成」摘要要讀得到規劃筆數與歷史重用筆數；快照只交出複本。"""
+    events = []
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
+        lambda **kwargs: _review_response(kwargs["payload"]["items"]),
+    )
+
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="test-key",
+        limit=2,
+        batch_size=1,
+        progress=events.append,
+    )
+
+    selection = next(
+        event for event in events if event["phase"] == "selection_complete"
+    )
+    assert selection["metrics"]["planned_ai_count"] == 2
+    assert selection["metrics"]["reused_count"] == 0
+    # 其他階段不重複夾帶整份統計
+    assert all("metrics" not in event for event in events if event is not selection)
+    # 回呼端拿到的是深層複本，修改它不會動到核心的帳本
+    assert selection["metrics"] is not result.metrics
+    assert (
+        selection["metrics"]["failure_classes"] is not result.metrics["failure_classes"]
+    )
+
+
 def test_smart_review_batch_event_reports_validation_distribution(db, monkeypatch):
     """批次事件與持久化 metrics 都保留 validation error 分布。"""
     events = []
