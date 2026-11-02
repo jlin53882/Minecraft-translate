@@ -5634,6 +5634,11 @@ class TranslationDB(
             return []
         if kind not in _REVIEWED_EXACT_KINDS:
             return []
+        # An omitted version is not a trustworthy exact-match scope.  Failing
+        # closed prevents a reviewed sentence from one game version being
+        # reused for another version with different terminology or formatting.
+        if not isinstance(mc_version, str) or not mc_version.strip():
+            return []
 
         scope_clauses, scope_params = _reviewed_exact_scope(mod_id, mc_version, kind)
         rows: list[tuple[int, str, str, str]] = []

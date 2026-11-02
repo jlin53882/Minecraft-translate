@@ -674,6 +674,15 @@ def test_reviewed_exact_glossary_does_not_cross_kubejs_namespace(db):
         KIND_KUBEJS_LANG,
         ("Same sentence",),
     ) == [{"key": "same.key", "en_us": "Same sentence", "zh_tw": "甲句"}]
+    assert (
+        db.reviewed_exact_glossary(
+            "namespace_a@pack-a",
+            None,
+            KIND_KUBEJS_LANG,
+            ("Same sentence",),
+        )
+        == []
+    )
 
 
 def test_reviewed_lang_glossary_loads_each_language_kind_once(db, monkeypatch):

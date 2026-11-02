@@ -126,6 +126,13 @@ def _attach_reviewed_context(
         item["_reviewed_exact_glossary"] = exact_glossaries[exact_key]
 
 
+def _clear_reviewed_context(items: list[dict[str, Any]]) -> None:
+    """Remove references that were attached by an earlier enabled run."""
+    for item in items:
+        item.pop("_reviewed_glossary", None)
+        item.pop("_reviewed_exact_glossary", None)
+
+
 def attach_moddb_context(
     items: list[dict[str, Any]],
     *,
@@ -147,6 +154,7 @@ def attach_moddb_context(
     if isinstance(lm_config, dict) and not lm_config.get(
         "moddb_reviewed_glossary", True
     ):
+        _clear_reviewed_context(items)
         reviewed_glossary_loader = None
         reviewed_exact_loader = None
     sessions: dict[str, TranslationSessionState] = {}

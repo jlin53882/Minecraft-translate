@@ -240,7 +240,7 @@ def test_reviewed_translation_for_item_reuses_only_a_unique_full_source() -> Non
     item = {
         "source_text": "The Pressure Chamber processes compressed air.",
         "text": "The Pressure Chamber processes compressed air.",
-        "_reviewed_glossary": [
+        "_reviewed_exact_glossary": [
             {
                 "en_us": "The Pressure Chamber processes compressed air.",
                 "zh_tw": "壓力室會處理壓縮空氣。",
@@ -257,7 +257,7 @@ def test_reviewed_translation_for_item_rejects_conflicting_full_source() -> None
 
     item = {
         "source_text": "The Pressure Chamber processes compressed air.",
-        "_reviewed_glossary": [
+        "_reviewed_exact_glossary": [
             {
                 "en_us": "The Pressure Chamber processes compressed air.",
                 "zh_tw": "壓力室會處理壓縮空氣。",
@@ -266,6 +266,22 @@ def test_reviewed_translation_for_item_rejects_conflicting_full_source() -> None
                 "en_us": "The Pressure Chamber processes compressed air.",
                 "zh_tw": "氣壓室會處理壓縮空氣。",
             },
+        ],
+    }
+
+    assert reviewed_translation_for_item(item) is None
+
+
+def test_reviewed_translation_does_not_reuse_term_glossary_as_exact() -> None:
+    from translation_tool.core.official_locale import reviewed_translation_for_item
+
+    item = {
+        "source_text": "The Pressure Chamber processes compressed air.",
+        "_reviewed_glossary": [
+            {
+                "en_us": "The Pressure Chamber processes compressed air.",
+                "zh_tw": "壓力室會處理壓縮空氣。",
+            }
         ],
     }
 
@@ -289,7 +305,7 @@ def test_reviewed_exact_translation_finishes_without_api_credentials(
         "source_text": "The Pressure Chamber processes compressed air.",
         "text": "The Pressure Chamber processes compressed air.",
         "cache_type": "patchouli",
-        "_reviewed_glossary": [
+        "_reviewed_exact_glossary": [
             {
                 "en_us": "The Pressure Chamber processes compressed air.",
                 "zh_tw": "壓力室會處理壓縮空氣。",
@@ -714,6 +730,34 @@ def test_moddb_context_skips_exact_reviewed_glossary_when_disabled(monkeypatch) 
     )
 
     assert calls == []
+    assert "_reviewed_glossary" not in items[0]
+    assert "_reviewed_exact_glossary" not in items[0]
+
+
+def test_moddb_context_clears_stale_reviewed_context_when_disabled(monkeypatch) -> None:
+    from translation_tool.core import lm_moddb_context
+
+    enabled = True
+    monkeypatch.setattr(
+        lm_moddb_context,
+        "load_config",
+        lambda: {"lm_translator": {"moddb_reviewed_glossary": enabled}},
+    )
+    items = build_items([(1, KIND_LANG, "mod-a", "lang.key", "Language")])
+
+    class FakeDB:
+        def reviewed_lang_glossary(self, *_args):
+            return [{"en_us": "Language", "zh_tw": "語言"}]
+
+        def reviewed_exact_glossary(self, *_args):
+            return [{"en_us": "Language", "zh_tw": "語言"}]
+
+    _attach_translation_sessions(items, operation_id="enabled-glossary", db=FakeDB())
+    assert "_reviewed_glossary" in items[0]
+    assert "_reviewed_exact_glossary" in items[0]
+
+    enabled = False
+    _attach_translation_sessions(items, operation_id="disabled-glossary", db=FakeDB())
     assert "_reviewed_glossary" not in items[0]
     assert "_reviewed_exact_glossary" not in items[0]
 

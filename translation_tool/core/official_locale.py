@@ -808,19 +808,17 @@ def official_translation_for_item(item: dict[str, Any]) -> str | None:
 
 
 def reviewed_translation_for_item(item: dict[str, Any]) -> str | None:
-    """只在同模組／版本的已審核 glossary 有唯一完整句對照時重用譯文。
+    """只在同模組／版本的完整句審核表有唯一對照時重用譯文。
 
-    ``_reviewed_glossary`` 由 ModDB context 依模組、遊戲版本與來源批次建立，
-    不是任意全域術語表。這裡只接受整筆來源文字的唯一對照；片語或有衝突的
-    對照仍交給 LLM，避免把短術語誤當成完整句翻譯。
+    ``_reviewed_glossary`` 是提示詞用的術語表，可能只包含片語，不能直接
+    當成整句翻譯。只有 ``_reviewed_exact_glossary`` 通過資料庫的模組／版本／
+    種類範圍與唯一目標檢查後，才可以跳過 LLM；片語或有衝突的對照仍交給 LLM。
     """
     source = item.get("source_text") or item.get("text")
-    reviewed_sources = (
-        (item.get("_reviewed_exact_glossary"),)
-        if "_reviewed_exact_glossary" in item
-        else (item.get("_reviewed_glossary"),)
-    )
+    reviewed = item.get("_reviewed_exact_glossary")
     if not isinstance(source, str) or not source.strip():
+        return None
+    if not isinstance(reviewed, list):
         return None
 
     source_text = source.replace("\r\n", "\n")
@@ -828,27 +826,19 @@ def reviewed_translation_for_item(item: dict[str, Any]) -> str | None:
         return None
 
     targets: set[str] = set()
-    for reviewed in reviewed_sources:
-        if not isinstance(reviewed, list):
+    for entry in reviewed:
+        if not isinstance(entry, dict):
             continue
-        for entry in reviewed:
-            if not isinstance(entry, dict):
-                continue
-            term, target = entry.get("en_us"), entry.get("zh_tw")
-            if not (
-                isinstance(term, str)
-                and isinstance(target, str)
-                and term.strip()
-                and target.strip()
-                and term.replace("\r\n", "\n") == source_text
-            ):
-                continue
-            targets.add(target.strip())
-        # The exact source contract has precedence over the legacy term-only
-        # glossary.  If it has a unique match, do not let a shorter fallback
-        # glossary entry change that result.
-        if targets:
-            break
+        term, target = entry.get("en_us"), entry.get("zh_tw")
+        if not (
+            isinstance(term, str)
+            and isinstance(target, str)
+            and term.strip()
+            and target.strip()
+            and term.replace("\r\n", "\n") == source_text
+        ):
+            continue
+        targets.add(target.strip())
 
     return next(iter(targets)) if len(targets) == 1 else None
 
