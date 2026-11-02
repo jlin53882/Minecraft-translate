@@ -295,6 +295,7 @@ def _attach_translation_sessions(
         operation_id=operation_id,
         mc_version=version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db, "reviewed_exact_glossary", None),
     )
 
 

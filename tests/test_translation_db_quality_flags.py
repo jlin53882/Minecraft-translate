@@ -592,6 +592,50 @@ def test_reviewed_lang_glossary_matches_terms_inside_source_sentences(db):
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
 
 
+def test_reviewed_exact_glossary_is_kind_and_conflict_scoped(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                "guide.pressure",
+                "The Pressure Chamber processes air.",
+                "壓力室會處理空氣。",
+            ),
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                "guide.conflict.a",
+                "Same sentence",
+                "甲句",
+            ),
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                "guide.conflict.b",
+                "Same sentence",
+                "乙句",
+            ),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=20)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_exact_glossary(
+        "foo",
+        "1.21.1",
+        KIND_PATCHOULI,
+        ("The Pressure Chamber processes air.", "Same sentence"),
+    ) == [
+        {
+            "key": "guide.pressure",
+            "en_us": "The Pressure Chamber processes air.",
+            "zh_tw": "壓力室會處理空氣。",
+        }
+    ]
+
+
 def test_reviewed_lang_glossary_loads_each_language_kind_once(db, monkeypatch):
     db.ingest(
         "1.21.1",

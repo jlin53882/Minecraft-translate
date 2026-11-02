@@ -711,6 +711,7 @@ def preview_same_source_ai_retranslation(
         operation_id=f"retranslate-preview:{id(db)}",
         mc_version=options.version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db, "reviewed_exact_glossary", None),
     )
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
     _raise_preview_timeout(deadline)
@@ -2090,6 +2091,7 @@ def _initialize_snapshot_run(db, entries, session, report, options):
         operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",
         mc_version=options.version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db, "reviewed_exact_glossary", None),
     )
     candidates = _group_retranslation_items_by_cache_type(candidates)
     items = candidates

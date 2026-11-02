@@ -104,6 +104,18 @@ _TERMINOLOGY_INSTRUCTION = (
     "程式碼、產品名或其他明確不可翻譯內容才保留原文。不要因為不確定就把整個 value 原樣回傳。"
 )
 
+_SEMANTIC_TRANSLATION_INSTRUCTION = (
+    "\n【語意完整性契約（高優先）】\n"
+    "翻譯前先辨識每筆原文的主體、動作、對象、條件、否定、數量、單位、時間與因果；"
+    "譯文必須保留這些資訊，不可省略、臆加，或把限定條件改成一般敘述。\n"
+    "先翻譯完整的人類語句，再套用術語；術語映射只固定名詞，不可把整筆參考句硬套到不同句型。\n"
+    "同模組已審核參考只用於詞義、語氣與專有名詞一致性；若與目前 payload 的格式、語境或語系衝突，"
+    "以目前原文及格式契約為準。\n"
+    "不要因單一片語不確定而整筆複製英文；只保留 placeholder、資源 ID、命令、標籤、程式碼或明確產品名稱，"
+    "其餘人類語句都要翻成自然的台灣繁體中文。\n"
+    "完成後逐筆自我檢查：原文每個事實是否都有對應譯文？數字、否定、條件、比較、因果與操作步驟是否未被改變？"
+)
+
 
 @dataclass(frozen=True)
 class OfficialLocaleRecord:
@@ -795,6 +807,52 @@ def official_translation_for_item(item: dict[str, Any]) -> str | None:
     )
 
 
+def reviewed_translation_for_item(item: dict[str, Any]) -> str | None:
+    """只在同模組／版本的已審核 glossary 有唯一完整句對照時重用譯文。
+
+    ``_reviewed_glossary`` 由 ModDB context 依模組、遊戲版本與來源批次建立，
+    不是任意全域術語表。這裡只接受整筆來源文字的唯一對照；片語或有衝突的
+    對照仍交給 LLM，避免把短術語誤當成完整句翻譯。
+    """
+    source = item.get("source_text") or item.get("text")
+    reviewed_sources = (
+        (item.get("_reviewed_exact_glossary"),)
+        if "_reviewed_exact_glossary" in item
+        else (item.get("_reviewed_glossary"),)
+    )
+    if not isinstance(source, str) or not source.strip():
+        return None
+
+    source_text = source.replace("\r\n", "\n")
+    if not source_text.strip():
+        return None
+
+    targets: set[str] = set()
+    for reviewed in reviewed_sources:
+        if not isinstance(reviewed, list):
+            continue
+        for entry in reviewed:
+            if not isinstance(entry, dict):
+                continue
+            term, target = entry.get("en_us"), entry.get("zh_tw")
+            if not (
+                isinstance(term, str)
+                and isinstance(target, str)
+                and term.strip()
+                and target.strip()
+                and term.replace("\r\n", "\n") == source_text
+            ):
+                continue
+            targets.add(target.strip())
+        # The exact source contract has precedence over the legacy term-only
+        # glossary.  If it has a unique match, do not let a shorter fallback
+        # glossary entry change that result.
+        if targets:
+            break
+
+    return next(iter(targets)) if len(targets) == 1 else None
+
+
 def official_exact_translation(key: object, en_us: object, zh_cn: object) -> str | None:
     """提供所有合併與翻譯種類共用的鍵值精確查找。"""
     return load_official_locale_index().lookup_exact(key, en_us, zh_cn)
@@ -822,6 +880,7 @@ def build_translation_prompt(
         [
             format_policy_for_items(items, profile=profile),
             _TERMINOLOGY_INSTRUCTION,
+            _SEMANTIC_TRANSLATION_INSTRUCTION,
         ]
     )
     index = load_official_locale_index()
@@ -1077,6 +1136,7 @@ __all__ = [
     "official_exact_translation",
     "official_terminology_matches_for_item",
     "official_translation_for_item",
+    "reviewed_translation_for_item",
     "terminology_issues",
     "terminology_matches_for_item",
     "terminology_term_allowed",

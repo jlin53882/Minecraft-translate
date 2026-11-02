@@ -144,9 +144,100 @@ _LAST_ACTIVITY_SQL = (
 )
 _EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
+_REVIEWED_EXACT_KINDS = frozenset(
+    {
+        KIND_LANG,
+        KIND_KUBEJS_LANG,
+        KIND_GUIDE,
+        KIND_PATCHOULI,
+        KIND_FTB_QUEST_LANG,
+        KIND_FTB_QUESTS,
+    }
+)
 # quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
 # 用來在 SQL 先排除「必定沒有格式 token」的列（Python 仍負責最終判斷）。
 _TOKEN_CHAR_GLOB_SQL = r"'*[§%${\]*'"
+
+
+def _reviewed_exact_sources(
+    source_texts: Sequence[str] | None,
+) -> tuple[str, ...]:
+    """保留非空且穩定去重的完整來源文字。"""
+    return tuple(
+        dict.fromkeys(
+            source
+            for source in source_texts or ()
+            if isinstance(source, str) and source.strip()
+        )
+    )
+
+
+def _reviewed_exact_scope(
+    mod_id: str,
+    mc_version: str | None,
+    kind: str,
+) -> tuple[list[str], list[object]]:
+    """建立完整句查詢的種類、模組來源與版本範圍。"""
+    clauses = [
+        "e.kind = ?",
+        "f.review_status = 'reviewed'",
+        "e.en_us <> ''",
+        "f.zh_tw <> ''",
+        "e.en_us <> f.zh_tw",
+    ]
+    params: list[object] = [kind]
+    scoped_pack = (
+        kind == KIND_KUBEJS_LANG
+        and mod_id.startswith("kubejs@")
+        or kind == KIND_FTB_QUEST_LANG
+        and mod_id.startswith("ftbquests@")
+    )
+    if scoped_pack:
+        clauses.append(
+            "EXISTS (SELECT 1 FROM entry_origin eo "
+            "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"
+        )
+        params.append(mod_id.split("@", 1)[1])
+    else:
+        clauses.append("e.mod_id = ?")
+        params.append(mod_id)
+    if mc_version:
+        clauses.append("e.mc_version = ?")
+        params.append(mc_version)
+    return clauses, params
+
+
+def _select_reviewed_exact_rows(
+    rows: Sequence[tuple[int, str, str, str]],
+    source_texts: Sequence[str],
+    kind: str,
+    limit: int | None,
+) -> list[dict[str, str]]:
+    """篩出格式一致且唯一目標的完整句對照。"""
+    source_keys = {term_canonical_key(source) for source in source_texts}
+    by_source: dict[str, list[dict[str, str]]] = {}
+    for _entry_id, key, en_us, zh_tw in rows:
+        if not all(isinstance(value, str) for value in (key, en_us, zh_tw)):
+            continue
+        if quality_state(en_us, zh_tw, kind=kind)[0] != "consistent":
+            continue
+        source_key = term_canonical_key(en_us)
+        if source_key not in source_keys:
+            continue
+        by_source.setdefault(source_key, []).append(
+            {"key": key, "en_us": en_us, "zh_tw": zh_tw}
+        )
+
+    result: list[dict[str, str]] = []
+    for source_key in sorted(by_source):
+        candidates = by_source[source_key]
+        targets = {entry["zh_tw"].strip() for entry in candidates}
+        if len(targets) != 1:
+            continue
+        result.append(candidates[0])
+        if limit is not None and len(result) >= int(limit):
+            break
+    return result
 
 _QUALITY_PAGE_BUFFER_LIMIT = 10_000
 _BATCH_REPLACE_STRIP_CHARS = "".join(
@@ -5518,6 +5609,45 @@ class TranslationDB(
             if limit is not None and len(result) >= max(0, int(limit)):
                 break
         return result
+
+    def reviewed_exact_glossary(
+        self,
+        mod_id: str,
+        mc_version: str | None,
+        kind: str,
+        source_texts: Sequence[str] | None = None,
+        *,
+        limit: int | None = 240,
+    ) -> list[dict[str, str]]:
+        """載入同模組／版本／種類的已審核完整來源對照。
+
+        這個查詢與 ``reviewed_lang_glossary`` 分開，避免把 guide／Patchouli
+        的完整句混進一般術語提示；翻譯入口只用它做唯一完整句的精確重用。
+        """
+        normalized_sources = _reviewed_exact_sources(source_texts)
+        if not normalized_sources or (limit is not None and int(limit) <= 0):
+            return []
+        if kind not in _REVIEWED_EXACT_KINDS:
+            return []
+
+        scope_clauses, scope_params = _reviewed_exact_scope(
+            mod_id, mc_version, kind
+        )
+        rows: list[tuple[int, str, str, str]] = []
+        for start in range(0, len(normalized_sources), _CHUNK):
+            chunk = normalized_sources[start : start + _CHUNK]
+            placeholders = ",".join("?" for _ in chunk)
+            rows.extend(
+                self._q(
+                    "SELECT e.id, e.key, e.en_us, f.zh_tw "
+                    "FROM entry e JOIN effective f ON f.entry_id=e.id "
+                    f"WHERE {' AND '.join(scope_clauses)} "
+                    f"AND e.en_us IN ({placeholders}) "
+                    "ORDER BY e.key, e.id",
+                    (*scope_params, *chunk),
+                )
+            )
+        return _select_reviewed_exact_rows(rows, normalized_sources, kind, limit)
 
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]

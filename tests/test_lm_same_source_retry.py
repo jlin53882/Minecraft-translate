@@ -189,6 +189,7 @@ def test_same_as_source_is_reconfirmed_and_second_translation_is_used(
     retry_prompt = calls[1]["system_prompt"]
     assert retry_prompt.startswith("LANG PROFILE PROMPT")
     assert "retry_reasons" in retry_prompt and "format_issues" in retry_prompt
+    assert "主體、動作、對象、條件、否定、數量、單位、時間、比較與因果" in retry_prompt
     assert calls[1]["payload"]["items"][0]["retry_reasons"]
     assert result == [{**item, "text": "壓力室"}]
 

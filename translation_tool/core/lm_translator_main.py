@@ -68,6 +68,7 @@ from translation_tool.core.lm_session import (
 from translation_tool.core.official_locale import (
     build_translation_prompt,
     official_translation_for_item,
+    reviewed_translation_for_item,
     terminology_issues,
     terminology_terms_for_item,
 )
@@ -312,6 +313,14 @@ def translate_batch_smart(
         resolved: dict[int, dict] = {}
         pending: list[tuple[int, dict]] = []
         for index, item in enumerate(items):
+            reviewed_text = reviewed_translation_for_item(item)
+            if reviewed_text is not None:
+                resolved[index] = {
+                    **item,
+                    "text": reviewed_text,
+                    "_reviewed_exact": True,
+                }
+                continue
             official_text = official_translation_for_item(item)
             if official_text is None:
                 pending.append((index, item))
