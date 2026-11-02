@@ -467,14 +467,10 @@ def test_new_source_kind_flags_migrate_before_quality_index_is_used(tmp_path):
             "UPDATE entry SET qflags=?",
             (quality_flags.BITS["consistent"],),
         )
-        conn.execute(
-            "UPDATE meta SET value='8' WHERE key='quality_schema_version'"
-        )
+        conn.execute("UPDATE meta SET value='8' WHERE key='quality_schema_version'")
     first.close()
 
-    criteria = EntryFilter(
-        version="1.21.1", quality=QualityFilter(status="mismatch")
-    )
+    criteria = EntryFilter(version="1.21.1", quality=QualityFilter(status="mismatch"))
     reader = TranslationDB(path, readonly=True)
     try:
         # 版本尚未由可寫連線遷移時，讀取端必須退回逐列判斷，不能相信舊索引。
