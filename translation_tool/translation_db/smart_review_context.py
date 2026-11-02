@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import re
+import sqlite3
 from itertools import islice
 from typing import Any
 
@@ -39,6 +40,28 @@ _REVIEWED_ENTRY_COLUMNS = (
     "FROM entry e JOIN translation f ON f.entry_id=e.id "
 )
 _LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
+_TARGET_ROW_LIMIT = 96  # 每個 kind、每個版本分組的詞組命中列上限
+
+
+def _scoped_phrase_sql(phrase_count: int, scope_sql: str) -> str:
+    """模組包範圍（KubeJS／FTB）的詞組命中查詢。
+
+    範圍條件是 EXISTS 子查詢，沒有索引提示時計畫器會掃整個 kind 或版本，再逐列探測
+    ``entry_origin``（每次約 16 ms，且每筆候選都要查）。``INDEXED BY idx_entry_en``
+    讓詞組先走 en_us 索引，再用範圍與審核狀態過濾（每次不到 1 ms）。
+    不含 ORDER BY／LIMIT：排序與上限由呼叫端在記憶體完成，避免臨時排序。
+    """
+    placeholders = ",".join("?" * phrase_count)
+    return (
+        _REVIEWED_ENTRY_COLUMNS.replace(
+            "FROM entry e JOIN", "FROM entry e INDEXED BY idx_entry_en JOIN", 1
+        )
+        + "WHERE e.en_us IN ("
+        + placeholders
+        + ") AND e.kind=? AND "
+        + scope_sql
+        + " AND f.review_status='reviewed' AND trim(f.zh_tw)<>''"
+    )
 
 
 class _LocalContextBuilder:
@@ -338,12 +361,20 @@ class _LocalContextBuilder:
         """以詞組精確查詢 reviewed lang 列，目前版本排在其他版本之前。"""
         if not lookup_phrases:
             return []
-        bulk = self._bulk_glossary_rows()
+        self._bulk_glossary_rows()
         scope = (*self._glossary_cache_scope(), self.mc_version)
         if self.cache.get("glossary_complete", {}).get(scope):
             # bulk glossary 沒被上限截斷時，詞組命中列必定是它的子集；
             # 直接取用快取，不必每筆候選再各查一次資料庫。
-            return self._target_rows_from_bulk(bulk, scope, lookup_phrases)
+            return self._target_rows_from_bulk(scope, lookup_phrases)
+        if self._glossary_scope() is not None:
+            rows = self._scoped_target_rows(lookup_phrases)
+            if rows is not None:
+                return rows
+        return self._glossary_target_rows_from_sql(lookup_phrases)
+
+    def _glossary_target_rows_from_sql(self, lookup_phrases: list[str]) -> list[tuple]:
+        """以模組或範圍條件直接查資料庫取詞組命中列（無快取可用時的查詢）。"""
         mc_version = self.mc_version
         placeholders = ",".join("?" for _ in lookup_phrases)
         scope_sql, scope_params = self._glossary_scope_sql()
@@ -418,6 +449,82 @@ class _LocalContextBuilder:
         )
         return current + other
 
+    def _scoped_target_rows(self, lookup_phrases: list[str]) -> list[tuple] | None:
+        """模組包範圍的詞組命中列：詞組先走 en_us 索引，排序與上限在記憶體完成。
+
+        索引在舊資料庫不存在時回傳 ``None``，由呼叫端改用一般查詢。
+        """
+        phrases = list(dict.fromkeys(lookup_phrases))
+        scope_sql, scope_params = self._glossary_scope_sql()
+        sql = _scoped_phrase_sql(len(phrases), scope_sql)
+        rows: list[tuple] = []
+        for kind in self._glossary_kinds():
+            try:
+                rows.extend(self.db._q(sql, (*phrases, kind, *scope_params)))
+            except sqlite3.OperationalError:
+                return None
+        return self._cap_target_rows(rows)
+
+    def _cap_target_rows(self, rows: list[tuple]) -> list[tuple]:
+        """依資料庫查詢的順序與上限整理詞組命中列。
+
+        目前版本依 id、其他版本依（版本, id）排序，每個 kind 各取最多
+        ``_TARGET_ROW_LIMIT`` 列，目前版本在前。
+        """
+        current_by_kind: dict[str, list[tuple]] = {}
+        other_by_kind: dict[str, list[tuple]] = {}
+        for row in rows:
+            target = (
+                current_by_kind if str(row[2]) == self.mc_version else other_by_kind
+            )
+            target.setdefault(str(row[1]), []).append(row)
+
+        def current_key(item: tuple) -> int:
+            return int(item[0])
+
+        def other_key(item: tuple) -> tuple[str, int]:
+            return (str(item[2]), int(item[0]))
+
+        current = sorted(
+            (
+                row
+                for kind_rows in current_by_kind.values()
+                for row in sorted(kind_rows, key=current_key)[:_TARGET_ROW_LIMIT]
+            ),
+            key=current_key,
+        )
+        other = sorted(
+            (
+                row
+                for kind_rows in other_by_kind.values()
+                for row in sorted(kind_rows, key=other_key)[:_TARGET_ROW_LIMIT]
+            ),
+            key=other_key,
+        )
+        return current + other
+
+    def _target_rows_from_bulk(
+        self, scope: tuple[Any, ...], lookup_phrases: list[str]
+    ) -> list[tuple]:
+        """由完整的 bulk glossary 取詞組命中列，結果與資料庫查詢逐列相同。
+
+        索引用去重前的原始列建立：同一筆條目有多筆已審核譯文時，資料庫查詢會回傳
+        每一列，這裡也要保留。
+        """
+        by_en_cache = self.cache.setdefault("glossary_by_en", {})
+        if scope not in by_en_cache:
+            by_en: dict[str, list[tuple]] = {}
+            for row in self.cache["glossary_raw_rows"][scope]:
+                by_en.setdefault(str(row[5]), []).append(row)
+            by_en_cache[scope] = by_en
+        by_en = by_en_cache[scope]
+        rows = [
+            row
+            for phrase in dict.fromkeys(lookup_phrases)
+            for row in by_en.get(phrase, ())
+        ]
+        return self._cap_target_rows(rows)
+
     def _bulk_glossary_rows(self) -> tuple[tuple, ...]:
         """取得同模組／版本共用的 bulk glossary（最多 5,000 列，已去重）。"""
         mc_version = self.mc_version
@@ -465,6 +572,9 @@ class _LocalContextBuilder:
             # 兩段查詢都沒碰到上限才代表同範圍的已審核列全數在記憶體中。
             self.cache.setdefault("glossary_complete", {})[scope] = (
                 len(current_rows) < 5000 and len(other_rows) < remaining
+            )
+            self.cache.setdefault("glossary_raw_rows", {})[scope] = tuple(
+                current_rows + other_rows
             )
         return rows_cache[scope]
 

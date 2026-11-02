@@ -126,6 +126,35 @@ other end through the reversed index and flipped.
 掃描整個模組；資料庫寫入或外部變更使世代改變時，舊快照自動失效。來源相關性、
 多譯文衝突排除與最終數量上限仍在 Python 端執行，不得提前在候選 SQL 階段截斷。
 
+### 智慧校對的模組包範圍術語查詢
+
+KubeJS 與 FTB（`kubejs_lang`、`kubejs_script`、`ftb_quest_lang`、`ftb_quests`）候選的
+術語範圍是「同一個模組包」，條件寫成
+`EXISTS (SELECT 1 FROM entry_origin … pack_scope = ?)`。這個條件沒有索引提示時，
+SQLite 會掃整個版本並逐列探測 `entry_origin`，每次查詢是毫秒級的十幾倍；而每筆
+候選都有自己的詞組，快取無法共用。因此 `smart_review_context.py` 的詞組命中列依序取自：
+
+1. **bulk glossary 快取**：同範圍已審核列未達 5,000 列上限時，詞組命中列必定是它的
+   子集，直接由記憶體取得，不查資料庫。索引使用去重前的原始列，同一條目有多筆已審核
+   譯文時與資料庫查詢逐列相同。
+2. **詞組導向查詢**（`_scoped_phrase_sql`）：bulk 被截斷時，用 `INDEXED BY idx_entry_en`
+   讓詞組先走 en_us 索引。查詢不含 `ORDER BY`／`LIMIT`，排序與每個 kind 取 96 列的
+   上限在記憶體完成，因此不會有臨時排序。
+3. **原本的 SQL**：模組範圍（非模組包）的候選，或舊資料庫缺少該索引時使用。
+
+新增或修改這類逐筆候選的查詢時，不得讓 `EXISTS` 範圍條件單獨決定計畫。驗證：
+
+- `tests/test_smart_review_context_glossary_cache.py`（KubeJS 與 FTB 各一組）：三條路徑
+  結果逐列一致、查詢計畫使用 `idx_entry_en` 且沒有臨時排序、完整 bulk 時不查詢、
+  上限與排序一致。
+- `tests/test_smart_review_70k_performance.py` 的 `run_pack_scope_context_gate`：以
+  `include_context=True` 載入四種 kind 的候選，檢查詞組查詢的 SQL 形式與總時間。
+  它不進一般 CI，手動執行：
+
+```bash
+SMART_REVIEW_70K_CASE=pack_scope python tools/run_smart_review_70k_gate.py
+```
+
 ### 共用 Rich Text Shield 快取契約
 
 翻譯中的 `$C...$`、`$P...$` 與 `$E...$` 只是單次執行的暫時佔位符，不能
