@@ -437,6 +437,55 @@ def _kubejs_lang_call_replacement(
     return content[call.match_start : call.match_end] + ", ".join(parts) + ")"
 
 
+def _zh_tw_update_target(
+    call: _KubeJSLangCall, translated: str, source_file: str
+) -> _KubeJSLangCall | None:
+    """回傳需要更新的既有 zh_tw 呼叫；譯文相同時回傳 None，無法安全回寫時拒絕。"""
+    if call.current_value is None:
+        raise ValueError(
+            "KubeJS zh_tw key 的值不是可安全回寫的靜態字串，"
+            f"拒絕猜測更新：{source_file}:{call.namespace}:{call.key}"
+        )
+    if translated == call.current_value:
+        return None
+    return call
+
+
+def _add_kubejs_overlay(
+    additions: dict[tuple[str, str], tuple[str, bool]],
+    call: _KubeJSLangCall,
+    translated: str,
+    source_file: str,
+) -> None:
+    """登記沒有既有 zh_tw 目標時要追加的 overlay；同一 key 的不同譯文拒絕覆蓋。"""
+    identity = (call.namespace, call.key)
+    existing = additions.get(identity)
+    if existing is not None and existing[0] != translated:
+        raise ValueError(
+            "KubeJS zh_tw overlay 發生衝突，拒絕覆蓋："
+            f"{source_file}:{call.namespace}:{call.key}"
+        )
+    additions.setdefault(identity, (translated, call.explicit_namespace))
+
+
+def _add_kubejs_replacement(
+    replacements: dict[int, tuple[int, str]],
+    content: str,
+    target: _KubeJSLangCall,
+    translated: str,
+    source_file: str,
+) -> None:
+    """登記對既有呼叫的替換；同一位置的不同替換內容拒絕覆蓋。"""
+    replacement = _kubejs_lang_call_replacement(content, target, translated)
+    previous = replacements.get(target.match_start)
+    if previous is not None and previous[1] != replacement:
+        raise ValueError(
+            "KubeJS zh_tw key 發生不同翻譯衝突，拒絕覆蓋："
+            f"{source_file}:{target.namespace}:{target.key}"
+        )
+    replacements[target.match_start] = (target.closing_index + 1, replacement)
+
+
 def _append_kubejs_lang_translations(
     content: str,
     *,
@@ -485,36 +534,15 @@ def _append_kubejs_lang_translations(
                 f"({len(matching_targets)} 個目標)"
             )
         if call.locale == "zh_tw":
-            if call.current_value is None:
-                raise ValueError(
-                    "KubeJS zh_tw key 的值不是可安全回寫的靜態字串，"
-                    f"拒絕猜測更新：{source_file}:{call.namespace}:{call.key}"
-                )
-            if translated == call.current_value:
+            target = _zh_tw_update_target(call, translated, source_file)
+            if target is None:
                 continue
-            target = call
+        elif matching_targets:
+            target = matching_targets[0]
         else:
-            if matching_targets:
-                target = matching_targets[0]
-            else:
-                identity = (call.namespace, call.key)
-                existing = additions.get(identity)
-                if existing is not None and existing[0] != translated:
-                    raise ValueError(
-                        "KubeJS zh_tw overlay 發生衝突，拒絕覆蓋："
-                        f"{source_file}:{call.namespace}:{call.key}"
-                    )
-                additions.setdefault(identity, (translated, call.explicit_namespace))
-                continue
-
-        replacement = _kubejs_lang_call_replacement(content, target, translated)
-        previous = replacements.get(target.match_start)
-        if previous is not None and previous[1] != replacement:
-            raise ValueError(
-                "KubeJS zh_tw key 發生不同翻譯衝突，拒絕覆蓋："
-                f"{source_file}:{target.namespace}:{target.key}"
-            )
-        replacements[target.match_start] = (target.closing_index + 1, replacement)
+            _add_kubejs_overlay(additions, call, translated, source_file)
+            continue
+        _add_kubejs_replacement(replacements, content, target, translated, source_file)
 
     output: list[str] = []
     cursor = 0
