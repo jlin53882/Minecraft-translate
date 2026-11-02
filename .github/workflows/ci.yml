@@ -36,8 +36,28 @@ jobs:
       - name: Install dependencies (frozen)
         run: uv sync --frozen --all-groups
 
-      - name: Run tests
-        run: uv run pytest -q
+      - name: Run tests (parallel workers)
+        # 約 8000 條測試、CPU 密集；用 xdist 依 runner 核心數平行，
+        # 本機 4 核實測 ~130 秒（序列約 6 分鐘以上）。
+        run: uv run pytest -q -n auto
+
+  docs-check:
+    # 與 test job 同時跑：產生文件檢查不需要 Node／Tkinter／完整測試。
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - name: Install dependencies (frozen)
+        run: uv sync --frozen --all-groups
 
       - name: Check generated docs are up to date
         run: |
