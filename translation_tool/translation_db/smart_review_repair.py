@@ -40,6 +40,9 @@ from translation_tool.translation_db.smart_review_validation import (
 )
 from translation_tool.utils.cancellation import TaskCancelled
 
+REPAIR_TRANSIENT_ATTEMPTS = 3
+REPAIR_TRANSIENT_WAIT_SEC = 3.0
+
 
 class _ValidationRepair:
     """執行單一批次的 invalid 條目修復請求。"""
@@ -154,15 +157,17 @@ class _ValidationRepair:
         state.executor.metrics.request_attempts += 1
         state.executor.metrics.provider_attempts += 1
         try:
-            raw = self.session.call(
-                system_prompt=smart_review_system_prompt(
-                    SMART_REVIEW_REPAIR_SYSTEM_PROMPT, self.repair_batch
-                ),
-                payload=payload,
-                api_key=api_key,
-                meta_out=meta,
-                response_schema=response_schema,
-                network_event_callback=self.events.on_network_event,
+            raw = self._call_with_recovery(
+                {
+                    "system_prompt": smart_review_system_prompt(
+                        SMART_REVIEW_REPAIR_SYSTEM_PROMPT, self.repair_batch
+                    ),
+                    "payload": payload,
+                    "api_key": api_key,
+                    "meta_out": meta,
+                    "response_schema": response_schema,
+                    "network_event_callback": self.events.on_network_event,
+                }
             )
         except TaskCancelled:
             state.record_usage(meta)
@@ -179,6 +184,32 @@ class _ValidationRepair:
         if failed or state.cancelled:
             return None
         return raw, meta, api_seconds
+
+    def _call_with_recovery(self, call_kwargs: dict[str, Any]) -> str:
+        """修復請求遇到暫時性故障（5xx、逾時、連線中斷）時等待後原樣重送，最多 3 次。
+
+        配額類與請求錯誤不在這裡重送；等待尊重 provider 的 ``Retry-After``。
+        """
+        from translation_tool.core.lm_translator_main import (
+            _is_transient_quality_retry_error,
+        )
+        from translation_tool.utils.cancellation import interruptible_sleep
+
+        for attempt in range(1, REPAIR_TRANSIENT_ATTEMPTS + 1):
+            try:
+                return self.session.call(**call_kwargs)
+            except Exception as exc:
+                if attempt == REPAIR_TRANSIENT_ATTEMPTS or not (
+                    _is_transient_quality_retry_error(exc)
+                ):
+                    raise
+                wait_sec = REPAIR_TRANSIENT_WAIT_SEC * attempt
+                retry_after = getattr(exc, "retry_after", None)
+                if isinstance(retry_after, (int, float)) and retry_after > 0:
+                    wait_sec = max(wait_sec, min(float(retry_after), 60.0))
+                self.state.bump("validation_repair_transient_retries")
+                interruptible_sleep(wait_sec)
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def _record_request_error(self, exc: Exception) -> None:
         """記錄修復請求失敗的安全分類；批次維持原 invalid 結果。"""
@@ -268,10 +299,33 @@ def repair_invalid_results(
     retry_runtime: _SmartReviewRetryRuntime,
     outer_attempt: int,
 ) -> list[dict[str, Any]]:
-    """只重試單批 invalid 條目一次，並在再次驗證失敗時保留 invalid。"""
+    """最多 ``SMART_REVIEW_VALIDATION_REPAIR_LIMIT`` 輪修復 invalid 條目。
+
+    每輪只重送仍 invalid 的條目；某輪沒有任何條目變有效（請求失敗或再次驗證失敗）就停止。
+    """
+    for _round in range(max(0, SMART_REVIEW_VALIDATION_REPAIR_LIMIT)):
+        before = sum(1 for r in results if r.get("validation_error"))
+        if not before:
+            break
+        results = _repair_round(
+            session, state, batch_ctx, batch, results, retry_runtime, outer_attempt
+        )
+        if sum(1 for r in results if r.get("validation_error")) >= before:
+            break
+    return results
+
+
+def _repair_round(
+    session: SmartReviewProviderSession,
+    state: SmartReviewRunState,
+    batch_ctx: SmartReviewBatch,
+    batch: Sequence[SmartReviewSnapshot],
+    results: list[dict[str, Any]],
+    retry_runtime: _SmartReviewRetryRuntime,
+    outer_attempt: int,
+) -> list[dict[str, Any]]:
+    """送出一輪 invalid 條目修復請求，並在再次驗證失敗時保留 invalid。"""
     invalid_results = [result for result in results if result.get("validation_error")]
-    if not invalid_results or SMART_REVIEW_VALIDATION_REPAIR_LIMIT <= 0:
-        return results
     invalid_ids = {str(result.get("id")) for result in invalid_results}
     repair_batch = [item for item in batch if str(item.ordinal) in invalid_ids]
     if not repair_batch:

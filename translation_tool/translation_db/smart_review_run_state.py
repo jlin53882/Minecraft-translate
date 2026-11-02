@@ -75,6 +75,7 @@ def new_smart_review_metrics(*, input_token_budget: int | None) -> dict[str, Any
         "repaired_invalid_count": 0,
         "validation_repair_request_errors": 0,
         "validation_repair_response_invalid_count": 0,
+        "validation_repair_transient_retries": 0,
         "context_escalation_attempts": 0,
         "context_escalation_items": 0,
         "context_escalation_resolved": 0,

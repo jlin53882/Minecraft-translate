@@ -24,7 +24,7 @@ from translation_tool.utils.config_manager import (
 SMART_REVIEW_DECISIONS = ("no_change", "suggest_revision", "needs_context")
 SMART_REVIEW_DEFAULT_BATCH_SIZE = DEFAULT_SMART_REVIEW_BATCH_SIZE
 SMART_REVIEW_MAX_BATCH_SIZE = DEFAULT_SMART_REVIEW_MAX_BATCH_SIZE
-SMART_REVIEW_VALIDATION_REPAIR_LIMIT = 1
+SMART_REVIEW_VALIDATION_REPAIR_LIMIT = 2  # 最多幾輪修復；與翻譯端品質重試一致
 SMART_REVIEW_ISSUE_TYPES = (
     "meaning",
     "terminology",

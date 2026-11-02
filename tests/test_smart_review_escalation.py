@@ -211,3 +211,119 @@ def test_adjacent_citations_move_into_reason_not_evidence_ids():
     assert resolved == 1
     assert merged[0]["evidence_ids"] == []
     assert "k.tip＝提示（reviewed）" in merged[0]["reason"]
+
+
+# --- 驗證修復：多輪與暫時性故障就地重送 -----------------------------------------
+
+
+def _item_response(item, *, valid):
+    entry = {
+        "id": item["id"],
+        "decision": "no_change",
+        "suggested_zh_tw": "",
+        "issue_types": [],
+        "evidence_ids": [],
+        "confidence": 0.8,
+    }
+    if valid:
+        entry["reason"] = "目前譯文可保留。"
+    return entry
+
+
+def _validation_call(plan):
+    """plan[i] 為第 i 次呼叫的行為：True 回有效、False 回缺 reason、例外則拋出。"""
+    calls = []
+
+    def call(**kwargs):
+        step = plan[min(len(calls), len(plan) - 1)]
+        calls.append(kwargs)
+        if isinstance(step, BaseException):
+            raise step
+        return json.dumps(
+            {
+                "items": [
+                    _item_response(i, valid=step) for i in kwargs["payload"]["items"]
+                ]
+            }
+        )
+
+    return call, calls
+
+
+def _http_error(status):
+    import requests
+
+    response = requests.Response()
+    response.status_code = status
+    return requests.HTTPError(str(status), response=response)
+
+
+def _no_sleep(monkeypatch):
+    monkeypatch.setattr(
+        "translation_tool.utils.cancellation.interruptible_sleep", lambda _s: None
+    )
+
+
+def test_validation_repair_transient_failure_is_resent(db, monkeypatch):
+    _no_sleep(monkeypatch)
+    call, calls = _validation_call([False, _http_error(503), True])
+    result = _run(db, monkeypatch, call)
+
+    assert len(calls) == 3  # 首次無效 + 修復遇到 503 + 原樣重送成功
+    assert result.invalid_count == 0
+    assert result.metrics["validation_repair_transient_retries"] == 1
+    assert result.metrics["repaired_valid_count"] == 1
+
+
+def test_validation_repair_runs_a_second_round_after_progress(db, monkeypatch):
+    """第一輪修好一部分、第二輪處理剩下的；沒有進展就不再空轉。"""
+    from translation_tool.translation_db import smart_review_repair as repair
+
+    assert repair.SMART_REVIEW_VALIDATION_REPAIR_LIMIT == 2
+    call, calls = _validation_call([False, False, True])
+    result = _run(db, monkeypatch, call)
+
+    # 第一輪修復仍無效、沒有進展 → 不進第二輪
+    assert len(calls) == 2
+    assert result.invalid_count == 1
+
+
+def test_validation_repair_gives_up_after_bounded_transient_attempts(db, monkeypatch):
+    _no_sleep(monkeypatch)
+    call, calls = _validation_call([False, _http_error(503)])
+    result = _run(db, monkeypatch, call)
+
+    assert len(calls) == 1 + 3
+    assert result.invalid_count == 1
+    assert result.metrics["validation_repair_request_errors"] == 1
+
+
+def test_validation_repair_second_round_resends_only_the_still_invalid(db, monkeypatch):
+    calls = []
+
+    def call(**kwargs):
+        calls.append([i["id"] for i in kwargs["payload"]["items"]])
+        items = kwargs["payload"]["items"]
+        if len(calls) == 1:
+            valid = [False] * len(items)
+        elif len(calls) == 2:
+            valid = [True] + [False] * (len(items) - 1)  # 第一輪只修好一筆
+        else:
+            valid = [True] * len(items)
+        return json.dumps(
+            {"items": [_item_response(i, valid=v) for i, v in zip(items, valid)]}
+        )
+
+    monkeypatch.setattr(CALL, call)
+    result = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="k",
+        limit=2,
+        batch_size=2,
+        lm_config=LM_CONFIG,
+    )
+
+    assert len(calls) == 3
+    assert len(calls[2]) == 1  # 第二輪只重送仍無效的那一筆
+    assert result.invalid_count == 0
