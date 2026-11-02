@@ -549,6 +549,43 @@ def test_guide_format_rule_version_recomputes_old_config_flags(tmp_path):
         reopened.close()
 
 
+def test_flags_stamped_with_the_previous_version_are_rebuilt_on_open(tmp_path):
+    """舊版算出的旗標把「只含 & 色碼」的條目判為一致；升級後開啟必須重算，篩選才找得到。"""
+    path = tmp_path / "stale.db"
+    source = "Type &o'$plank'&r now &o'#'&r"
+    translated = "輸入 &o'$plank'&r 現在 '#'"
+    first = TranslationDB(path)
+    first.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", source, translated, "", SRC_AI)],
+    )
+    entry_id = first.list_entries("1.21.1", limit=1)[0][0].id
+    with first._tx() as conn:
+        # 還原成上一版的狀態：旗標是「一致」，定義版本是 9
+        conn.execute(
+            "UPDATE entry SET qflags=? WHERE id=?",
+            (quality_flags.BITS["consistent"], entry_id),
+        )
+        conn.execute(
+            "UPDATE meta SET value='9' WHERE key='quality_schema_version'",
+        )
+    first.close()
+
+    reopened = TranslationDB(path)
+    try:
+        criteria = EntryFilter(
+            version="1.21.1", quality=QualityFilter(status="mismatch")
+        )
+        rows, total = reopened.list_entries(criteria=criteria, limit=10)
+
+        assert total == 1
+        assert [row.id for row in rows] == [entry_id]
+        assert rows[0].quality_state == "mismatch"  # 與詳情面板的判斷一致
+        assert reopened.verify_quality_flags() == []
+    finally:
+        reopened.close()
+
+
 def test_guide_link_breakage_is_mismatch_in_flags_pages_and_rows(db):
     """指南連結目標被改壞時，條目清單的「格式不一致」要列出它，不能顯示為「一致」。"""
     _seed(db)
@@ -896,7 +933,7 @@ def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
 
 # 規則快照：判斷結果改變時這個測試會失敗。失敗代表已存的 entry.qflags 與新規則不一致，
 # 請遞增 quality_flags.SCHEMA_VERSION，並同步更新下面的版本與預期結果。
-_RULE_SNAPSHOT_VERSION = "9"
+_RULE_SNAPSHOT_VERSION = "10"
 _RULE_SNAPSHOT_CASES = (
     ("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()", "patchouli", False),
     ("A$(br2)B\n\n", "甲\n$(br2)乙", "patchouli", False),
@@ -936,6 +973,35 @@ _RULE_SNAPSHOT_CASES = (
         False,
     ),
 )
+
+
+# 旗標快照：以 ``quality_flags.compute`` 的「不一致」位元為準（條目頁品質篩選實際讀的就是它）。
+# 一般語系只含 ``&`` 色碼或 ``<tag>`` 標記、沒有 ``§``／``%s`` 這類 token 時，也要判為不一致；
+# 改變這類結果卻沒有遞增 SCHEMA_VERSION，會讓已存的旗標與詳情面板互相矛盾。
+_FLAG_SNAPSHOT_CASES = (
+    ("Type &o'$plank'&r now &o'#'&r", "輸入 &o'$plank'&r 現在 '#'", "lang", True),
+    ("Type &o'$plank'&r now", "輸入 &o'$plank'&r 現在", "lang", False),
+    ("Use <imp>iron</imp> now", "現在使用鐵", "lang", True),
+    ("Use <imp>iron</imp> now", "現在使用<imp>鐵</imp>", "lang", False),
+    ("Hello &oworld&r", "你好世界", "kubejs_lang", True),
+    ("Hello &oworld&r", "你好世界", "ftb_quest_lang", True),
+    ("Plain text", "純文字", "lang", False),
+)
+
+
+def test_flag_snapshot_covers_color_code_and_markup_only_lang_text():
+    actual = tuple(
+        bool(
+            quality_flags.compute("k", source, translated, kind)
+            & quality_flags.BITS["mismatch"]
+        )
+        for source, translated, kind, _expected in _FLAG_SNAPSHOT_CASES
+    )
+    expected = tuple(case[3] for case in _FLAG_SNAPSHOT_CASES)
+
+    assert actual == expected, (
+        "品質旗標的判斷結果改變：請遞增 quality_flags.SCHEMA_VERSION"
+    )
 
 
 def test_quality_rule_snapshot_matches_schema_version():

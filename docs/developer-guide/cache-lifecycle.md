@@ -22,7 +22,7 @@
 | 契約 | 擁有者 | 目前版本 | 版本變更時的處理 |
 |---|---|---:|---|
 | 翻譯 LM 語意快取鍵 | `core/lm_translator_shared_cache.py` | `v3` | 只在鍵欄位／命中語意改變時升版，保留舊鍵相容策略並補碰撞測試 |
-| 品質旗標 | `translation_db/quality_flags.py` | `9` | 可寫開啟時標記待重算並分批重建；唯讀時退回逐列判斷 |
+| 品質旗標 | `translation_db/quality_flags.py` | `10` | 可寫開啟時標記待重算並分批重建；唯讀時退回逐列判斷 |
 | 統計摘要 | `translation_db/stat_summary.py` | `3` | 可寫開啟時驗證並重算衍生摘要 |
 | 條目活動 | `translation_db/entry_activity.py` | `2` | 缺少或失效時由可寫開啟安裝並重算 |
 | 生效譯文衍生欄位 | `translation_db/effective_columns.py` | `2` | 依有效旗標重建，讀取端保留關聯查詢 fallback |
