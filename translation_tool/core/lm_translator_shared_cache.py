@@ -40,19 +40,27 @@ def pack_scope_key_suffix(item: Mapping[str, Any]) -> str:
 
 
 def _scoped_cache_key(
-    *, key_mode: str, path: str, source_text: str, pack_scope: str, locale: str
+    *,
+    key_mode: str,
+    path: str,
+    source_text: str,
+    module_id: str = "",
+    pack_scope: str,
+    locale: str,
 ) -> str:
     """建立無歧義、可拆解的 scoped cache key。
 
-    直接把 scope 拼到 path 尾端會讓人為構造的路徑互相碰撞（例如路徑本身
-    已包含 ``@pack:``）。有 scope 的新項目使用長度前綴欄位；無 scope 的
-    舊項目仍由 ``CacheRule.make_key`` 保留原本 key，避免整個既有快取失效。
+    直接把模組或 scope 拼到 path 尾端會讓人為構造的路徑互相碰撞（例如路徑
+    本身已包含 ``@pack:``）。有來源身分的新項目使用長度前綴欄位；沒有
+    模組與 scope 的舊項目仍由 ``CacheRule.make_key`` 保留原本 key，避免
+    整個既有快取失效。欄位格式升版為 v3，讓舊 scoped key 不會誤命中新語意。
     """
     fields = (
-        "v2",
+        "v3",
         key_mode,
         path,
         source_text if key_mode != "path" else "",
+        module_id,
         pack_scope,
         locale,
     )
@@ -68,20 +76,28 @@ class CacheRule:
     def make_key(self, item: dict[str, Any]) -> str:
         """依規則建立 cache key。
 
-        模組包身分與非預設來源語系都會加入鍵尾，讓相同路徑／原文的不同來源不共用快取；
-        沒有來源包身分的舊項目仍維持原本格式，保留既有快取相容性。
+        模組包身分、pack scope 與來源語系都會加入結構化鍵，讓相同路徑／原文
+        的不同來源不共用快取；沒有來源包身分的舊項目仍維持原本格式，保留既有
+        快取相容性。
         """
         path = str(item.get("path") or "")
         src = str(item.get("source_text") or "")
+        module_id = str(item.get("_mod_id") or item.get("mod_id") or "").strip()
         scope = str(item.get("pack_scope") or "").strip()
         has_locale = "source_locale" in item
         locale = normalize_source_locale(item.get("source_locale"))
-        locale_identity = locale or ("unknown" if has_locale else "")
-        if scope:
+        entry_id = str(item.get("_entry_id") or "").strip()
+        locale_identity = locale or (
+            f"unknown:{entry_id}" if has_locale and entry_id else "unknown"
+            if has_locale
+            else ""
+        )
+        if module_id or scope:
             return _scoped_cache_key(
                 key_mode=self.key_mode,
                 path=path,
                 source_text=src,
+                module_id=module_id,
                 pack_scope=scope,
                 locale=locale_identity,
             )

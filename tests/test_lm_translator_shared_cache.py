@@ -58,6 +58,15 @@ class TestCacheRule:
             {**base, "pack_scope": "pack-b"}
         )
 
+    def test_cache_rule_separates_module_ids_without_pack_scope(self):
+        from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+        rule = CacheRule("path|source_text")
+        base = {"path": "item.iron", "source_text": "Iron"}
+        assert rule.make_key({**base, "_mod_id": "mod-a"}) != rule.make_key(
+            {**base, "_mod_id": "mod-b"}
+        )
+
     def test_scoped_key_is_length_delimited_not_suffix_ambiguous(self):
         from translation_tool.core.lm_translator_shared_cache import CacheRule
 
@@ -65,7 +74,7 @@ class TestCacheRule:
         first = rule.make_key({"path": "item.iron", "pack_scope": "pack-a"})
         second = rule.make_key({"path": "item.iron|5:pack-a", "pack_scope": "pack-b"})
 
-        assert first.startswith("2:v2|")
+        assert first.startswith("2:v3|")
         assert first != second
 
     def test_scoped_lang_cache_rejects_changed_source_text_on_same_path(self):

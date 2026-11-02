@@ -500,7 +500,13 @@ def translate_items_with_cache_loop(
 
             rule = cache_rules.get(ctype) or CacheRule("path|source_text")
             cache_identity = {"path": pth, "source_text": src}
-            for identity_field in ("source_locale", "pack_scope", "_entry_id"):
+            for identity_field in (
+                "source_locale",
+                "pack_scope",
+                "_entry_id",
+                "_mod_id",
+                "mod_id",
+            ):
                 if identity_field in it:
                     cache_identity[identity_field] = it[identity_field]
             cache_key = rule.make_key(cache_identity)
