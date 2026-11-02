@@ -537,6 +537,69 @@ def test_kubejs_lang_writer_rejects_ambiguous_existing_zh_tw_key(tmp_path):
         )
 
 
+def test_kubejs_lang_writer_rejects_ambiguous_zh_tw_fallback_key(tmp_path):
+    """zh_tw fallback 的重複 key 也不可只更新其中一筆。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.same', '舊一');\n"
+        "  event.add('demo', 'item.same', '舊二');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[zh_tw][demo].event.add[1]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="zh_tw key 不唯一"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
+def test_kubejs_lang_writer_rejects_dynamic_zh_tw_duplicate_key(tmp_path):
+    """動態 zh_tw value 也要納入同 key 衝突保護，不能只更新靜態目標。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  const value = getTranslatedValue();\n"
+        "  event.add('demo', 'item.same', value);\n"
+        "  event.add('demo', 'item.same', '舊翻譯');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[zh_tw][demo].event.add[2]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="zh_tw key 不唯一"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
 def test_ftb_single_file_locale_identity_is_shared(tmp_path):
     lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
     lang.mkdir(parents=True)

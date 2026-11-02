@@ -278,7 +278,7 @@ def _clientevents_lang_locale_at(
 
 def _parse_kubejs_lang_call(
     content: str, match: re.Match[str], locale: str
-) -> tuple[str, str, str, list[str], int, bool, str] | None:
+) -> tuple[str, str, str, list[str], int, bool, str | None] | None:
     """解析一個已位於 ``ClientEvents.lang`` 範圍內的 ``event.add``。"""
     arguments, closing_index = _extract_call_args_with_end(content, match.end())
     if arguments is None or closing_index is None:
@@ -295,7 +295,7 @@ def _parse_kubejs_lang_call(
             return None
     key = _decode_js_string_literal(key_expr)
     current_value = _decode_js_string_literal(value_expr)
-    if not key or current_value is None:
+    if not key:
         return None
     return (
         locale,
@@ -373,7 +373,7 @@ class _KubeJSLangCall:
     parts: tuple[str, ...]
     closing_index: int
     explicit_namespace: bool
-    current_value: str
+    current_value: str | None
     occurrence: int
 
 
@@ -477,18 +477,23 @@ def _append_kubejs_lang_translations(
 
         selected_key, translated = selected
         used_keys.add(selected_key)
+        matching_targets = targets[(call.namespace, call.key)]
+        if len(matching_targets) > 1:
+            raise ValueError(
+                "KubeJS zh_tw key 不唯一，拒絕猜測更新："
+                f"{source_file}:{call.namespace}:{call.key} "
+                f"({len(matching_targets)} 個目標)"
+            )
         if call.locale == "zh_tw":
+            if call.current_value is None:
+                raise ValueError(
+                    "KubeJS zh_tw key 的值不是可安全回寫的靜態字串，"
+                    f"拒絕猜測更新：{source_file}:{call.namespace}:{call.key}"
+                )
             if translated == call.current_value:
                 continue
             target = call
         else:
-            matching_targets = targets[(call.namespace, call.key)]
-            if len(matching_targets) > 1:
-                raise ValueError(
-                    "KubeJS zh_tw key 不唯一，拒絕猜測更新："
-                    f"{source_file}:{call.namespace}:{call.key} "
-                    f"({len(matching_targets)} 個目標)"
-                )
             if matching_targets:
                 target = matching_targets[0]
             else:
