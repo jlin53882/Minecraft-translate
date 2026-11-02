@@ -277,6 +277,20 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
         "ClientEvents.lang[zh_tw][demo]" in item.source_selector for item in items
     )
     assert {item.mod_id for item in items} == {"demo@" + result.pack_scope}
+    assert {item.source_locale for item in items} == {"en_us"}
+
+    db = TranslationDB(tmp_path / "kubejs-locale.db")
+    try:
+        db.ingest("1.21.1", result.items)
+        entry_id = db._one(
+            "SELECT id FROM entry WHERE kind='kubejs_lang' "
+            "AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )[0]
+        assert db.source_locales_for_entries([entry_id]) == {entry_id: "en_us"}
+    finally:
+        db.close()
+
 
     translated = tmp_path / "translated" / "client_scripts" / "lang.json"
     translated.parent.mkdir(parents=True)
@@ -300,6 +314,27 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
     output_text = (output / "client_scripts/lang.js").read_text(encoding="utf-8")
     assert "'demo', 'item.demo.machine', 'Machine'" in output_text
     assert 'event.add("demo", "item.demo.machine", "機器翻譯");' in output_text
+
+
+def test_kubejs_script_locale_fallback_uses_most_common_locale(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '機器');\n"
+        "  event.add('demo', 'item.demo.machine', '機器二');\n"
+        "});\n"
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.key == "item.demo.machine"]
+
+    assert len(items) == 3
+    assert {item.source_locale for item in items} == {"zh_tw"}
 
 
 def test_kubejs_lang_dynamic_value_keeps_scan_and_writer_occurrence_aligned(

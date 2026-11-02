@@ -498,6 +498,42 @@ def _scan_kubejs(root: Path, version: str, scope: str, result: PackScanResult) -
         text, digest = loaded
         _scan_kubejs_script(text, rel, digest, scope, version, result)
     _scan_kubejs_lang(root, version, scope, result)
+    _normalize_kubejs_script_source_locales(result)
+
+
+def _normalize_kubejs_script_source_locales(result: PackScanResult) -> None:
+    """讓同一個 KubeJS JS key 的所有 locale origin 使用同一來源語系。
+
+    ``ClientEvents.lang`` 的 selector 必須保留原始 locale，因為 writer 需要
+    知道每個事件實際寫入哪個語系；但資料庫的 ``source_locale`` 是條目的
+    原文身分，不能因為同一 key 同時有 en_us／zh_tw 就變成 unknown。JSON
+    語系檔已在 ``_append_kubejs_lang_items`` 選好來源，這裡只處理 JS selector。
+    """
+    grouped: defaultdict[tuple[str, str], list[tuple[int, str]]] = defaultdict(list)
+    for index, item in enumerate(result.items):
+        if item.kind != KIND_KUBEJS_LANG or not item.source_selector.startswith(
+            "ClientEvents.lang["
+        ):
+            continue
+        if not item.source_locale:
+            continue
+        locale = normalize_locale(item.source_locale)
+        value = item.en_us or item.zh_tw or item.zh_cn
+        if not locale or not value.strip():
+            continue
+        grouped[(item.mod_id, item.key)].append((index, locale))
+
+    for entries in grouped.values():
+        locale_counts: defaultdict[str, int] = defaultdict(int)
+        for _index, locale in entries:
+            locale_counts[locale] += 1
+        source_locale = select_source_locale(locale_counts)
+        if source_locale is None:
+            continue
+        for index, _locale in entries:
+            result.items[index] = replace(
+                result.items[index], source_locale=source_locale
+            )
 
 
 def _scan_kubejs_script(
