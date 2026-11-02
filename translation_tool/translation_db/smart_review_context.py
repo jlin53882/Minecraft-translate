@@ -338,6 +338,12 @@ class _LocalContextBuilder:
         """以詞組精確查詢 reviewed lang 列，目前版本排在其他版本之前。"""
         if not lookup_phrases:
             return []
+        bulk = self._bulk_glossary_rows()
+        scope = (*self._glossary_cache_scope(), self.mc_version)
+        if self.cache.get("glossary_complete", {}).get(scope):
+            # bulk glossary 沒被上限截斷時，詞組命中列必定是它的子集；
+            # 直接取用快取，不必每筆候選再各查一次資料庫。
+            return self._target_rows_from_bulk(bulk, scope, lookup_phrases)
         mc_version = self.mc_version
         placeholders = ",".join("?" for _ in lookup_phrases)
         scope_sql, scope_params = self._glossary_scope_sql()
@@ -363,6 +369,52 @@ class _LocalContextBuilder:
             (*scope_params, mc_version, *lookup_phrases),
             order_key=lambda row: (str(row[2]), int(row[0])),
             kinds=kinds,
+        )
+        return current + other
+
+    def _target_rows_from_bulk(
+        self,
+        bulk: tuple[tuple, ...],
+        scope: tuple[Any, ...],
+        lookup_phrases: list[str],
+    ) -> list[tuple]:
+        """由完整的 bulk glossary 取詞組命中列，順序與每個 kind 的上限同資料庫查詢。
+
+        目前版本依 id、其他版本依（版本, id）排序，每個 kind 各取最多 96 列，
+        目前版本在前。
+        """
+        by_en_cache = self.cache.setdefault("glossary_by_en", {})
+        if scope not in by_en_cache:
+            by_en: dict[str, list[tuple]] = {}
+            for row in bulk:
+                by_en.setdefault(str(row[5]), []).append(row)
+            by_en_cache[scope] = by_en
+        by_en = by_en_cache[scope]
+        current_by_kind: dict[str, list[tuple]] = {}
+        other_by_kind: dict[str, list[tuple]] = {}
+        for phrase in dict.fromkeys(lookup_phrases):
+            for row in by_en.get(phrase, ()):
+                target = (
+                    current_by_kind if str(row[2]) == self.mc_version else other_by_kind
+                )
+                target.setdefault(str(row[1]), []).append(row)
+        current = sorted(
+            (
+                row
+                for rows in current_by_kind.values()
+                for row in sorted(rows, key=lambda item: int(item[0]))[:96]
+            ),
+            key=lambda item: int(item[0]),
+        )
+        other = sorted(
+            (
+                row
+                for rows in other_by_kind.values()
+                for row in sorted(rows, key=lambda item: (str(item[2]), int(item[0])))[
+                    :96
+                ]
+            ),
+            key=lambda item: (str(item[2]), int(item[0])),
         )
         return current + other
 
@@ -410,6 +462,10 @@ class _LocalContextBuilder:
                     seen_ids.add(row_id)
                     merged.append(row)
             rows_cache[scope] = tuple(merged)
+            # 兩段查詢都沒碰到上限才代表同範圍的已審核列全數在記憶體中。
+            self.cache.setdefault("glossary_complete", {})[scope] = (
+                len(current_rows) < 5000 and len(other_rows) < remaining
+            )
         return rows_cache[scope]
 
     def _glossary_term_index(
