@@ -288,8 +288,8 @@
 | `translation_tool/core/lm_translator_main.py:_handle_service_unavailable_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_retry_same_source_translations` | BLE001 | 已記錄／回報 | optional quality retry must not fail the valid batch |
-| `translation_tool/core/lm_translator_main.py:_retry_quality_translations` | BLE001 | 已記錄／回報 | optional quality retry must not fail a valid batch |
-| `translation_tool/core/lm_translator_main.py:_retry_quality_translations` | BLE001 | 已記錄／回報 | health is best effort |
+| `translation_tool/core/lm_translator_main.py:_run_quality_retry_round` | BLE001 | 已記錄／回報 | optional quality retry must not fail a valid batch |
+| `translation_tool/core/lm_translator_main.py:_run_quality_retry_round` | BLE001 | 已記錄／回報 | health is best effort |
 | `translation_tool/core/lm_translator_main.py:_attempt_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_scan.py:scan_translatable_files` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/lm_translator_scan.py:extract_items_parallel.process_file_task` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |

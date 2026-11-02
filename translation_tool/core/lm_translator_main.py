@@ -47,6 +47,7 @@ from translation_tool.core.lm_config_schema import (
 from translation_tool.core.lm_format_policy import build_translation_payload
 from translation_tool.core.lm_format_retry import (
     QUALITY_RETRY_INSTRUCTION,
+    QUALITY_RETRY_MAX_ROUNDS,
     build_quality_retry_batch,
     quality_issues,
 )
@@ -2102,12 +2103,14 @@ def _mark_quality_retry_result(
             marked.append(item)
             continue
         # Keep the public generic translator result unchanged. Mod DB items
-        # opt in through their explicit batch-group metadata.
-        if "_batch_group" not in item:
+        # opt in through their explicit batch-group metadata, repair items
+        # through ``_report_quality_retry``.
+        if "_batch_group" not in item and not item.get("_report_quality_retry"):
             marked.append(item)
             continue
         updated = {**item, "_quality_retry_candidate": True}
         if position in fixed:
+            updated.pop("_quality_retry_unresolved", None)
             updated["_quality_retry_fixed"] = True
         if position in unresolved:
             updated["_quality_retry_unresolved"] = True
@@ -2128,6 +2131,56 @@ def _is_quality_retry_quota_failure(error: Exception) -> bool:
     return any(token in text for token in ("quota", "rate limit", "rate_limit"))
 
 
+_QUALITY_RETRY_TRANSIENT_ATTEMPTS = 3
+_QUALITY_RETRY_TRANSIENT_WAIT_SEC = 3.0
+_QUALITY_RETRY_TRANSIENT_CLASSES = frozenset(
+    {
+        "server_error",
+        "deadline_exceeded",
+        "timeout",
+        "connection_error",
+        "service_unavailable",
+        "provider_overload",
+    }
+)
+
+
+def _is_transient_quality_retry_error(error: Exception) -> bool:
+    """暫時性故障（5xx、逾時、連線中斷）值得就地再試；配額與請求錯誤不是。"""
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    if isinstance(error, TaskCancelled):
+        return False
+    if isinstance(error, ChatGPTAPIError):
+        return bool(error.status and error.status >= 500)
+    status = (
+        error.response.status_code
+        if isinstance(error, requests.HTTPError) and error.response is not None
+        else None
+    )
+    return _classify_batch_error(error, status) in _QUALITY_RETRY_TRANSIENT_CLASSES
+
+
+def _call_quality_retry_with_recovery(request_kwargs: dict) -> str:
+    """送出品質重試請求；暫時性故障時等待後原樣重送，最多 3 次。"""
+    for attempt in range(1, _QUALITY_RETRY_TRANSIENT_ATTEMPTS + 1):
+        try:
+            return call_gemini_requests(**request_kwargs).strip()
+        except Exception as exc:
+            if attempt == _QUALITY_RETRY_TRANSIENT_ATTEMPTS or not (
+                _is_transient_quality_retry_error(exc)
+            ):
+                raise
+            wait_sec = _QUALITY_RETRY_TRANSIENT_WAIT_SEC * attempt
+            log_warning(
+                f"[品質重試] 暫時性故障，{wait_sec:g} 秒後重送"
+                f"（第 {attempt}/{_QUALITY_RETRY_TRANSIENT_ATTEMPTS - 1} 次；"
+                f"{_retry_error_detail(exc)}）"
+            )
+            interruptible_sleep(wait_sec)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
 def _retry_quality_translations(
     runtime: _BatchRuntime,
     round_data: _BatchRound,
@@ -2139,7 +2192,64 @@ def _retry_quality_translations(
     output_cap: int | None,
     conversation_history: list[dict[str, str]],
 ) -> list[dict]:
-    """以單批次請求重試所有品質問題翻譯並保留最終結果。"""
+    """最多進行 ``QUALITY_RETRY_MAX_ROUNDS`` 輪品質重試，每輪只重送仍不合格的項目。
+
+    某輪沒有任何改善（請求失敗、配額不足、回應無法使用）就停止，不再空轉。
+    """
+    pending = _count_quality_retry_candidates(runtime, round_data, result)
+    for round_number in range(1, QUALITY_RETRY_MAX_ROUNDS + 1):
+        if not pending:
+            break
+        result = _run_quality_retry_round(
+            runtime,
+            round_data,
+            result,
+            prompt=prompt,
+            model_name=model_name,
+            api_key=api_key,
+            output_cap=output_cap,
+            conversation_history=conversation_history,
+            round_number=round_number,
+        )
+        remaining = _count_quality_retry_candidates(runtime, round_data, result)
+        if remaining >= pending:
+            break  # 這一輪沒有任何改善（請求失敗或回應仍不合格），不再空轉
+        pending = remaining
+    return result
+
+
+def _count_quality_retry_candidates(
+    runtime: _BatchRuntime, round_data: _BatchRound, result: list[dict]
+) -> int:
+    """目前仍符合品質重試條件的項目數（與送出重試時使用同一套判定）。"""
+    return len(
+        build_quality_retry_batch(
+            round_data.current_batch,
+            result,
+            list(round_data.id_to_item),
+            retry_same_as_source=runtime.retry_same_as_source,
+            include_official=bool(runtime.lm_cfg.get("official_glossary", True)),
+            include_moddb_reviewed=bool(
+                runtime.lm_cfg.get("moddb_reviewed_glossary", True)
+            ),
+            terminology_cache=runtime.terminology_cache,
+        ).positions
+    )
+
+
+def _run_quality_retry_round(
+    runtime: _BatchRuntime,
+    round_data: _BatchRound,
+    result: list[dict],
+    *,
+    prompt: str,
+    model_name: str,
+    api_key: str,
+    output_cap: int | None,
+    conversation_history: list[dict[str, str]],
+    round_number: int,
+) -> list[dict]:
+    """以單批次請求重試所有品質問題翻譯並保留最終結果（第 ``round_number`` 輪）。"""
     candidates = build_quality_retry_batch(
         round_data.current_batch,
         result,
@@ -2192,7 +2302,8 @@ def _retry_quality_translations(
     )
     candidate_count = len(candidates.positions)
     log_info(
-        f"[品質重試] 送出 {candidate_count}/{len(round_data.current_batch)} 筆需要重新確認的譯文"
+        f"[品質重試] 第 {round_number}/{QUALITY_RETRY_MAX_ROUNDS} 輪：送出 "
+        f"{candidate_count}/{len(round_data.current_batch)} 筆需要重新確認的譯文"
         "（與原文相同、格式或術語不一致），"
         f"估計輸入 {round(retry_input_tokens)} tokens"
     )
@@ -2234,7 +2345,7 @@ def _retry_quality_translations(
         )
         with quota.hold_probe_lease(model_name, runtime.quota_owner, lease_sec):
             _wait_for_request_slot(runtime, model_name)
-            retry_text = call_gemini_requests(**request_kwargs).strip()
+            retry_text = _call_quality_retry_with_recovery(request_kwargs)
         raise_if_cancelled()
         quota.mark_ok(model_name, started_at=started)
         if (
@@ -2289,52 +2400,10 @@ def _retry_quality_translations(
             quota_failed=_is_quality_retry_quota_failure(exc),
         )
 
-    accepted_positions: list[int] = []
-    accepted_results: list[dict] = []
-    unresolved = 0
-    initially_same_source_ids = {
-        str(item.get("id"))
-        for item in candidates.payload.get("items", [])
-        if "翻譯結果與原文相同" in (item.get("retry_reasons") or [])
-    }
-    initially_same_source_positions = {
-        position
-        for position, item_id in zip(
-            candidates.positions, candidates.item_ids, strict=True
-        )
-        if str(item_id) in initially_same_source_ids
-    }
-    for position, retry_item in zip(candidates.positions, retried, strict=True):
-        source_text = round_data.current_batch[position].get("text")
-        translated_text = retry_item.get("text")
-        still_suspect_same_source = (
-            position not in initially_same_source_positions
-            and isinstance(source_text, str)
-            and translated_text == source_text
-            and any(char.isalpha() for char in source_text)
-        )
-        if (
-            not isinstance(translated_text, str)
-            or not translated_text.strip()
-            or not isinstance(source_text, str)
-            or still_suspect_same_source
-            or quality_issues(round_data.current_batch[position], translated_text)
-            or terminology_issues(
-                round_data.current_batch[position],
-                translated_text,
-                include_official=bool(runtime.lm_cfg.get("official_glossary", True)),
-                include_moddb_reviewed=bool(
-                    runtime.lm_cfg.get("moddb_reviewed_glossary", True)
-                ),
-                terms=runtime.terminology_cache.get(
-                    id(round_data.current_batch[position])
-                ),
-            )
-        ):
-            unresolved += 1
-            continue
-        accepted_positions.append(position)
-        accepted_results.append(retry_item)
+    accepted_positions, accepted_results = _accept_clean_quality_retries(
+        runtime, round_data, candidates, retried
+    )
+    unresolved = candidate_count - len(accepted_positions)
 
     if unresolved:
         log_warning(
@@ -2359,6 +2428,52 @@ def _retry_quality_translations(
         fixed_positions=tuple(accepted_positions),
         unresolved_positions=unresolved_positions,
     )
+
+
+def _accept_clean_quality_retries(
+    runtime: _BatchRuntime,
+    round_data: _BatchRound,
+    candidates,
+    retried: list[dict],
+) -> tuple[list[int], list[dict]]:
+    """只接受通過品質與術語檢查、且不是照抄原文的重試譯文。"""
+    include_official = bool(runtime.lm_cfg.get("official_glossary", True))
+    include_moddb = bool(runtime.lm_cfg.get("moddb_reviewed_glossary", True))
+    initially_same_source = {
+        str(item.get("id"))
+        for item in candidates.payload.get("items", [])
+        if "翻譯結果與原文相同" in (item.get("retry_reasons") or [])
+    }
+    accepted_positions: list[int] = []
+    accepted_results: list[dict] = []
+    for position, item_id, retry_item in zip(
+        candidates.positions, candidates.item_ids, retried, strict=True
+    ):
+        source_item = round_data.current_batch[position]
+        source_text = source_item.get("text")
+        translated_text = retry_item.get("text")
+        if (
+            not isinstance(translated_text, str)
+            or not translated_text.strip()
+            or not isinstance(source_text, str)
+            or (
+                str(item_id) not in initially_same_source
+                and translated_text == source_text
+                and any(char.isalpha() for char in source_text)
+            )
+            or quality_issues(source_item, translated_text)
+            or terminology_issues(
+                source_item,
+                translated_text,
+                include_official=include_official,
+                include_moddb_reviewed=include_moddb,
+                terms=runtime.terminology_cache.get(id(source_item)),
+            )
+        ):
+            continue
+        accepted_positions.append(position)
+        accepted_results.append(retry_item)
+    return accepted_positions, accepted_results
 
 
 def _clear_quota_on_http_success(

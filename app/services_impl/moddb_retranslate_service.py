@@ -185,6 +185,9 @@ class SameSourceAIRepairReport:
     cache_stats_note: str = ""
     ai_submitted_items: int = 0
     ai_validated_items: int = 0
+    quality_retry_candidates: int = 0
+    quality_retry_fixed: int = 0
+    quality_retry_unresolved: int = 0
     ai_submission_unit: str = "items_passed_to_translate_batch_smart"
     candidate_profile_counts: dict[str, int] = field(default_factory=dict)
     processed_candidates: int = 0
@@ -1147,6 +1150,39 @@ def _finalize_batch_results(
     return len(results), stop_after_batch
 
 
+def _count_quality_retry(report, result: dict[str, Any]) -> None:
+    """累計翻譯端回報的品質重試結果，供摘要顯示每一筆是否被重試過。"""
+    if not result.get("_quality_retry_candidate"):
+        return
+    report.quality_retry_candidates += 1
+    if result.get("_quality_retry_fixed"):
+        report.quality_retry_fixed += 1
+    if result.get("_quality_retry_unresolved"):
+        report.quality_retry_unresolved += 1
+
+
+def _repair_validation_issues(
+    report, kind: str, source_text: str, translated_text: str
+) -> list[str]:
+    """寫回前的格式驗證；翻譯端的品質重試使用同一個函式，兩邊判定一致。"""
+    if report.mode == "quality_mismatch":
+        return repair_output_issues_for_kind(
+            source_text,
+            translated_text,
+            kind=kind,
+            allow_actual_newlines=not report.strict_newline,
+        )
+    return translation_issues(source_text, translated_text, kind=kind)
+
+
+def _attach_repair_quality_gate(items: list[dict[str, Any]], report) -> None:
+    """讓翻譯端的品質重試使用與寫回驗證相同的規則，驗證不過的項目會先被重送。"""
+    for item in items:
+        kind = str(item.get("_kind") or "lang")
+        item["_quality_gate"] = partial(_repair_validation_issues, report, kind)
+        item["_report_quality_retry"] = True
+
+
 def _finalize_result(
     db, options, session, original, result, has_result, report, cache_keys_to_save
 ) -> bool:
@@ -1176,16 +1212,12 @@ def _finalize_result(
         )
         return True
     translated_text = result["text"]
-    kind = str(original.get("_kind") or "lang")
-    issues = (
-        repair_output_issues_for_kind(
-            original["source_text"],
-            translated_text,
-            kind=kind,
-            allow_actual_newlines=not report.strict_newline,
-        )
-        if report.mode == "quality_mismatch"
-        else translation_issues(original["source_text"], translated_text, kind=kind)
+    _count_quality_retry(report, result)
+    issues = _repair_validation_issues(
+        report,
+        str(original.get("_kind") or "lang"),
+        original["source_text"],
+        translated_text,
     )
     if issues:
         _mark_flagged(db, session, report, original, translated_text, issues)
@@ -1574,6 +1606,8 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
             else ""
         )
         + f"，格式檢查未通過 {report.flagged}，"
+        f"品質重試 {report.quality_retry_candidates} 筆"
+        f"（修正 {report.quality_retry_fixed}、仍未通過 {report.quality_retry_unresolved}），"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
         f"未處理來源項目 {report.unprocessed_candidates}，未送出來源項目 {report.not_submitted_candidates}，"
         f"範圍內仍符合修復條件 {report.remaining}；快取 key 變更 "
@@ -2086,6 +2120,7 @@ def _initialize_snapshot_run(db, entries, session, report, options):
         [entry.entry_id for entry in entries]
     )
     candidates = _build_retranslation_items(entries, source_locales=source_locales)
+    _attach_repair_quality_gate(candidates, report)
     attach_moddb_context(
         candidates,
         operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",

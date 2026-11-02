@@ -3135,3 +3135,48 @@ def test_rebase_item_reports_a_missing_review_row(tmp_path):
     assert (
         moddb_repair_review_store.rebase_item(store, "run-none", 99, "舊", 1) is False
     )
+
+
+def test_repair_items_carry_the_write_back_validation_as_quality_gate():
+    """翻譯端的品質重試必須用與寫回驗證相同的規則，驗證不過的項目才會先被重送。"""
+    from types import SimpleNamespace
+
+    from app.services_impl import moddb_retranslate_service as service
+
+    report = SimpleNamespace(mode="quality_mismatch", strict_newline=False)
+    items = [{"_kind": "lang", "source_text": "Use <b>this</b> now"}]
+    service._attach_repair_quality_gate(items, report)
+
+    gate = items[0]["_quality_gate"]
+    bad = "現在使用 </b>這個<b>"
+    assert gate(items[0]["source_text"], bad) == service._repair_validation_issues(
+        report, "lang", items[0]["source_text"], bad
+    )
+    assert gate(items[0]["source_text"], bad)
+    assert gate(items[0]["source_text"], "現在使用<b>這個</b>") == []
+
+
+def test_repair_report_counts_quality_retry_outcomes():
+    from app.services_impl import moddb_retranslate_service as service
+
+    report = service.SameSourceAIRepairReport()
+    service._count_quality_retry(report, {"text": "a"})
+    service._count_quality_retry(
+        report,
+        {"text": "b", "_quality_retry_candidate": True, "_quality_retry_fixed": True},
+    )
+    service._count_quality_retry(
+        report,
+        {
+            "text": "c",
+            "_quality_retry_candidate": True,
+            "_quality_retry_unresolved": True,
+        },
+    )
+
+    assert (
+        report.quality_retry_candidates,
+        report.quality_retry_fixed,
+        report.quality_retry_unresolved,
+    ) == (2, 1, 1)
+    assert report.as_dict()["quality_retry_candidates"] == 2
