@@ -22,6 +22,7 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.read_cache import ReadCache
 from translation_tool.translation_db.schema import (
+    KIND_FTB_QUEST_LANG,
     KIND_GUIDE,
     KIND_KUBEJS_LANG,
     KIND_PATCHOULI,
@@ -435,6 +436,77 @@ def test_definition_version_change_recomputes_every_entry(tmp_path):
         reopened.close()
 
 
+def test_new_source_kind_flags_migrate_before_quality_index_is_used(tmp_path):
+    """新格式種類加入後，舊 qflags 不得讓 FTB／KubeJS 消失在品質篩選。"""
+    path = tmp_path / "new-source-kind-quality.db"
+    first = TranslationDB(path)
+    first.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "kubejs",
+                "kube.one",
+                "Use %s",
+                "使用",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_FTB_QUEST_LANG,
+                "ftbquests",
+                "quest.one",
+                "Use %s",
+                "使用",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    with first._tx() as conn:
+        # 模擬 #220 前建立的衍生快取：資料列存在，但仍被標為「一致」。
+        conn.execute(
+            "UPDATE entry SET qflags=?",
+            (quality_flags.BITS["consistent"],),
+        )
+        conn.execute(
+            "UPDATE meta SET value='8' WHERE key='quality_schema_version'"
+        )
+    first.close()
+
+    criteria = EntryFilter(
+        version="1.21.1", quality=QualityFilter(status="mismatch")
+    )
+    reader = TranslationDB(path, readonly=True)
+    try:
+        # 版本尚未由可寫連線遷移時，讀取端必須退回逐列判斷，不能相信舊索引。
+        assert not reader._quality_flags_ready()
+        rows, total = reader.list_entries(criteria=criteria, limit=None)
+        assert total == 2
+        assert {row.kind for row in rows} == {
+            KIND_KUBEJS_LANG,
+            KIND_FTB_QUEST_LANG,
+        }
+        assert set(reader.kind_option_values(criteria)) == {
+            KIND_KUBEJS_LANG,
+            KIND_FTB_QUEST_LANG,
+        }
+    finally:
+        reader.close()
+
+    migrated = TranslationDB(path)
+    try:
+        assert quality_flags.is_installed(migrated._conn)
+        assert migrated._quality_flags_ready()
+        assert migrated.verify_quality_flags() == []
+        rows, total = migrated.list_entries(criteria=criteria, limit=None)
+        assert total == 2
+        assert {row.kind for row in rows} == {
+            KIND_KUBEJS_LANG,
+            KIND_FTB_QUEST_LANG,
+        }
+    finally:
+        migrated.close()
+
+
 def test_guide_format_rule_version_recomputes_old_config_flags(tmp_path):
     """<config> 規則更新後，舊版格式旗標必須在開啟資料庫時重算。"""
     path = tmp_path / "config-rule-version.db"
@@ -828,7 +900,7 @@ def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
 
 # 規則快照：判斷結果改變時這個測試會失敗。失敗代表已存的 entry.qflags 與新規則不一致，
 # 請遞增 quality_flags.SCHEMA_VERSION，並同步更新下面的版本與預期結果。
-_RULE_SNAPSHOT_VERSION = "8"
+_RULE_SNAPSHOT_VERSION = "9"
 _RULE_SNAPSHOT_CASES = (
     ("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()", "patchouli", False),
     ("A$(br2)B\n\n", "甲\n$(br2)乙", "patchouli", False),
