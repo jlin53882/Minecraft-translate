@@ -61,6 +61,7 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.models import QUALITY_TOKEN_CATEGORIES
 from translation_tool.translation_db.quality import token_issues, whitespace_note
 from translation_tool.translation_db.query_interrupt import (
     QueryCancelled,
@@ -94,6 +95,7 @@ from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
+    "QUALITY_TOKEN_CATEGORIES",
     "SOURCE_NAMES",
     "SRC_AI",
     "SRC_CUSTOM",

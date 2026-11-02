@@ -9,6 +9,7 @@ from datetime import date, datetime
 import flet as ft
 
 from app.services_impl.moddb_service import (
+    QUALITY_TOKEN_CATEGORIES,
     QualityFilter,
     TimeFilter,
     custom_date_bounds,
@@ -19,7 +20,6 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.update_scope import update_regions
-from translation_tool.translation_db.models import QUALITY_TOKEN_CATEGORIES
 
 QUALITY_TOKEN_CATEGORY_LABELS = {
     "all": "所有類別",

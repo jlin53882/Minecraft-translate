@@ -7,6 +7,7 @@ import sqlite3
 import flet as ft
 
 from app.services_impl import moddb_cleanup_service as svc
+from app.services_impl.moddb_service import EntryFilter
 from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
@@ -26,7 +27,6 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label, shorten
-from translation_tool.translation_db.models import EntryFilter
 from translation_tool.utils.log_unit import log_exception
 
 ALL_MODULES = "__all__"

@@ -95,10 +95,12 @@ def repair_input_issues_for_kind(
     newline_mismatch = dict(result.source_counts).get("\n", 0) != dict(
         result.target_counts
     ).get("\n", 0)
+    # 只有真換行（identifier ``\n``）屬於可略過的換行差異；字面 ``\\n``（兩個字元）
+    # 是必須原樣保留的 token，缺少時仍是硬性問題，與 ``repair_input_issues_from_counts`` 一致。
     hard_issues = tuple(
         issue.legacy_message
         for issue in result.diagnostics
-        if issue.category != "newline"
+        if not (issue.category == "newline" and issue.identifier == "\n")
     ) + tuple(result.extra_guide_issues)
 
     # Hard-newline formats keep the old behaviour: a newline-only mismatch is a

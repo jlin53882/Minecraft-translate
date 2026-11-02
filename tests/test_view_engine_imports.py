@@ -53,3 +53,14 @@ def test_allowlist_has_no_stale_entries():
     assert stale == [], "白名單有已經不存在的項目，請移除：\n" + "\n".join(
         f"{f} → {m}" for f, m in stale
     )
+
+
+def test_services_facade_exports_what_moddb_views_need():
+    """View 取用的型別與常數必須由 services facade 匯出，而不是直接 import 引擎。"""
+    from app.services_impl import moddb_service
+    from translation_tool.translation_db import EntryFilter
+    from translation_tool.translation_db.models import QUALITY_TOKEN_CATEGORIES
+
+    assert moddb_service.EntryFilter is EntryFilter
+    assert moddb_service.QUALITY_TOKEN_CATEGORIES is QUALITY_TOKEN_CATEGORIES
+    assert {"EntryFilter", "QUALITY_TOKEN_CATEGORIES"} <= set(moddb_service.__all__)

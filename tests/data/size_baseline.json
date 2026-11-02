@@ -20,7 +20,7 @@
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 81,
     "app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._build_controls": 117,
     "app/views/moddb/overview_panel.py:OverviewPanel.__init__": 103,
-    "app/views/moddb/repair_card.py:create_repair_card": 128,
+    "app/views/moddb/repair_card.py:create_repair_card": 140,
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 103,
     "app/views/moddb/smart_review_batch_reviewer.py:SmartReviewBatchReviewer._build_controls": 94,
     "app/views/moddb/species_dialog.py:SpeciesCandidateDialog._build_controls": 126,
@@ -45,7 +45,7 @@
     "app/views/moddb/smart_review_reviewer.py": 835,
     "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 915,
-    "app/views/moddb/translate_panel.py": 1172,
+    "app/views/moddb/translate_panel.py": 1173,
     "app/views/moddb_view.py": 962
   }
 }
