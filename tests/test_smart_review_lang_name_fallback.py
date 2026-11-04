@@ -110,3 +110,41 @@ def test_lang_of_another_module_is_not_used(db):
     _seed(db, lang_mod="bar")
 
     assert _glossary(_context(db)) == {}
+
+
+def test_indexed_lookup_matches_a_brute_force_scan(db):
+    """前綴索引只是加速：結果必須與逐列 ``contains_term`` 比對完全相同。"""
+    from translation_tool.core.official_locale import normalize_terminology_text
+    from translation_tool.utils.text_matching import contains_term
+
+    terms = {
+        "block.pc": ("Pressure Chamber", "壓力室"),
+        "block.coil": ("Plasma Coil", "電漿線圈"),
+        "block.ep": ("Ender-Pearl Gate", "終界珍珠閘"),
+        "item.ab": ("Ab Cd", "甲乙"),
+    }
+    items = [_item(KIND_LANG, "foo", key, en, zh) for key, (en, zh) in terms.items()]
+    texts = [
+        "Build a Pressure Chamber now",
+        "pressure chambers are big",  # 複數：詞界規則不命中
+        "Use the plasma coil, then the Plasma Coil again",
+        "An Ender-Pearl Gate and the ender pearl gate",
+        "Ab Cd and abcd",
+        "Nothing here",
+    ]
+    items += [
+        _item(KIND_KUBEJS_LANG, PACK_MOD, f"tip.{i}", text, "", PACK)
+        for i, text in enumerate(texts)
+    ]
+    db.ingest(V, items)
+    _review_translated(db)
+
+    for i, text in enumerate(texts):
+        expected = {
+            normalize_terminology_text(en).strip().lower(): zh
+            for en, zh in terms.values()
+            if contains_term(
+                normalize_terminology_text(text), normalize_terminology_text(en)
+            )
+        }
+        assert _glossary(_context(db, f"tip.{i}")) == expected, text

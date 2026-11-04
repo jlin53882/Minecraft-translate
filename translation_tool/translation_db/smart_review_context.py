@@ -32,7 +32,12 @@ from translation_tool.translation_db.schema import (
     KIND_LANG,
     SRC_JAR_TW,
 )
-from translation_tool.utils.text_matching import contains_term, term_canonical_key
+from translation_tool.utils.text_matching import (
+    build_term_prefix_index,
+    contains_term,
+    matching_terms,
+    term_canonical_key,
+)
 
 _REVIEWED_ENTRY_COLUMNS = (
     "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
@@ -772,13 +777,19 @@ class _LocalContextBuilder:
 
     # -- 模組包項目退回 ``@`` 前面模組名稱的 lang ----------------------------------
 
-    def _name_fallback_lang_rows(self) -> list[tuple]:
-        """``@`` 前面模組名稱在目前版本的已審核 lang 列；每個（模組, 版本）只查一次。"""
+    def _name_fallback_index(
+        self,
+    ) -> tuple[dict[str, list[tuple]], tuple[str, ...], dict[str, Any]]:
+        """``@`` 前面模組名稱在目前版本的已審核 lang 列與詞組前綴索引。
+
+        每個（模組, 版本）只查詢與建立一次；每筆候選只用前綴索引找出可能命中的術語，
+        不會逐列比對整個模組的 lang（候選數 × lang 列數會讓大量候選慢上數十倍）。
+        """
         base_name = self.mod_id.split("@", 1)[0]
         cache = self.cache.setdefault("lang_name_fallback", {})
         scope = (base_name, self.mc_version)
         if scope not in cache:
-            cache[scope] = (
+            rows = (
                 self.db._q(
                     _REVIEWED_ENTRY_COLUMNS
                     + "WHERE e.kind=? AND e.mod_id=? AND e.mc_version=? "
@@ -789,6 +800,13 @@ class _LocalContextBuilder:
                 if base_name
                 else []
             )
+            by_term: dict[str, list[tuple]] = {}
+            for row in rows:
+                term = normalize_terminology_text(str(row[5])).strip()
+                if term:
+                    by_term.setdefault(term, []).append(row)
+            terms = tuple(by_term)
+            cache[scope] = (by_term, terms, build_term_prefix_index(terms))
         return cache[scope]
 
     def _lang_name_fallback_context(
@@ -800,29 +818,35 @@ class _LocalContextBuilder:
         """
         if self._glossary_scope() is None or "@" not in self.mod_id:
             return []
+        by_term_rows, terms, prefix_index = self._name_fallback_index()
+        if not terms:
+            return []
         covered = {
             term_canonical_key(normalize_terminology_text(str(item.get("en_us", ""))))
             for item in same_kind_context
         }
         normalized_en_us = normalize_terminology_text(self.en_us)
-        by_term: dict[str, list[tuple]] = {}
-        for row in self._name_fallback_lang_rows():
-            normalized_term = normalize_terminology_text(str(row[5])).strip()
-            canonical = term_canonical_key(normalized_term)
-            if (
-                not normalized_term
-                or canonical in covered
-                or not contains_term(normalized_en_us, normalized_term)
-                or self._quality_details(row)[0] != "consistent"
-                or not terminology_term_allowed(
-                    self.en_us, normalized_term, key=str(row[4]), index=official
-                )
-            ):
+        matched_terms = matching_terms(
+            (normalized_en_us,), terms, prefix_index=prefix_index
+        )
+        by_canonical: dict[str, list[tuple]] = {}
+        for term in matched_terms:
+            canonical = term_canonical_key(term)
+            if canonical in covered:
                 continue
-            by_term.setdefault(canonical, []).append(row)
+            for row in by_term_rows[term]:
+                if self._quality_details(row)[0] != "consistent":
+                    continue
+                if not terminology_term_allowed(
+                    self.en_us, term, key=str(row[4]), index=official
+                ):
+                    continue
+                by_canonical.setdefault(canonical, []).append(row)
         context: list[dict[str, Any]] = []
-        for canonical in sorted(by_term, key=lambda value: (-len(value), value))[:6]:
-            rows = by_term[canonical]
+        for canonical in sorted(by_canonical, key=lambda value: (-len(value), value))[
+            :6
+        ]:
+            rows = sorted(by_canonical[canonical], key=lambda row: int(row[0]))
             if len({str(row[6]).strip() for row in rows}) != 1:
                 continue
             row = rows[0]
