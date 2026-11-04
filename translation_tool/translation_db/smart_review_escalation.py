@@ -2,8 +2,9 @@
 
 第一次判斷只看同 key、同文與詞庫證據。許多 ``needs_context`` 其實只是缺少「同一組鍵的
 其他欄位」：例如 ``config.xxx`` 的子鍵 ``config.xxx.tooltip``、父鍵，或同父鍵的其他欄位。
-本模組在第一次結果之後，為 ``needs_context`` 條目補上這些相鄰鍵（含目前譯文與審核狀態，
-未審核資料明確標示）再請模型判斷一次。
+本模組在第一次結果之後，為 ``needs_context`` 條目補上這些相鄰鍵再請模型判斷一次：已審核的譯文優先；
+沒有已審核譯文時，帶非 AI 來源的未審核譯文並明確標示 unreviewed（只當命名參考）；
+都沒有就只帶英文原文。AI 自己產生且未審核的譯文不附上，避免循環論證。
 
 * 第一次請求的 payload 不變，所以歷史重用（需要完整 local context 相同）不受影響。
 * 升級結果必須通過同一組 strict 驗證才會取代原結果；請求失敗時維持第一次結果。
@@ -47,7 +48,7 @@ SMART_REVIEW_ESCALATION_PROMPT = """
 補充說明：這是第二次判斷。第一次你對這些條目回答了 needs_context，現在每筆的 context 已加入
 reference_type 為 adjacent_key 的相鄰鍵資料（同一組鍵的父鍵、子鍵或同父鍵的其他欄位，含它們的
 英文與目前譯文）。請用這些資料判斷：
-1. 相鄰鍵的 review_status 不是 reviewed 時，只能當作命名與用語的參考，不可當作已審核的標準答案。
+1. 相鄰鍵的 review_status 標示譯文可信度；只有 reviewed 可當作標準答案，unreviewed 只能當命名與用語參考，no_translation 只有英文，只能看出命名結構。
 2. 若相鄰資料已足以確定 no_change 或 suggest_revision，請改判並引用該相鄰鍵的 key。
 3. 若仍缺資料，維持 needs_context，並在 reason 具體說明還缺哪一項。"""
 
@@ -79,23 +80,20 @@ def adjacent_key_context(
     return [_evidence_item(row) for row in ordered[:limit]]
 
 
-# AI 產生且未審核的譯文是模型自己的輸出；拿來佐證校對會變成循環論證，所以不當作譯文證據。
-_UNTRUSTED_UNREVIEWED_SOURCES = frozenset({SRC_AI, SRC_AI_REPAIR})
+# AI 產生且未審核的譯文是模型自己的輸出；拿來佐證校對會變成循環論證，所以不附上。
+_SELF_GENERATED_SOURCES = frozenset({SRC_AI, SRC_AI_REPAIR})
 
 
 def _pick_translation(entry_rows: list[tuple]) -> tuple:
-    """同一條目有多個來源時，優先已審核，其次非 AI 來源；都沒有就只保留英文原文。"""
-    usable = [
-        row
-        for row in entry_rows
-        if row[3]
-        and (row[4] == "reviewed" or row[5] not in _UNTRUSTED_UNREVIEWED_SOURCES)
-    ]
-    if not usable:
-        entry_id, key, en_us = entry_rows[0][:3]
-        return (entry_id, key, en_us, "", None, None)
-    usable.sort(key=lambda row: 0 if row[4] == "reviewed" else 1)
-    return usable[0]
+    """同一條目有多個來源時：已審核優先，其次非 AI 來源的未審核譯文；都沒有就只留英文。"""
+    with_text = [row for row in entry_rows if row[3]]
+    reviewed = [row for row in with_text if row[4] == "reviewed"]
+    others = [row for row in with_text if row[5] not in _SELF_GENERATED_SOURCES]
+    for pool in (reviewed, others):
+        if pool:
+            return pool[0]
+    entry_id, key, en_us = entry_rows[0][:3]
+    return (entry_id, key, en_us, "", None, None)
 
 
 _ADJACENT_SQL = (
@@ -130,15 +128,22 @@ def _distance(key: str, other: str) -> tuple[int, int, str]:
 
 def _evidence_item(row: tuple) -> dict[str, Any]:
     entry_id, key, en_us, zh_tw, review_status, source = row
+    status = (review_status or "unreviewed") if zh_tw else "no_translation"
+    limitations = {
+        "reviewed": "adjacent key in the same module; reviewed translation",
+        "unreviewed": "adjacent key in the same module; translation NOT reviewed, "
+        "naming reference only",
+        "no_translation": "adjacent key in the same module; English only, no translation",
+    }.get(status, "adjacent key in the same module; naming reference only")
     return {
         "id": f"adj:{entry_id}",
         "reference_type": "adjacent_key",
         "key": str(key),
         "en_us": str(en_us),
         "zh_tw": str(zh_tw or ""),
-        "review_status": str(review_status or "untranslated"),
+        "review_status": status,
         "source": source,
-        "limitations": "adjacent key in the same module; naming context only",
+        "limitations": limitations,
     }
 
 

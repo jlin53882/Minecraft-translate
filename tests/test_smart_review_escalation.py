@@ -85,7 +85,7 @@ def test_adjacent_context_collects_parent_children_and_marks_untranslated(db):
 
     assert set(keys) == {"config.speed", "config.speed.max"}
     assert keys["config.speed"]["zh_tw"] == "速度"
-    assert keys["config.speed.max"]["review_status"] == "untranslated"
+    assert keys["config.speed.max"]["review_status"] == "no_translation"
     assert all(item["reference_type"] == "adjacent_key" for item in keys.values())
     assert "other.thing" not in keys
 
@@ -359,7 +359,7 @@ def test_adjacent_context_does_not_cite_unreviewed_ai_translations(db):
     )
 
     assert item["zh_tw"] == ""
-    assert item["review_status"] == "untranslated"
+    assert item["review_status"] == "no_translation"
 
 
 def test_untranslated_adjacent_citation_does_not_present_english_as_translation():
@@ -385,7 +385,7 @@ def test_untranslated_adjacent_citation_does_not_present_english_as_translation(
                 "key": "k.max",
                 "zh_tw": "",
                 "en_us": "Maximum",
-                "review_status": "untranslated",
+                "review_status": "no_translation",
             },
         ),
     )
@@ -404,3 +404,36 @@ def test_untranslated_adjacent_citation_does_not_present_english_as_translation(
 
     assert "k.max（尚無譯文；英文：Maximum）" in merged[0]["reason"]
     assert "k.max＝" not in merged[0]["reason"]
+
+
+def test_adjacent_context_prefers_reviewed_and_labels_unreviewed_non_ai(db):
+    """已審核優先；沒有時帶非 AI 的未審核譯文並標示 unreviewed。"""
+    from translation_tool.translation_db.schema import SRC_MANUAL
+
+    with db._tx() as conn:
+        entry_id = conn.execute(
+            "SELECT id FROM entry WHERE key='config.speed'"
+        ).fetchone()[0]
+        conn.execute("DELETE FROM translation WHERE entry_id=?", (entry_id,))
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+            "VALUES (?,?,?,'','unreviewed')",
+            (entry_id, SRC_MANUAL, "人工未審核"),
+        )
+    snapshot = _snapshot_for(db, "config.speed.tooltip")
+
+    def parent_item():
+        return next(
+            i for i in adjacent_key_context(db, snapshot) if i["key"] == "config.speed"
+        )
+
+    assert parent_item()["zh_tw"] == "人工未審核"
+    assert parent_item()["review_status"] == "unreviewed"
+    assert "NOT reviewed" in parent_item()["limitations"]
+
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE translation SET review_status='reviewed' WHERE entry_id=?",
+            (entry_id,),
+        )
+    assert parent_item()["review_status"] == "reviewed"
