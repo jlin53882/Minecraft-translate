@@ -105,7 +105,6 @@ def test_quality_controls_expose_all_registered_format_categories():
         "newline",
         "color",
         "markup",
-        "markup_order",
         "guide",
         "other",
     } <= category_keys

@@ -25,7 +25,6 @@ QUALITY_TOKEN_CATEGORIES: tuple[str, ...] = (
     "newline",
     "color",
     "markup",
-    "markup_order",
     "guide",
     "other",
 )

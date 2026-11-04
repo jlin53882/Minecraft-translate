@@ -7,7 +7,6 @@ from collections.abc import Iterable
 import flet as ft
 
 from app.services_impl.moddb_format_diff_service import (
-    MARKUP_ORDER_CATEGORY,
     FormatDiagnostic,
     FormatSpan,
     diagnostic_action,
@@ -22,8 +21,6 @@ def diagnostic_tone(issue: FormatDiagnostic) -> str:
 def diagnostic_label(issue: FormatDiagnostic) -> str:
     if issue.category == "newline" and issue.identifier == "\n":
         return f"換行數量不一致 · 原文 {issue.source_count} / 譯文 {issue.target_count}"
-    if issue.category == MARKUP_ORDER_CATEGORY:
-        return "標記順序與原文不同"
     action = diagnostic_action(issue)
     return f"{action} {issue.display_token} × {abs(issue.delta)}"
 

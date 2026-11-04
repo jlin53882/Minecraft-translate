@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from translation_tool.core.format_diagnostics import (
-    MARKUP_ORDER_CATEGORY,
     FormatDiagnostic,
     FormatDiagnosticsResult,
     FormatSpan,
@@ -39,7 +38,6 @@ def compare_format_diff(
 
 
 __all__ = [
-    "MARKUP_ORDER_CATEGORY",
     "FormatDiagnostic",
     "FormatDiagnosticsResult",
     "FormatDiffIssue",

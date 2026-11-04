@@ -50,7 +50,7 @@ def _token_label(token: str) -> str:
 
 def _quality_details(row: BatchReplaceChange) -> list[str]:
     details = [
-        f"{'順序不同' if delta.diagnostic_category == 'markup_order' else ('缺少' if delta.direction == 'missing' else '多出')}"
+        f"{'缺少' if delta.direction == 'missing' else '多出'}"
         f"{_CATEGORY_LABELS.get(delta.diagnostic_category, '特殊 token')}"
         f" `{_token_label(delta.token) if delta.diagnostic_category != 'guide' else delta.display_token}`："
         f"{delta.before} → {delta.after}"

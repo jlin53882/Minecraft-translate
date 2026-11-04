@@ -29,7 +29,6 @@ QUALITY_TOKEN_CATEGORY_LABELS = {
     "newline": "換行",
     "color": "FTB 色碼 &",
     "markup": "KubeJS 自訂標記",
-    "markup_order": "標記順序",
     "guide": "Guide 結構",
     "other": "其他格式",
 }

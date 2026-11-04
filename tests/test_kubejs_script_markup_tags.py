@@ -62,38 +62,31 @@ def test_same_tag_order_passes():
     )
 
 
-def test_swapped_tag_order_is_reported():
-    issues = translation_issues(
-        "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="kubejs_script"
+def test_swapped_tag_order_is_not_an_issue():
+    """合理的語序調整（標籤種類與數量相同、只是順序不同）不是格式錯誤。"""
+    assert (
+        translation_issues(
+            "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="kubejs_script"
+        )
+        == []
     )
-    assert issues == ["標記順序與原文不同"]
-
-
-def test_order_is_not_reported_when_tags_are_also_missing():
-    # 數量已經不同時只回報數量問題，避免同一個錯誤被重複計算
-    issues = translation_issues(
-        "<imp>A<r> <item>B<r>", "<imp>甲<r>", kind="kubejs_script"
+    assert (
+        translation_issues(
+            "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="lang"
+        )
+        == []
     )
-    assert "標記順序與原文不同" not in issues
-    assert "少了 1 個「<item>」" in issues
-
-
-def test_order_diagnostic_has_its_own_action_wording():
-    from translation_tool.core.format_diagnostics import diagnostic_action
-
     result = analyze_format_diagnostics(
         "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="kubejs_script"
     )
-    order = [d for d in result.diagnostics if d.category == "markup_order"]
-    assert len(order) == 1
-    assert diagnostic_action(order[0]) == "順序不同"
-    assert order[0].summary == "標記順序與原文不同"
+    assert result.diagnostics == ()
 
 
-def test_order_check_applies_to_general_lang_too():
-    assert translation_issues(
-        "<imp>A<r> <item>B<r>", "<item>乙<r> <imp>甲<r>", kind="lang"
-    ) == ["標記順序與原文不同"]
+def test_missing_tag_is_still_reported_when_order_also_differs():
+    issues = translation_issues(
+        "<imp>A<r> <item>B<r>", "<imp>甲<r>", kind="kubejs_script"
+    )
+    assert "少了 1 個「<item>」" in issues
 
 
 def test_ampersand_color_code_dropped_is_reported_for_ftb():

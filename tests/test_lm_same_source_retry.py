@@ -1011,23 +1011,38 @@ def test_cache_receives_only_the_final_retry_translation(
     assert saves == ["lang"]
 
 
-def test_markup_order_mismatch_triggers_quality_retry(monkeypatch, configure_batch):
-    """重試判定與最終驗證共用規則：標記順序錯誤也要被重送，而不是直接被驗證擋下。"""
+def test_quality_retry_gate_matches_final_diagnostics_not_only_tokens(
+    monkeypatch, configure_batch
+):
+    """重試判定與最終驗證共用規則：自訂標記數量不符也要被重送。"""
     configure_batch()
-    item = _item("Use <b>this</b> now", 0)
+    source = "Use <b>this</b> and <i>that</i>"
+    item = _item(source, 0)
     result, status, calls = _run_with_api(
         monkeypatch,
         [item],
         [
-            lambda call: _reply(call, {"Use <b>this</b> now": "現在使用 </b>這個<b>"}),
-            lambda call: _reply(call, {"Use <b>this</b> now": "現在使用<b>這個</b>"}),
+            lambda call: _reply(call, {source: "使用<b>這個</b>與那個"}),
+            lambda call: _reply(call, {source: "使用<b>這個</b>與<i>那個</i>"}),
         ],
     )
-
     assert status == "AUTO"
     assert len(calls) == 2
-    assert result[0]["text"] == "現在使用<b>這個</b>"
-    assert "標記順序" in json.dumps(calls[1]["payload"], ensure_ascii=False)
+    assert result[0]["text"] == "使用<b>這個</b>與<i>那個</i>"
+
+
+def test_reordered_tags_do_not_trigger_a_retry(monkeypatch, configure_batch):
+    """標籤種類與數量相同、只有順序不同是合理的語序調整，不重送。"""
+    configure_batch()
+    source = "Use <b>this</b> and <i>that</i>"
+    item = _item(source, 0)
+    result, _status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [lambda call: _reply(call, {source: "使用<i>那個</i>與<b>這個</b>"})],
+    )
+    assert len(calls) == 1
+    assert result[0]["text"] == "使用<i>那個</i>與<b>這個</b>"
 
 
 def test_item_quality_gate_hook_drives_the_retry(monkeypatch, configure_batch):

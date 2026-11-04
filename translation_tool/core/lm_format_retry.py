@@ -79,7 +79,7 @@ def quality_issues(source_item: dict, translated_text: str) -> list[str]:
         shield_issues = []
     issues = token_issues_for_kind(source_item.get("text"), candidate, kind=kind)
     raw_source = str(source_item.get("source_text") or "")
-    # 最終寫入前的驗證（translation_issues）涵蓋色碼順序、標記順序等更多類別；
+    # 最終寫入前的驗證（translation_issues）涵蓋色碼、自訂標記等更多類別；
     # 重試判定必須使用同一套規則，否則這些項目永遠不會被重試，卻在驗證時被擋下。
     final_gate = _final_gate_issues(source_item, raw_source, raw_translated, kind)
     combined = [

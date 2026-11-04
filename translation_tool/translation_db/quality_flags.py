@@ -25,6 +25,8 @@ from translation_tool.translation_db.quality import matches_quality
 
 # 旗標定義版本；``quality.py``／``guide_format.py`` 的判斷結果改變時遞增
 # （``tests/test_translation_db_quality_flags.py`` 的規則快照會在規則改變時失敗提醒）。
+# 11：移除「標記順序不同」診斷（合理的語序調整不是格式錯誤）；舊版旗標可能把這類條目
+#     標成不一致，必須重算。
 # 10：一般語系（lang 等）只含 ``&`` 色碼或 ``<tag>`` 自訂標記時，``matches_quality`` 也會做
 #    完整格式分析（``has_format_structure_marks``）。舊旗標把這類條目判為「一致」，
 #    造成詳情顯示不一致、品質篩選卻找不到；版本停在 9 的資料庫必須重算。
@@ -37,7 +39,7 @@ from translation_tool.translation_db.quality import matches_quality
 # 4：<link;分類;顯示文字> 的顯示文字可翻譯
 # 3：獨立成行元件不含文字、段落空行不計文字首尾的空行
 # 2：指南條目的結構標記計入「格式不一致／一致」
-SCHEMA_VERSION = "10"
+SCHEMA_VERSION = "11"
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,

@@ -69,8 +69,6 @@ class FormatDiagnostic:
 
     @property
     def legacy_message(self) -> str:
-        if self.category == MARKUP_ORDER_CATEGORY:
-            return "標記順序與原文不同"
         action = "少了" if self.direction == "missing" else "多了"
         return f"{action} {abs(self.delta)} 個「{self.display_token}」"
 
@@ -78,8 +76,6 @@ class FormatDiagnostic:
     def summary(self) -> str:
         if self.category == "newline" and self.identifier == "\n":
             return f"換行數量不一致：原文 {self.source_count}、譯文 {self.target_count}"
-        if self.category == MARKUP_ORDER_CATEGORY:
-            return "標記順序與原文不同"
         action = "缺少" if self.direction == "missing" else "多出"
         location = (
             "位置無法可靠判定"
@@ -255,7 +251,6 @@ def _structure_diagnostics(
         return ()
     return (
         *_markup_tag_diagnostics(source, translated),
-        *_markup_order_diagnostics(source, translated),
         *_color_code_diagnostics(source, translated),
     )
 
@@ -286,7 +281,6 @@ def _analyze_token_format(
 # KubeJS 腳本文字可能帶有遊戲內的自訂標記（例如 <imp>、<r>、<item>）。這類標記不是
 # token 分析器認得的格式，若只看一般 token，標記被丟掉、改名或翻譯也會被當成正常譯文。
 _MARKUP_TAG_RE = re.compile(r"</?[A-Za-z][A-Za-z0-9_.:-]*\s*/?>")
-MARKUP_ORDER_CATEGORY = "markup_order"
 # Legacy "&" color codes (e.g. &2, &r) used by FTB Quests text. Only lowercase
 # codes are matched so that words such as "Q&A" are not treated as codes.
 _COLOR_CODE_RE = re.compile(r"&[0-9a-fk-or]")
@@ -326,9 +320,7 @@ def _color_code_diagnostics(
 
 
 def diagnostic_action(issue: FormatDiagnostic) -> str:
-    """顯示用的動作詞：缺少、多出，或標記順序不同（不是數量問題）。"""
-    if issue.category == MARKUP_ORDER_CATEGORY:
-        return "順序不同"
+    """顯示用的動作詞：缺少或多出。"""
     return "缺少" if issue.direction == "missing" else "多出"
 
 
@@ -355,32 +347,6 @@ def _markup_tag_diagnostics(
             )
         )
     return tuple(diagnostics)
-
-
-def _markup_order_diagnostics(
-    source: str, translated: str
-) -> tuple[FormatDiagnostic, ...]:
-    """標記的數量相同但先後順序不同時回報一筆。
-
-    注意：這可能是合理的語序調整，所以這是需要人工確認的提醒，不是硬性錯誤。
-    """
-    source_tags = _MARKUP_TAG_RE.findall(source)
-    target_tags = _MARKUP_TAG_RE.findall(translated)
-    if len(source_tags) < 2 or Counter(source_tags) != Counter(target_tags):
-        return ()
-    if source_tags == target_tags:
-        return ()
-    return (
-        FormatDiagnostic(
-            identifier="order",
-            category=MARKUP_ORDER_CATEGORY,
-            direction="missing",
-            source_count=len(source_tags),
-            target_count=len(target_tags),
-            delta=1,
-            display_label="標記順序",
-        ),
-    )
 
 
 def _analyze_guide_format(
@@ -644,7 +610,6 @@ def analyze_format_diagnostics(
 
 
 __all__ = [
-    "MARKUP_ORDER_CATEGORY",
     "DiagnosticDirection",
     "FormatAnalysis",
     "FormatAnalyzer",

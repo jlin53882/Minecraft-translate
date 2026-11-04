@@ -41,7 +41,6 @@ _PREVIEW_ISSUE_LABELS = {
     "newline": "實際換行",
     "placeholder": "佔位符",
     "markup": "KubeJS 自訂標記",
-    "markup_order": "標記順序",
     "patchouli": "Patchouli 標記",
     "guide": "指南結構",
     "other": "其他格式",

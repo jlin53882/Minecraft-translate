@@ -3148,7 +3148,7 @@ def test_repair_items_carry_the_write_back_validation_as_quality_gate():
     service._attach_repair_quality_gate(items, report)
 
     gate = items[0]["_quality_gate"]
-    bad = "現在使用 </b>這個<b>"
+    bad = "現在使用這個"  # 標記全部遺失
     assert gate(items[0]["source_text"], bad) == service._repair_validation_issues(
         report, "lang", items[0]["source_text"], bad
     )
