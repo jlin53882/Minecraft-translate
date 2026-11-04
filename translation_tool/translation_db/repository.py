@@ -218,21 +218,38 @@ def _select_reviewed_exact_rows(
     source_texts: Sequence[str],
     kind: str,
     limit: int | None,
+    *,
+    lang_rows: Sequence[tuple[int, str, str, str]] = (),
 ) -> list[dict[str, str]]:
-    """篩出格式一致且唯一目標的完整句對照。"""
+    """篩出格式一致且唯一目標的完整句對照。
+
+    ``lang_rows`` 是同模組／版本 lang 的已審核完整句，是最根本的對照：同一個原文在 lang
+    有已審核譯文時只以 lang 為準（譯法不唯一就不重用，不退回其他種類）；
+    lang 沒有該原文時才採用同種類（``rows``）的唯一對照。
+    """
     source_keys = {term_canonical_key(source) for source in source_texts}
-    by_source: dict[str, list[dict[str, str]]] = {}
-    for _entry_id, key, en_us, zh_tw in rows:
-        if not all(isinstance(value, str) for value in (key, en_us, zh_tw)):
-            continue
-        if quality_state(en_us, zh_tw, kind=kind)[0] != "consistent":
-            continue
-        source_key = term_canonical_key(en_us)
-        if source_key not in source_keys:
-            continue
-        by_source.setdefault(source_key, []).append(
-            {"key": key, "en_us": en_us, "zh_tw": zh_tw}
-        )
+
+    def group(
+        candidates_rows: Sequence[tuple[int, str, str, str]],
+    ) -> dict[str, list[dict[str, str]]]:
+        grouped: dict[str, list[dict[str, str]]] = {}
+        for _entry_id, key, en_us, zh_tw in candidates_rows:
+            if not all(isinstance(value, str) for value in (key, en_us, zh_tw)):
+                continue
+            # 格式一致性以「要翻譯的項目種類」判斷：lang 的譯文也必須符合該種類的規則
+            if quality_state(en_us, zh_tw, kind=kind)[0] != "consistent":
+                continue
+            source_key = term_canonical_key(en_us)
+            if source_key not in source_keys:
+                continue
+            grouped.setdefault(source_key, []).append(
+                {"key": key, "en_us": en_us, "zh_tw": zh_tw}
+            )
+        return grouped
+
+    by_source = group(rows)
+    # lang 優先：有 lang 候選的原文，整個以 lang 的候選取代同種類的候選
+    by_source.update(group(lang_rows))
 
     result: list[dict[str, str]] = []
     for source_key in sorted(by_source):
@@ -5636,6 +5653,7 @@ class TranslationDB(
 
         這個查詢與 ``reviewed_lang_glossary`` 分開，避免把 guide／Patchouli
         的完整句混進一般術語提示；翻譯入口只用它做唯一完整句的精確重用。
+        比對範圍是同模組／版本下 ``lang`` 與「同種類」的已審核完整句，``lang`` 優先。
         """
         normalized_sources = _reviewed_exact_sources(source_texts)
         if not normalized_sources or (limit is not None and int(limit) <= 0):
@@ -5648,22 +5666,32 @@ class TranslationDB(
         if not isinstance(mc_version, str) or not mc_version.strip():
             return []
 
-        scope_clauses, scope_params = _reviewed_exact_scope(mod_id, mc_version, kind)
-        rows: list[tuple[int, str, str, str]] = []
-        for start in range(0, len(normalized_sources), _CHUNK):
-            chunk = normalized_sources[start : start + _CHUNK]
-            placeholders = ",".join("?" for _ in chunk)
-            rows.extend(
-                self._q(
-                    "SELECT e.id, e.key, e.en_us, f.zh_tw "
-                    "FROM entry e JOIN effective f ON f.entry_id=e.id "
-                    f"WHERE {' AND '.join(scope_clauses)} "
-                    f"AND e.en_us IN ({placeholders}) "
-                    "ORDER BY e.key, e.id",
-                    (*scope_params, *chunk),
-                )
+        def load(source_kind: str) -> list[tuple[int, str, str, str]]:
+            scope_clauses, scope_params = _reviewed_exact_scope(
+                mod_id, mc_version, source_kind
             )
-        return _select_reviewed_exact_rows(rows, normalized_sources, kind, limit)
+            loaded: list[tuple[int, str, str, str]] = []
+            for start in range(0, len(normalized_sources), _CHUNK):
+                chunk = normalized_sources[start : start + _CHUNK]
+                placeholders = ",".join("?" for _ in chunk)
+                loaded.extend(
+                    self._q(
+                        "SELECT e.id, e.key, e.en_us, f.zh_tw "
+                        "FROM entry e JOIN effective f ON f.entry_id=e.id "
+                        f"WHERE {' AND '.join(scope_clauses)} "
+                        f"AND e.en_us IN ({placeholders}) "
+                        "ORDER BY e.key, e.id",
+                        (*scope_params, *chunk),
+                    )
+                )
+            return loaded
+
+        # lang 是最根本的對照，優先於同種類；其他種類（KubeJS、指南…）沒有自己的對照時
+        # 也可以沿用同模組／版本 lang 的已審核完整句。
+        lang_rows = load(KIND_LANG) if kind != KIND_LANG else []
+        return _select_reviewed_exact_rows(
+            load(kind), normalized_sources, kind, limit, lang_rows=lang_rows
+        )
 
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]
