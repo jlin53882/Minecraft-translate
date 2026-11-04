@@ -56,22 +56,34 @@ def test_same_kind_still_works_without_a_lang_entry(db):
     ]
 
 
-def test_lang_wins_over_a_conflicting_same_kind_translation(db):
-    """lang 是最根本的對照：同種類譯法不同時，以 lang 為準。"""
+def test_same_kind_wins_when_it_has_the_sentence(db):
+    """同種類有該句就用同種類；同種類沒有時才退回 lang。"""
     _add(db, KIND_LANG, "foo", "block.pressure", "壓力室會處理空氣。")
     _add(db, KIND_KUBEJS_LANG, "foo", "k.pressure", "壓力艙處理空氣。")
 
     assert [r["zh_tw"] for r in _exact(db, "foo", KIND_KUBEJS_LANG)] == [
-        "壓力室會處理空氣。"
+        "壓力艙處理空氣。"
     ]
 
 
-def test_ambiguous_lang_does_not_fall_back_to_the_same_kind(db):
-    _add(db, KIND_LANG, "foo", "a.pressure", "壓力室會處理空氣。")
-    _add(db, KIND_LANG, "foo", "b.pressure", "壓力艙會處理空氣。")
-    _add(db, KIND_KUBEJS_LANG, "foo", "k.pressure", "壓力室處理空氣。")
+def test_ambiguous_same_kind_does_not_fall_back_to_lang(db):
+    _add(db, KIND_LANG, "foo", "block.pressure", "壓力室會處理空氣。")
+    _add(db, KIND_KUBEJS_LANG, "foo", "a.pressure", "壓力艙處理空氣。")
+    _add(db, KIND_KUBEJS_LANG, "foo", "b.pressure", "壓力倉處理空氣。")
 
     assert _exact(db, "foo", KIND_KUBEJS_LANG) == []
+
+
+def test_pack_module_id_matches_the_lang_of_the_name_before_the_at_sign(db):
+    """KubeJS／FTB 的模組識別帶有 ``名稱@模組包@序號``，lang 比對 ``@`` 前面的名稱。"""
+    _add(db, KIND_LANG, "alltheores", "block.pressure", "壓力室會處理空氣。")
+
+    result = _exact(db, "alltheores@All the Mods 10 8.3@40b3569cc156", KIND_KUBEJS_LANG)
+
+    assert [r["zh_tw"] for r in result] == ["壓力室會處理空氣。"]
+    assert (
+        _exact(db, "othermod@All the Mods 10 8.3@40b3569cc156", KIND_KUBEJS_LANG) == []
+    )
 
 
 def test_unreviewed_lang_is_not_used(db):

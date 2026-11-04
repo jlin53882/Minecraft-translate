@@ -223,9 +223,8 @@ def _select_reviewed_exact_rows(
 ) -> list[dict[str, str]]:
     """篩出格式一致且唯一目標的完整句對照。
 
-    ``lang_rows`` 是同模組／版本 lang 的已審核完整句，是最根本的對照：同一個原文在 lang
-    有已審核譯文時只以 lang 為準（譯法不唯一就不重用，不退回其他種類）；
-    lang 沒有該原文時才採用同種類（``rows``）的唯一對照。
+    先用同種類（``rows``）的唯一對照；同種類沒有該原文時，才退回同模組／版本 lang
+    （``lang_rows``）的唯一對照。同種類有候選但譯法不唯一時不重用，也不退回 lang。
     """
     source_keys = {term_canonical_key(source) for source in source_texts}
 
@@ -247,9 +246,9 @@ def _select_reviewed_exact_rows(
             )
         return grouped
 
-    by_source = group(rows)
-    # lang 優先：有 lang 候選的原文，整個以 lang 的候選取代同種類的候選
-    by_source.update(group(lang_rows))
+    by_source = group(lang_rows)
+    # 同種類優先：該原文在同種類有候選時，整個以同種類的候選取代 lang 的候選
+    by_source.update(group(rows))
 
     result: list[dict[str, str]] = []
     for source_key in sorted(by_source):
@@ -5653,7 +5652,7 @@ class TranslationDB(
 
         這個查詢與 ``reviewed_lang_glossary`` 分開，避免把 guide／Patchouli
         的完整句混進一般術語提示；翻譯入口只用它做唯一完整句的精確重用。
-        比對範圍是同模組／版本下 ``lang`` 與「同種類」的已審核完整句，``lang`` 優先。
+        比對範圍是同模組／版本下「同種類」的已審核完整句；同種類沒有該句時退回 ``lang``（模組名稱取 ``@`` 前面的部分）。
         """
         normalized_sources = _reviewed_exact_sources(source_texts)
         if not normalized_sources or (limit is not None and int(limit) <= 0):
@@ -5666,9 +5665,11 @@ class TranslationDB(
         if not isinstance(mc_version, str) or not mc_version.strip():
             return []
 
-        def load(source_kind: str) -> list[tuple[int, str, str, str]]:
+        def load(
+            source_kind: str, scope_mod_id: str = mod_id
+        ) -> list[tuple[int, str, str, str]]:
             scope_clauses, scope_params = _reviewed_exact_scope(
-                mod_id, mc_version, source_kind
+                scope_mod_id, mc_version, source_kind
             )
             loaded: list[tuple[int, str, str, str]] = []
             for start in range(0, len(normalized_sources), _CHUNK):
@@ -5686,9 +5687,11 @@ class TranslationDB(
                 )
             return loaded
 
-        # lang 是最根本的對照，優先於同種類；其他種類（KubeJS、指南…）沒有自己的對照時
-        # 也可以沿用同模組／版本 lang 的已審核完整句。
-        lang_rows = load(KIND_LANG) if kind != KIND_LANG else []
+        # 同種類沒有該句時，退回同模組／版本 lang 的已審核完整句。KubeJS／FTB 的模組識別
+        # 帶有 ``名稱@模組包@序號``，lang 比對的是 ``@`` 前面的模組名稱。
+        lang_rows = (
+            load(KIND_LANG, mod_id.split("@", 1)[0]) if kind != KIND_LANG else []
+        )
         return _select_reviewed_exact_rows(
             load(kind), normalized_sources, kind, limit, lang_rows=lang_rows
         )
