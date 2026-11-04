@@ -154,9 +154,11 @@ _REVIEWED_EXACT_KINDS = frozenset(
         KIND_FTB_QUESTS,
     }
 )
-# quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
-# 用來在 SQL 先排除「必定沒有格式 token」的列（Python 仍負責最終判斷）。
-_TOKEN_CHAR_GLOB_SQL = r"'*[§%${\]*'"
+# 格式診斷（``has_format_structure_marks``）只會在含 § % $ { \ 換行、``&`` 色碼或 ``<`` 標記的
+# 文字出現；GLOB 字元集是其超集，用來在 SQL 先排除「必定沒有格式標記」的列
+# （Python 仍負責最終判斷）。新增標記語法時，這裡必須一起擴充，否則 SQL 會先把該類條目排除，
+# 掃描與修復就找不到它們。
+_TOKEN_CHAR_GLOB_SQL = r"'*[§%${\<&]*'"
 
 
 def _reviewed_exact_sources(
