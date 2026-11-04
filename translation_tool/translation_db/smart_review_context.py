@@ -139,7 +139,9 @@ class _LocalContextBuilder:
         glossary_rows = self._glossary_rows_for_item()
         official = load_official_locale_index()
         official_context = self._official_context(official)
-        context.extend(self._glossary_context(glossary_rows, official))
+        glossary_context = self._glossary_context(glossary_rows, official)
+        context.extend(glossary_context)
+        context.extend(self._lang_name_fallback_context(official, glossary_context))
         context.extend(self._same_text_context())
         module_locale_context = self._module_locale_context()
         # 同一資料庫列可能同時由 same-key 與 glossary 路徑取得；保留第一個較具體的路徑。
@@ -766,6 +768,77 @@ class _LocalContextBuilder:
                         en_us_value=normalized_term,
                     )
                 )
+        return context
+
+    # -- 模組包項目退回 ``@`` 前面模組名稱的 lang ----------------------------------
+
+    def _name_fallback_lang_rows(self) -> list[tuple]:
+        """``@`` 前面模組名稱在目前版本的已審核 lang 列；每個（模組, 版本）只查一次。"""
+        base_name = self.mod_id.split("@", 1)[0]
+        cache = self.cache.setdefault("lang_name_fallback", {})
+        scope = (base_name, self.mc_version)
+        if scope not in cache:
+            cache[scope] = (
+                self.db._q(
+                    _REVIEWED_ENTRY_COLUMNS
+                    + "WHERE e.kind=? AND e.mod_id=? AND e.mc_version=? "
+                    "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
+                    "AND e.en_us<>f.zh_tw",
+                    (KIND_LANG, base_name, self.mc_version),
+                )
+                if base_name
+                else []
+            )
+        return cache[scope]
+
+    def _lang_name_fallback_context(
+        self, official: Any, same_kind_context: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """KubeJS／FTB 項目：同包沒有的術語，退回 ``@`` 前面模組名稱的 lang。
+
+        只補同包（同種類）glossary 還沒有的原文；譯法不唯一的術語不提供。
+        """
+        if self._glossary_scope() is None or "@" not in self.mod_id:
+            return []
+        covered = {
+            term_canonical_key(normalize_terminology_text(str(item.get("en_us", ""))))
+            for item in same_kind_context
+        }
+        normalized_en_us = normalize_terminology_text(self.en_us)
+        by_term: dict[str, list[tuple]] = {}
+        for row in self._name_fallback_lang_rows():
+            normalized_term = normalize_terminology_text(str(row[5])).strip()
+            canonical = term_canonical_key(normalized_term)
+            if (
+                not normalized_term
+                or canonical in covered
+                or not contains_term(normalized_en_us, normalized_term)
+                or self._quality_details(row)[0] != "consistent"
+                or not terminology_term_allowed(
+                    self.en_us, normalized_term, key=str(row[4]), index=official
+                )
+            ):
+                continue
+            by_term.setdefault(canonical, []).append(row)
+        context: list[dict[str, Any]] = []
+        for canonical in sorted(by_term, key=lambda value: (-len(value), value))[:6]:
+            rows = by_term[canonical]
+            if len({str(row[6]).strip() for row in rows}) != 1:
+                continue
+            row = rows[0]
+            context.append(
+                self._db_context_item(
+                    row,
+                    reference_type="reviewed_lang_glossary",
+                    match_type="whole_term_module_name_lang",
+                    confidence="medium",
+                    limitations=(
+                        "reviewed lang of the module name before '@'; "
+                        "used because the pack has no reviewed term; applies to this text only"
+                    ),
+                    en_us_value=normalize_terminology_text(str(row[5])).strip(),
+                )
+            )
         return context
 
     # -- 同文與模組自帶語系 ---------------------------------------------------
