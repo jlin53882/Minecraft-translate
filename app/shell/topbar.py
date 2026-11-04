@@ -64,7 +64,7 @@ class TaskPill(ft.Container):
     """任務膠囊：有任務時顯示「名稱 · 進度條 · 百分比」，沒有任務時整個隱藏。
 
     同時有多個任務時名稱後加「＋N」，點擊改開任務清單（``on_list_click``）；
-    只有一個任務時點擊回到該頁。還沒回報進度時顯示「準備中」與不定進度條。
+    只有一個任務時點擊回到該頁。還沒回報進度時顯示「執行中」與不定進度條。
     """
 
     def __init__(
@@ -129,8 +129,8 @@ class TaskPill(ft.Container):
             else "執行中的任務（點擊回到該頁）"
         )
         self.name.color = tone.fg
-        # 還沒回報進度：不定進度條配「準備中」，不顯示與動畫矛盾的 0%
-        self.percent.value = f"{task.percent}%" if task.progress > 0 else "準備中"
+        # 還沒回報進度（例如整批請求已送出、等模型回應）：不定進度條配「執行中」，不顯示與動畫矛盾的 0%
+        self.percent.value = f"{task.percent}%" if task.progress > 0 else "執行中"
         self.percent.color = tone.fg
         self.bar.value = task.progress if task.progress > 0 else None
         self.bar.color = tone.fg

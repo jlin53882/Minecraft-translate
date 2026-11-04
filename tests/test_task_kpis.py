@@ -134,7 +134,7 @@ def test_task_rows_list_running_first_and_filter_by_status():
     rows = build_task_rows(active, history, FILTER_ALL, now=30)
     assert [r.name for r in rows] == ["校對", "準備", "提取", "QC", "合併"]
     assert rows[0].status_text == "進行中 50%"
-    assert rows[1].status_text == "準備中"
+    assert rows[1].status_text == "執行中"
     assert rows[2].page_label == "JAR 提取"
     assert [r.name for r in build_task_rows(active, history, FILTER_RUNNING)] == [
         "校對",
@@ -162,8 +162,8 @@ def test_task_pill_shows_other_running_tasks_and_opens_the_list(manager):
     first = TaskSession(name="Mod 資料庫智慧校對", view_key="moddb")
     first.start()
     pill.set_task(manager.current())
-    # 還沒回報進度：不定進度條配「準備中」，不顯示 0%
-    assert pill.percent.value == "準備中" and pill.bar.value is None
+    # 還沒回報進度：不定進度條配「執行中」，不顯示 0%
+    assert pill.percent.value == "執行中" and pill.bar.value is None
     pill.on_click(None)
     assert opened == ["moddb"] and lists == []
 
