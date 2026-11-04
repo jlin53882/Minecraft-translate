@@ -5584,6 +5584,28 @@ class TranslationDB(
 
         return self._cached(cache_key, load)
 
+    def _reviewed_lang_rows_with_name_fallback(
+        self, mod_id: str, mc_version: str | None
+    ) -> list[list[str]]:
+        """同種類的已審核術語列，加上 ``@`` 前面模組名稱的 lang 作為退路。
+
+        KubeJS／FTB 的模組識別帶有 ``名稱@模組包@序號``。同種類沒有的術語才退回該 lang；
+        同種類已有的原文（即使譯法不唯一）不會被 lang 覆蓋或混成衝突。
+        """
+        rows = self._reviewed_lang_candidate_rows(mod_id, mc_version)
+        base_name = mod_id.split("@", 1)[0]
+        if "@" not in mod_id or not base_name:
+            return rows
+        own_sources = {term_canonical_key(row[1]) for row in rows}
+        return [
+            *rows,
+            *(
+                row
+                for row in self._reviewed_lang_candidate_rows(base_name, mc_version)
+                if term_canonical_key(row[1]) not in own_sources
+            ),
+        ]
+
     def reviewed_lang_glossary(
         self,
         mod_id: str,
@@ -5592,7 +5614,10 @@ class TranslationDB(
         *,
         limit: int | None = 240,
     ) -> list[dict[str, str]]:
-        """回傳品質乾淨且已審核的指定模組 lang 術語。"""
+        """回傳品質乾淨且已審核的指定模組 lang 術語。
+
+        同種類沒有的術語會退回 ``@`` 前面模組名稱的 lang（KubeJS／FTB 模組包識別）。
+        """
         normalized_sources = tuple(
             dict.fromkeys(
                 source
@@ -5608,7 +5633,7 @@ class TranslationDB(
         # 跨語言大小寫折疊由 Python ``casefold`` 負責；SQLite ``lower`` 只
         # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。候選集合依模組、
         # 版本與資料世代快取，來源相關性仍由每次呼叫的 matcher 判斷。
-        rows = self._reviewed_lang_candidate_rows(mod_id, mc_version)
+        rows = self._reviewed_lang_rows_with_name_fallback(mod_id, mc_version)
         matched_sources = matching_terms(
             normalized_sources, tuple(row[1] for row in rows)
         )

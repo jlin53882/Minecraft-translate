@@ -97,3 +97,58 @@ def test_other_module_or_version_is_not_used(db):
     _add(db, KIND_LANG, "foo", "block.pressure", "壓力室會處理空氣。", version="1.20.1")
 
     assert _exact(db, "foo", KIND_KUBEJS_LANG) == []
+
+
+# --- 術語表：同種類沒有的術語，退回 ``@`` 前面模組名稱的 lang ---------------------
+
+PACK = "foo@Some Pack 1.0@abcdef123456"
+
+
+def _add_term(db, kind, mod, key, en, zh):
+    db.write_back(
+        "1.21.1", [WriteBackItem(kind, mod, key, en, zh)], fill_other_versions=False
+    )
+    row = next(
+        entry
+        for entry in db.list_entries("1.21.1", limit=100)[0]
+        if entry.key == key and entry.mod_id == mod
+    )
+    db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+
+def _glossary(db, mod, text):
+    return {
+        row["en_us"]: row["zh_tw"]
+        for row in db.reviewed_lang_glossary(mod, "1.21.1", (text,))
+    }
+
+
+def test_pack_glossary_falls_back_to_the_lang_of_the_module_name(db):
+    _add_term(db, KIND_LANG, "foo", "block.pc", "Pressure Chamber", "壓力室")
+
+    assert _glossary(db, PACK, "Build a Pressure Chamber now") == {
+        "Pressure Chamber": "壓力室"
+    }
+
+
+def test_pack_glossary_same_kind_term_is_not_overridden_by_lang(db):
+    _add_term(db, KIND_LANG, "foo", "block.pc", "Pressure Chamber", "壓力室")
+    _add_term(db, KIND_KUBEJS_LANG, PACK, "k.pc", "Pressure Chamber", "壓力艙")
+
+    assert _glossary(db, PACK, "Build a Pressure Chamber now") == {
+        "Pressure Chamber": "壓力艙"
+    }
+
+
+def test_pack_glossary_ignores_the_lang_of_other_modules(db):
+    _add_term(db, KIND_LANG, "bar", "block.pc", "Pressure Chamber", "壓力室")
+
+    assert _glossary(db, PACK, "Build a Pressure Chamber now") == {}
+
+
+def test_plain_module_glossary_is_unchanged(db):
+    _add_term(db, KIND_LANG, "foo", "block.pc", "Pressure Chamber", "壓力室")
+
+    assert _glossary(db, "foo", "Build a Pressure Chamber now") == {
+        "Pressure Chamber": "壓力室"
+    }
