@@ -69,6 +69,17 @@ def _snapshot_for(db, key):
 
 
 def test_adjacent_context_collects_parent_children_and_marks_untranslated(db):
+    from translation_tool.translation_db.schema import SRC_MANUAL
+
+    with db._tx() as conn:  # write_back 預設是 AI 來源；父鍵補一筆人工審核的譯文
+        parent_id = conn.execute(
+            "SELECT id FROM entry WHERE key='config.speed'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+            "VALUES (?,?,?,'','reviewed')",
+            (parent_id, SRC_MANUAL, "速度"),
+        )
     snapshot = _snapshot_for(db, "config.speed.tooltip")
     keys = {item["key"]: item for item in adjacent_key_context(db, snapshot)}
 
@@ -327,3 +338,69 @@ def test_validation_repair_second_round_resends_only_the_still_invalid(db, monke
     assert len(calls) == 3
     assert len(calls[2]) == 1  # 第二輪只重送仍無效的那一筆
     assert result.invalid_count == 0
+
+
+def test_adjacent_context_does_not_cite_unreviewed_ai_translations(db):
+    """AI 自己產生且未審核的譯文不能當佐證，否則模型會拿自己的輸出支持自己。"""
+    from translation_tool.translation_db.schema import SRC_AI
+
+    with db._tx() as conn:
+        entry_id = conn.execute(
+            "SELECT id FROM entry WHERE key='config.speed.max'"
+        ).fetchone()[0]
+        conn.execute(
+            "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
+            "VALUES (?,?,?,'','unreviewed')",
+            (entry_id, SRC_AI, "AI 的最大值"),
+        )
+    snapshot = _snapshot_for(db, "config.speed.tooltip")
+    item = next(
+        i for i in adjacent_key_context(db, snapshot) if i["key"] == "config.speed.max"
+    )
+
+    assert item["zh_tw"] == ""
+    assert item["review_status"] == "untranslated"
+
+
+def test_untranslated_adjacent_citation_does_not_present_english_as_translation():
+    from translation_tool.translation_db.models import SmartReviewSnapshot
+
+    snapshot = SmartReviewSnapshot(
+        "r",
+        1,
+        1,
+        "lang",
+        "1.21.1",
+        "demo",
+        "k",
+        "K",
+        "x",
+        None,
+        None,
+        None,
+        context=(
+            {
+                "id": "adj:9",
+                "reference_type": "adjacent_key",
+                "key": "k.max",
+                "zh_tw": "",
+                "en_us": "Maximum",
+                "review_status": "untranslated",
+            },
+        ),
+    )
+    merged, _ = merge_escalated_results(
+        [{"id": "1", "decision": "needs_context", "reason": "缺", "evidence_ids": []}],
+        [
+            {
+                "id": "1",
+                "decision": "no_change",
+                "reason": "可保留",
+                "evidence_ids": ["adj:9"],
+            }
+        ],
+        [snapshot],
+    )
+
+    assert "k.max（尚無譯文；英文：Maximum）" in merged[0]["reason"]
+    assert "k.max＝" not in merged[0]["reason"]

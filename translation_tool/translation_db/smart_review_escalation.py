@@ -19,6 +19,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from translation_tool.translation_db.models import SmartReviewSnapshot
+from translation_tool.translation_db.schema import SRC_AI, SRC_AI_REPAIR
 from translation_tool.translation_db.smart_review_prompt import (
     SMART_REVIEW_SYSTEM_PROMPT,
     build_smart_review_payload,
@@ -60,16 +61,41 @@ def adjacent_key_context(
     """
     key = snapshot.key
     parent = key.rsplit(".", 1)[0] if "." in key else ""
-    rows: dict[int, tuple] = {}
+    rows: dict[int, list[tuple]] = {}
     for low, high in _key_ranges(key, parent):
         for row in db._q(_ADJACENT_SQL, _params(snapshot, low, high)):
-            rows.setdefault(int(row[0]), row)
+            rows.setdefault(int(row[0]), []).append(row)
     if parent:
         for row in db._q(_ADJACENT_SQL, _params(snapshot, parent, parent + "\x00")):
-            rows.setdefault(int(row[0]), row)
+            rows.setdefault(int(row[0]), []).append(row)
     rows.pop(snapshot.entry_id, None)
-    ordered = sorted(rows.values(), key=lambda row: _distance(key, str(row[1])))
+    twins = set(snapshot.twin_entry_ids)
+    picked = [
+        _pick_translation(entry_rows)
+        for entry_id, entry_rows in rows.items()
+        if entry_id not in twins and str(entry_rows[0][1]) != key
+    ]
+    ordered = sorted(picked, key=lambda row: _distance(key, str(row[1])))
     return [_evidence_item(row) for row in ordered[:limit]]
+
+
+# AI 產生且未審核的譯文是模型自己的輸出；拿來佐證校對會變成循環論證，所以不當作譯文證據。
+_UNTRUSTED_UNREVIEWED_SOURCES = frozenset({SRC_AI, SRC_AI_REPAIR})
+
+
+def _pick_translation(entry_rows: list[tuple]) -> tuple:
+    """同一條目有多個來源時，優先已審核，其次非 AI 來源；都沒有就只保留英文原文。"""
+    usable = [
+        row
+        for row in entry_rows
+        if row[3]
+        and (row[4] == "reviewed" or row[5] not in _UNTRUSTED_UNREVIEWED_SOURCES)
+    ]
+    if not usable:
+        entry_id, key, en_us = entry_rows[0][:3]
+        return (entry_id, key, en_us, "", None, None)
+    usable.sort(key=lambda row: 0 if row[4] == "reviewed" else 1)
+    return usable[0]
 
 
 _ADJACENT_SQL = (
@@ -176,7 +202,9 @@ def _adopt(new: dict[str, Any], adjacent: dict[str, dict[str, Any]]) -> dict[str
     if not cited:
         return new
     notes = "；".join(
-        f"{item['key']}＝{item['zh_tw'] or item['en_us']}（{item['review_status']}）"
+        f"{item['key']}＝{item['zh_tw']}（{item['review_status']}）"
+        if item["zh_tw"]
+        else f"{item['key']}（尚無譯文；英文：{item['en_us']}）"
         for item in cited
     )
     return {
