@@ -8,7 +8,7 @@ from typing import Any
 
 from translation_tool.core.lm_batch_budget import BudgetConfig
 from translation_tool.core.lm_session import TranslationSessionState
-from translation_tool.core.source_locale import normalize_source_locale
+from translation_tool.core.source_locale import effective_source_locale
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUESTS,
     KIND_GUIDE,
@@ -72,8 +72,11 @@ def _item_context(
 
 
 def _item_locale(item: dict[str, Any]) -> str | None:
-    """項目的來源語系（正規化）；沒有或不合法時為 ``None``（未知，不視為任何語系）。"""
-    return normalize_source_locale(item.get("source_locale"))
+    """已審核參考比對用的項目語系：沒有或不合法時為 ``None``（未知，不視為任何語系）；
+
+    沒有語系概念的種類（KubeJS 腳本、FTB 任務結構）未知時視為 ``en_us``。
+    """
+    return effective_source_locale(_infer_kind(item), item.get("source_locale"))
 
 
 def _source_text_contexts(

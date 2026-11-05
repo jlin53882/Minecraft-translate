@@ -105,6 +105,19 @@ def resolve_source_locale(selectors: Iterable[str]) -> str | None:
     return next(iter(source_locales))
 
 
+# 沒有語系概念的種類（KubeJS 腳本字串、FTB 任務結構）：來源紀錄不會帶語系，原文依慣例是英文。
+# 語系未知時以 en_us 比對已審核參考；已知是其他語系的參考仍然不相容。
+LOCALELESS_KINDS = frozenset({"kubejs_script", "ftb_quests"})
+
+
+def effective_source_locale(kind: str | None, locale: object) -> str | None:
+    """已審核參考比對用的項目語系：未知且種類沒有語系概念時視為 ``en_us``，其餘維持未知。"""
+    normalized = normalize_source_locale(locale)
+    if normalized is None and kind in LOCALELESS_KINDS:
+        return "en_us"
+    return normalized
+
+
 def reviewed_locale_compatible(
     item_locale: object, reference_locale: str | None
 ) -> bool:

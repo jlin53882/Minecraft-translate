@@ -129,3 +129,48 @@ def test_legacy_entries_without_origins_keep_working(db):
     assert _exact(db, "pt_br", KIND_LANG) == []
     assert _targets(_terms(db, None)) == ["義大利麵"]
     assert _terms(db, "pt_br") == []
+
+
+def test_lang_fallback_is_not_blocked_by_an_incompatible_same_kind_term(db):
+    """同種類只有 pt_br 的術語時，en_us 項目仍要能用 lang 退路的 en_us 已審核術語。"""
+    db.ingest(
+        V,
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "block.pm",
+                "Pasta Maker",
+                "義大利麵機",
+                source_path="x/en_us.json",
+                source_selector="lang:en_us:block.pm",
+                source_hash="h-lang",
+                source_format="lang-json",
+                pack_scope="",
+                source_locale="en_us",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "foo@pack-a",
+                "ref.pm",
+                "Pasta Maker",
+                "資料夾機",
+                source_path="kubejs/lang/pt_br.json",
+                source_selector="lang:pt_br:ref.pm",
+                source_hash="h-kjs",
+                source_format="lang-json",
+                pack_scope="pack-a",
+                source_locale="pt_br",
+            ),
+        ],
+    )
+    _review_all(db)
+    texts = ("Cook with the Pasta Maker",)
+
+    en = db.reviewed_lang_glossary("foo@pack-a", V, texts, source_locale="en_us")
+    pt = db.reviewed_lang_glossary("foo@pack-a", V, texts, source_locale="pt_br")
+
+    assert _targets(en) == [
+        "義大利麵機"
+    ]  # 同種類的 pt_br 術語不相容，不能擋掉 lang 退路
+    assert _targets(pt) == ["資料夾機"]  # pt_br 項目只看到自己的 pt_br 術語

@@ -70,11 +70,27 @@ def source_locale_sql(entry_alias: str) -> str:
 
 
 def reference_locale_sql(entry_alias: str) -> str:
-    """已審核參考的來源語系：沒有任何來源紀錄的舊條目回傳空字串，其餘同 ``source_locale_sql``。"""
+    """已審核參考的來源語系（供 ``reviewed_locale_compatible`` 判斷）。
+
+    - 沒有任何來源紀錄的舊條目：空字串；
+    - 任一來源紀錄語系不明、或同一條目混有多個語系：``unknown:<id>``；
+    - 其餘：唯一的語系 token。
+
+    這裡刻意不用 ``COUNT(DISTINCT …)``：它會讓每個結果列各建一個暫時 B-tree，違反資料庫查詢
+    不得出現 ``TEMP B-TREE`` 的規範；以 ``MIN``／``MAX`` 判斷是否只有一個語系。
+    """
+    entry_id = f"CAST({entry_alias}.id AS TEXT)"
+    unknown = f"'unknown:' || {entry_id}"
     return (
-        "CASE WHEN NOT EXISTS (SELECT 1 FROM entry_origin eo_ref "
+        "CASE "
+        "WHEN NOT EXISTS (SELECT 1 FROM entry_origin eo_ref "
         f"WHERE eo_ref.entry_id={entry_alias}.id) THEN '' "
-        f"ELSE {source_locale_sql(entry_alias)} END"
+        "WHEN EXISTS (SELECT 1 FROM entry_origin eo_null "
+        f"WHERE eo_null.entry_id={entry_alias}.id AND eo_null.source_locale IS NULL) "
+        f"THEN {unknown} "
+        "ELSE (SELECT CASE WHEN MIN(eo_one.source_locale)=MAX(eo_one.source_locale) "
+        f"THEN MIN(eo_one.source_locale) ELSE {unknown} END FROM entry_origin eo_one "
+        f"WHERE eo_one.entry_id={entry_alias}.id) END"
     )
 
 

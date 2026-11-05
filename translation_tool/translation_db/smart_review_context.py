@@ -19,6 +19,10 @@ from translation_tool.core.official_locale import (
     terminology_term_allowed,
     terminology_terms_for_item,
 )
+from translation_tool.core.source_locale import (
+    effective_source_locale,
+    reviewed_locale_compatible,
+)
 from translation_tool.core.terminology_model import (
     evidence_context_entry,
     from_official_match,
@@ -32,6 +36,7 @@ from translation_tool.translation_db.schema import (
     KIND_LANG,
     SRC_JAR_TW,
 )
+from translation_tool.translation_db.sql_helpers import reference_locale_sql
 from translation_tool.utils.text_matching import (
     build_term_prefix_index,
     contains_term,
@@ -39,9 +44,12 @@ from translation_tool.utils.text_matching import (
     term_canonical_key,
 )
 
+# 第 11 欄（索引 10）是參考的來源語系（見 ``reference_locale_sql``）：證據必須與候選的來源語系相容。
+_REFERENCE_LOCALE_INDEX = 10
 _REVIEWED_ENTRY_COLUMNS = (
     "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
-    "f.zh_tw, f.source, f.review_status, f.revision "
+    "f.zh_tw, f.source, f.review_status, f.revision, "
+    f"{reference_locale_sql('e')} "
     "FROM entry e JOIN translation f ON f.entry_id=e.id "
 )
 _LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
@@ -95,6 +103,28 @@ class _LocalContextBuilder:
         self.key_rows_cache = cache.setdefault("key_rows", {})
         self.quality_cache = cache.setdefault("quality", {})
 
+    @property
+    def item_locale(self) -> str | None:
+        """候選自己的來源語系；沒有來源紀錄或無法確認時為 ``None``（未知，不視為任何語系）。"""
+        if "item_locale" not in self.cache:
+            self.cache["item_locale"] = {}
+        known = self.cache["item_locale"]
+        if self.entry_id not in known:
+            row = self.db._one(
+                f"SELECT {reference_locale_sql('e')} FROM entry e WHERE e.id=?",
+                (self.entry_id,),
+            )
+            known[self.entry_id] = effective_source_locale(
+                self.kind, row[0] if row else None
+            )
+        return known[self.entry_id]
+
+    def _locale_ok(self, row: tuple) -> bool:
+        """證據列的來源語系與候選相容（未知語系的參考永遠不相容）。"""
+        return reviewed_locale_compatible(
+            self.item_locale, row[_REFERENCE_LOCALE_INDEX]
+        )
+
     def _glossary_scope(self) -> str | None:
         """從 scanner 建立的 mod id 取得 KubeJS／FTB 的模組包身分。"""
         scoped_kinds = {
@@ -141,9 +171,16 @@ class _LocalContextBuilder:
     def build(self) -> list[dict[str, Any]]:
         """依證據優先順序組合並去重後的 context。"""
         context = self._same_key_context(self._same_key_rows())
-        glossary_rows = self._glossary_rows_for_item()
+        glossary_rows = [
+            row for row in self._glossary_rows_for_item() if self._locale_ok(row)
+        ]
         official = load_official_locale_index()
-        official_context = self._official_context(official)
+        # 官方 Minecraft 術語是英文；只用於英文或語系未知的候選。
+        official_context = (
+            self._official_context(official)
+            if self.item_locale in (None, "en_us")
+            else []
+        )
         glossary_context = self._glossary_context(glossary_rows, official)
         context.extend(glossary_context)
         context.extend(self._lang_name_fallback_context(official, glossary_context))
@@ -254,7 +291,7 @@ class _LocalContextBuilder:
         return [
             row
             for row in self.key_rows_cache[cache_key]
-            if int(row[0]) != self.entry_id
+            if int(row[0]) != self.entry_id and self._locale_ok(row)
         ]
 
     def _query_same_key_rows(self) -> list[tuple]:
@@ -789,6 +826,8 @@ class _LocalContextBuilder:
             if canonical in covered:
                 continue
             for row in by_term_rows[term]:
+                if not self._locale_ok(row):
+                    continue
                 if self._quality_details(row)[0] != "consistent":
                     continue
                 if not terminology_term_allowed(
@@ -832,6 +871,8 @@ class _LocalContextBuilder:
         )
         context: list[dict[str, Any]] = []
         for row in related_rows:
+            if not self._locale_ok(row):
+                continue
             if (
                 str(row[1]) == self.kind
                 and str(row[3]) == self.mod_id

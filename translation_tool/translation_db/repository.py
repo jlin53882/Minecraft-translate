@@ -5588,14 +5588,26 @@ class TranslationDB(
         return self._cached(cache_key, load)
 
     def _reviewed_lang_rows_with_name_fallback(
-        self, mod_id: str, mc_version: str | None
+        self,
+        mod_id: str,
+        mc_version: str | None,
+        source_locale: str | None = None,
     ) -> list[list[str]]:
-        """同種類的已審核術語列，加上 ``@`` 前面模組名稱的 lang 作為退路。
+        """與項目來源語系相容的已審核術語列，加上 ``@`` 前面模組名稱的 lang 作為退路。
 
         KubeJS／FTB 的模組識別帶有 ``名稱@模組包@序號``。同種類沒有的術語才退回該 lang；
         同種類已有的原文（即使譯法不唯一）不會被 lang 覆蓋或混成衝突。
+        順序很重要：先依來源語系過濾同種類候選，再計算「同種類已有的原文」，最後才補入相容的
+        lang 退路；否則同種類只有不相容語系（例如 pt_br）的術語時，會把相容的 en_us lang
+        退路一併排除。
         """
-        rows = self._reviewed_lang_candidate_rows(mod_id, mc_version)
+
+        def compatible(rows: list[list[str]]) -> list[list[str]]:
+            return [
+                row for row in rows if reviewed_locale_compatible(source_locale, row[3])
+            ]
+
+        rows = compatible(self._reviewed_lang_candidate_rows(mod_id, mc_version))
         base_name = mod_id.split("@", 1)[0]
         if "@" not in mod_id or not base_name:
             return rows
@@ -5604,7 +5616,9 @@ class TranslationDB(
             *rows,
             *(
                 row
-                for row in self._reviewed_lang_candidate_rows(base_name, mc_version)
+                for row in compatible(
+                    self._reviewed_lang_candidate_rows(base_name, mc_version)
+                )
                 if term_canonical_key(row[1]) not in own_sources
             ),
         ]
@@ -5640,11 +5654,9 @@ class TranslationDB(
         # 跨語言大小寫折疊由 Python ``casefold`` 負責；SQLite ``lower`` 只
         # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。候選集合依模組、
         # 版本與資料世代快取，來源相關性仍由每次呼叫的 matcher 判斷。
-        rows = [
-            row
-            for row in self._reviewed_lang_rows_with_name_fallback(mod_id, mc_version)
-            if reviewed_locale_compatible(source_locale, row[3])
-        ]
+        rows = self._reviewed_lang_rows_with_name_fallback(
+            mod_id, mc_version, source_locale
+        )
         matched_sources = matching_terms(
             normalized_sources, tuple(row[1] for row in rows)
         )
