@@ -410,52 +410,6 @@ class _LocalContextBuilder:
         )
         return current + other
 
-    def _target_rows_from_bulk(
-        self,
-        bulk: tuple[tuple, ...],
-        scope: tuple[Any, ...],
-        lookup_phrases: list[str],
-    ) -> list[tuple]:
-        """由完整的 bulk glossary 取詞組命中列，順序與每個 kind 的上限同資料庫查詢。
-
-        目前版本依 id、其他版本依（版本, id）排序，每個 kind 各取最多 96 列，
-        目前版本在前。
-        """
-        by_en_cache = self.cache.setdefault("glossary_by_en", {})
-        if scope not in by_en_cache:
-            by_en: dict[str, list[tuple]] = {}
-            for row in bulk:
-                by_en.setdefault(str(row[5]), []).append(row)
-            by_en_cache[scope] = by_en
-        by_en = by_en_cache[scope]
-        current_by_kind: dict[str, list[tuple]] = {}
-        other_by_kind: dict[str, list[tuple]] = {}
-        for phrase in dict.fromkeys(lookup_phrases):
-            for row in by_en.get(phrase, ()):
-                target = (
-                    current_by_kind if str(row[2]) == self.mc_version else other_by_kind
-                )
-                target.setdefault(str(row[1]), []).append(row)
-        current = sorted(
-            (
-                row
-                for rows in current_by_kind.values()
-                for row in sorted(rows, key=lambda item: int(item[0]))[:96]
-            ),
-            key=lambda item: int(item[0]),
-        )
-        other = sorted(
-            (
-                row
-                for rows in other_by_kind.values()
-                for row in sorted(rows, key=lambda item: (str(item[2]), int(item[0])))[
-                    :96
-                ]
-            ),
-            key=lambda item: (str(item[2]), int(item[0])),
-        )
-        return current + other
-
     def _scoped_target_rows(self, lookup_phrases: list[str]) -> list[tuple] | None:
         """模組包範圍的詞組命中列：詞組先走 en_us 索引，排序與上限在記憶體完成。
 

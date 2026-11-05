@@ -437,3 +437,66 @@ def test_adjacent_context_prefers_reviewed_and_labels_unreviewed_non_ai(db):
             (entry_id,),
         )
     assert parent_item()["review_status"] == "reviewed"
+
+
+# --- 相鄰鍵：同父鍵超過 64 個時，重要的欄位不能被截斷擠掉 -------------------------------
+
+
+def _many_siblings_db(tmp_path, *, noise_first: bool):
+    database = TranslationDB(tmp_path / f"many-{noise_first}.db")
+    noise = [
+        WriteBackItem(
+            KIND_LANG, "demo", f"cfg.opt.zz_{i:03d}", f"Noise {i}", f"雜訊{i}"
+        )
+        for i in range(150)
+    ]
+    important = [
+        WriteBackItem(KIND_LANG, "demo", "cfg.opt", "Option", "選項"),
+        WriteBackItem(KIND_LANG, "demo", "cfg.opt.name", "Option name", "選項名稱"),
+        WriteBackItem(
+            KIND_LANG, "demo", "cfg.opt.description", "Option text", "選項說明"
+        ),
+        WriteBackItem(KIND_LANG, "demo", "cfg.opt.tooltip", "Option tip", "選項提示"),
+    ]
+    ordered = [*noise, *important] if noise_first else [*important, *noise]
+    database.write_back("1.21.1", ordered, fill_other_versions=False)
+    return database
+
+
+@pytest.mark.parametrize(
+    "noise_first", [True, False], ids=["noise-first", "noise-last"]
+)
+def test_important_sibling_fields_survive_more_than_64_siblings(tmp_path, noise_first):
+    database = _many_siblings_db(tmp_path, noise_first=noise_first)
+    try:
+        row = database._one(
+            "SELECT id, kind, mc_version, mod_id, key, en_us FROM entry "
+            "WHERE key='cfg.opt.zz_075'"
+        )
+        from translation_tool.translation_db.models import SmartReviewSnapshot
+
+        snapshot = SmartReviewSnapshot(
+            "r",
+            1,
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            "x",
+            None,
+            None,
+            None,
+        )
+        keys = [item["key"] for item in adjacent_key_context(database, snapshot)]
+
+        assert len(keys) <= 12
+        assert {
+            "cfg.opt",
+            "cfg.opt.name",
+            "cfg.opt.description",
+            "cfg.opt.tooltip",
+        } <= set(keys)
+    finally:
+        database.close()

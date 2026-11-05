@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -41,7 +42,9 @@ from translation_tool.translation_db.smart_review_validation import (
 from translation_tool.utils.cancellation import TaskCancelled
 
 ADJACENT_EVIDENCE_LIMIT = 12
-_ROW_FETCH_LIMIT = 64
+_KEY_FETCH_CAP = (
+    20_000  # 單一鍵範圍最多讀幾個鍵（依鍵名順序；超過時深處的鍵不參與排序）
+)
 
 SMART_REVIEW_ESCALATION_PROMPT = """
 
@@ -58,26 +61,40 @@ def adjacent_key_context(
 ) -> list[dict[str, Any]]:
     """同模組、同 kind、同版本中與目前鍵相鄰的條目（父鍵、子鍵、同父鍵手足）。
 
-    只用 ``idx_entry_kind_mod_key`` 的鍵範圍查詢，不排序；挑選與截斷在記憶體完成。
+    分兩步：先只讀相鄰範圍的（id, key）——不帶譯文、不截斷在相關性之前——在記憶體依
+    ``_rank`` 排序並取前 ``limit`` 筆，再只為被選中的條目讀英文與譯文。這樣同一個父鍵底下
+    有上百個手足時，name／description／tooltip 這類重要欄位也不會被先讀到的雜項擠掉。
+    只用 ``idx_entry_kind_mod_key`` 的鍵範圍查詢；單一範圍最多讀 ``_KEY_FETCH_CAP`` 個鍵。
     """
     key = snapshot.key
     parent = key.rsplit(".", 1)[0] if "." in key else ""
-    rows: dict[int, list[tuple]] = {}
-    for low, high in _key_ranges(key, parent):
-        for row in db._q(_ADJACENT_SQL, _params(snapshot, low, high)):
-            rows.setdefault(int(row[0]), []).append(row)
+    candidates: dict[int, str] = {}
+    ranges = [*_key_ranges(key, parent)]
     if parent:
-        for row in db._q(_ADJACENT_SQL, _params(snapshot, parent, parent + "\x00")):
-            rows.setdefault(int(row[0]), []).append(row)
-    rows.pop(snapshot.entry_id, None)
+        ranges.append((parent, parent + "\x00"))
+    for low, high in ranges:
+        for entry_id, other in db._q(_KEYS_SQL, _params(snapshot, low, high)):
+            candidates[int(entry_id)] = str(other)
+    candidates.pop(snapshot.entry_id, None)
     twins = set(snapshot.twin_entry_ids)
-    picked = [
-        _pick_translation(entry_rows)
-        for entry_id, entry_rows in rows.items()
-        if entry_id not in twins and str(entry_rows[0][1]) != key
+    ranked = sorted(
+        (
+            (_rank(key, parent, other), entry_id)
+            for entry_id, other in candidates.items()
+            if entry_id not in twins and other != key
+        )
+    )
+    chosen = [entry_id for _rank_value, entry_id in ranked[:limit]]
+    if not chosen:
+        return []
+    rows_by_entry: dict[int, list[tuple]] = {}
+    for row in db._q(_ROWS_SQL, (json.dumps(chosen),)):
+        rows_by_entry.setdefault(int(row[0]), []).append(row)
+    return [
+        _evidence_item(_pick_translation(rows_by_entry[entry_id]))
+        for entry_id in chosen
+        if entry_id in rows_by_entry
     ]
-    ordered = sorted(picked, key=lambda row: _distance(key, str(row[1])))
-    return [_evidence_item(row) for row in ordered[:limit]]
 
 
 # AI 產生且未審核的譯文是模型自己的輸出；拿來佐證校對會變成循環論證，所以不附上。
@@ -96,11 +113,15 @@ def _pick_translation(entry_rows: list[tuple]) -> tuple:
     return (entry_id, key, en_us, "", None, None)
 
 
-_ADJACENT_SQL = (
+_KEYS_SQL = (
+    "SELECT e.id, e.key FROM entry e "
+    "WHERE e.kind=? AND e.mod_id=? AND e.mc_version=? AND e.key>=? AND e.key<? "
+    f"ORDER BY e.key LIMIT {_KEY_FETCH_CAP}"
+)
+_ROWS_SQL = (
     "SELECT e.id, e.key, e.en_us, f.zh_tw, f.review_status, f.source "
     "FROM entry e LEFT JOIN translation f ON f.entry_id=e.id "
-    "WHERE e.kind=? AND e.mod_id=? AND e.mc_version=? AND e.key>=? AND e.key<? "
-    f"LIMIT {_ROW_FETCH_LIMIT}"
+    "WHERE e.id IN (SELECT value FROM json_each(?))"
 )
 
 
@@ -116,14 +137,51 @@ def _key_ranges(key: str, parent: str) -> list[tuple[str, str]]:
     return ranges
 
 
-def _distance(key: str, other: str) -> tuple[int, int, str]:
-    """離目前鍵越近越前：共同前綴越長、長度差越小。"""
+# 欄位名稱（最後一段）屬於這些時優先：它們通常就是缺的那段說明或顯示名稱。
+_PREFERRED_FIELDS = frozenset(
+    {
+        "name",
+        "title",
+        "subtitle",
+        "description",
+        "desc",
+        "tooltip",
+        "tip",
+        "lore",
+        "label",
+        "text",
+        "hint",
+    }
+)
+
+
+def _rank(key: str, parent: str, other: str) -> tuple[int, int, int, int, str]:
+    """相鄰鍵的優先順序（越小越前）：
+
+    1. 父鍵、子鍵、同父鍵手足，依序；
+    2. 欄位名稱是 name／title／description／tooltip… 的優先；
+    3. 與目前鍵共同前綴越長、長度差越小越前；
+    4. 最後以鍵名排序，讓結果不受插入順序影響。
+    """
+    if other == parent:
+        group = 0
+    elif other.startswith(key + "."):
+        group = 1
+    else:
+        group = 2
+    field = other.rsplit(".", 1)[-1].lower()
     common = 0
     for a, b in zip(key, other, strict=False):
         if a != b:
             break
         common += 1
-    return (-common, abs(len(key) - len(other)), other)
+    return (
+        group,
+        0 if field in _PREFERRED_FIELDS else 1,
+        -common,
+        abs(len(key) - len(other)),
+        other,
+    )
 
 
 def _evidence_item(row: tuple) -> dict[str, Any]:
