@@ -126,7 +126,7 @@ class TranslatePanel(ft.Column):
         self.version_dd = kit.dropdown(
             label="遊戲版本", dense=True, width=220, on_select=self._on_scope_changed
         )
-        self.mod_dd = kit.dropdown(
+        self.mod_dd = kit.searchable_dropdown(
             label="模組", dense=True, width=260, on_select=self._on_scope_changed
         )
         self.limit_field = kit.text_field(

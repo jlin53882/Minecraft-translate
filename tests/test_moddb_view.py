@@ -3021,3 +3021,22 @@ def test_batch_replace_snack_reports_shadowed_entries(db_path, monkeypatch):
     dialog._finish_apply({"state": "complete"}, outcome)
     assert shown and "優先序" in shown[0] and "只改變 3 筆" in shown[0]
     db.close()
+
+
+def test_every_module_filter_with_many_modules_is_searchable():
+    """條目校對、批次機翻、智慧校對執行頁、批量審核、學名查詢的模組選單都可打字搜尋。"""
+    from app.views.moddb import (
+        bulk_review_dialog,
+        smart_review_run_panel,
+        species_dialog,
+        translate_panel,
+    )
+
+    for module in (
+        bulk_review_dialog,
+        smart_review_run_panel,
+        species_dialog,
+        translate_panel,
+    ):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "self.mod_dd = kit.searchable_dropdown(" in source, module.__name__

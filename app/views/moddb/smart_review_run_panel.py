@@ -118,7 +118,7 @@ class SmartReviewRunPanel(SmartReviewRunPlanningMixin):
             self.version_dd, [(version, version)] if version else []
         )
         self.version_dd.value = version
-        self.mod_dd = kit.dropdown(
+        self.mod_dd = kit.searchable_dropdown(
             label="模組", dense=True, width=210, on_select=self._on_mod
         )
         self.kind_dd = kit.dropdown(
