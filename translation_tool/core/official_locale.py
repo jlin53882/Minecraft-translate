@@ -502,11 +502,17 @@ class OfficialLocaleIndex:
 
 
 def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """檔案內容的 SHA-256，雜湊前把 CRLF 正規化為 LF。
+
+    官方語系是 JSON：字串裡的換行必須跳脫成 ``\\n``，真正的 CR／LF 只會出現在 token 之間的空白。
+    所以 Windows 的 ``core.autocrlf=true`` 或解壓縮工具把檔案轉成 CRLF，不會改變任何 key 或譯文；
+    若因此驗證失敗，整個官方術語索引都會被停用。內容真的被改動或損壞時雜湊仍然不符。
+    """
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
+class _LocaleIntegrityError(ValueError):
+    """官方語系檔的內容與 manifest 記錄的 SHA-256 不符。"""
 
 
 def _empty_index() -> OfficialLocaleIndex:
@@ -682,29 +688,44 @@ def _derive_component_terms(
     return derived
 
 
+def _read_verified_locales(locale_root: Path) -> dict[str, Any]:
+    """讀取三個官方語系檔，並逐一以 manifest 的 SHA-256 驗證完整性。
+
+    回傳 ``{"en_us": …, "zh_cn": …, "zh_tw": …}``；內容與 manifest 不符時拋出
+    ``_LocaleIntegrityError``，檔案無法讀取或 JSON 無效時拋出一般的 ``OSError``／``ValueError``。
+    """
+    manifest = json.loads((locale_root / "manifest.json").read_text(encoding="utf-8"))
+    data = {
+        Path(name).stem: json.loads((locale_root / name).read_text(encoding="utf-8"))
+        for name in _LOCALE_FILES
+    }
+    manifest_files = manifest.get("files", {})
+    for name in _LOCALE_FILES:
+        expected = manifest_files.get(name, {}).get("sha256")
+        if (
+            not isinstance(expected, str)
+            or _file_sha256(locale_root / name) != expected
+        ):
+            raise _LocaleIntegrityError(
+                f"官方語系完整性驗證失敗：{name}（內容的 SHA-256 與 manifest 不符；"
+                "換行差異已忽略，請確認檔案沒有被修改或損壞）"
+            )
+    return data
+
+
 def _load_index(root: Path) -> OfficialLocaleIndex:
     """載入官方語系索引並在資源根目錄間快取結果。"""
     locale_root = root / _OFFICIAL_RELATIVE_ROOT
     try:
-        manifest = json.loads(
-            (locale_root / "manifest.json").read_text(encoding="utf-8")
-        )
-        data = {
-            Path(name).stem: json.loads(
-                (locale_root / name).read_text(encoding="utf-8")
-            )
-            for name in _LOCALE_FILES
-        }
-        manifest_files = manifest.get("files", {})
-        for name in _LOCALE_FILES:
-            expected = manifest_files.get(name, {}).get("sha256")
-            if (
-                not isinstance(expected, str)
-                or _file_sha256(locale_root / name) != expected
-            ):
-                raise ValueError(f"官方語系完整性驗證失敗：{name}")
-    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        data = _read_verified_locales(locale_root)
+    except _LocaleIntegrityError as exc:
+        logger.warning("%s", exc)
+        return _empty_index()
+    except OSError as exc:
         logger.warning("找不到或無法讀取 Minecraft 官方語系：%s", exc)
+        return _empty_index()
+    except (ValueError, TypeError, AttributeError) as exc:
+        logger.warning("Minecraft 官方語系檔案格式無效：%s", exc)
         return _empty_index()
     if not all(isinstance(values, dict) for values in data.values()):
         logger.warning("Minecraft 官方語系檔案必須都是 JSON object")

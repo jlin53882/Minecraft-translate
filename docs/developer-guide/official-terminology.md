@@ -4,6 +4,15 @@
 `OfficialLocaleIndex.official_terminology_matches_for_item`（`translation_tool/core/official_locale.py`）。
 兩端只透過 `translation_tool/core/terminology_model.py` 的 adapter 轉成各自輸出，不各自組術語。
 
+## 官方語系檔的完整性驗證
+
+載入時（`_load_index`）會對 `assets/official_locales/minecraft/` 的 `en_us.json`、`zh_cn.json`、`zh_tw.json`
+計算 SHA-256 並與 `manifest.json` 比對；任何一項不符，整個官方索引就停用（`available=False`），官方精確翻譯與官方術語都不會注入。
+
+- 雜湊前會把 CRLF 正規化為 LF（`_file_sha256`）：這些檔案是 JSON，字串中的換行必須跳脫，真正的 CR／LF 只會出現在 token 之間的空白，所以 Windows 的 `core.autocrlf=true` 或解壓縮工具造成的換行轉換不會讓驗證失敗；內容被改動或損壞時雜湊仍然不符。
+- 警告文字分三種：`官方語系完整性驗證失敗：<檔名>（內容的 SHA-256 與 manifest 不符…）`、`找不到或無法讀取 Minecraft 官方語系`（檔案不存在或無法讀取）、`Minecraft 官方語系檔案格式無效`（JSON 無法解析或結構錯誤）。
+- 版本庫以 `.gitattributes` 的 `-text` 保存 LF，`tests/test_official_locale_line_endings.py` 檢查磁碟上的檔案沒有 CRLF；測試見 `tests/test_official_locale_integrity.py`。
+
 ## 命中優先順序
 
 | 順序 | `match_type` | 說明 |
