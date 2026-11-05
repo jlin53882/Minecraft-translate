@@ -404,3 +404,15 @@ def test_field_and_dropdown_keep_caller_arguments_and_apply_style():
 
     d = kit.dropdown(label="選單", options=[ft.dropdown.Option("a")], dense=True)
     assert isinstance(d, ft.Dropdown) and d.label == "選單" and d.bgcolor == C.PANEL2
+
+
+def test_searchable_dropdown_filters_by_typing_and_bounds_the_menu():
+    """選項很多的下拉選單：可打字篩選；選單固定高度，不會撐成佔滿畫面的長清單。"""
+    d = kit.searchable_dropdown(label="模組", options=[ft.dropdown.Option("a")])
+
+    assert isinstance(d, ft.Dropdown) and d.label == "模組"
+    assert d.editable is True and d.enable_filter is True
+    assert d.menu_height == kit.inputs.SEARCHABLE_MENU_HEIGHT
+    # 呼叫端指定的值優先
+    assert kit.searchable_dropdown(menu_height=200).menu_height == 200
+    assert kit.searchable_dropdown(editable=False).editable is False

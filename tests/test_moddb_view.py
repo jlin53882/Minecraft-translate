@@ -1466,6 +1466,16 @@ def test_entries_step_moves_within_page_and_empty_state_without_database():
     assert panel.editor_body.visible is False and panel.empty_editor.visible is True
 
 
+def test_entries_module_filter_is_searchable_and_the_other_filters_are_not():
+    """模組有幾百個：模組選單可打字搜尋、固定高度往下展開；版本等少量選項維持一般選單。"""
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: None)
+
+    assert panel.mod_dd.editable is True and panel.mod_dd.enable_filter is True
+    assert panel.mod_dd.menu_height
+    assert not panel.version_dd.editable and not panel.version_dd.enable_filter
+    assert not panel.kind_dd.editable
+
+
 # ------------------------------------------------------------------ 掃描匯入
 # 只替換 scan_panel 看到的 threading：直接改全域 threading.Thread 會連 ThreadPoolExecutor 的
 # worker 一起變成同步執行而死結。

@@ -211,7 +211,7 @@ def _build_controls(panel) -> None:
     panel.version_dd = kit.dropdown(
         label="遊戲版本", dense=True, width=220, on_select=panel._on_version
     )
-    panel.mod_dd = kit.dropdown(
+    panel.mod_dd = kit.searchable_dropdown(
         label="模組", dense=True, width=220, on_select=panel._on_mod
     )
     panel.kind_dd = kit.dropdown(
