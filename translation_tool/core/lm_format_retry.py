@@ -18,15 +18,21 @@ from translation_tool.plugins.shared.rich_text_shield import (
 from translation_tool.translation_db.quality import (
     guide_structure_issues,
     token_issues_for_kind,
+    translation_issues,
 )
 
+# 同一批次的品質重試最多進行幾輪；每輪只重送仍不合格的項目。
+QUALITY_RETRY_MAX_ROUNDS = 2
+
 QUALITY_RETRY_INSTRUCTION = (
-    "這是目前批次唯一一次的翻譯品質修復重試，請同時處理每個項目列出的問題。\n"
+    "這是翻譯品質修復重試，請同時處理每個項目列出的問題。\n"
     "如果 retry_reasons 表示翻譯結果與原文相同，請重新翻譯，不要直接複製原文。\n"
     "format_issues 是程式依原文與譯文比對產生的硬性問題，不可以忽略或重新解讀；"
     "請依目前 payload 的原文重新翻譯，不要沿用上一版錯誤格式。\n"
     "合法的同一段落軟折行不需要恢復成英文原本的行數；只有 format_issues 指出的硬結構需要修正。\n"
     "terminology_issues 是程式依已審核或官方術語表找出的漏譯，必須在同一項目譯文中使用指定的目標詞。\n"
+    "修復時仍須保留原文的主體、動作、對象、條件、否定、數量、單位、時間、比較與因果；"
+    "不可只修格式或術語就省略完整語意，也不可把限定條件改成一般敘述。\n"
     "請維持原本翻譯語意，不要輸出說明文字，只回傳相同項目 ID 的結構化 JSON 翻譯結果。"
 )
 
@@ -73,11 +79,27 @@ def quality_issues(source_item: dict, translated_text: str) -> list[str]:
         shield_issues = []
     issues = token_issues_for_kind(source_item.get("text"), candidate, kind=kind)
     raw_source = str(source_item.get("source_text") or "")
-    return [
+    # 最終寫入前的驗證（translation_issues）涵蓋色碼、自訂標記等更多類別；
+    # 重試判定必須使用同一套規則，否則這些項目永遠不會被重試，卻在驗證時被擋下。
+    final_gate = _final_gate_issues(source_item, raw_source, raw_translated, kind)
+    combined = [
         *shield_issues,
         *issues,
         *guide_structure_issues(raw_source, raw_translated, kind=kind),
     ]
+    return [*combined, *(issue for issue in final_gate if issue not in combined)]
+
+
+def _final_gate_issues(
+    source_item: dict, raw_source: str, raw_translated: str, kind: str | None
+) -> list[str]:
+    """與最終驗證相同的格式診斷；呼叫端可用 ``_quality_gate`` 覆寫（如修復模式）。"""
+    gate = source_item.get("_quality_gate")
+    if callable(gate):
+        return list(gate(raw_source, raw_translated))
+    if not raw_source:
+        return []
+    return translation_issues(raw_source, raw_translated, kind=kind)
 
 
 def build_quality_retry_batch(

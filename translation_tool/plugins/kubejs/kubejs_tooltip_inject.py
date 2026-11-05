@@ -10,6 +10,7 @@ import os
 import re
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from translation_tool.core.kubejs_translator_state import atomic_write_bytes
@@ -277,7 +278,7 @@ def _clientevents_lang_locale_at(
 
 def _parse_kubejs_lang_call(
     content: str, match: re.Match[str], locale: str
-) -> tuple[str, str, str, list[str], int, bool, str] | None:
+) -> tuple[str, str, str, list[str], int, bool, str | None] | None:
     """解析一個已位於 ``ClientEvents.lang`` 範圍內的 ``event.add``。"""
     arguments, closing_index = _extract_call_args_with_end(content, match.end())
     if arguments is None or closing_index is None:
@@ -294,7 +295,7 @@ def _parse_kubejs_lang_call(
             return None
     key = _decode_js_string_literal(key_expr)
     current_value = _decode_js_string_literal(value_expr)
-    if not key or current_value is None:
+    if not key:
         return None
     return (
         locale,
@@ -360,6 +361,131 @@ def _select_itemevents_tooltip_translation(
     return selected_key, str(translation_map[selected_key])
 
 
+@dataclass(frozen=True, slots=True)
+class _KubeJSLangCall:
+    """一個可回寫的 ClientEvents.lang event.add 呼叫。"""
+
+    match_start: int
+    match_end: int
+    locale: str
+    namespace: str
+    key: str
+    parts: tuple[str, ...]
+    closing_index: int
+    explicit_namespace: bool
+    current_value: str | None
+    occurrence: int
+
+
+def _collect_kubejs_lang_calls(
+    content: str, ranges: list[tuple[int, int, str]]
+) -> list[_KubeJSLangCall]:
+    """以 scanner 相同的 occurrence 契約收集可回寫的語系呼叫。"""
+    code = _mask_js_non_code(content)
+    pattern = re.compile(r"\bevent\.add\s*\(")
+    calls: list[_KubeJSLangCall] = []
+    occurrence = 0
+
+    for match in pattern.finditer(code):
+        locale = _clientevents_lang_locale_at(ranges, match.start())
+        if locale is None:
+            continue
+        arguments, closing_index = _extract_call_args_with_end(content, match.end())
+        if arguments is None or closing_index is None:
+            continue
+        parts = split_js_args(arguments)
+        if not is_client_lang_add_shape(parts):
+            continue
+        # 動態 value 也會消耗 occurrence，保持 scanner／writer 對齊。
+        occurrence += 1
+        candidate = _parse_kubejs_lang_call(content, match, locale)
+        if candidate is None:
+            continue
+        (
+            parsed_locale,
+            namespace,
+            key,
+            parsed_parts,
+            parsed_closing_index,
+            explicit_namespace,
+            current_value,
+        ) = candidate
+        calls.append(
+            _KubeJSLangCall(
+                match_start=match.start(),
+                match_end=match.end(),
+                locale=parsed_locale,
+                namespace=namespace,
+                key=key,
+                parts=tuple(parsed_parts),
+                closing_index=parsed_closing_index,
+                explicit_namespace=explicit_namespace,
+                current_value=current_value,
+                occurrence=occurrence,
+            )
+        )
+    return calls
+
+
+def _kubejs_lang_call_replacement(
+    content: str, call: _KubeJSLangCall, translated: str
+) -> str:
+    """只重建 event.add 的引數，保留原始呼叫前綴與檔案格式。"""
+    parts = list(call.parts)
+    value_index = 2 if call.explicit_namespace else 1
+    parts[value_index] = json.dumps(translated, ensure_ascii=False)
+    return content[call.match_start : call.match_end] + ", ".join(parts) + ")"
+
+
+def _zh_tw_update_target(
+    call: _KubeJSLangCall, translated: str, source_file: str
+) -> _KubeJSLangCall | None:
+    """回傳需要更新的既有 zh_tw 呼叫；譯文相同時回傳 None，無法安全回寫時拒絕。"""
+    if call.current_value is None:
+        raise ValueError(
+            "KubeJS zh_tw key 的值不是可安全回寫的靜態字串，"
+            f"拒絕猜測更新：{source_file}:{call.namespace}:{call.key}"
+        )
+    if translated == call.current_value:
+        return None
+    return call
+
+
+def _add_kubejs_overlay(
+    additions: dict[tuple[str, str], tuple[str, bool]],
+    call: _KubeJSLangCall,
+    translated: str,
+    source_file: str,
+) -> None:
+    """登記沒有既有 zh_tw 目標時要追加的 overlay；同一 key 的不同譯文拒絕覆蓋。"""
+    identity = (call.namespace, call.key)
+    existing = additions.get(identity)
+    if existing is not None and existing[0] != translated:
+        raise ValueError(
+            "KubeJS zh_tw overlay 發生衝突，拒絕覆蓋："
+            f"{source_file}:{call.namespace}:{call.key}"
+        )
+    additions.setdefault(identity, (translated, call.explicit_namespace))
+
+
+def _add_kubejs_replacement(
+    replacements: dict[int, tuple[int, str]],
+    content: str,
+    target: _KubeJSLangCall,
+    translated: str,
+    source_file: str,
+) -> None:
+    """登記對既有呼叫的替換；同一位置的不同替換內容拒絕覆蓋。"""
+    replacement = _kubejs_lang_call_replacement(content, target, translated)
+    previous = replacements.get(target.match_start)
+    if previous is not None and previous[1] != replacement:
+        raise ValueError(
+            "KubeJS zh_tw key 發生不同翻譯衝突，拒絕覆蓋："
+            f"{source_file}:{target.namespace}:{target.key}"
+        )
+    replacements[target.match_start] = (target.closing_index + 1, replacement)
+
+
 def _append_kubejs_lang_translations(
     content: str,
     *,
@@ -369,50 +495,30 @@ def _append_kubejs_lang_translations(
 ) -> str:
     """以 locale-aware 方式輸出 KubeJS LangEventJS 翻譯。
 
-    英文來源事件永遠保持原樣；翻譯會追加成 ``zh_tw`` 事件。若來源本身
-    已是 ``zh_tw``，只在同一個精確 selector 上更新 value。這避免把英文
-    腳本誤當成繁中輸出，也避免對檔案中其他 API 的 ``event.add`` 做全文替換。
+    非 ``zh_tw`` 的來源事件永遠保持原樣；有唯一既有 ``zh_tw`` key 時直接
+    更新它，只有沒有目標時才追加 overlay。既有目標不唯一時 fail closed，
+    避免輸出兩個互相衝突的繁中 key，讓重掃描誤判成成功。
     """
     ranges = _clientevents_lang_ranges(content)
     if not ranges:
         return content
 
-    code = _mask_js_non_code(content)
-    pattern = re.compile(r"\bevent\.add\s*\(")
-    output: list[str] = []
-    cursor = 0
-    occurrence = 0
-    additions: list[tuple[str, str, str, bool]] = []
+    calls = _collect_kubejs_lang_calls(content, ranges)
+    targets: dict[tuple[str, str], list[_KubeJSLangCall]] = defaultdict(list)
+    for call in calls:
+        if call.locale == "zh_tw":
+            targets[(call.namespace, call.key)].append(call)
 
-    for match in pattern.finditer(code):
-        locale = _clientevents_lang_locale_at(ranges, match.start())
-        if locale is None:
-            continue
-        arguments, _ = _extract_call_args_with_end(content, match.end())
-        if arguments is None or not is_client_lang_add_shape(split_js_args(arguments)):
-            continue
-        # 與 scanner 保持相同契約：即使值是動態表達式，這個 event.add
-        # 仍會消耗 occurrence；只有後續解析成功時才有可套用的翻譯。
-        occurrence += 1
-        candidate = _parse_kubejs_lang_call(content, match, locale)
-        if candidate is None:
-            continue
-        (
-            locale,
-            namespace,
-            key,
-            parts,
-            closing_index,
-            explicit_namespace,
-            current_value,
-        ) = candidate
+    replacements: dict[int, tuple[int, str]] = {}
+    additions: dict[tuple[str, str], tuple[str, bool]] = {}
 
+    for call in calls:
         selected = _select_kubejs_lang_translation(
             source_file,
-            locale,
-            namespace,
-            key,
-            occurrence,
+            call.locale,
+            call.namespace,
+            call.key,
+            call.occurrence,
             translation_map,
         )
         if selected is None:
@@ -420,21 +526,34 @@ def _append_kubejs_lang_translations(
 
         selected_key, translated = selected
         used_keys.add(selected_key)
-        if locale == "en_us":
-            additions.append((namespace, key, translated, explicit_namespace))
+        matching_targets = targets[(call.namespace, call.key)]
+        if len(matching_targets) > 1:
+            raise ValueError(
+                "KubeJS zh_tw key 不唯一，拒絕猜測更新："
+                f"{source_file}:{call.namespace}:{call.key} "
+                f"({len(matching_targets)} 個目標)"
+            )
+        if matching_targets:
+            # Existing zh_tw targets must always pass the same safe-write
+            # validation, even when the translated source is en_us/zh_cn.
+            # Otherwise a unique dynamic target could be overwritten with a
+            # static translation and lose its runtime expression.
+            target = _zh_tw_update_target(matching_targets[0], translated, source_file)
+            if target is None:
+                continue
+        else:
+            _add_kubejs_overlay(additions, call, translated, source_file)
             continue
-        if locale != "zh_tw" or translated == current_value:
-            continue
+        _add_kubejs_replacement(replacements, content, target, translated, source_file)
 
-        new_parts = list(parts)
-        value_index = 2 if explicit_namespace else 1
-        new_parts[value_index] = json.dumps(translated, ensure_ascii=False)
-        output.append(content[cursor : match.start()])
-        output.append(content[match.start() : match.end()])
-        output.append(", ".join(new_parts))
-        output.append(")")
-        cursor = closing_index + 1
-
+    output: list[str] = []
+    cursor = 0
+    for start, (end, replacement) in sorted(replacements.items()):
+        if start < cursor:
+            raise ValueError(f"KubeJS event.add 回寫範圍重疊：{source_file}")
+        output.append(content[cursor:start])
+        output.append(replacement)
+        cursor = end
     output.append(content[cursor:])
     result = "".join(output)
     if not additions:
@@ -445,7 +564,7 @@ def _append_kubejs_lang_translations(
         "// Minecraft-translate generated zh_tw language overlay",
         "ClientEvents.lang('zh_tw', event => {",
     ]
-    for namespace, key, value, explicit_namespace in additions:
+    for (namespace, key), (value, explicit_namespace) in additions.items():
         encoded_key = json.dumps(key, ensure_ascii=False)
         encoded_value = json.dumps(value, ensure_ascii=False)
         if explicit_namespace:
@@ -453,8 +572,8 @@ def _append_kubejs_lang_translations(
             lines.append(
                 f"  event.add({encoded_namespace}, {encoded_key}, {encoded_value});"
             )
-        else:
-            lines.append(f"  event.add({encoded_key}, {encoded_value});")
+            continue
+        lines.append(f"  event.add({encoded_key}, {encoded_value});")
     lines.extend(["});", ""])
     separator = "" if result.endswith("\n") else "\n"
     return result + separator + "\n".join(lines)

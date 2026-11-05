@@ -8,7 +8,7 @@ import time
 import traceback
 import uuid
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
@@ -185,6 +185,9 @@ class SameSourceAIRepairReport:
     cache_stats_note: str = ""
     ai_submitted_items: int = 0
     ai_validated_items: int = 0
+    quality_retry_candidates: int = 0
+    quality_retry_fixed: int = 0
+    quality_retry_unresolved: int = 0
     ai_submission_unit: str = "items_passed_to_translate_batch_smart"
     candidate_profile_counts: dict[str, int] = field(default_factory=dict)
     processed_candidates: int = 0
@@ -648,8 +651,12 @@ def _limited_repair_snapshot(db, options, deadline):
         eligible += 1
         if limit is None or len(chosen) < limit:
             chosen.append(entry)
+    source_locales = db.source_locales_for_entries([entry.entry_id for entry in chosen])
     items = _group_retranslation_items_by_cache_type(
-        _build_retranslation_items(chosen, deadline=deadline), deadline=deadline
+        _build_retranslation_items(
+            chosen, source_locales=source_locales, deadline=deadline
+        ),
+        deadline=deadline,
     )
     rows_by_key = {
         (entry.entry_id, int(entry.source_id or SRC_AI)): entry for entry in chosen
@@ -696,12 +703,18 @@ def preview_same_source_ai_retranslation(
     else:
         raise ValueError(f"未知既有譯文修復條件：{mode}")
     _raise_preview_timeout(deadline)
-    items = _build_retranslation_items(entries, deadline=deadline)
+    source_locales = db.source_locales_for_entries(
+        [entry.entry_id for entry in entries]
+    )
+    items = _build_retranslation_items(
+        entries, source_locales=source_locales, deadline=deadline
+    )
     attach_moddb_context(
         items,
         operation_id=f"retranslate-preview:{id(db)}",
         mc_version=options.version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db, "reviewed_exact_glossary", None),
     )
     items = _group_retranslation_items_by_cache_type(items, deadline=deadline)
     _raise_preview_timeout(deadline)
@@ -770,7 +783,10 @@ def preview_same_source_ai_retranslation_from_path(
 
 
 def _build_retranslation_items(
-    entries: Sequence[SameSourceAIEntry], *, deadline: float | None = None
+    entries: Sequence[SameSourceAIEntry],
+    *,
+    source_locales: Mapping[int, str | None] | None = None,
+    deadline: float | None = None,
 ) -> list[dict[str, Any]]:
     rows = []
     for row in entries:
@@ -779,6 +795,11 @@ def _build_retranslation_items(
     items = build_items(rows, check=lambda: _raise_preview_timeout(deadline))
     for item, row in zip(items, entries, strict=True):
         _raise_preview_timeout(deadline)
+        locale = (source_locales or {}).get(row.entry_id)
+        if source_locales is not None:
+            item["source_locale"] = locale
+        if locale not in (None, "", "en_us", "zh_tw", "zh_cn"):
+            item["_batch_group"] = (str(row.mod_id), str(row.kind), locale)
         item["_expected_old_zh_tw"] = row.current_ai_translation
         item["_expected_version"] = row.mc_version
         item["_source_id"] = row.source_id if row.source_id is not None else SRC_AI
@@ -1129,6 +1150,39 @@ def _finalize_batch_results(
     return len(results), stop_after_batch
 
 
+def _count_quality_retry(report, result: dict[str, Any]) -> None:
+    """累計翻譯端回報的品質重試結果，供摘要顯示每一筆是否被重試過。"""
+    if not result.get("_quality_retry_candidate"):
+        return
+    report.quality_retry_candidates += 1
+    if result.get("_quality_retry_fixed"):
+        report.quality_retry_fixed += 1
+    if result.get("_quality_retry_unresolved"):
+        report.quality_retry_unresolved += 1
+
+
+def _repair_validation_issues(
+    report, kind: str, source_text: str, translated_text: str
+) -> list[str]:
+    """寫回前的格式驗證；翻譯端的品質重試使用同一個函式，兩邊判定一致。"""
+    if report.mode == "quality_mismatch":
+        return repair_output_issues_for_kind(
+            source_text,
+            translated_text,
+            kind=kind,
+            allow_actual_newlines=not report.strict_newline,
+        )
+    return translation_issues(source_text, translated_text, kind=kind)
+
+
+def _attach_repair_quality_gate(items: list[dict[str, Any]], report) -> None:
+    """讓翻譯端的品質重試使用與寫回驗證相同的規則，驗證不過的項目會先被重送。"""
+    for item in items:
+        kind = str(item.get("_kind") or "lang")
+        item["_quality_gate"] = partial(_repair_validation_issues, report, kind)
+        item["_report_quality_retry"] = True
+
+
 def _finalize_result(
     db, options, session, original, result, has_result, report, cache_keys_to_save
 ) -> bool:
@@ -1158,16 +1212,12 @@ def _finalize_result(
         )
         return True
     translated_text = result["text"]
-    kind = str(original.get("_kind") or "lang")
-    issues = (
-        repair_output_issues_for_kind(
-            original["source_text"],
-            translated_text,
-            kind=kind,
-            allow_actual_newlines=not report.strict_newline,
-        )
-        if report.mode == "quality_mismatch"
-        else translation_issues(original["source_text"], translated_text, kind=kind)
+    _count_quality_retry(report, result)
+    issues = _repair_validation_issues(
+        report,
+        str(original.get("_kind") or "lang"),
+        original["source_text"],
+        translated_text,
     )
     if issues:
         _mark_flagged(db, session, report, original, translated_text, issues)
@@ -1556,6 +1606,8 @@ def _finish_snapshot(db, options, session, report, tracker) -> None:
             else ""
         )
         + f"，格式檢查未通過 {report.flagged}，"
+        f"品質重試 {report.quality_retry_candidates} 筆"
+        f"（修正 {report.quality_retry_fixed}、仍未通過 {report.quality_retry_unresolved}），"
         f"資料已變動跳過 {report.skipped_changed}，失敗 {report.failed}，"
         f"未處理來源項目 {report.unprocessed_candidates}，未送出來源項目 {report.not_submitted_candidates}，"
         f"範圍內仍符合修復條件 {report.remaining}；快取 key 變更 "
@@ -2064,12 +2116,17 @@ def _initialize_snapshot_run(db, entries, session, report, options):
         entries, skipped_newline_only = _filter_newline_only_repair_entries(entries)
         report.skipped_newline_only_candidates += skipped_newline_only
         report.candidates = len(entries)
-    candidates = _build_retranslation_items(entries)
+    source_locales = db.source_locales_for_entries(
+        [entry.entry_id for entry in entries]
+    )
+    candidates = _build_retranslation_items(entries, source_locales=source_locales)
+    _attach_repair_quality_gate(candidates, report)
     attach_moddb_context(
         candidates,
         operation_id=f"retranslate:{getattr(session, 'id', '') or id(session)}",
         mc_version=options.version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db, "reviewed_exact_glossary", None),
     )
     candidates = _group_retranslation_items_by_cache_type(candidates)
     items = candidates

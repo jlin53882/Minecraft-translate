@@ -8,6 +8,7 @@ from translation_tool.core.format_diagnostics import (
     analyze_format_diagnostics,
     format_identifier_label,
     format_kind_policy,
+    has_format_structure_marks,
 )
 from translation_tool.core.format_tokens import (
     format_token_spans,
@@ -15,7 +16,11 @@ from translation_tool.core.format_tokens import (
     token_category,
 )
 from translation_tool.core.guide_format import guide_issues
-from translation_tool.translation_db.models import QualityFilter, QualityIssueDelta
+from translation_tool.translation_db.models import (
+    QUALITY_TOKEN_CATEGORIES,
+    QualityFilter,
+    QualityIssueDelta,
+)
 from translation_tool.utils.species_names import (
     is_potential_species_name,
     is_species_candidate,
@@ -77,17 +82,34 @@ def repair_input_issues_for_kind(
     source: str, previous_translation: str, *, kind: str | None = None
 ) -> tuple[bool, tuple[str, ...], bool]:
     """Return repair eligibility, hard issues, and mixed-newline status."""
-    wanted = format_tokens(source)
-    previous = format_tokens(previous_translation)
-    if not format_kind_policy(kind).has_structured_marks:
-        return repair_input_issues_from_counts(wanted, previous)
-    # 指南類的實際換行可重排，只有硬結構（標記、元件、前綴）不符才需要修復
-    issues = (
-        *token_issues_for_kind(source, previous_translation, kind=kind),
-        *guide_structure_issues(source, previous_translation, kind=kind),
+    # 修復預覽、套用 CAS 與 ModDB 品質篩選必須共用同一套格式診斷。
+    # 舊版只呼叫 format_tokens，會漏掉 FTB Quests 的 ``&2``／``&l`` 色碼與
+    # KubeJS 的自訂標記，造成資料庫可篩出條目，但修復預覽把它們當成正常譯文。
+    policy = format_kind_policy(kind)
+    result = analyze_format_diagnostics(
+        source,
+        previous_translation,
+        kind=kind or "lang",
+        repair=True,
     )
-    newline_mismatch = wanted["\n"] != previous["\n"]
-    return bool(issues), issues, bool(newline_mismatch and issues)
+    newline_mismatch = dict(result.source_counts).get("\n", 0) != dict(
+        result.target_counts
+    ).get("\n", 0)
+    # 只有真換行（identifier ``\n``）屬於可略過的換行差異；字面 ``\\n``（兩個字元）
+    # 是必須原樣保留的 token，缺少時仍是硬性問題，與 ``repair_input_issues_from_counts`` 一致。
+    hard_issues = tuple(
+        issue.legacy_message
+        for issue in result.diagnostics
+        if not (issue.category == "newline" and issue.identifier == "\n")
+    ) + tuple(result.extra_guide_issues)
+
+    # Hard-newline formats keep the old behaviour: a newline-only mismatch is a
+    # candidate that the caller may deliberately skip or include.  Guide and
+    # Patchouli use soft newlines, so reflow alone is not a repair candidate.
+    eligible = bool(hard_issues) or (
+        newline_mismatch and policy.newline_policy == "hard"
+    )
+    return eligible, hard_issues, bool(newline_mismatch and hard_issues)
 
 
 def repair_input_issues_from_counts(
@@ -271,7 +293,7 @@ def matches_quality(
 
     policy = format_kind_policy(kind)
     if not policy.has_structured_marks and not (
-        format_token_spans(source) or format_token_spans(translated)
+        has_format_structure_marks(source) or has_format_structure_marks(translated)
     ):
         return status == "consistent"
 
@@ -284,10 +306,16 @@ def matches_quality(
     if direction not in {"all", "missing", "extra"}:
         raise ValueError(f"未知 token 不一致方向：{direction}")
     category = criteria.token_category
-    if category not in {"all", "placeholder", "minecraft", "patchouli", "newline"}:
+    if category not in QUALITY_TOKEN_CATEGORIES:
         raise ValueError(f"未知 token 類別：{category}")
-    if structure_issues and direction == "all" and category == "all":
-        return True
+    if structure_issues and category in {"all", "guide"}:
+        # Guide structure diagnostics do not have a separate FormatDiagnostic
+        # direction.  They describe missing/invalid structure, so they belong
+        # to the "少了 token" side when the user narrows the direction.
+        if category == "guide":
+            return direction in {"all", "missing"}
+        if direction in {"all", "missing"}:
+            return True
 
     def selected(direction_name: str) -> bool:
         return any(

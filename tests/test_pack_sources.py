@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from translation_tool.plugins.kubejs.kubejs_tooltip_inject import inject
 from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.pack_sources import scan_pack_sources
@@ -277,6 +279,18 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
         "ClientEvents.lang[zh_tw][demo]" in item.source_selector for item in items
     )
     assert {item.mod_id for item in items} == {"demo@" + result.pack_scope}
+    assert {item.source_locale for item in items} == {"en_us"}
+
+    db = TranslationDB(tmp_path / "kubejs-locale.db")
+    try:
+        db.ingest("1.21.1", result.items)
+        entry_id = db._one(
+            "SELECT id FROM entry WHERE kind='kubejs_lang' AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )[0]
+        assert db.source_locales_for_entries([entry_id]) == {entry_id: "en_us"}
+    finally:
+        db.close()
 
     translated = tmp_path / "translated" / "client_scripts" / "lang.json"
     translated.parent.mkdir(parents=True)
@@ -299,7 +313,227 @@ def test_kubejs_lang_supports_locales_and_three_argument_form(tmp_path):
     ]
     output_text = (output / "client_scripts/lang.js").read_text(encoding="utf-8")
     assert "'demo', 'item.demo.machine', 'Machine'" in output_text
-    assert 'event.add("demo", "item.demo.machine", "機器翻譯");' in output_text
+    assert "event.add('demo', 'item.demo.machine', \"機器翻譯\");" in output_text
+
+
+def test_kubejs_script_locale_fallback_uses_most_common_locale(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '機器');\n"
+        "  event.add('demo', 'item.demo.machine', '機器二');\n"
+        "});\n"
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.key == "item.demo.machine"]
+
+    assert len(items) == 3
+    assert {item.source_locale for item in items} == {"zh_tw"}
+    assert {(item.en_us, item.zh_tw, item.zh_cn) for item in items} == {
+        ("機器", "", ""),
+        ("機器二", "", ""),
+        ("", "", "机器"),
+    }
+
+    db = TranslationDB(tmp_path / "kubejs-fallback.db")
+    try:
+        db.ingest("1.21.1", result.items)
+        row = db._one(
+            "SELECT en_us FROM entry WHERE kind='kubejs_lang' AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert row is not None and row[0] in {"機器", "機器二"}
+    finally:
+        db.close()
+
+
+def test_kubejs_lang_skips_blank_values_but_keeps_occurrence_alignment(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.empty', '');\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    items = [item for item in result.items if item.kind == "kubejs_lang"]
+    assert [item.key for item in items] == ["item.demo.machine"]
+    assert "event.add[2]|item.demo.machine" in items[0].source_selector
+    assert len(result.stale_origins) == 1
+    assert result.stale_origins[0].selector.endswith("event.add[1]|item.demo.empty")
+
+
+def test_moddb_rescan_removes_legacy_blank_kubejs_origin(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '');\n"
+        "});\n"
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        db.ingest(
+            "1.21.1",
+            [
+                ScanItem(
+                    "kubejs_lang",
+                    "demo@" + result.pack_scope,
+                    "item.demo.machine",
+                    "",
+                    source_path="client_scripts/lang.js",
+                    source_selector=(
+                        "ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine"
+                    ),
+                    source_hash="legacy",
+                    source_format="kubejs-js",
+                    pack_scope=result.pack_scope,
+                    source_locale="en_us",
+                )
+            ],
+        )
+
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+
+        row = db._one(
+            "SELECT id, en_us FROM entry WHERE kind='kubejs_lang' "
+            "AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert row is not None and row[1] == "机器"
+        assert db._one(
+            "SELECT COUNT(*) FROM entry_origin WHERE pack_scope=? "
+            "AND source_kind='kubejs_lang' AND source_path=? "
+            "AND selector LIKE '%[en_us][demo].event.add[1]|%'",
+            (result.pack_scope, "client_scripts/lang.js"),
+        ) == (0,)
+        assert db.source_locales_for_entries([row[0]]) == {row[0]: "zh_cn"}
+    finally:
+        db.close()
+
+
+def test_moddb_rescan_scopes_legacy_origin_cleanup_to_version(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '');\n"
+        "});\n"
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        legacy_item = ScanItem(
+            "kubejs_lang",
+            "demo@" + result.pack_scope,
+            "item.demo.machine",
+            "",
+            source_path="client_scripts/lang.js",
+            source_selector=(
+                "ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine"
+            ),
+            source_hash="legacy",
+            source_format="kubejs-js",
+            pack_scope=result.pack_scope,
+            source_locale="en_us",
+        )
+        db.ingest("1.20.1", [legacy_item])
+        db.ingest("1.21.1", [legacy_item])
+
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+
+        rows = db._q(
+            "SELECT e.mc_version, COUNT(eo.id) "
+            "FROM entry e LEFT JOIN entry_origin eo ON eo.entry_id=e.id "
+            "AND eo.pack_scope=? AND eo.source_kind='kubejs_lang' "
+            "AND eo.source_path=? AND eo.selector LIKE '%[en_us][demo].event.add[1]|%' "
+            "WHERE e.kind='kubejs_lang' AND e.mod_id=? AND e.key=? "
+            "GROUP BY e.mc_version ORDER BY e.mc_version",
+            (
+                result.pack_scope,
+                "client_scripts/lang.js",
+                "demo@" + result.pack_scope,
+                "item.demo.machine",
+            ),
+        )
+        assert rows == [("1.20.1", 1), ("1.21.1", 0)]
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("locale", ["zh_cn", "zh_tw"])
+def test_kubejs_script_locale_only_fallback_is_a_translation_candidate(
+    tmp_path, locale
+):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        f"ClientEvents.lang('{locale}', event => {{\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    item = next(item for item in result.items if item.key == "item.demo.machine")
+    assert item.source_locale == locale
+    assert (item.en_us, item.zh_cn, item.zh_tw) == ("机器", "", "")
+
+    db_path = tmp_path / f"kubejs-{locale}-only.db"
+    db = TranslationDB(db_path)
+    try:
+        db.ingest("1.21.1", result.items)
+        row = db._one(
+            "SELECT en_us FROM entry WHERE kind='kubejs_lang' AND mod_id=? AND key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert row is not None and row[0] == "机器"
+        db.close()
+        db = TranslationDB(db_path)
+        persisted = db._one(
+            "SELECT e.en_us, eo.source_locale FROM entry e "
+            "JOIN entry_origin eo ON eo.entry_id=e.id "
+            "WHERE e.kind='kubejs_lang' AND e.mod_id=? AND e.key=?",
+            ("demo@" + result.pack_scope, "item.demo.machine"),
+        )
+        assert persisted == ("机器", locale)
+    finally:
+        db.close()
 
 
 def test_kubejs_lang_dynamic_value_keeps_scan_and_writer_occurrence_aligned(
@@ -412,6 +646,136 @@ def test_kubejs_lang_writer_does_not_fallback_for_unsupported_locale(tmp_path):
     assert "不應套用" not in output_text
 
 
+def test_kubejs_lang_writer_rejects_ambiguous_existing_zh_tw_key(tmp_path):
+    """多個既有繁中目標不可猜測套用，避免產生不一致 overlay。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.same', 'Original');\n"
+        "});\n"
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.same', '舊一');\n"
+        "  event.add('demo', 'item.same', '舊二');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo].event.add[1]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="zh_tw key 不唯一"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
+def test_kubejs_lang_writer_rejects_ambiguous_zh_tw_fallback_key(tmp_path):
+    """zh_tw fallback 的重複 key 也不可只更新其中一筆。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.same', '舊一');\n"
+        "  event.add('demo', 'item.same', '舊二');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[zh_tw][demo].event.add[1]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="zh_tw key 不唯一"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
+def test_kubejs_lang_writer_rejects_dynamic_zh_tw_duplicate_key(tmp_path):
+    """動態 zh_tw value 也要納入同 key 衝突保護，不能只更新靜態目標。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  const value = getTranslatedValue();\n"
+        "  event.add('demo', 'item.same', value);\n"
+        "  event.add('demo', 'item.same', '舊翻譯');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[zh_tw][demo].event.add[2]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="zh_tw key 不唯一"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
+def test_kubejs_lang_writer_rejects_dynamic_zh_tw_target_from_english_source(tmp_path):
+    """英文來源不可覆寫唯一但動態的既有繁中目標。"""
+    source = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.same', 'Original');\n"
+        "});\n"
+        "ClientEvents.lang('zh_tw', event => {\n"
+        "  event.add('demo', 'item.same', getTranslatedValue());\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    translated = tmp_path / "translated" / "client_scripts" / "lang.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(
+        json.dumps(
+            {
+                "client_scripts/lang.js|ClientEvents.lang[en_us][demo].event.add[1]|item.same": "新翻譯"
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="不是可安全回寫的靜態字串"):
+        inject(
+            str(tmp_path / "kubejs"),
+            str(tmp_path / "translated"),
+            str(tmp_path / "output"),
+        )
+
+
 def test_ftb_single_file_locale_identity_is_shared(tmp_path):
     lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
     lang.mkdir(parents=True)
@@ -423,6 +787,77 @@ def test_ftb_single_file_locale_identity_is_shared(tmp_path):
     assert len(items) == 1
     assert items[0].key.startswith("__root__.snbt|lang:quest.title")
     assert items[0].source_path == "lang/en_us.snbt"
+
+
+def test_ftb_non_default_locale_is_source_and_keeps_locale_identity(tmp_path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang" / "pt_br"
+    lang.mkdir(parents=True)
+    (lang / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+
+    assert len(items) == 1
+    assert result.locale_fallbacks == {"ftbquests": "pt_br"}
+    assert items[0].source_locale == "pt_br"
+    assert items[0].source_selector == "lang:pt_br:quest.title"
+    assert items[0].source_path == "lang/pt_br/chapter.snbt"
+
+
+def test_ftb_fallback_source_keeps_companion_zh_tw_translation(tmp_path):
+    """非英文 fallback 仍是原文；同時存在的 zh_tw 只作為既有譯文。"""
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    (lang / "pt_br").mkdir(parents=True)
+    (lang / "zh_tw").mkdir(parents=True)
+    (lang / "pt_br" / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+    (lang / "zh_tw" / "chapter.snbt").write_text(
+        '{quest.title:"繁體標題"}', encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+
+    assert len(items) == 1
+    assert items[0].source_locale == "pt_br"
+    assert items[0].en_us == "Título em português"
+    assert items[0].zh_tw == "繁體標題"
+
+
+def test_ftb_empty_en_us_uses_non_empty_fallback_source(tmp_path):
+    """空的 en_us 不可遮蔽可用的 pt_br 原文。"""
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    (lang / "pt_br").mkdir(parents=True)
+    (lang / "en_us").mkdir(parents=True)
+    (lang / "pt_br" / "chapter.snbt").write_text(
+        '{quest.title:"Título em português"}', encoding="utf-8"
+    )
+    (lang / "en_us" / "chapter.snbt").write_text('{quest.title:""}', encoding="utf-8")
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    items = [item for item in result.items if item.kind == "ftb_quest_lang"]
+
+    assert len(items) == 1
+    assert result.locale_fallbacks == {"ftbquests": "pt_br"}
+    assert items[0].source_locale == "pt_br"
+    assert items[0].en_us == "Título em português"
+    assert items[0].source_path == "lang/pt_br/chapter.snbt"
+
+
+def test_ftb_invalid_locale_path_is_reported_and_not_used_as_source(tmp_path):
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "README.snbt").write_text(
+        '{quest.title:"Not a locale file"}', encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    assert not [item for item in result.items if item.kind == "ftb_quest_lang"]
+    assert any(issue["reason"] == "ftb_lang_locale_invalid" for issue in result.issues)
 
 
 def test_ftb_component_json_is_not_sent_as_plain_text(tmp_path):

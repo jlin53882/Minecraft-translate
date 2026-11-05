@@ -9,6 +9,7 @@ from datetime import date, datetime
 import flet as ft
 
 from app.services_impl.moddb_service import (
+    QUALITY_TOKEN_CATEGORIES,
     QualityFilter,
     TimeFilter,
     custom_date_bounds,
@@ -19,6 +20,18 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.ui.update_scope import update_regions
+
+QUALITY_TOKEN_CATEGORY_LABELS = {
+    "all": "所有類別",
+    "placeholder": "佔位符",
+    "minecraft": "Minecraft 色碼 §",
+    "patchouli": "Patchouli 提示",
+    "newline": "換行",
+    "color": "FTB 色碼 &",
+    "markup": "KubeJS 自訂標記",
+    "guide": "Guide 結構",
+    "other": "其他格式",
+}
 
 
 def picked_date(value: date | datetime) -> date:
@@ -131,6 +144,7 @@ class AdvancedFilters:
                 ("unknown_source", "原文未知"),
                 ("missing_translation", "尚無譯文"),
                 ("species_name", "疑似學名文字"),
+                ("species_format", "疑似學名格式"),
             ],
             "all",
         )
@@ -140,13 +154,10 @@ class AdvancedFilters:
             "all",
         )
         self.category = self._dropdown(
-            "token 類別",
+            "格式／標記類別",
             [
-                ("all", "所有類別"),
-                ("placeholder", "佔位符"),
-                ("minecraft", "Minecraft 色碼"),
-                ("patchouli", "Patchouli 提示"),
-                ("newline", "換行"),
+                (category, QUALITY_TOKEN_CATEGORY_LABELS[category])
+                for category in QUALITY_TOKEN_CATEGORIES
             ],
             "all",
         )

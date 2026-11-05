@@ -170,6 +170,26 @@ def dropdown(**kwargs) -> ft.Dropdown:
     return ft.Dropdown(**{**style, **kwargs})
 
 
+SEARCHABLE_MENU_HEIGHT = 320
+
+
+def searchable_dropdown(**kwargs) -> ft.Dropdown:
+    """選項很多（例如幾百個模組）的下拉選單：可在輸入框打字篩選，選單固定高度往下展開。
+
+    沒有指定 ``menu_height`` 時，Flet 會把選單撐到盡可能多的項目，變成佔滿畫面的長清單；
+    這裡固定高度，行為與少量選項的下拉選單一致（顯示在控制項下方，超出時捲動）。
+    輸入文字會以不分大小寫的方式篩選選項。
+    """
+    return dropdown(
+        **{
+            "editable": True,
+            "enable_filter": True,
+            "menu_height": SEARCHABLE_MENU_HEIGHT,
+            **kwargs,
+        }
+    )
+
+
 def set_dropdown_options(dd: ft.Dropdown, pairs: Sequence[tuple[str, str]]) -> bool:
     """更新下拉選項：重複的 key 只留一個；內容沒變就不動，避免每次切頁都重建選項。
 

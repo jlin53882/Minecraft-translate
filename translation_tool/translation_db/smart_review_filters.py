@@ -8,10 +8,11 @@ twin，套用時一併寫入。候選的 local context 由 ``smart_review_contex
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import (
     KIND_KUBEJS_LANG,
@@ -21,6 +22,7 @@ from translation_tool.translation_db.schema import (
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
+    source_locale_sql,
 )
 
 _SMART_REVIEW_TWIN_GROUP_CHUNK_SIZE = 128
@@ -36,15 +38,39 @@ def _smart_review_row_group(row: Sequence[Any]) -> tuple[Any, ...]:
     return (row[2], row[3], row[1], row[5], row[6], row[7], row[8])
 
 
+def _smart_review_locale_group(
+    entry_id: int, source_locales: Mapping[int, str | None]
+) -> str:
+    """建立安全的同文分組語系身分。
+
+    所有可確認的 locale 都是來源身分的一部分，包含 ``en_us``、``zh_cn``
+    與 ``zh_tw``。這必須與 SQL 的 ``source_locale`` 分組完全一致；沒有
+    可信來源的條目則使用自己的 id，避免把兩個 unknown 誤當成同一個來源。
+    """
+    locale = normalize_source_locale(source_locales.get(entry_id))
+    if locale is None:
+        return f"unknown:{entry_id}"
+    return locale
+
+
 def _dedupe_same_text_rows(
     rows: Sequence[tuple[Any, ...]],
+    source_locales: Mapping[int, str | None] | None = None,
 ) -> list[tuple[tuple[Any, ...], tuple[int, ...]]]:
-    """同版本、模組、種類且英文與目前譯文狀態都相同的條目只保留第一筆。"""
+    """同版本、模組、種類且原文、目前譯文狀態與來源語系都相同的條目只保留第一筆。
+
+    已知來源語系必須相同才可合併；unknown 沒有足夠來源身分，不能和其他
+    條目合併。
+    """
+    locales = source_locales or {}
     twins: dict[tuple[Any, ...], list[int]] = {}
     kept: list[tuple[tuple[Any, ...], tuple[Any, ...]]] = []
     for row in rows:
         # row: id, kind, mc_version, mod_id, key, en_us, zh_tw, source, status, ...
-        group = _smart_review_row_group(row)
+        group = (
+            *_smart_review_row_group(row),
+            _smart_review_locale_group(int(row[0]), locales),
+        )
         if group in twins:
             twins[group].append(int(row[0]))
             continue
@@ -58,7 +84,10 @@ def _smart_review_current_snapshot_sql() -> str:
     return (
         "SELECT e.kind, e.mc_version, e.mod_id, e.key, e.en_us, f.zh_tw, f.source, "
         + _effective_review_sql()
-        + ", t.revision FROM entry e JOIN effective f ON f.entry_id=e.id "
+        + ", t.revision, "
+        # 查詢哨兵 unknown:<id> 在快照中還原為 NULL，與 Python 端的可信來源語系一致
+        + f"NULLIF({source_locale_sql('e')}, 'unknown:' || CAST(e.id AS TEXT)) AS source_locale"
+        + " FROM entry e JOIN effective f ON f.entry_id=e.id "
         "LEFT JOIN translation t ON t.entry_id=f.entry_id AND t.source=f.source "
         "WHERE f.entry_id=?"
     )
@@ -84,6 +113,7 @@ _SMART_REVIEW_DEDUPE_COLUMNS = (
     "current_zh_tw",
     "effective_source",
     "effective_review",
+    "source_locale",
 )
 
 
@@ -109,6 +139,8 @@ def _smart_review_candidate_cte(
         "e.mod_id AS mod_id, e.key AS entry_key, e.en_us AS en_us, "
         "f.zh_tw AS current_zh_tw, f.source AS effective_source, "
         f"({selection.effective_review}) AS effective_review, "
+        f"{source_locale_sql('e')} "
+        "AS source_locale, "
         "t.revision AS effective_revision, tm.zh_tw AS manual_zh_tw, "
         "tm.checker AS manual_checker, tm.review_status AS manual_review_status, "
         "tm.revision AS manual_revision "
@@ -398,22 +430,52 @@ class SmartReviewCandidateSelectionMixin:
             + " "
         )
         absolute_offset = max(0, int(offset))
+        locales: dict[int, str | None] = {}
         selected_rows, selection_exhausted = self._page_deduped_candidate_rows(
-            query_sql, selection.params, absolute_offset, bounded_limit
+            query_sql, selection.params, absolute_offset, bounded_limit, locales
         )
         if not selection_exhausted:
             selected_rows = self._complete_smart_review_twin_ids(
                 selection, selected_rows
             )
+            # 補查是依 SQL 欄位比對，不分來源語系；跨語系的同文條目要踢出 twin
+            self._load_source_locales(
+                [int(row[0]) for row, _ in selected_rows]
+                + [twin for _, twins in selected_rows for twin in twins],
+                locales,
+            )
+            selected_rows = [
+                (
+                    row,
+                    tuple(
+                        twin
+                        for twin in twins
+                        if _smart_review_locale_group(twin, locales)
+                        == _smart_review_locale_group(int(row[0]), locales)
+                    ),
+                )
+                for row, twins in selected_rows
+            ]
         return [
             self._smart_review_snapshot_from_row(
                 row,
                 twin_ids,
                 absolute_offset + row_index,
                 include_context=include_context,
+                source_locale=locales.get(int(row[0])),
             )
             for row_index, (row, twin_ids) in enumerate(selected_rows, 1)
         ]
+
+    def _load_source_locales(
+        self, entry_ids: Sequence[int], locales: dict[int, str | None]
+    ) -> None:
+        """批次補齊尚未查過的條目來源語系到 ``locales``（每個 id 只查一次）。"""
+        missing = [
+            entry_id for entry_id in dict.fromkeys(entry_ids) if entry_id not in locales
+        ]
+        if missing:
+            locales.update(self.source_locales_for_entries(missing))
 
     def _page_deduped_candidate_rows(
         self,
@@ -421,6 +483,7 @@ class SmartReviewCandidateSelectionMixin:
         params: tuple[Any, ...],
         absolute_offset: int,
         bounded_limit: int,
+        locales: dict[int, str | None],
     ) -> tuple[list[tuple[tuple[Any, ...], tuple[int, ...]]], bool]:
         """讀出去重後的代表候選頁面，回傳（資料列, 是否已讀完整個範圍）。
 
@@ -429,7 +492,8 @@ class SmartReviewCandidateSelectionMixin:
         target_count = absolute_offset + bounded_limit
         if bounded_limit == 0:
             raw_rows = self._q(query_sql, params)
-            deduped_rows = _dedupe_same_text_rows(raw_rows)
+            self._load_source_locales([int(row[0]) for row in raw_rows], locales)
+            deduped_rows = _dedupe_same_text_rows(raw_rows, locales)
             return deduped_rows[absolute_offset:], True
         selection_exhausted = False
         raw_fetch_limit = max(1, target_count)
@@ -438,7 +502,8 @@ class SmartReviewCandidateSelectionMixin:
                 query_sql + "LIMIT ? OFFSET ?",
                 (*params, raw_fetch_limit, 0),
             )
-            deduped_rows = _dedupe_same_text_rows(raw_rows)
+            self._load_source_locales([int(row[0]) for row in raw_rows], locales)
+            deduped_rows = _dedupe_same_text_rows(raw_rows, locales)
             if len(deduped_rows) >= target_count or len(raw_rows) < raw_fetch_limit:
                 selection_exhausted = len(raw_rows) < raw_fetch_limit
                 break
@@ -455,6 +520,7 @@ class SmartReviewCandidateSelectionMixin:
         ordinal: int,
         *,
         include_context: bool = True,
+        source_locale: str | None = None,
     ) -> SmartReviewSnapshot:
         """把候選資料列與其 local context 組成不可變快照。"""
         (
@@ -504,6 +570,7 @@ class SmartReviewCandidateSelectionMixin:
             manual_review_status=manual_review_status,
             manual_revision=(None if manual_revision is None else int(manual_revision)),
             twin_entry_ids=twin_ids,
+            source_locale=source_locale,
         )
 
     def count_smart_review_candidates(

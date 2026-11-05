@@ -106,10 +106,8 @@ def test_merge_view_all_checkboxes_and_switches_exist(monkeypatch):
     assert view.process_zh_cn_switch.label == "處理 zh_cn 檔案"
     assert view.process_zh_cn_switch.value is True
 
-    assert (
-        view.patchouli_skip_zh_cn_switch.label
-        == "優先使用已有繁中，無則信任簡中（跳過英文）"
-    )
+    # 文字由同列的標籤提供（窄視窗時可換行），開關本身不帶 label 以免被裁切
+    assert view.patchouli_skip_zh_cn_switch.label is None
     assert view.patchouli_skip_zh_cn_switch.value is False
 
 

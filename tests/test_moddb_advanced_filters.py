@@ -90,6 +90,29 @@ def test_programmatic_sort_value_uses_that_basis_natural_direction():
     assert filters.sort_by == "entry_newest"
 
 
+def test_quality_controls_expose_all_registered_format_categories():
+    filters, _ = _filters()
+
+    status_keys = {option.key for option in filters.quality_status.options}
+    assert "species_format" in status_keys
+
+    category_keys = {option.key for option in filters.category.options}
+    assert {
+        "all",
+        "placeholder",
+        "minecraft",
+        "patchouli",
+        "newline",
+        "color",
+        "markup",
+        "guide",
+        "other",
+    } <= category_keys
+
+    filters.category.value = "markup"
+    assert filters.quality_filter().token_category == "markup"
+
+
 def _calendar_value(year, month, day):
     """日曆選到某天時回傳的值：該日本地零點換算成 UTC（與執行環境的時區無關）。"""
     from datetime import datetime

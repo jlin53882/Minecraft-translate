@@ -41,6 +41,7 @@ from app.ui.kit.inputs import (
     field,
     page_window,
     pick_button,
+    searchable_dropdown,
     set_dropdown_options,
     text_field,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "pick_button",
     "progress_bar",
     "rekey",
+    "searchable_dropdown",
     "section_card",
     "section_label",
     "set_dropdown_options",

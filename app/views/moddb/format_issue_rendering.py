@@ -6,7 +6,11 @@ from collections.abc import Iterable
 
 import flet as ft
 
-from app.services_impl.moddb_format_diff_service import FormatDiagnostic, FormatSpan
+from app.services_impl.moddb_format_diff_service import (
+    FormatDiagnostic,
+    FormatSpan,
+    diagnostic_action,
+)
 from app.ui.design import C
 
 
@@ -17,7 +21,7 @@ def diagnostic_tone(issue: FormatDiagnostic) -> str:
 def diagnostic_label(issue: FormatDiagnostic) -> str:
     if issue.category == "newline" and issue.identifier == "\n":
         return f"換行數量不一致 · 原文 {issue.source_count} / 譯文 {issue.target_count}"
-    action = "缺少" if issue.direction == "missing" else "多出"
+    action = diagnostic_action(issue)
     return f"{action} {issue.display_token} × {abs(issue.delta)}"
 
 

@@ -1466,6 +1466,16 @@ def test_entries_step_moves_within_page_and_empty_state_without_database():
     assert panel.editor_body.visible is False and panel.empty_editor.visible is True
 
 
+def test_entries_module_filter_is_searchable_and_the_other_filters_are_not():
+    """模組有幾百個：模組選單可打字搜尋、固定高度往下展開；版本等少量選項維持一般選單。"""
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: None)
+
+    assert panel.mod_dd.editable is True and panel.mod_dd.enable_filter is True
+    assert panel.mod_dd.menu_height
+    assert not panel.version_dd.editable and not panel.version_dd.enable_filter
+    assert not panel.kind_dd.editable
+
+
 # ------------------------------------------------------------------ 掃描匯入
 # 只替換 scan_panel 看到的 threading：直接改全域 threading.Thread 會連 ThreadPoolExecutor 的
 # worker 一起變成同步執行而死結。
@@ -3011,3 +3021,22 @@ def test_batch_replace_snack_reports_shadowed_entries(db_path, monkeypatch):
     dialog._finish_apply({"state": "complete"}, outcome)
     assert shown and "優先序" in shown[0] and "只改變 3 筆" in shown[0]
     db.close()
+
+
+def test_every_module_filter_with_many_modules_is_searchable():
+    """條目校對、批次機翻、智慧校對執行頁、批量審核、學名查詢的模組選單都可打字搜尋。"""
+    from app.views.moddb import (
+        bulk_review_dialog,
+        smart_review_run_panel,
+        species_dialog,
+        translate_panel,
+    )
+
+    for module in (
+        bulk_review_dialog,
+        smart_review_run_panel,
+        species_dialog,
+        translate_panel,
+    ):
+        source = Path(module.__file__).read_text(encoding="utf-8")
+        assert "self.mod_dd = kit.searchable_dropdown(" in source, module.__name__

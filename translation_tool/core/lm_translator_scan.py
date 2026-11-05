@@ -18,6 +18,7 @@ from translation_tool.core.guide_translation import (
     load_guide,
 )
 from translation_tool.core.lang_codec import parse_lang_text
+from translation_tool.core.source_locale import locale_from_source_path
 from translation_tool.core.translatable_extractor import (
     extract_translatables,
     find_advancement_json,
@@ -114,8 +115,11 @@ def extract_items_parallel(
                 c_type = "patchouli"
 
             extracted_items = extract_translatables(data, f)
+            source_locale = locale_from_source_path(str(f))
             for item in extracted_items:
                 item["cache_type"] = c_type
+                if source_locale is not None:
+                    item["source_locale"] = source_locale
 
             return {
                 "file_path": str(f),

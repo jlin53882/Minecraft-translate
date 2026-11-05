@@ -8,7 +8,10 @@ import traceback
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from tests.test_smart_review_70k_performance import run_70k_gate
+from tests.test_smart_review_70k_performance import (
+    run_70k_gate,
+    run_pack_scope_context_gate,
+)
 
 
 def main() -> int:
@@ -17,7 +20,11 @@ def main() -> int:
         directory = os.environ.get("SMART_REVIEW_70K_ROOT")
         if not directory:
             raise RuntimeError("SMART_REVIEW_70K_ROOT is required")
-        run_70k_gate(Path(directory))
+        case = os.environ.get("SMART_REVIEW_70K_CASE", "70k")
+        cases = {"70k": run_70k_gate, "pack_scope": run_pack_scope_context_gate}
+        if case not in cases:
+            raise RuntimeError(f"unknown SMART_REVIEW_70K_CASE: {case}")
+        cases[case](Path(directory))
         exit_code = 0
     except BaseException:  # noqa: BLE001 - convert benchmark failure to exit code
         traceback.print_exc()

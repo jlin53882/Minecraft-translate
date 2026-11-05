@@ -22,7 +22,9 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.read_cache import ReadCache
 from translation_tool.translation_db.schema import (
+    KIND_FTB_QUEST_LANG,
     KIND_GUIDE,
+    KIND_KUBEJS_LANG,
     KIND_PATCHOULI,
     SRC_AI,
     SRC_JAR_CN,
@@ -434,6 +436,73 @@ def test_definition_version_change_recomputes_every_entry(tmp_path):
         reopened.close()
 
 
+def test_new_source_kind_flags_migrate_before_quality_index_is_used(tmp_path):
+    """新格式種類加入後，舊 qflags 不得讓 FTB／KubeJS 消失在品質篩選。"""
+    path = tmp_path / "new-source-kind-quality.db"
+    first = TranslationDB(path)
+    first.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "kubejs",
+                "kube.one",
+                "Use %s",
+                "使用",
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_FTB_QUEST_LANG,
+                "ftbquests",
+                "quest.one",
+                "Use %s",
+                "使用",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    with first._tx() as conn:
+        # 模擬 #220 前建立的衍生快取：資料列存在，但仍被標為「一致」。
+        conn.execute(
+            "UPDATE entry SET qflags=?",
+            (quality_flags.BITS["consistent"],),
+        )
+        conn.execute("UPDATE meta SET value='8' WHERE key='quality_schema_version'")
+    first.close()
+
+    criteria = EntryFilter(version="1.21.1", quality=QualityFilter(status="mismatch"))
+    reader = TranslationDB(path, readonly=True)
+    try:
+        # 版本尚未由可寫連線遷移時，讀取端必須退回逐列判斷，不能相信舊索引。
+        assert not reader._quality_flags_ready()
+        rows, total = reader.list_entries(criteria=criteria, limit=None)
+        assert total == 2
+        assert {row.kind for row in rows} == {
+            KIND_KUBEJS_LANG,
+            KIND_FTB_QUEST_LANG,
+        }
+        assert set(reader.kind_option_values(criteria)) == {
+            KIND_KUBEJS_LANG,
+            KIND_FTB_QUEST_LANG,
+        }
+    finally:
+        reader.close()
+
+    migrated = TranslationDB(path)
+    try:
+        assert quality_flags.is_installed(migrated._conn)
+        assert migrated._quality_flags_ready()
+        assert migrated.verify_quality_flags() == []
+        rows, total = migrated.list_entries(criteria=criteria, limit=None)
+        assert total == 2
+        assert {row.kind for row in rows} == {
+            KIND_KUBEJS_LANG,
+            KIND_FTB_QUEST_LANG,
+        }
+    finally:
+        migrated.close()
+
+
 def test_guide_format_rule_version_recomputes_old_config_flags(tmp_path):
     """<config> 規則更新後，舊版格式旗標必須在開啟資料庫時重算。"""
     path = tmp_path / "config-rule-version.db"
@@ -476,6 +545,43 @@ def test_guide_format_rule_version_recomputes_old_config_flags(tmp_path):
         assert (
             reopened.list_entries("1.21.1", limit=1)[0][0].quality_state == "consistent"
         )
+    finally:
+        reopened.close()
+
+
+def test_flags_stamped_with_the_previous_version_are_rebuilt_on_open(tmp_path):
+    """舊版算出的旗標把「只含 & 色碼」的條目判為一致；升級後開啟必須重算，篩選才找得到。"""
+    path = tmp_path / "stale.db"
+    source = "Type &o'$plank'&r now &o'#'&r"
+    translated = "輸入 &o'$plank'&r 現在 '#'"
+    first = TranslationDB(path)
+    first.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "k", source, translated, "", SRC_AI)],
+    )
+    entry_id = first.list_entries("1.21.1", limit=1)[0][0].id
+    with first._tx() as conn:
+        # 還原成上一版的狀態：旗標是「一致」，定義版本是 9
+        conn.execute(
+            "UPDATE entry SET qflags=? WHERE id=?",
+            (quality_flags.BITS["consistent"], entry_id),
+        )
+        conn.execute(
+            "UPDATE meta SET value='9' WHERE key='quality_schema_version'",
+        )
+    first.close()
+
+    reopened = TranslationDB(path)
+    try:
+        criteria = EntryFilter(
+            version="1.21.1", quality=QualityFilter(status="mismatch")
+        )
+        rows, total = reopened.list_entries(criteria=criteria, limit=10)
+
+        assert total == 1
+        assert [row.id for row in rows] == [entry_id]
+        assert rows[0].quality_state == "mismatch"  # 與詳情面板的判斷一致
+        assert reopened.verify_quality_flags() == []
     finally:
         reopened.close()
 
@@ -592,6 +698,140 @@ def test_reviewed_lang_glossary_matches_terms_inside_source_sentences(db):
     ) == [{"key": "pressure", "en_us": "Pressure Chamber", "zh_tw": "壓力室"}]
 
 
+def test_reviewed_exact_glossary_is_kind_and_conflict_scoped(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                "guide.pressure",
+                "The Pressure Chamber processes air.",
+                "壓力室會處理空氣。",
+            ),
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                "guide.conflict.a",
+                "Same sentence",
+                "甲句",
+            ),
+            ScanItem(
+                KIND_PATCHOULI,
+                "foo",
+                "guide.conflict.b",
+                "Same sentence",
+                "乙句",
+            ),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=20)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_exact_glossary(
+        "foo",
+        "1.21.1",
+        KIND_PATCHOULI,
+        ("The Pressure Chamber processes air.", "Same sentence"),
+    ) == [
+        {
+            "key": "guide.pressure",
+            "en_us": "The Pressure Chamber processes air.",
+            "zh_tw": "壓力室會處理空氣。",
+        }
+    ]
+
+
+def test_reviewed_exact_glossary_does_not_cross_kubejs_namespace(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "kubejs@pack-a",
+                "same.key",
+                "Same sentence",
+                "甲句",
+                source_path="kubejs/client_scripts/a.js",
+                source_selector="lang:en_us:same.key",
+                source_hash="hash-a",
+                pack_scope="pack-a",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "namespace_b@pack-a",
+                "same.key",
+                "Same sentence",
+                "乙句",
+                source_path="kubejs/client_scripts/b.js",
+                source_selector="lang:en_us:same.key",
+                source_hash="hash-b",
+                pack_scope="pack-a",
+            ),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=20)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert db.reviewed_exact_glossary(
+        "kubejs@pack-a",
+        "1.21.1",
+        KIND_KUBEJS_LANG,
+        ("Same sentence",),
+        source_locale="en_us",
+    ) == [{"key": "same.key", "en_us": "Same sentence", "zh_tw": "甲句"}]
+    assert (
+        db.reviewed_exact_glossary(
+            "kubejs@pack-a",
+            None,
+            KIND_KUBEJS_LANG,
+            ("Same sentence",),
+        )
+        == []
+    )
+
+
+def test_reviewed_lang_glossary_does_not_cross_kubejs_namespace(db):
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "demo@pack-a",
+                "demo.key",
+                "Pressure Chamber",
+                "演示室",
+                source_path="kubejs/client_scripts/demo.js",
+                source_selector="lang:en_us:demo.key",
+                source_hash="hash-demo",
+                pack_scope="pack-a",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "kubejs@pack-a",
+                "other.key",
+                "Other term",
+                "其他詞",
+                source_path="kubejs/client_scripts/kube.js",
+                source_selector="lang:en_us:other.key",
+                source_hash="hash-kube",
+                pack_scope="pack-a",
+            ),
+        ],
+    )
+    for row in db.list_entries("1.21.1", limit=20)[0]:
+        db.review_manual(row.id, expected_zh_tw=row.zh_tw, actor="tester")
+
+    assert (
+        db.reviewed_lang_glossary(
+            "kubejs@pack-a",
+            "1.21.1",
+            ("The Pressure Chamber processes air.",),
+        )
+        == []
+    )
+
+
 def test_reviewed_lang_glossary_loads_each_language_kind_once(db, monkeypatch):
     db.ingest(
         "1.21.1",
@@ -694,7 +934,7 @@ def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
 
 # 規則快照：判斷結果改變時這個測試會失敗。失敗代表已存的 entry.qflags 與新規則不一致，
 # 請遞增 quality_flags.SCHEMA_VERSION，並同步更新下面的版本與預期結果。
-_RULE_SNAPSHOT_VERSION = "8"
+_RULE_SNAPSHOT_VERSION = "11"
 _RULE_SNAPSHOT_CASES = (
     ("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()", "patchouli", False),
     ("A$(br2)B\n\n", "甲\n$(br2)乙", "patchouli", False),
@@ -734,6 +974,35 @@ _RULE_SNAPSHOT_CASES = (
         False,
     ),
 )
+
+
+# 旗標快照：以 ``quality_flags.compute`` 的「不一致」位元為準（條目頁品質篩選實際讀的就是它）。
+# 一般語系只含 ``&`` 色碼或 ``<tag>`` 標記、沒有 ``§``／``%s`` 這類 token 時，也要判為不一致；
+# 改變這類結果卻沒有遞增 SCHEMA_VERSION，會讓已存的旗標與詳情面板互相矛盾。
+_FLAG_SNAPSHOT_CASES = (
+    ("Type &o'$plank'&r now &o'#'&r", "輸入 &o'$plank'&r 現在 '#'", "lang", True),
+    ("Type &o'$plank'&r now", "輸入 &o'$plank'&r 現在", "lang", False),
+    ("Use <imp>iron</imp> now", "現在使用鐵", "lang", True),
+    ("Use <imp>iron</imp> now", "現在使用<imp>鐵</imp>", "lang", False),
+    ("Hello &oworld&r", "你好世界", "kubejs_lang", True),
+    ("Hello &oworld&r", "你好世界", "ftb_quest_lang", True),
+    ("Plain text", "純文字", "lang", False),
+)
+
+
+def test_flag_snapshot_covers_color_code_and_markup_only_lang_text():
+    actual = tuple(
+        bool(
+            quality_flags.compute("k", source, translated, kind)
+            & quality_flags.BITS["mismatch"]
+        )
+        for source, translated, kind, _expected in _FLAG_SNAPSHOT_CASES
+    )
+    expected = tuple(case[3] for case in _FLAG_SNAPSHOT_CASES)
+
+    assert actual == expected, (
+        "品質旗標的判斷結果改變：請遞增 quality_flags.SCHEMA_VERSION"
+    )
 
 
 def test_quality_rule_snapshot_matches_schema_version():

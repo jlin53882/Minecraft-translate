@@ -280,6 +280,18 @@ class SmartReviewReviewer:
             still_valid=lambda: state.is_current(token),
         )
 
+    def can_auto_sync(self) -> bool:
+        """執行中的批次有新結果時是否可自動重讀。
+
+        有進行中的動作、或草稿有尚未儲存的編輯時不自動刷新，避免洗掉使用者輸入。
+        """
+        state = self.state
+        return (
+            bool(state.run_id)
+            and not state.busy
+            and not state.draft_changed(str(self.draft.value or ""))
+        )
+
     def refresh(self) -> None:
         """同步重新讀取目前批次與篩選統計，供另一個審查面板更新畫面。"""
         state = self.state

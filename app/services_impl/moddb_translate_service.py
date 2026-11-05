@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import traceback
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import partial
@@ -52,6 +52,7 @@ from translation_tool.core.lm_translator_skeleton import (
     TranslatorHooks,
     run_translator_skeleton,
 )
+from translation_tool.core.source_locale import is_default_source_locale
 from translation_tool.translation_db.models import WriteBackItem
 from translation_tool.translation_db.quality import translation_issues
 from translation_tool.translation_db.run_progress import (
@@ -207,34 +208,54 @@ def _update_remaining(report: TranslateReport) -> None:
     report.remaining = max(0, report.candidates - report.written)
 
 
+def _grouped_items(db, rows, *, check=None) -> list[dict[str, Any]]:
+    """候選列轉成依批次邊界穩定分組的項目，並附上可信的來源語系（一次查詢，不逐筆）。"""
+    locales = db.source_locales_for_entries([int(row[0]) for row in rows])
+    return group_items_by_batch_key(
+        build_items(rows, check=check, source_locales=locales), check=check
+    )
+
+
 def build_items(
     rows: list[tuple[int, str, str, str, str]],
     *,
     check: Callable[[], None] | None = None,
+    source_locales: Mapping[int, str | None] | None = None,
 ) -> list[dict[str, Any]]:
-    """資料庫條目轉成引擎項目；``check`` 可在每列轉換前執行 deadline/cancel 檢查。"""
+    """資料庫條目轉成引擎項目；``check`` 可在每列轉換前執行 deadline/cancel 檢查。
+
+    ``source_locales`` 是每個條目可信的來源語系（見 ``TranslationDB.source_locales_for_entries``）。
+    來源身份與 Prompt 補充分離：只要資料庫能確認 locale，就把它保存到
+    ``source_locale``；只有非預設語系會加入額外批次分組，Prompt 是否補充
+    由共用來源語系策略另外決定。無法確認時也保留 ``None``，讓快取層能
+    明確拒絕把 unknown 當成已知語系重用。
+    """
     items = []
     for eid, kind, mod_id, key, en_us in rows:
         if check is not None:
             check()
-        items.append(
-            {
-                "file": f"{mod_id}/{kind}",
-                "path": key,
-                "text": en_us,
-                "source_text": en_us,
-                # Guide (.md/.txt) keeps the Patchouli prompt flow but belongs
-                # to the md cache bucket; .txt is intentionally included.
-                "cache_type": cache_type_for_kind(kind),
-                # The shared loop uses this boundary to prevent cross-module or
-                # cross-kind payloads. Session state is attached later because
-                # build_items is also used by preview/tests without a TaskSession.
-                "_batch_group": (str(mod_id), str(kind)),
-                "_entry_id": eid,
-                "_kind": kind,
-                "_mod_id": mod_id,
-            }
-        )
+        locale = (source_locales or {}).get(eid)
+        item = {
+            "file": f"{mod_id}/{kind}",
+            "path": key,
+            "text": en_us,
+            "source_text": en_us,
+            # Guide (.md/.txt) keeps the Patchouli prompt flow but belongs
+            # to the md cache bucket; .txt is intentionally included.
+            "cache_type": cache_type_for_kind(kind),
+            # The shared loop uses this boundary to prevent cross-module or
+            # cross-kind payloads. Session state is attached later because
+            # build_items is also used by preview/tests without a TaskSession.
+            "_batch_group": (str(mod_id), str(kind)),
+            "_entry_id": eid,
+            "_kind": kind,
+            "_mod_id": mod_id,
+        }
+        if source_locales is not None:
+            item["source_locale"] = locale
+        if not is_default_source_locale(locale):
+            item["_batch_group"] = (str(mod_id), str(kind), str(locale))
+        items.append(item)
     return items
 
 
@@ -274,6 +295,7 @@ def _attach_translation_sessions(
         operation_id=operation_id,
         mc_version=version,
         reviewed_glossary_loader=db.reviewed_lang_glossary,
+        reviewed_exact_loader=getattr(db, "reviewed_exact_glossary", None),
     )
 
 
@@ -301,7 +323,7 @@ def estimate_scope_plan(
         limit or None,
         exclude_reusable=reuse_other_versions,
     )
-    items = group_items_by_batch_key(build_items(rows))
+    items = _grouped_items(db, rows)
     _attach_translation_sessions(
         items,
         operation_id=f"count:{version}:{','.join(mod_ids)}",
@@ -509,7 +531,7 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
                 "開始機翻時會直接沿用（不呼叫 AI）；"
                 "只有「模組、鍵值、原文都相同」才算，原文不同的不會沿用",
             )
-        preview_items = group_items_by_batch_key(build_items(rows), check=None)
+        preview_items = _grouped_items(db, rows, check=None)
         _attach_translation_sessions(
             preview_items,
             operation_id=f"preview:{getattr(session, 'id', '') or id(session)}",
@@ -905,7 +927,7 @@ def _translate_rows(
             translate_batch_smart, batch, batch_total, event_callback
         )
 
-    items = group_items_by_batch_key(build_items(rows))
+    items = _grouped_items(db, rows)
     operation_id = str(getattr(session, "id", "") or id(session))
     _attach_translation_sessions(
         items, operation_id=operation_id, db=db, version=options.version

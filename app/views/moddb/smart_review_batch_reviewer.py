@@ -51,10 +51,15 @@ _BATCHABLE_STATUS = SmartReviewStatus.READY
 class SmartReviewBatchReviewer:
     """提供有界分頁、跨頁選取與部分成功結果摘要的批量審查面板。"""
 
-    def __init__(self, ctx: SmartReviewContext, *, on_changed) -> None:
-        """建立批量審查控制項；批次由 ``load_run`` 指定，不在初始化時讀資料庫。"""
+    def __init__(self, ctx: SmartReviewContext, *, on_changed, on_refresh=None) -> None:
+        """建立批量審查控制項；批次由 ``load_run`` 指定，不在初始化時讀資料庫。
+
+        ``on_changed`` 在批量動作成功後通知外層；``on_refresh`` 在使用者按下
+        「重新整理」後通知外層，讓同視窗的另一個審查面板一起重新讀取。
+        """
         self.ctx = ctx
         self.on_changed = on_changed
+        self.on_refresh = on_refresh
         self.run_id: str | None = None
         self.run_info: dict = {}
         self.counts: dict[str, int] = {}
@@ -94,7 +99,7 @@ class SmartReviewBatchReviewer:
             "重新整理",
             "secondary",
             icon=ft.Icons.REFRESH,
-            on_click=lambda _e: self.refresh(),
+            on_click=lambda _e: self._on_refresh_clicked(),
             tooltip="重新讀取目前批次與狀態",
         )
         self.select_page_btn = kit.button(
@@ -275,6 +280,20 @@ class SmartReviewBatchReviewer:
             )
             return
         self._load_page(include_run=True)
+
+    def _on_refresh_clicked(self) -> None:
+        """使用者按下重新整理：先更新自己，再通知外層同步另一個審查面板。"""
+        self.refresh()
+        if callable(self.on_refresh):
+            self.on_refresh()
+
+    def can_auto_sync(self) -> bool:
+        """執行中的批次有新結果時是否可自動重讀。
+
+        有進行中的讀取或動作、或使用者已經選取候選時不自動刷新；刷新會清除選取，
+        不能在使用者操作到一半時洗掉。
+        """
+        return bool(self.run_id) and not (self._busy or self._loading or self._selected)
 
     def refresh(self) -> None:
         """同步重新讀取目前頁；刷新會清除選取，避免使用舊快照批量寫入。"""

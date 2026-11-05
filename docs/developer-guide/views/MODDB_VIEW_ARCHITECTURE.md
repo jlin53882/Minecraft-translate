@@ -134,6 +134,8 @@ EntriesPanel 的編輯器另有獨立的 resident 草稿契約：`EditorDraftSto
 
 `SmartReviewDialog` 切換到「審查」時只在目前批次尚未載入時啟動 `SmartReviewReviewer.load_run` 或 `SmartReviewBatchReviewer.load_run`；兩者的資料庫讀取都透過 `SmartReviewContext.run_background`，分頁本身先立即顯示載入狀態。`SmartReviewHistory.refresh` 的批次清單與「載入更多」也透過 `run_background`，以 request sequence、資料庫身分與視窗世代丟棄晚到結果；因此切換分頁不會被歷史 JSON／SQLite 讀取卡住，也不會用舊清單覆蓋新請求。
 
+審查中的批次與 `SmartReviewJob` 正在執行的批次相同時，`SmartReviewDialog._update_review_sync` 以 `PollerHandle` 啟動 `_poll_review`；進入審查分頁、`open_review` 與開啟視窗時重新判斷，離開審查分頁與 `_teardown` 停止。輪詢只在任務進度簽章（`_job_progress_signature`）改變時呼叫 `sync_review_panels`，由各面板的 `refresh` 在 UI 事件內同步重讀（大型批次的整批重讀約為毫秒級，因為歷史儲存保有彙總資訊）；每個面板各自記錄最後同步的簽章（`_review_synced`），沒變就不重讀。`SmartReviewReviewer.can_auto_sync` 與 `SmartReviewBatchReviewer.can_auto_sync` 讓使用者正在操作的面板（草稿未儲存、已選取候選、動作或讀取進行中）略過這一輪，不會被自動刷新洗掉。`SmartReviewBatchReviewer` 的 `on_refresh` 在使用者按「重新整理」後通知對話框，由 `_refresh_opposite_review` 讓逐筆面板一起重讀。
+
 智慧校對有四個語意不同的狀態層，標籤各自維護、不互相硬併：（1）候選層級 `SmartReviewStatus`，條目列標記 `MARK_STYLES` 與審查頁 `FILTERS` 各自顯示文字，`tests/test_smart_review_status_contract.py` 要求兩者加上明確的「不標記／不可篩選」清單後涵蓋全部成員；（2）執行批次層級 `SmartReviewRunStatus`（`smart_review_run_status.py`），`run_status_label` 與 `run_status_color` 是執行頁、歷史頁與背景任務提示共用的單一來源，已取消與部分完成同為 gold；（3）批量審查單筆結果 `BatchOutcome`（`smart_review_batch_outcome.py`），`summarize_outcomes` 把每筆結果恰好歸入套用、保留、略過、失敗其中一組，未知字面值計入略過，所以「完成 N / M」恆等於分類加總；（4）條目生效審核狀態 `REVIEW_STATUS_LABELS`（未審核、人工已審核；歷史狀態 `legacy_unknown` 與人工已審核同標籤），與前三層無關。
 
 條目列的智慧校對狀態標籤由 `smart_review_marks.py` 的 `smart_review_mark_chip` 繪製，資料來自 `TranslationDB.smart_review_marks`（`SmartReviewHistoryStore.latest_run_marks` 只完整解析最近一份可解析的批次檔，其餘批次只讀檔頭開始時間，並以檔案修改時間與大小快取；結構損壞的批次略過）；`panel_refresh.py` 的背景快照與 `EntriesPanel._load_list` 都會帶入 `smart_review_marks`，`entry_row_tile.py` 與詳情區的 `smart_chip` 只負責顯示。篩選則由 `entry_filters.py` 的 `smart_review_filter` 下拉（選項定義在 `smart_review_marks.py` 的 `SMART_REVIEW_FILTER_OPTIONS`）寫入 `EntryFilter.smart_review`；`TranslationDB._filter_sql` 以 `smart_review_entry_ids` 取得最近批次中符合狀態群組（`SMART_REVIEW_FILTER_GROUPS`）的條目 id，用 `json_each` 子查詢限制清單，所以清單、筆數、分頁與模組選項使用同一組條件。
@@ -164,6 +166,8 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 ### 翻譯範圍計數與批次規劃
 
 `panel_refresh._load_translate_snapshot` 在背景刷新時只讀取版本／模組清單、未翻譯筆數與可沿用筆數，避免每次範圍變更都載入整個版本並建立翻譯 session。`TranslatePanel` 以這些數字顯示快速批次估算；按下預覽或開始機翻後，`moddb_translate_service` 才建立完整 items、附加同模組 session 與已審核術語，並由共用 planner 產生精確批次數。預覽與實際翻譯仍使用相同的批次規劃路徑；格式修復的即時進度會快取剩餘 canonical plan，只有批次容量、token 預算或 session history 使下一批大小改變時才重新規劃剩餘範圍。
+
+Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_gate`（`_repair_validation_issues`），翻譯端的品質重試因此使用與寫回驗證相同的規則；重試結果由 `_count_quality_retry` 累計到報告。
 
 `TranslatePanel` 依 `summary["status"]` 顯示結果：`CANCELLED` 為「已取消」、`DONE_WITH_WARNINGS` 為「機翻完成（有警告）」（有品質拒絕、來源回填、MAX_TOKENS、回應格式錯誤或未解決的品質重試時）、其他非 `DONE` 為「未完成（狀態）」。`TaskSession.status` 仍只有 `DONE`／`ERROR`。畫面日誌每批一行，完整品質清單由 `moddb_translate_report` 寫入 `logging.log_dir` 下的報告檔，畫面只顯示數量與路徑。
 

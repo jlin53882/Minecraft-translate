@@ -74,6 +74,15 @@ def _reply(call, by_value):
     )
 
 
+def _lang_cache_key(item):
+    """快取鍵由 CacheRule 產生（含模組身分，v3 結構化鍵）。"""
+    from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+    return CacheRule("path").make_key(
+        {"path": item["path"], "_mod_id": item["_mod_id"]}
+    )
+
+
 def _item(text, index, **extra):
     return {
         "path": f"sample.key.{index}",
@@ -180,6 +189,7 @@ def test_same_as_source_is_reconfirmed_and_second_translation_is_used(
     retry_prompt = calls[1]["system_prompt"]
     assert retry_prompt.startswith("LANG PROFILE PROMPT")
     assert "retry_reasons" in retry_prompt and "format_issues" in retry_prompt
+    assert "主體、動作、對象、條件、否定、數量、單位、時間、比較與因果" in retry_prompt
     assert calls[1]["payload"]["items"][0]["retry_reasons"]
     assert result == [{**item, "text": "壓力室"}]
 
@@ -341,12 +351,28 @@ def test_candidate_filter_keeps_short_and_uppercase_words_but_skips_symbols(
     assert len(result) == len(items)
 
 
+def test_retry_rate_limit_falls_back_to_first_valid_result(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    item = _item("Minecraft", 0)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [lambda call: _reply(call, {}), _http_error(429)],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2  # 429 屬於配額問題，不在品質重試內就地重送
+    assert result == [{**item, "text": "Minecraft"}]
+
+
 @pytest.mark.parametrize(
     "failure",
-    [requests.Timeout("timeout"), _http_error(429), _http_error(503)],
-    ids=["timeout", "http-429", "http-503"],
+    [requests.Timeout("timeout"), _http_error(503), _http_error(500)],
+    ids=["timeout", "http-503", "http-500"],
 )
-def test_retry_technical_failure_falls_back_to_first_valid_result(
+def test_retry_transient_failure_is_resent_and_the_fix_is_used(
     monkeypatch, configure_batch, failure
 ):
     configure_batch()
@@ -354,11 +380,31 @@ def test_retry_technical_failure_falls_back_to_first_valid_result(
     result, status, calls = _run_with_api(
         monkeypatch,
         [item],
-        [lambda call: _reply(call, {}), failure],
+        [
+            lambda call: _reply(call, {}),
+            failure,
+            lambda call: _reply(call, {"Minecraft": "我的世界"}),
+        ],
     )
 
     assert status == "AUTO"
-    assert len(calls) == 2
+    assert len(calls) == 3  # 首次 + 暫時性故障 + 原樣重送
+    assert result == [{**item, "text": "我的世界"}]
+
+
+def test_retry_transient_failure_gives_up_after_bounded_attempts(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    item = _item("Minecraft", 0)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [lambda call: _reply(call, {})] + [_http_error(503)] * 3,
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 4  # 首次 + 3 次暫時性故障，之後保留第一次譯文
     assert result == [{**item, "text": "Minecraft"}]
 
 
@@ -411,16 +457,40 @@ def test_partial_blank_retry_keeps_first_value_only_for_blank_candidate(
         [
             lambda call: _reply(call, {"Alpha": "阿爾法"}),
             lambda call: _reply(call, {"Beta": "貝塔", "Gamma": " \n "}),
+            lambda call: _reply(call, {"Gamma": " \n "}),
         ],
     )
 
     assert status == "AUTO"
-    assert len(calls) == 2
+    assert len(calls) == 3
     assert [entry["value"] for entry in calls[1]["payload"]["items"]] == [
         "Beta",
         "Gamma",
     ]
+    # 第二輪只重送仍不合格的項目；第二輪沒有改善就保留第一次譯文。
+    assert [entry["value"] for entry in calls[2]["payload"]["items"]] == ["Gamma"]
     assert [entry["text"] for entry in result] == ["阿爾法", "貝塔", "Gamma"]
+
+
+def test_second_quality_round_fixes_what_the_first_round_missed(
+    monkeypatch, configure_batch
+):
+    configure_batch()
+    items = [_item("Alpha", 0), _item("Beta", 1)]
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        items,
+        [
+            lambda call: _reply(call, {}),
+            lambda call: _reply(call, {"Alpha": "阿爾法"}),
+            lambda call: _reply(call, {"Beta": "貝塔"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 3
+    assert [entry["value"] for entry in calls[2]["payload"]["items"]] == ["Beta"]
+    assert [entry["text"] for entry in result] == ["阿爾法", "貝塔"]
 
 
 def test_retry_cancellation_propagates_instead_of_falling_back(
@@ -937,5 +1007,84 @@ def test_cache_receives_only_the_final_retry_translation(
 
     assert result.status == "DONE"
     assert result.processed == 1
-    assert writes == [("lang", item["path"], "Pressure Chamber", expected)]
+    assert writes == [("lang", _lang_cache_key(item), "Pressure Chamber", expected)]
     assert saves == ["lang"]
+
+
+def test_quality_retry_gate_matches_final_diagnostics_not_only_tokens(
+    monkeypatch, configure_batch
+):
+    """重試判定與最終驗證共用規則：自訂標記數量不符也要被重送。"""
+    configure_batch()
+    source = "Use <b>this</b> and <i>that</i>"
+    item = _item(source, 0)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {source: "使用<b>這個</b>與那個"}),
+            lambda call: _reply(call, {source: "使用<b>這個</b>與<i>那個</i>"}),
+        ],
+    )
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result[0]["text"] == "使用<b>這個</b>與<i>那個</i>"
+
+
+def test_reordered_tags_do_not_trigger_a_retry(monkeypatch, configure_batch):
+    """標籤種類與數量相同、只有順序不同是合理的語序調整，不重送。"""
+    configure_batch()
+    source = "Use <b>this</b> and <i>that</i>"
+    item = _item(source, 0)
+    result, _status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [lambda call: _reply(call, {source: "使用<i>那個</i>與<b>這個</b>"})],
+    )
+    assert len(calls) == 1
+    assert result[0]["text"] == "使用<i>那個</i>與<b>這個</b>"
+
+
+def test_item_quality_gate_hook_drives_the_retry(monkeypatch, configure_batch):
+    """呼叫端（如格式修復）可用 ``_quality_gate`` 掛上自己的最終驗證規則。"""
+    configure_batch()
+
+    def gate(_source, translated):
+        return [] if "好" in translated else ["缺少關鍵字"]
+
+    item = _item("Hello", 0, _quality_gate=gate)
+    result, status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {"Hello": "哈囉"}),
+            lambda call: _reply(call, {"Hello": "你好"}),
+        ],
+    )
+
+    assert status == "AUTO"
+    assert len(calls) == 2
+    assert result[0]["text"] == "你好"
+
+
+def test_chatgpt_5xx_recovery_waits_for_retry_after(monkeypatch, configure_batch):
+    from translation_tool.core.openai_codex_client import ChatGPTAPIError
+
+    configure_batch()
+    waits = []
+    monkeypatch.setattr(main, "interruptible_sleep", waits.append)
+    item = _item("Minecraft", 0)
+    err = ChatGPTAPIError("overloaded", status=503, retry_after=12)
+    result, _status, calls = _run_with_api(
+        monkeypatch,
+        [item],
+        [
+            lambda call: _reply(call, {}),
+            err,
+            lambda call: _reply(call, {"Minecraft": "我的世界"}),
+        ],
+    )
+
+    assert len(calls) == 3
+    assert 12 in waits
+    assert result[0]["text"] == "我的世界"

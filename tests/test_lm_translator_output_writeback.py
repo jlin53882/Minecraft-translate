@@ -5,7 +5,7 @@ from pathlib import Path
 import orjson
 import pytest
 
-from translation_tool.core import lm_translator
+from translation_tool.core import lm_translator, lm_translator_shared_cache
 from translation_tool.translation_db import (
     KIND_ADVANCEMENT,
     DbSettings,
@@ -223,6 +223,19 @@ def test_translate_directory_generator_advancement_db_hit_round_trip(
 
     monkeypatch.setattr(lm_translator, "validate_api_keys", lambda: None)
     monkeypatch.setattr(lm_translator, "reload_translation_cache", lambda: None)
+    # This case verifies DB-only writeback; an ignored workspace cache must not
+    # add unrelated literal-advancement translations to the expected output.
+    monkeypatch.setattr(lm_translator, "get_cache_dict_ref", lambda _type: {})
+    monkeypatch.setattr(
+        lm_translator_shared_cache, "get_cache_dict_ref", lambda _type: {}
+    )
+
+    def fake_translate(batch, *, total):
+        return [{**item, "text": item["source_text"]} for item in batch], "AUTO"
+
+    # Keep this regression focused on DB writeback and JSON preservation; the
+    # provider/official glossary path is covered by the dedicated LM tests.
+    monkeypatch.setattr(lm_translator, "translate_batch_smart", fake_translate)
 
     list(
         lm_translator.translate_directory_generator(

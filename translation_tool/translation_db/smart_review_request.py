@@ -25,6 +25,7 @@ from translation_tool.core.retry_after import parse_response_retry_after
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.smart_review_prompt import (
     SMART_REVIEW_SYSTEM_PROMPT,
+    smart_review_system_prompt,
 )
 from translation_tool.translation_db.smart_review_provider import (
     SmartReviewProviderSession,
@@ -225,7 +226,9 @@ class _BatchRequester:
         api_started = time.monotonic()
         try:
             self.outcome.raw = session.call(
-                system_prompt=SMART_REVIEW_SYSTEM_PROMPT,
+                system_prompt=smart_review_system_prompt(
+                    SMART_REVIEW_SYSTEM_PROMPT, self.batch
+                ),
                 payload=self.payload,
                 api_key=request_api_key,
                 meta_out=self.attempt_meta,

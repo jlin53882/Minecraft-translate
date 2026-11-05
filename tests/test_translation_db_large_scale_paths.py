@@ -93,16 +93,29 @@ def test_time_data_range_with_other_filters_uses_generic_scan(db):
     assert (low, high) == tuple(expected)
 
 
+def _trusted_lang_item(key: str, en: str, tw: str) -> ScanItem:
+    """帶有可信 en_us 來源身分的 lang 條目（同文去重需要來源語系）。"""
+    return ScanItem(
+        KIND_LANG,
+        "mod",
+        key,
+        en,
+        tw,
+        "",
+        None,
+        source_path="assets/mod/lang/en_us.json",
+        source_selector=f"lang:en_us:{key}",
+        source_locale="en_us",
+    )
+
+
 def test_smart_review_twin_completion_starts_from_the_page_groups(tmp_path):
     """同文補查必須由頁面群組出發；讓規劃器從 effective 數萬列起頭會每列重掃 json_each。"""
     d = TranslationDB(tmp_path / "twins.db")
     d.ingest(
         VERSION,
-        [
-            ScanItem(KIND_LANG, "mod", f"k.{i}", "Same Text", "相同", "", None)
-            for i in range(6)
-        ]
-        + [ScanItem(KIND_LANG, "mod", "z.other", "Other", "其他", "", None)],
+        [_trusted_lang_item(f"k.{i}", "Same Text", "相同") for i in range(6)]
+        + [_trusted_lang_item("z.other", "Other", "其他")],
     )
     statements = _plans(d, "selected_groups AS")
     snapshots = d.smart_review_candidates(

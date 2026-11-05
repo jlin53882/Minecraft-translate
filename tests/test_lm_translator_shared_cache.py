@@ -49,6 +49,84 @@ class TestCacheRule:
 
         assert key == "test.path|Hello"
 
+    def test_cache_rule_separates_pack_scopes(self):
+        from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+        rule = CacheRule("path|source_text")
+        base = {"path": "item.iron", "source_text": "Iron", "source_locale": "pt_br"}
+        assert rule.make_key({**base, "pack_scope": "pack-a"}) != rule.make_key(
+            {**base, "pack_scope": "pack-b"}
+        )
+
+    def test_cache_rule_separates_module_ids_without_pack_scope(self):
+        from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+        rule = CacheRule("path|source_text")
+        base = {"path": "item.iron", "source_text": "Iron"}
+        assert rule.make_key({**base, "_mod_id": "mod-a"}) != rule.make_key(
+            {**base, "_mod_id": "mod-b"}
+        )
+
+    def test_scoped_key_is_length_delimited_not_suffix_ambiguous(self):
+        from translation_tool.core.lm_translator_shared_cache import CacheRule
+
+        rule = CacheRule("path")
+        first = rule.make_key({"path": "item.iron", "pack_scope": "pack-a"})
+        second = rule.make_key({"path": "item.iron|5:pack-a", "pack_scope": "pack-b"})
+
+        assert first.startswith("2:v3|")
+        assert first != second
+
+    def test_scoped_lang_cache_rejects_changed_source_text_on_same_path(self):
+        from translation_tool.core.lm_translator_shared_cache import (
+            CacheRule,
+            fast_split_items_by_cache,
+        )
+
+        rule = CacheRule("path")
+        item = {
+            "cache_type": "lang",
+            "path": "item.iron",
+            "source_text": "New source",
+            "pack_scope": "pack-a",
+        }
+        stale_key = rule.make_key({**item, "source_text": "Old source"})
+        cached, pending = fast_split_items_by_cache(
+            [item],
+            cache_rules={"lang": rule},
+            cache_provider=lambda _kind: {
+                stale_key: {"src": "Old source", "dst": "舊翻譯"}
+            },
+        )
+
+        assert cached == []
+        assert [row["source_text"] for row in pending] == ["New source"]
+
+    def test_unknown_source_locale_never_accepts_a_cache_hit(self):
+        from translation_tool.core.lm_translator_shared_cache import (
+            CacheRule,
+            fast_split_items_by_cache,
+        )
+
+        rule = CacheRule("path")
+        item = {
+            "cache_type": "lang",
+            "path": "item.iron",
+            "source_text": "Iron",
+            "source_locale": None,
+            "_entry_id": 42,
+        }
+        cached, pending = fast_split_items_by_cache(
+            [item],
+            cache_rules={"lang": rule},
+            cache_provider=lambda _kind: {
+                rule.make_key(item): {"src": "Iron", "dst": "鐵"}
+            },
+        )
+
+        assert cached == []
+        assert pending == [item]
+
 
 def test_safe_output_text_falls_back_to_source_for_rejected_ai_candidate():
     from translation_tool.core.lm_translator_shared_cache import safe_output_text

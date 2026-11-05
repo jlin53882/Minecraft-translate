@@ -10,16 +10,36 @@ from translation_tool.core.lm_batch_budget import (
     profile_for_cache_type,
     select_batch_size,
 )
+from translation_tool.core.source_locale import normalize_source_locale
 
 
-def batch_group_key(item: dict[str, Any]) -> tuple[str, str]:
-    """Return the stable boundary key used by both preview and execution."""
+def _locale_group_part(item: dict[str, Any]) -> str:
+    """批次邊界中的來源語系：正規化後的語系、沒有語系回傳空字串。
+
+    不合法的語系 token 不能被丟掉（那會讓它混進別的批次）；以獨立的值保留，
+    讓只有它自己的批次在送出時依 ``batch_source_locale`` fail closed。
+    """
+    raw = item.get("source_locale")
+    if raw in (None, ""):
+        return ""
+    return normalize_source_locale(raw) or f"invalid:{raw}"
+
+
+def batch_group_key(item: dict[str, Any]) -> tuple[str, ...]:
+    """Return the stable boundary key used by both preview and execution.
+
+    批次邊界永遠包含來源語系：不同語系（包含 ``en_us``、``zh_cn`` 這類預設語系與
+    沒有語系的項目）不會放進同一批，因為 ``batch_source_locale`` 遇到同批混有多種語系
+    會直接拒絕（見 ``translation_tool.core.source_locale``）。Mod DB 路線已在
+    ``_batch_group`` 的第三個元素帶入非預設語系，這裡不重複加入。
+    """
     group = item.get("_batch_group")
+    if isinstance(group, tuple) and len(group) == 3:
+        return tuple(str(part) for part in group)
     if isinstance(group, tuple) and len(group) == 2:
-        return str(group[0]), str(group[1])
-    # 一般機翻沒有 Mod DB 的模組邊界；同 cache type 的項目維持原本
-    # 的批次行為。Mod DB 路線若需要更細的邊界，會明確寫入 _batch_group。
-    return "", str(item.get("cache_type") or "lang")
+        return (*(str(part) for part in group), _locale_group_part(item))
+    # 一般目錄翻譯沒有 Mod DB 的模組邊界；同 cache type 且同來源語系的項目放同一批。
+    return "", str(item.get("cache_type") or "lang"), _locale_group_part(item)
 
 
 def group_items_by_batch_key(
@@ -28,8 +48,8 @@ def group_items_by_batch_key(
     check: Callable[[], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Stable-group items by ``cache_type + batch_group`` without losing order."""
-    groups: dict[tuple[str, tuple[str, str]], list[dict[str, Any]]] = {}
-    order: list[tuple[str, tuple[str, str]]] = []
+    groups: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+    order: list[tuple[str, tuple[str, ...]]] = []
     for item in items:
         if check is not None:
             check()

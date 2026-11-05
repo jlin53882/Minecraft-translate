@@ -24,7 +24,19 @@ from translation_tool.translation_db.schema import (
 
 
 def _item(key, en, tw="", mod="foo", cn="", source=None):
-    return ScanItem(KIND_LANG, mod, key, en, tw, cn, source)
+    # 跨版本沿用需要可信的來源語系身分（en_us 來源檔）
+    return ScanItem(
+        KIND_LANG,
+        mod,
+        key,
+        en,
+        tw,
+        cn,
+        source,
+        source_path=f"assets/{mod}/lang/en_us.json",
+        source_selector=f"lang:en_us:{key}",
+        source_locale="en_us",
+    )
 
 
 def _entry(db, version, key, mod="foo"):

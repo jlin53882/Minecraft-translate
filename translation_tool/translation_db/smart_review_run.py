@@ -21,6 +21,9 @@ from translation_tool.translation_db.models import (
     SmartReviewSnapshot,
 )
 from translation_tool.translation_db.schema import SRC_AI
+from translation_tool.translation_db.smart_review_escalation import (
+    escalate_needs_context_results,
+)
 from translation_tool.translation_db.smart_review_history import SmartReviewHistoryStore
 from translation_tool.translation_db.smart_review_planner import (
     SmartReviewPlanInput,
@@ -28,8 +31,11 @@ from translation_tool.translation_db.smart_review_planner import (
     plan_new_smart_review,
 )
 from translation_tool.translation_db.smart_review_prompt import (
+    SMART_REVIEW_SYSTEM_PROMPT,
     build_smart_review_payload,
     smart_review_response_schema,
+    smart_review_system_prompt,
+    trusted_non_default_locale,
 )
 from translation_tool.translation_db.smart_review_provider import (
     SmartReviewProviderSession,
@@ -70,6 +76,37 @@ class _BatchCursor:
         return False
 
 
+def _group_by_source_locale(
+    snapshots: Sequence[SmartReviewSnapshot],
+) -> Sequence[SmartReviewSnapshot]:
+    """穩定地把相同來源語系的候選排在一起，讓每個請求只含單一語系。
+
+    預設語系與 unknown 屬同一組且排最前；全為預設語系時順序不變。
+    """
+    order: dict[str | None, int] = {None: 0}
+    for item in snapshots:
+        order.setdefault(trusted_non_default_locale(item.source_locale), len(order))
+    return sorted(
+        snapshots,
+        key=lambda item: order[trusted_non_default_locale(item.source_locale)],
+    )
+
+
+def _same_locale_run_length(
+    snapshots: Sequence[SmartReviewSnapshot], position: int
+) -> int:
+    """回傳從 ``position`` 起連續屬於同一來源語系組的候選數。"""
+    locale = trusted_non_default_locale(snapshots[position].source_locale)
+    length = 1
+    while (
+        position + length < len(snapshots)
+        and trusted_non_default_locale(snapshots[position + length].source_locale)
+        == locale
+    ):
+        length += 1
+    return length
+
+
 class _SmartReviewBatchRunner:
     """依序處理所有候選批次；取消與失敗狀態記錄在 ``SmartReviewRunState``。"""
 
@@ -83,7 +120,7 @@ class _SmartReviewBatchRunner:
         self.db = db
         self.session = session
         self.state = state
-        self.snapshots = snapshots
+        self.snapshots = _group_by_source_locale(snapshots)
         self._attempted_ordinals: set[int] = set()
 
     def _cancel_requested(self) -> bool:
@@ -100,7 +137,9 @@ class _SmartReviewBatchRunner:
                 state.cancelled = True
                 break
             cursor.current_size = min(
-                cursor.adaptive_size, len(snapshots) - cursor.position
+                cursor.adaptive_size,
+                len(snapshots) - cursor.position,
+                _same_locale_run_length(snapshots, cursor.position),
             )
             batch_number += 1
             batch_ctx = state.begin_batch(
@@ -195,6 +234,16 @@ class _SmartReviewBatchRunner:
             retry_runtime,
             outcome.attempt,
         )
+        results = escalate_needs_context_results(
+            self.db,
+            session,
+            state,
+            batch_ctx,
+            batch,
+            results,
+            retry_runtime,
+            outcome.attempt,
+        )
         self._persist_results(results, batch_ctx)
         self._count_results(results, batch_ctx)
         self._finish_batch(cursor, batch_ctx, batch)
@@ -210,7 +259,11 @@ class _SmartReviewBatchRunner:
         response_schema = smart_review_response_schema(
             [str(item.ordinal) for item in batch]
         )
-        estimated_input = _smart_review_estimated_input_tokens(payload, response_schema)
+        estimated_input = _smart_review_estimated_input_tokens(
+            payload,
+            response_schema,
+            smart_review_system_prompt(SMART_REVIEW_SYSTEM_PROMPT, batch),
+        )
         state.metrics["last_estimated_input_tokens"] = round(estimated_input, 2)
         preparation_seconds = time.monotonic() - preparation_started
         state.add_timing_seconds(batch_ctx, "prompt_build_ms", preparation_seconds)
@@ -565,6 +618,8 @@ def _open_run_state(
             "planning_ms": round(planning_seconds * 1000),
             "run_record_ms": round(run_record_seconds * 1000),
         },
+        # 讓畫面的「範圍搜尋完成」摘要讀得到規劃筆數與歷史重用筆數
+        metrics=state.metrics,
     )
     return state
 

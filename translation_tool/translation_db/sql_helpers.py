@@ -46,4 +46,79 @@ def translation_review_sql(alias: str, has_review_state: bool) -> str:
     return f"CASE WHEN {alias}.source={SRC_MANUAL} THEN 'legacy_unknown' END"
 
 
-__all__ = ["effective_review_sql", "like_pattern", "translation_review_sql"]
+def source_locale_sql(entry_alias: str) -> str:
+    """回傳持久化來源語系的 SQL 摘要。
+
+    ``unknown:<entry_id>`` 是查詢內部的唯一哨兵值：來源不存在、包含無法
+    還原的來源，或同一條目混有多個語系時，都不能只以空字串與其他 unknown
+    條目合併。已知的單一來源語系則直接回傳正規化 token。新掃描明確保存的
+    ``zh_tw``／``zh_cn`` 可能就是實際選定的 fallback 原文，不能因為語系名稱
+    常被用作譯文而一律排除；舊資料的遷移會把無法確認角色的來源保留為 NULL，
+    讓這裡保守回傳 unknown。
+    """
+    entry_id = f"CAST({entry_alias}.id AS TEXT)"
+    unknown = f"'unknown:' || {entry_id}"
+    return (
+        "COALESCE((SELECT CASE "
+        "WHEN EXISTS (SELECT 1 FROM entry_origin eo0 "
+        f"WHERE eo0.entry_id={entry_alias}.id AND eo0.source_locale IS NULL) "
+        f"THEN {unknown} "
+        "WHEN COUNT(DISTINCT eo.source_locale)=1 THEN MAX(eo.source_locale) "
+        f"ELSE {unknown} END FROM entry_origin eo "
+        f"WHERE eo.entry_id={entry_alias}.id), {unknown})"
+    )
+
+
+def reference_locale_sql(entry_alias: str) -> str:
+    """已審核參考的來源語系（供 ``reviewed_locale_compatible`` 判斷）。
+
+    - 沒有任何來源紀錄的舊條目：空字串；
+    - 任一來源紀錄語系不明、或同一條目混有多個語系：``unknown:<id>``；
+    - 其餘：唯一的語系 token。
+
+    這裡刻意不用 ``COUNT(DISTINCT …)``：它會讓每個結果列各建一個暫時 B-tree，違反資料庫查詢
+    不得出現 ``TEMP B-TREE`` 的規範；以 ``MIN``／``MAX`` 判斷是否只有一個語系。
+    """
+    entry_id = f"CAST({entry_alias}.id AS TEXT)"
+    unknown = f"'unknown:' || {entry_id}"
+    return (
+        "CASE "
+        "WHEN NOT EXISTS (SELECT 1 FROM entry_origin eo_ref "
+        f"WHERE eo_ref.entry_id={entry_alias}.id) THEN '' "
+        "WHEN EXISTS (SELECT 1 FROM entry_origin eo_null "
+        f"WHERE eo_null.entry_id={entry_alias}.id AND eo_null.source_locale IS NULL) "
+        f"THEN {unknown} "
+        "ELSE (SELECT CASE WHEN MIN(eo_one.source_locale)=MAX(eo_one.source_locale) "
+        f"THEN MIN(eo_one.source_locale) ELSE {unknown} END FROM entry_origin eo_one "
+        f"WHERE eo_one.entry_id={entry_alias}.id) END"
+    )
+
+
+def source_locale_match_sql(left_alias: str, right_alias: str) -> str:
+    """建立可重用的來源語系相容條件。
+
+    兩個沒有 ``entry_origin`` 的舊條目維持升級前的重用行為；只要任一條目
+    有來源紀錄但語系無法確認，就不把 ``unknown:<id>`` 當成可匹配的語系。
+    """
+    left_locale = source_locale_sql(left_alias)
+    right_locale = source_locale_sql(right_alias)
+    return (
+        "("
+        f"(NOT EXISTS (SELECT 1 FROM entry_origin eo_{left_alias} "
+        f"WHERE eo_{left_alias}.entry_id={left_alias}.id) "
+        f"AND NOT EXISTS (SELECT 1 FROM entry_origin eo_{right_alias} "
+        f"WHERE eo_{right_alias}.entry_id={right_alias}.id)) "
+        f"OR ({left_locale} NOT LIKE 'unknown:%' "
+        f"AND {right_locale}={left_locale})"
+        ")"
+    )
+
+
+__all__ = [
+    "effective_review_sql",
+    "like_pattern",
+    "reference_locale_sql",
+    "source_locale_match_sql",
+    "source_locale_sql",
+    "translation_review_sql",
+]

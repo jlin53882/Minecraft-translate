@@ -7,6 +7,7 @@ from translation_tool.core.format_diagnostics import (
     FormatDiagnosticsResult,
     FormatSpan,
     analyze_format_diagnostics,
+    diagnostic_action,
 )
 from translation_tool.core.format_diagnostics import (
     FormatDiagnostic as FormatDiffIssue,
@@ -45,5 +46,6 @@ __all__ = [
     "FormatTokenOccurrence",
     "analyze_format_diagnostics",
     "compare_format_diff",
+    "diagnostic_action",
     "format_token_label",
 ]

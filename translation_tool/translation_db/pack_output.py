@@ -22,6 +22,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+from translation_tool.core.source_locale import (
+    locale_from_source_path,
+    normalize_source_locale,
+)
 from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import walk_snbt_file
 from translation_tool.plugins.ftbquests.ftbquests_snbt_inject import (
     patch_lang_snbt_file,
@@ -43,7 +47,6 @@ from translation_tool.translation_db.schema import (
     KIND_LANG,
 )
 
-_LOCALES = {"en_us", "zh_cn", "zh_tw"}
 _OUTPUT_OWNERSHIP_MARKER = ".minecraft-translate-overlay.json"
 _OUTPUT_OWNERSHIP_SCHEMA = "minecraft_translate.pack_overlay.v1"
 _QUEST_FIELD = re.compile(r"(?:^|\.)(title|subtitle|description(?:\[\d+\])?)$")
@@ -193,13 +196,18 @@ def _make_plan(
     for item in items:
         if not item.zh_tw.strip() or item.zh_tw == item.en_us:
             continue
-        # KubeJS 的 effective translation 會同時帶入同一 entry 的 en_us／
-        # zh_tw origins。輸出必須以英文定義作為來源，從 zh_tw origin 重複
-        # 產生計畫會讓 writer 把既有語系當成新的來源事件。
-        if _is_kubejs_js_origin(item.origin) and _kubejs_lang_locale(
-            item.origin.selector
-        ) not in {None, "en_us"}:
-            continue
+        # KubeJS 的 effective translation 會同時帶入同一 entry 的來源／
+        # 翻譯 origins。一般情況下只由 en_us selector 產生計畫，避免把
+        # 既有語系當成新的來源事件；但沒有 en_us 的模組包會把選出的
+        # zh_cn／zh_tw selector 提升為資料庫原文，此時 source_locale 會
+        # 與 selector locale 相同，必須保留它作為可輸出的來源。
+        if _is_kubejs_js_origin(item.origin):
+            selector_locale = _kubejs_lang_locale(item.origin.selector)
+            source_locale = normalize_source_locale(item.origin.source_locale or "")
+            if selector_locale not in {None, "en_us"} and (
+                not source_locale or source_locale != selector_locale
+            ):
+                continue
         target = _target_for(item)
         if target is None:
             report.unsupported.append(
@@ -733,15 +741,40 @@ def _find_rescanned_items(
     kind = origin.source_kind
     if origin.source_kind in {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS}:
         target_path = target_path.removeprefix("config/ftbquests/quests/")
-    return index.get((kind, target_path, origin.selector), [])
+    exact = index.get((kind, target_path, origin.selector), [])
+    if exact or kind != KIND_FTB_QUEST_LANG:
+        return exact
+    migrated = _ftb_lang_current_selector(origin.selector, origin.source_path)
+    return index.get((kind, target_path, migrated), []) if migrated else []
+
+
+def _ftb_lang_current_selector(selector: str, source_path: str) -> str | None:
+    """舊版 FTB 語系 selector（``lang:<key>``）在新版掃描中的對應 selector。
+
+    只在來源檔案路徑明確帶有 locale（``lang/<locale>.snbt``、``lang/<locale>/…``）時才對應；
+    沒有證據就回傳 ``None``，不猜測。已經是新版格式的 selector 不需要對應。
+    """
+    if not selector.startswith("lang:"):
+        return None
+    value = selector[5:]
+    head = value.split(":", 1)[0]
+    if ":" in value and normalize_source_locale(head) is not None:
+        return None
+    locale = locale_from_source_path(source_path)
+    return f"lang:{locale}:{value}" if locale is not None else None
 
 
 def _kubejs_emitted_selector(selector: str) -> str:
-    """把英文 ClientEvents.lang identity 對應到 writer 產生的 zh_tw identity。"""
+    """把來源 ClientEvents.lang identity 對應到 writer 產生的 zh_tw identity。"""
     match = _KUBEJS_LANG_SELECTOR.match(selector)
-    if match is None or match.group("locale").lower() != "en_us":
+    if match is None or match.group("locale").lower() == "zh_tw":
         return selector
-    return selector.replace("ClientEvents.lang[en_us]", "ClientEvents.lang[zh_tw]", 1)
+    return re.sub(
+        r"ClientEvents\.lang\[[^\]]+\]",
+        "ClientEvents.lang[zh_tw]",
+        selector,
+        count=1,
+    )
 
 
 def _kubejs_normalized_selector(selector: str) -> str:
@@ -789,7 +822,12 @@ def _quest_update_key(item: EffectivePackTranslation) -> str | None:
 def _ftb_lang_update_key(selector: str) -> str | None:
     if not selector.startswith("lang:"):
         return None
-    return selector[5:]
+    value = selector[5:]
+    parts = value.split(":", 1)
+    if len(parts) == 2 and normalize_source_locale(parts[0]) is not None:
+        return parts[1]
+    # 舊版資料庫的 FTB selector 沒有 locale；保留讀取相容性。
+    return value
 
 
 def _ftb_lang_target(source_path: str) -> str:
@@ -797,11 +835,11 @@ def _ftb_lang_target(source_path: str) -> str:
     parts = list(PurePosixPath(relative).parts)
     if not parts or parts[0].lower() != "lang":
         return relative
-    if len(parts) >= 2 and parts[1].lower() in _LOCALES:
+    if len(parts) >= 2 and normalize_source_locale(parts[1]) is not None:
         parts[1] = "zh_tw"
     elif len(parts) == 2:
         stem = Path(parts[1]).stem.lower()
-        if stem in _LOCALES:
+        if normalize_source_locale(stem) is not None:
             parts[1] = "zh_tw" + Path(parts[1]).suffix
     return "/".join(parts)
 

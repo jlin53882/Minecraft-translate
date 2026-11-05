@@ -7,6 +7,7 @@ import sqlite3
 import flet as ft
 
 from app.services_impl import moddb_cleanup_service as svc
+from app.services_impl.moddb_service import EntryFilter
 from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
@@ -30,11 +31,6 @@ from translation_tool.utils.log_unit import log_exception
 
 ALL_MODULES = "__all__"
 ALL_KINDS = "__all__"
-KIND_OPTIONS = (
-    (ALL_KINDS, "全部類型"),
-    ("guide", "Guide 指南文字"),
-    ("patchouli", "Patchouli 手冊"),
-)
 SKIPPED_LABELS = {
     "translation_conflict": "翻譯來源衝突",
     "different_original": "原文不同",
@@ -75,7 +71,7 @@ class DuplicateCleanupDialog:
         self.kind_dd = kit.dropdown(
             label="內容類型", dense=True, width=210, on_select=self._on_scope_changed
         )
-        kit.set_dropdown_options(self.kind_dd, list(KIND_OPTIONS))
+        kit.set_dropdown_options(self.kind_dd, [(ALL_KINDS, "全部類型")])
         self.kind_dd.value = ALL_KINDS
         self.scope_hint = ft.Text("", size=12, color=C.MUTED, selectable=True)
         self._update_scope_hint()
@@ -191,7 +187,12 @@ class DuplicateCleanupDialog:
                     else (versions[0] if versions else None)
                 )
                 modules = list(db.mods(query_version)) if db and query_version else []
-                result = (versions, modules)
+                kinds = (
+                    list(db.kind_option_values(EntryFilter(version=query_version)))
+                    if db and query_version
+                    else []
+                )
+                result = (versions, modules, kinds)
             except Exception as exc:  # noqa: BLE001 - worker boundary reports UI error
                 error = exc
                 log_exception("重複鍵清理範圍選單載入失敗")
@@ -222,7 +223,7 @@ class DuplicateCleanupDialog:
             self.status.value = f"範圍選單載入失敗：{error}"
             self._safe_update()
             return
-        versions, modules = result
+        versions, modules, kinds = result
         current = self.version_dd.value
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         if current not in versions:
@@ -232,6 +233,7 @@ class DuplicateCleanupDialog:
         self.version_dd.value = current
         self.version = current or ""
         self._refresh_modules(modules)
+        self._refresh_kinds(kinds)
         self._update_scope_hint()
         if not self._busy:
             self.status.visible = False
@@ -243,6 +245,17 @@ class DuplicateCleanupDialog:
         kit.set_dropdown_options(self.mod_dd, options)
         keys = {key for key, _label in options}
         self.mod_dd.value = selected if selected in keys else ALL_MODULES
+
+    def _refresh_kinds(self, kinds) -> None:
+        """Populate every kind present in the selected version from the DB."""
+        options = [
+            (ALL_KINDS, "全部類型"),
+            *((kind, kind_label(kind)) for kind in kinds),
+        ]
+        selected = self.kind_dd.value
+        kit.set_dropdown_options(self.kind_dd, options)
+        keys = {key for key, _label in options}
+        self.kind_dd.value = selected if selected in keys else ALL_KINDS
 
     def _selected_scope(self) -> tuple[str, str | None, str | None]:
         version = str(self.version_dd.value or "").strip()

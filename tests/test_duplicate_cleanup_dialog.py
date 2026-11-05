@@ -191,3 +191,32 @@ def test_scope_options_reload_uses_a_version_available_in_the_new_database(
     finally:
         first.close()
         second.close()
+
+
+def test_scope_options_include_every_kind_present_in_the_selected_version(
+    tmp_path, monkeypatch
+):
+    db = _db(tmp_path / "all-kinds.db")
+    with db._tx() as conn:
+        for kind in ("lang", "patchouli", "kubejs_lang", "ftb_quest_lang"):
+            conn.execute(
+                "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
+                "VALUES (?, ?, 'all-kinds', ?, 'text')",
+                (kind, VERSION, f"{kind}.key"),
+            )
+    try:
+        dialog, workers, _shown = _dialog(monkeypatch, {"value": db})
+        dialog._start_scope_options_load()
+        workers[0]()
+
+        actual = {option.key for option in dialog.kind_dd.options}
+        assert {
+            "__all__",
+            "guide",
+            "lang",
+            "patchouli",
+            "kubejs_lang",
+            "ftb_quest_lang",
+        } <= actual
+    finally:
+        db.close()

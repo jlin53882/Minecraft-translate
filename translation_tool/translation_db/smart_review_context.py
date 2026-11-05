@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import re
+import sqlite3
 from itertools import islice
 from typing import Any
 
@@ -18,24 +19,62 @@ from translation_tool.core.official_locale import (
     terminology_term_allowed,
     terminology_terms_for_item,
 )
+from translation_tool.core.source_locale import (
+    effective_source_locale,
+    reviewed_locale_compatible,
+)
 from translation_tool.core.terminology_model import (
     evidence_context_entry,
     from_official_match,
 )
 from translation_tool.translation_db.quality import quality_state
 from translation_tool.translation_db.schema import (
+    KIND_FTB_QUEST_LANG,
+    KIND_FTB_QUESTS,
     KIND_KUBEJS_LANG,
+    KIND_KUBEJS_SCRIPT,
     KIND_LANG,
     SRC_JAR_TW,
 )
-from translation_tool.utils.text_matching import contains_term, term_canonical_key
+from translation_tool.translation_db.sql_helpers import reference_locale_sql
+from translation_tool.utils.text_matching import (
+    build_term_prefix_index,
+    contains_term,
+    matching_terms,
+    term_canonical_key,
+)
 
+# 第 11 欄（索引 10）是參考的來源語系（見 ``reference_locale_sql``）：證據必須與候選的來源語系相容。
+_REFERENCE_LOCALE_INDEX = 10
 _REVIEWED_ENTRY_COLUMNS = (
     "SELECT e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us, "
-    "f.zh_tw, f.source, f.review_status, f.revision "
+    "f.zh_tw, f.source, f.review_status, f.revision, "
+    f"{reference_locale_sql('e')} "
     "FROM entry e JOIN translation f ON f.entry_id=e.id "
 )
-_LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG)
+_LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
+_TARGET_ROW_LIMIT = 96  # 每個 kind、每個版本分組的詞組命中列上限
+
+
+def _scoped_phrase_sql(phrase_count: int, scope_sql: str) -> str:
+    """模組包範圍（KubeJS／FTB）的詞組命中查詢。
+
+    範圍條件是 EXISTS 子查詢，沒有索引提示時計畫器會掃整個 kind 或版本，再逐列探測
+    ``entry_origin``（每次約 16 ms，且每筆候選都要查）。``INDEXED BY idx_entry_en``
+    讓詞組先走 en_us 索引，再用範圍與審核狀態過濾（每次不到 1 ms）。
+    不含 ORDER BY／LIMIT：排序與上限由呼叫端在記憶體完成，避免臨時排序。
+    """
+    placeholders = ",".join("?" * phrase_count)
+    return (
+        _REVIEWED_ENTRY_COLUMNS.replace(
+            "FROM entry e JOIN", "FROM entry e INDEXED BY idx_entry_en JOIN", 1
+        )
+        + "WHERE e.en_us IN ("
+        + placeholders
+        + ") AND e.kind=? AND "
+        + scope_sql
+        + " AND f.review_status='reviewed' AND trim(f.zh_tw)<>''"
+    )
 
 
 class _LocalContextBuilder:
@@ -64,13 +103,87 @@ class _LocalContextBuilder:
         self.key_rows_cache = cache.setdefault("key_rows", {})
         self.quality_cache = cache.setdefault("quality", {})
 
+    @property
+    def item_locale(self) -> str | None:
+        """候選自己的來源語系；沒有來源紀錄或無法確認時為 ``None``（未知，不視為任何語系）。"""
+        if "item_locale" not in self.cache:
+            self.cache["item_locale"] = {}
+        known = self.cache["item_locale"]
+        if self.entry_id not in known:
+            row = self.db._one(
+                f"SELECT {reference_locale_sql('e')} FROM entry e WHERE e.id=?",
+                (self.entry_id,),
+            )
+            known[self.entry_id] = effective_source_locale(
+                self.kind, row[0] if row else None
+            )
+        return known[self.entry_id]
+
+    def _locale_ok(self, row: tuple) -> bool:
+        """證據列的來源語系與候選相容（未知語系的參考永遠不相容）。"""
+        return reviewed_locale_compatible(
+            self.item_locale, row[_REFERENCE_LOCALE_INDEX]
+        )
+
+    def _glossary_scope(self) -> str | None:
+        """從 scanner 建立的 mod id 取得 KubeJS／FTB 的模組包身分。"""
+        scoped_kinds = {
+            KIND_KUBEJS_LANG,
+            KIND_KUBEJS_SCRIPT,
+            KIND_FTB_QUEST_LANG,
+            KIND_FTB_QUESTS,
+        }
+        if self.kind not in scoped_kinds or "@" not in self.mod_id:
+            return None
+        _prefix, scope = self.mod_id.split("@", 1)
+        return scope or None
+
+    def _glossary_kinds(self) -> tuple[str, ...]:
+        """限制外掛語系 glossary 只取同一模組包的同格式語系。"""
+        if (
+            self.kind in {KIND_KUBEJS_LANG, KIND_KUBEJS_SCRIPT}
+            and self._glossary_scope()
+        ):
+            return (KIND_KUBEJS_LANG,)
+        if (
+            self.kind in {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS}
+            and self._glossary_scope()
+        ):
+            return (KIND_FTB_QUEST_LANG,)
+        return _LANGUAGE_KINDS
+
+    def _glossary_scope_sql(self) -> tuple[str, tuple[Any, ...]]:
+        """回傳同包範圍條件；沒有可信 scope 時退回舊 mod_id 契約。"""
+        scope = self._glossary_scope()
+        if scope is not None:
+            return (
+                (
+                    "EXISTS (SELECT 1 FROM entry_origin eo "
+                    "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"
+                ),
+                (scope,),
+            )
+        return "e.mod_id=?", (self.mod_id,)
+
+    def _glossary_cache_scope(self) -> tuple[str, str, str | None, tuple[str, ...]]:
+        return (self.kind, self.mod_id, self._glossary_scope(), self._glossary_kinds())
+
     def build(self) -> list[dict[str, Any]]:
         """依證據優先順序組合並去重後的 context。"""
         context = self._same_key_context(self._same_key_rows())
-        glossary_rows = self._glossary_rows_for_item()
+        glossary_rows = [
+            row for row in self._glossary_rows_for_item() if self._locale_ok(row)
+        ]
         official = load_official_locale_index()
-        official_context = self._official_context(official)
-        context.extend(self._glossary_context(glossary_rows, official))
+        # 官方 Minecraft 術語是英文；只用於英文或語系未知的候選。
+        official_context = (
+            self._official_context(official)
+            if self.item_locale in (None, "en_us")
+            else []
+        )
+        glossary_context = self._glossary_context(glossary_rows, official)
+        context.extend(glossary_context)
+        context.extend(self._lang_name_fallback_context(official, glossary_context))
         context.extend(self._same_text_context())
         module_locale_context = self._module_locale_context()
         # 同一資料庫列可能同時由 same-key 與 glossary 路徑取得；保留第一個較具體的路徑。
@@ -105,6 +218,7 @@ class _LocalContextBuilder:
         *,
         order_key,
         limit: int | None = None,
+        kinds: tuple[str, ...] = _LANGUAGE_KINDS,
     ) -> list[tuple]:
         """分別查詢語系 kind，再合併已排序的 index stream。
 
@@ -119,7 +233,7 @@ class _LocalContextBuilder:
                 _REVIEWED_ENTRY_COLUMNS + "WHERE e.kind=? AND " + where_sql,
                 (kind, *params),
             )
-            for kind in _LANGUAGE_KINDS
+            for kind in kinds
         ]
         merged = heapq.merge(*streams, key=order_key)
         if limit is None:
@@ -177,7 +291,7 @@ class _LocalContextBuilder:
         return [
             row
             for row in self.key_rows_cache[cache_key]
-            if int(row[0]) != self.entry_id
+            if int(row[0]) != self.entry_id and self._locale_ok(row)
         ]
 
     def _query_same_key_rows(self) -> list[tuple]:
@@ -291,52 +405,150 @@ class _LocalContextBuilder:
         """以詞組精確查詢 reviewed lang 列，目前版本排在其他版本之前。"""
         if not lookup_phrases:
             return []
-        mod_id, mc_version = self.mod_id, self.mc_version
+        self._bulk_glossary_rows()
+        scope = (*self._glossary_cache_scope(), self.mc_version)
+        if self.cache.get("glossary_complete", {}).get(scope):
+            # bulk glossary 沒被上限截斷時，詞組命中列必定是它的子集；
+            # 直接取用快取，不必每筆候選再各查一次資料庫。
+            return self._target_rows_from_bulk(scope, lookup_phrases)
+        if self._glossary_scope() is not None:
+            rows = self._scoped_target_rows(lookup_phrases)
+            if rows is not None:
+                return rows
+        return self._glossary_target_rows_from_sql(lookup_phrases)
+
+    def _glossary_target_rows_from_sql(self, lookup_phrases: list[str]) -> list[tuple]:
+        """以模組或範圍條件直接查資料庫取詞組命中列（無快取可用時的查詢）。"""
+        mc_version = self.mc_version
         placeholders = ",".join("?" for _ in lookup_phrases)
+        scope_sql, scope_params = self._glossary_scope_sql()
+        kinds = self._glossary_kinds()
         # 分成目前版本與其他版本兩段查詢，讓 glossary_order 索引直接
         # 提供 LIMIT 前的順序；不要用 CASE 排序把整批候選放進暫存 B-tree。
         current = self._language_rows(
             "glossary_target_current_rows",
-            "e.mod_id=? AND e.mc_version=? "
+            scope_sql + " AND e.mc_version=? "
             "AND e.en_us IN (" + placeholders + ") "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
             "ORDER BY e.id LIMIT 96",
-            (mod_id, mc_version, *lookup_phrases),
+            (*scope_params, mc_version, *lookup_phrases),
             order_key=lambda row: int(row[0]),
+            kinds=kinds,
         )
         other = self._language_rows(
             "glossary_target_other_rows",
-            "e.mod_id=? AND e.mc_version<>? "
+            scope_sql + " AND e.mc_version<>? "
             "AND e.en_us IN (" + placeholders + ") "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
             "ORDER BY e.mc_version, e.id LIMIT 96",
-            (mod_id, mc_version, *lookup_phrases),
+            (*scope_params, mc_version, *lookup_phrases),
             order_key=lambda row: (str(row[2]), int(row[0])),
+            kinds=kinds,
         )
         return current + other
 
+    def _scoped_target_rows(self, lookup_phrases: list[str]) -> list[tuple] | None:
+        """模組包範圍的詞組命中列：詞組先走 en_us 索引，排序與上限在記憶體完成。
+
+        索引在舊資料庫不存在時回傳 ``None``，由呼叫端改用一般查詢。
+        """
+        phrases = list(dict.fromkeys(lookup_phrases))
+        scope_sql, scope_params = self._glossary_scope_sql()
+        sql = _scoped_phrase_sql(len(phrases), scope_sql)
+        rows: list[tuple] = []
+        for kind in self._glossary_kinds():
+            try:
+                rows.extend(self.db._q(sql, (*phrases, kind, *scope_params)))
+            except sqlite3.OperationalError:
+                return None
+        return self._cap_target_rows(rows)
+
+    def _cap_target_rows(self, rows: list[tuple]) -> list[tuple]:
+        """依資料庫查詢的順序與上限整理詞組命中列。
+
+        目前版本依 id、其他版本依（版本, id）排序，每個 kind 各取最多
+        ``_TARGET_ROW_LIMIT`` 列，目前版本在前。
+        """
+        current_by_kind: dict[str, list[tuple]] = {}
+        other_by_kind: dict[str, list[tuple]] = {}
+        for row in rows:
+            target = (
+                current_by_kind if str(row[2]) == self.mc_version else other_by_kind
+            )
+            target.setdefault(str(row[1]), []).append(row)
+
+        def current_key(item: tuple) -> int:
+            return int(item[0])
+
+        def other_key(item: tuple) -> tuple[str, int]:
+            return (str(item[2]), int(item[0]))
+
+        current = sorted(
+            (
+                row
+                for kind_rows in current_by_kind.values()
+                for row in sorted(kind_rows, key=current_key)[:_TARGET_ROW_LIMIT]
+            ),
+            key=current_key,
+        )
+        other = sorted(
+            (
+                row
+                for kind_rows in other_by_kind.values()
+                for row in sorted(kind_rows, key=other_key)[:_TARGET_ROW_LIMIT]
+            ),
+            key=other_key,
+        )
+        return current + other
+
+    def _target_rows_from_bulk(
+        self, scope: tuple[Any, ...], lookup_phrases: list[str]
+    ) -> list[tuple]:
+        """由完整的 bulk glossary 取詞組命中列，結果與資料庫查詢逐列相同。
+
+        索引用去重前的原始列建立：同一筆條目有多筆已審核譯文時，資料庫查詢會回傳
+        每一列，這裡也要保留。
+        """
+        by_en_cache = self.cache.setdefault("glossary_by_en", {})
+        if scope not in by_en_cache:
+            by_en: dict[str, list[tuple]] = {}
+            for row in self.cache["glossary_raw_rows"][scope]:
+                by_en.setdefault(str(row[5]), []).append(row)
+            by_en_cache[scope] = by_en
+        by_en = by_en_cache[scope]
+        rows = [
+            row
+            for phrase in dict.fromkeys(lookup_phrases)
+            for row in by_en.get(phrase, ())
+        ]
+        return self._cap_target_rows(rows)
+
     def _bulk_glossary_rows(self) -> tuple[tuple, ...]:
         """取得同模組／版本共用的 bulk glossary（最多 5,000 列，已去重）。"""
-        mod_id, mc_version = self.mod_id, self.mc_version
+        mc_version = self.mc_version
+        scope_sql, scope_params = self._glossary_scope_sql()
+        kinds = self._glossary_kinds()
         current_rows = self._language_rows(
             "glossary_current_rows",
-            "e.mod_id=? AND e.mc_version=? "
+            scope_sql + " AND e.mc_version=? "
             "AND f.review_status='reviewed' AND e.en_us<>'' "
             "AND trim(f.zh_tw)<>'' ORDER BY e.id LIMIT 5000",
-            (mod_id, mc_version),
+            (*scope_params, mc_version),
             order_key=lambda row: int(row[0]),
             limit=5000,
+            kinds=kinds,
         )
         remaining = 5000 - len(current_rows)
         other_rows = (
             self._language_rows(
                 "glossary_other_rows",
-                "e.mod_id=? AND e.mc_version<>? "
+                scope_sql + " AND e.mc_version<>? "
                 "AND f.review_status='reviewed' AND e.en_us<>'' "
                 "AND trim(f.zh_tw)<>'' ORDER BY e.mc_version, e.id LIMIT ?",
-                (mod_id, mc_version, remaining),
+                (*scope_params, mc_version, remaining),
                 order_key=lambda row: (str(row[2]), int(row[0])),
                 limit=remaining,
+                kinds=kinds,
             )
             if remaining
             else []
@@ -344,7 +556,7 @@ class _LocalContextBuilder:
         # 同一模組／版本的候選會共用相同 bulk glossary。先把目前版本與
         # 其他版本合併一次，再建立詞元倒排索引；每筆候選只取可能命中的列，
         # 之後仍交給 contains_term 做最後的詞界確認。
-        scope = (mod_id, mc_version)
+        scope = (*self._glossary_cache_scope(), mc_version)
         rows_cache = self.cache.setdefault("glossary_rows", {})
         if scope not in rows_cache:
             merged: list[tuple] = []
@@ -355,13 +567,20 @@ class _LocalContextBuilder:
                     seen_ids.add(row_id)
                     merged.append(row)
             rows_cache[scope] = tuple(merged)
+            # 兩段查詢都沒碰到上限才代表同範圍的已審核列全數在記憶體中。
+            self.cache.setdefault("glossary_complete", {})[scope] = (
+                len(current_rows) < 5000 and len(other_rows) < remaining
+            )
+            self.cache.setdefault("glossary_raw_rows", {})[scope] = tuple(
+                current_rows + other_rows
+            )
         return rows_cache[scope]
 
     def _glossary_term_index(
         self, glossary_rows: tuple[tuple, ...]
     ) -> tuple[dict[str, list[tuple]], dict[str, list[tuple]], dict[int, int]]:
         """建立（並快取）詞元倒排索引，避免每筆候選重掃最多 5,000 列。"""
-        scope = (self.mod_id, self.mc_version)
+        scope = (*self._glossary_cache_scope(), self.mc_version)
         index_cache = self.cache.setdefault("glossary_term_index", {})
         if scope not in index_cache:
             indexed_tokens: dict[str, list[tuple]] = {}
@@ -547,6 +766,98 @@ class _LocalContextBuilder:
                 )
         return context
 
+    # -- 模組包項目退回 ``@`` 前面模組名稱的 lang ----------------------------------
+
+    def _name_fallback_index(
+        self,
+    ) -> tuple[dict[str, list[tuple]], tuple[str, ...], dict[str, Any]]:
+        """``@`` 前面模組名稱在目前版本的已審核 lang 列與詞組前綴索引。
+
+        每個（模組, 版本）只查詢與建立一次；每筆候選只用前綴索引找出可能命中的術語，
+        不會逐列比對整個模組的 lang（候選數 × lang 列數會讓大量候選慢上數十倍）。
+        """
+        base_name = self.mod_id.split("@", 1)[0]
+        cache = self.cache.setdefault("lang_name_fallback", {})
+        scope = (base_name, self.mc_version)
+        if scope not in cache:
+            rows = (
+                self.db._q(
+                    _REVIEWED_ENTRY_COLUMNS
+                    + "WHERE e.kind=? AND e.mod_id=? AND e.mc_version=? "
+                    "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
+                    "AND e.en_us<>f.zh_tw",
+                    (KIND_LANG, base_name, self.mc_version),
+                )
+                if base_name
+                else []
+            )
+            by_term: dict[str, list[tuple]] = {}
+            for row in rows:
+                term = normalize_terminology_text(str(row[5])).strip()
+                if term:
+                    by_term.setdefault(term, []).append(row)
+            terms = tuple(by_term)
+            cache[scope] = (by_term, terms, build_term_prefix_index(terms))
+        return cache[scope]
+
+    def _lang_name_fallback_context(
+        self, official: Any, same_kind_context: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """KubeJS／FTB 項目：同包沒有的術語，退回 ``@`` 前面模組名稱的 lang。
+
+        只補同包（同種類）glossary 還沒有的原文；譯法不唯一的術語不提供。
+        """
+        if self._glossary_scope() is None or "@" not in self.mod_id:
+            return []
+        by_term_rows, terms, prefix_index = self._name_fallback_index()
+        if not terms:
+            return []
+        covered = {
+            term_canonical_key(normalize_terminology_text(str(item.get("en_us", ""))))
+            for item in same_kind_context
+        }
+        normalized_en_us = normalize_terminology_text(self.en_us)
+        matched_terms = matching_terms(
+            (normalized_en_us,), terms, prefix_index=prefix_index
+        )
+        by_canonical: dict[str, list[tuple]] = {}
+        for term in matched_terms:
+            canonical = term_canonical_key(term)
+            if canonical in covered:
+                continue
+            for row in by_term_rows[term]:
+                if not self._locale_ok(row):
+                    continue
+                if self._quality_details(row)[0] != "consistent":
+                    continue
+                if not terminology_term_allowed(
+                    self.en_us, term, key=str(row[4]), index=official
+                ):
+                    continue
+                by_canonical.setdefault(canonical, []).append(row)
+        context: list[dict[str, Any]] = []
+        for canonical in sorted(by_canonical, key=lambda value: (-len(value), value))[
+            :6
+        ]:
+            rows = sorted(by_canonical[canonical], key=lambda row: int(row[0]))
+            if len({str(row[6]).strip() for row in rows}) != 1:
+                continue
+            row = rows[0]
+            context.append(
+                self._db_context_item(
+                    row,
+                    reference_type="reviewed_lang_glossary",
+                    match_type="whole_term_module_name_lang",
+                    confidence="medium",
+                    limitations=(
+                        "reviewed lang of the module name before '@'; "
+                        "used because the pack has no reviewed term; applies to this text only"
+                    ),
+                    en_us_value=normalize_terminology_text(str(row[5])).strip(),
+                )
+            )
+        return context
+
     # -- 同文與模組自帶語系 ---------------------------------------------------
 
     def _same_text_context(self) -> list[dict[str, Any]]:
@@ -560,6 +871,8 @@ class _LocalContextBuilder:
         )
         context: list[dict[str, Any]] = []
         for row in related_rows:
+            if not self._locale_ok(row):
+                continue
             if (
                 str(row[1]) == self.kind
                 and str(row[3]) == self.mod_id

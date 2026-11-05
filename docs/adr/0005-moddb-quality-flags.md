@@ -54,6 +54,14 @@
 - 改變 `quality.py` 或學名規則的判斷結果時必須遞增 `quality_schema_version`，否則已存的
   旗標與新規則不同。
 
+### 目前實作版本
+
+本 ADR 的「指南結構定義版本 2」是指南標記規則的版本，不是資料庫品質旗標的整體版本。
+目前 `quality_flags.SCHEMA_VERSION` 為 `9`；KubeJS 與 FTB Quests 的獨立 `kind` 已納入
+同一套品質旗標與重算流程。後續若新增格式種類、來源語系或品質判定規則，必須同步檢查
+旗標重算、唯讀 fallback、進階篩選與本文件／使用者文件，避免 UI 顯示的結果與資料庫查詢
+使用不同版本的判定。
+
 ## 正確性保護
 
 `tests/test_translation_db_quality_flags.py` 在四個版本上比對六種狀態 × 多種篩選

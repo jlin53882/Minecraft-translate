@@ -76,6 +76,7 @@ _RESUME_CAS_FIELDS = (
     "manual_checker",
     "manual_review_status",
     "manual_revision",
+    "source_locale",
 )
 
 _RESUME_RETRYABLE_STATUSES = frozenset(
@@ -163,7 +164,9 @@ def _resume_cas_values(
     )
 
 
-def _resume_snapshot(run_id: str, item: SmartReviewCandidate) -> SmartReviewSnapshot:
+def _resume_snapshot(
+    run_id: str, item: SmartReviewCandidate, source_locale: str | None = None
+) -> SmartReviewSnapshot:
     """把歷史候選轉成續跑所需的不可變 snapshot。"""
     return SmartReviewSnapshot(
         run_id=run_id,
@@ -183,6 +186,7 @@ def _resume_snapshot(run_id: str, item: SmartReviewCandidate) -> SmartReviewSnap
         manual_checker=item.manual_checker,
         manual_review_status=item.manual_review_status,
         manual_revision=item.manual_revision,
+        source_locale=source_locale,
     )
 
 
@@ -284,6 +288,7 @@ class SmartReviewRunStoreMixin:
             "manual_checker": None if manual is None else manual[1],
             "manual_review_status": None if manual is None else manual[2],
             "manual_revision": None if manual is None else manual[3],
+            "source_locale": None,
             "context": (
                 self._smart_review_context(
                     int(entry_id),
@@ -345,6 +350,9 @@ class SmartReviewRunStoreMixin:
     ) -> dict[int, dict[str, Any] | None]:
         """讀取續跑候選的輕量快照，必要時才重建完整 context。"""
         current_by_ordinal: dict[int, dict[str, Any] | None] = {}
+        locales = self.source_locales_for_entries(
+            [candidate.entry_id for candidate in candidates]
+        )
         context_cache_reset = False
         for candidate in candidates:
             current = self._resume_current_payload(
@@ -353,6 +361,7 @@ class SmartReviewRunStoreMixin:
                 include_context=False,
             )
             if current is not None:
+                current["source_locale"] = locales.get(candidate.entry_id)
                 cas_changed = _resume_cas_values(candidate) != _resume_cas_values(
                     current
                 )
@@ -368,6 +377,8 @@ class SmartReviewRunStoreMixin:
                         scope,
                         include_context=True,
                     )
+                    if current is not None:
+                        current["source_locale"] = locales.get(candidate.entry_id)
                 else:
                     # 未變更的候選直接沿用 JSON 內的 context，避免續跑時為
                     # 數萬筆候選重做相同的資料庫證據查詢。
@@ -453,10 +464,13 @@ class SmartReviewRunStoreMixin:
             )
         self._merge_resume_metrics(run, resume_stats)
         refreshed = history.list_candidates(run_id)
+        pending = [
+            item for item in refreshed if item.status == SmartReviewStatus.PENDING
+        ]
+        locales = self.source_locales_for_entries([item.entry_id for item in pending])
         snapshots = [
-            _resume_snapshot(run_id, item)
-            for item in refreshed
-            if item.status == SmartReviewStatus.PENDING
+            _resume_snapshot(run_id, item, locales.get(item.entry_id))
+            for item in pending
         ]
         base = _resume_counts(refreshed)
         if progress is not None:
@@ -681,6 +695,7 @@ class SmartReviewRunStoreMixin:
             if limit is not None
             else params,
         )
+        locales = self.source_locales_for_entries([int(row[2]) for row in rows])
         result: list[SmartReviewCandidate] = []
         for row in rows:
             result.append(
@@ -713,6 +728,7 @@ class SmartReviewRunStoreMixin:
                     status=row[25],
                     applied_batch=row[26],
                     applied_at=row[27],
+                    source_locale=locales.get(int(row[2])),
                 )
             )
         return result

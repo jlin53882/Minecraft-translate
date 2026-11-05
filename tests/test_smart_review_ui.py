@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -58,6 +59,25 @@ def _sync_page():
     page.run_task = lambda coro, *args: asyncio.run(coro(*args))
     page.snacks = []
     return page
+
+
+@pytest.fixture(autouse=True)
+def _review_poller_started(monkeypatch):
+    """測試用的同步 ``run_task`` 會把輪詢一路跑到結束；審查同步輪詢改為只記錄啟動。
+
+    需要驗證輪詢行為的測試直接呼叫 ``dialog._poll_review`` 或 ``sync_review_panels``。
+    回傳記錄到的輪詢處理函式清單。
+    """
+    from app.views.moddb import smart_review_dialog
+
+    started = []
+
+    def record(self, page, handler):
+        started.append(handler)
+        return True
+
+    monkeypatch.setattr(smart_review_dialog.PollerHandle, "start", record)
+    return started
 
 
 def _candidate(ordinal: int = 1, status: str = "ready", **overrides):
@@ -1767,6 +1787,94 @@ def test_job_logs_preparation_stages_once_and_keeps_stage_visible(
     assert job.state.stage_message == "執行批次已建立，開始送出第一批…"
 
 
+def test_job_selection_summary_shows_planned_and_reused_counts(tmp_path, monkeypatch):
+    """「範圍搜尋完成」摘要顯示核心回報的規劃筆數與歷史重用筆數，而不是 0。"""
+    import app.views.moddb.smart_review_job as job_module
+
+    def fake_run(*_args, progress=None, **_kwargs):
+        progress(
+            {
+                "run_id": "run-plan",
+                "phase": "selection_complete",
+                "selected": 38136,
+                "processed": 0,
+                "timing": {"selection_seconds": 6.19, "run_record_seconds": 2.31},
+                "metrics": {"planned_ai_count": 38136, "reused_count": 12},
+            }
+        )
+        return _Result()
+
+    monkeypatch.setattr(job_module, "run_moddb_smart_review_from_path", fake_run)
+    monkeypatch.setattr(
+        job_module,
+        "get_moddb_smart_review_run_breakdown_from_path",
+        lambda *_a, **_k: {"status": {}, "errors": []},
+    )
+    job = SmartReviewJob(_sync_page())
+    assert job.start(_request(tmp_path)) is None
+
+    texts = [entry.text for entry in job.session.snapshot()["logs"]]
+    summary = next(text for text in texts if "範圍搜尋完成" in text)
+    assert "選取 38,136 筆" in summary
+    assert "精確規劃送 AI 38,136 筆" in summary
+    assert "歷史重用 12 筆" in summary
+
+
+def test_job_selection_summary_matches_a_real_core_run(db, tmp_path, monkeypatch):
+    """真實核心搭配真實 job：摘要的筆數與實際規劃一致，不再顯示 0。"""
+    import app.views.moddb.smart_review_job as job_module
+    from translation_tool.translation_db.smart_review_run import run_smart_review
+
+    def fake_provider(**kwargs):
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.8,
+                        "reason": "目前譯文可保留。",
+                    }
+                    for item in kwargs["payload"]["items"]
+                ]
+            }
+        )
+
+    monkeypatch.setattr(
+        "translation_tool.translation_db.smart_review_provider.call_gemini_requests",
+        fake_provider,
+    )
+
+    def real_run(*_args, progress=None, **_kwargs):
+        return run_smart_review(
+            db,
+            model_name="gemini-test",
+            api_key="test-key",
+            limit=2,
+            batch_size=1,
+            effective_source=None,
+            progress=progress,
+        )
+
+    monkeypatch.setattr(job_module, "run_moddb_smart_review_from_path", real_run)
+    monkeypatch.setattr(
+        job_module,
+        "get_moddb_smart_review_run_breakdown_from_path",
+        lambda *_a, **_k: {"status": {}, "errors": []},
+    )
+    job = SmartReviewJob(_sync_page())
+    assert job.start(_request(tmp_path)) is None
+
+    texts = [entry.text for entry in job.session.snapshot()["logs"]]
+    summary = next(text for text in texts if "範圍搜尋完成" in text)
+    assert "選取 2 筆" in summary
+    assert "精確規劃送 AI 2 筆" in summary
+    assert "歷史重用 0 筆" in summary
+
+
 def test_resume_job_logs_snapshot_counts_and_current_progress(tmp_path, monkeypatch):
     """續跑 log 顯示歷史快照與本次新增進度，不把舊處理量當成新批次。"""
     import app.views.moddb.smart_review_job as job_module
@@ -2044,6 +2152,195 @@ def test_reviewer_refresh_reloads_counts_after_peer_apply(reviewer):
     assert (
         reviewer.body.controls[0].content.controls[1].value == "可套用的候選都處理完了"
     )
+
+
+def _live_dialog(db, monkeypatch, rows, *, running: bool = True):
+    """建立審查頁指向 run-1 的對話框；job 預設正在執行同一個批次。"""
+    from app.views.moddb.smart_review_dialog import SmartReviewDialog
+
+    fake = _FakeService(list(rows))
+    monkeypatch.setattr(
+        loader_module, "moddb_smart_review_read_session", fake.read_session
+    )
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        fake.read_session,
+    )
+
+    def run_now(context, work, on_done, *, still_valid=None, **_kwargs):
+        """同步執行對話框背景讀取，保留過期結果檢查。"""
+        try:
+            result, error = work(), None
+        except Exception as exc:  # noqa: BLE001 - mirrors production error capture
+            result, error = None, str(exc)
+        if context.closed or (still_valid is not None and not still_valid()):
+            return True
+        on_done(result, error)
+        return True
+
+    monkeypatch.setattr(SmartReviewContext, "run_background", run_now)
+    dialog = SmartReviewDialog(_sync_page(), lambda: db, "1.21.1", None)
+    if running:
+        dialog.job.state = SmartReviewJobState(phase="running", run_id="run-1")
+    dialog.open_review("run-1")
+    return dialog, fake
+
+
+def test_batch_refresh_button_also_refreshes_the_single_reviewer(db, monkeypatch):
+    """批量面板按重新整理後，逐筆面板也要讀到同一批次的最新數量。"""
+    rows = [_candidate(1, "ready"), _candidate(2, "ready"), _candidate(3, "applied")]
+    dialog, fake = _live_dialog(db, monkeypatch, rows, running=False)
+    dialog._on_review_mode("batch")
+    assert dialog.batch_reviewer.total == 2
+    assert dialog.reviewer.state.total == 2
+
+    # 批次在背景又寫入兩筆可套用候選
+    fake.rows.extend([_candidate(4, "ready"), _candidate(5, "ready")])
+    dialog.batch_reviewer.refresh_btn.on_click(None)  # 真的按下重新整理
+
+    assert dialog.batch_reviewer.total == 4
+    assert dialog.reviewer.state.total == 4
+    labels = [option.text for option in dialog.reviewer.filter_dd.options]
+    assert labels[0] == "可套用（4）"
+
+
+def test_opening_the_running_batch_starts_review_sync(
+    db, monkeypatch, _review_poller_started
+):
+    """審查中的批次就是正在執行的批次時，要啟動同步輪詢。"""
+    _live_dialog(db, monkeypatch, [_candidate(1, "ready")])
+
+    assert len(_review_poller_started) == 1
+    assert _review_poller_started[0].__name__ == "_poll_review"
+
+
+def test_review_sync_is_not_started_for_a_finished_batch(
+    db, monkeypatch, _review_poller_started
+):
+    """批次不在執行（或看的不是執行中的批次）就不輪詢。"""
+    _live_dialog(db, monkeypatch, [_candidate(1, "ready")], running=False)
+
+    assert _review_poller_started == []
+
+
+def test_review_panels_pick_up_results_written_while_the_batch_runs(db, monkeypatch):
+    """批次執行中新增的候選要同步到兩個審查面板，不必重整或重開頁面。"""
+    rows = [_candidate(1, "ready"), _candidate(2, "pending")]
+    dialog, fake = _live_dialog(db, monkeypatch, rows)
+    dialog._on_review_mode("batch")
+    assert dialog.reviewer.state.total == 1
+    assert dialog.batch_reviewer.total == 1
+
+    fake.rows[1] = _candidate(2, "ready")
+    fake.rows.append(_candidate(3, "ready"))
+    dialog.job.state.processed = 2
+    dialog.sync_review_panels()
+
+    assert dialog.reviewer.state.total == 3
+    assert dialog.batch_reviewer.total == 3
+    assert dialog.reviewer.state.counts["ready"] == 3
+    assert dialog.batch_reviewer.counts["ready"] == 3
+
+
+def test_review_sync_skips_panels_when_progress_did_not_change(db, monkeypatch):
+    """任務進度沒變就不重讀，避免每個輪詢週期都讀資料庫。"""
+    dialog, fake = _live_dialog(db, monkeypatch, [_candidate(1, "ready")])
+    dialog.job.state.processed = 1
+    dialog.sync_review_panels()
+    assert dialog.reviewer.state.total == 1
+
+    fake.rows.append(_candidate(2, "ready"))  # 進度簽章沒變
+    dialog.sync_review_panels()
+
+    assert dialog.reviewer.state.total == 1
+    dialog.job.state.processed = 2
+    dialog.sync_review_panels()
+    assert dialog.reviewer.state.total == 2
+
+
+def test_review_sync_keeps_the_batch_selection_the_user_is_making(db, monkeypatch):
+    """批量面板已有選取時不被自動刷新洗掉；逐筆面板照常同步，之後再補批量面板。"""
+    rows = [_candidate(1, "ready"), _candidate(2, "ready")]
+    dialog, fake = _live_dialog(db, monkeypatch, rows)
+    dialog._on_review_mode("batch")
+    dialog.batch_reviewer._selected.add(1)
+    fake.rows.append(_candidate(3, "ready"))
+    dialog.job.state.processed = 1
+
+    dialog.sync_review_panels()
+
+    assert dialog.batch_reviewer.total == 2  # 選取中：保留
+    assert dialog.batch_reviewer._selected == {1}
+    assert dialog.reviewer.state.total == 3  # 逐筆面板閒置：已同步
+
+    dialog.batch_reviewer._selected.clear()
+    dialog.sync_review_panels()
+    assert dialog.batch_reviewer.total == 3
+
+
+def test_review_sync_keeps_a_draft_the_user_is_editing(db, monkeypatch):
+    """逐筆面板有尚未儲存的草稿編輯時不自動刷新，避免洗掉輸入。"""
+    rows = [_candidate(1, "ready")]
+    dialog, fake = _live_dialog(db, monkeypatch, rows)
+    dialog.reviewer.draft.value = "尚未儲存的修改"
+    fake.rows.append(_candidate(2, "ready"))
+    dialog.job.state.processed = 1
+
+    dialog.sync_review_panels()
+
+    assert dialog.reviewer.state.total == 1
+    assert dialog.reviewer.draft.value == "尚未儲存的修改"
+    assert dialog.batch_reviewer.total == 2  # 批量面板閒置：已同步
+
+
+def test_review_poll_syncs_while_running_and_once_more_when_finished(db, monkeypatch):
+    """輪詢在批次執行中同步；批次結束後再補同步最終狀態，然後結束。"""
+    import asyncio
+
+    import app.views.moddb.smart_review_dialog as dialog_module
+
+    dialog, _fake = _live_dialog(db, monkeypatch, [_candidate(1, "ready")])
+    monkeypatch.setattr(dialog_module, "_REVIEW_SYNC_SECONDS", 0)
+    syncs = []
+
+    def fake_sync():
+        syncs.append(dialog.job.state.phase)
+        dialog.job.state.phase = "done"  # 第一次同步後任務結束
+
+    dialog.sync_review_panels = fake_sync
+    asyncio.run(dialog._poll_review(lambda: True))
+
+    assert syncs == ["running", "done"]
+
+
+def test_review_poll_does_nothing_after_it_was_stopped(db, monkeypatch):
+    """輪詢被停止（離開審查頁或關閉視窗）後，不再同步。"""
+    import asyncio
+
+    import app.views.moddb.smart_review_dialog as dialog_module
+
+    dialog, _fake = _live_dialog(db, monkeypatch, [_candidate(1, "ready")])
+    monkeypatch.setattr(dialog_module, "_REVIEW_SYNC_SECONDS", 0)
+    syncs = []
+    dialog.sync_review_panels = lambda: syncs.append(True)
+
+    asyncio.run(dialog._poll_review(lambda: False))
+
+    assert syncs == []
+
+
+def test_review_sync_stops_when_leaving_the_review_tab_or_closing(db, monkeypatch):
+    """離開審查頁、關閉視窗都要停止輪詢。"""
+    dialog, _fake = _live_dialog(db, monkeypatch, [_candidate(1, "ready")])
+    stops = []
+    dialog._review_poller.stop = lambda: stops.append(True)
+
+    dialog._on_tab("run")
+    assert stops == [True]
+
+    dialog._teardown()
+    assert len(stops) == 2
 
 
 def test_dialog_refreshes_the_opposite_review_mode_after_apply(db, monkeypatch):

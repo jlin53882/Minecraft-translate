@@ -71,6 +71,19 @@ for h in get_key_health_snapshot():   # 依設定檔順序
 
 ## 品質重試與共用品質准入
 
+所有經過 `translate_batch_smart` 的翻譯請求（Mod DB 機翻、Mod DB 譯文修復、目錄翻譯）都有品質重試：
+
+- **判定與最終驗證同一套規則**：`lm_format_retry.quality_issues` 除了保護 token 與指南結構，也套用
+  `translation_issues`（色碼順序、標記順序等完整格式診斷）。呼叫端可在項目上放 `_quality_gate(原文, 譯文) -> 問題清單`
+  覆寫最終驗證（Mod DB 譯文修復用它帶入 `strict_newline` 與修復模式規則），重試判定就與寫回前的驗證一致，
+  不會出現「驗證擋下卻從沒被重試」的項目。
+- **多輪**：每批最多 `QUALITY_RETRY_MAX_ROUNDS`（2）輪，每輪只重送仍不合格的項目；某輪沒有任何改善即停止。
+  只有通過品質與術語檢查、且不是照抄原文的重試譯文才會被接受。
+- **暫時性故障就地恢復**：重試請求遇到 5xx、逾時或連線中斷時，等待後原樣重送（最多 3 次；ChatGPT 的
+  `Retry-After` 至少等滿）。429／配額類故障不在這裡重送，交給下方的共用 scheduler。
+- **可見性**：Mod DB 譯文修復的 `SameSourceAIRepairReport` 記錄 `quality_retry_candidates`、`quality_retry_fixed`、
+  `quality_retry_unresolved`，摘要日誌顯示「品質重試 N 筆（修正 X、仍未通過 Y）」。
+
 品質 retry 的請求失敗時，只更新必要的 provider／模型／key 健康訊號，不會再次進入一般
 批次的錯誤狀態機。ChatGPT Responses 的 429 與 `Retry-After` 會寫入同一個 provider/model
 的 scheduler；Gemini 則讀取回應標頭或 `RetryInfo`，沒有可解析的值時使用本批間隔作為保守

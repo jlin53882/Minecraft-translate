@@ -14,6 +14,21 @@ from translation_tool.translation_db.smart_review_status import (
     SmartReviewStatus,
 )
 
+# Keep the accepted values in the storage model so the DB matcher and every UI
+# that exposes this filter cannot silently drift apart when a new format kind
+# adds a diagnostic category.
+QUALITY_TOKEN_CATEGORIES: tuple[str, ...] = (
+    "all",
+    "placeholder",
+    "minecraft",
+    "patchouli",
+    "newline",
+    "color",
+    "markup",
+    "guide",
+    "other",
+)
+
 
 @dataclass(frozen=True)
 class EntryRow:
@@ -156,13 +171,7 @@ class QualityFilter:
             raise ValueError(f"未知翻譯品質狀態：{self.status}")
         if self.direction not in {"all", "missing", "extra"}:
             raise ValueError(f"未知 token 不一致方向：{self.direction}")
-        if self.token_category not in {
-            "all",
-            "placeholder",
-            "minecraft",
-            "patchouli",
-            "newline",
-        }:
+        if self.token_category not in QUALITY_TOKEN_CATEGORIES:
             raise ValueError(f"未知 token 類別：{self.token_category}")
 
     @property
@@ -450,6 +459,8 @@ class SmartReviewSnapshot:
     manual_revision: int | None = None
     # 選取時被去重、套用時一併寫入的同文條目（見 smart_review._dedupe_same_text_rows）
     twin_entry_ids: tuple[int, ...] = ()
+    # 條目可信的來源語系（由 entry_origin 還原）；None 代表未知，不得視為 en_us
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -485,6 +496,7 @@ class SmartReviewCandidate:
     applied_batch: str | None = None
     applied_at: str | None = None
     ai_status: str | None = None
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -568,6 +580,7 @@ class ScanItem:
     source_hash: str = ""
     source_format: str = ""
     pack_scope: str = ""
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -580,6 +593,7 @@ class EntryOrigin:
     selector: str
     source_hash: str = ""
     format_profile: str = ""
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)

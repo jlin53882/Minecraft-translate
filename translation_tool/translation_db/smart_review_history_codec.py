@@ -39,6 +39,7 @@ SMART_REVIEW_CAS_SNAPSHOT_FIELDS = (
     "effective_source",
     "review_status",
     "effective_revision",
+    "source_locale",
     "manual_zh_tw",
     "manual_checker",
     "manual_review_status",
@@ -123,6 +124,7 @@ def snapshot_payload(run_id: str, item: SmartReviewSnapshot) -> dict[str, Any]:
         "manual_checker": item.manual_checker,
         "manual_review_status": item.manual_review_status,
         "manual_revision": item.manual_revision,
+        "source_locale": item.source_locale,
         "twin_entry_ids": [int(value) for value in item.twin_entry_ids],
         "context": _copy_context(item.context),
         "decision": None,
@@ -186,6 +188,7 @@ def candidate_from_payload(
             if payload.get("manual_revision") is None
             else int(payload["manual_revision"])
         ),
+        source_locale=payload.get("source_locale"),
         decision=payload.get("decision"),
         suggested_zh_tw=payload.get("suggested_zh_tw"),
         issue_types=tuple(str(item) for item in issue_types),

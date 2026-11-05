@@ -23,7 +23,13 @@ from app.views.moddb.smart_review_run_planning import (
     ResumeSelection,
     build_resume_request,
 )
-from translation_tool.translation_db import TranslationDB
+from translation_tool.translation_db import (
+    KIND_FTB_QUEST_LANG,
+    KIND_FTB_QUESTS,
+    KIND_KUBEJS_LANG,
+    KIND_KUBEJS_SCRIPT,
+    TranslationDB,
+)
 from translation_tool.translation_db.schema import SRC_AI
 from translation_tool.translation_db.smart_review_history import (
     SmartReviewHistoryStore,
@@ -254,6 +260,148 @@ def run_70k_gate(root: Path) -> dict[str, object]:
     )
     assert float(metrics["total_s"]) <= 60.0
     return metrics
+
+
+# 模組包範圍（KubeJS／FTB）的候選 context：詞庫範圍是 entry_origin.pack_scope，
+# 已審核列超過 bulk glossary 的 5,000 列上限時，每筆候選都要走詞組查詢。
+_PACK_SCOPE = "bench-pack"
+_PACK_REVIEWED_ROWS = 5_200
+_PACK_CANDIDATES_PER_KIND = 300
+_PACK_TOTAL_BUDGET_S = 60.0
+# (kind, 模組, 未審核候選數；0 表示只用預設候選數)：語系 kind 另有超過 bulk 上限的已審核列，
+# 腳本與任務沒有自己的詞庫，取用同包語系的詞庫
+_PACK_SPECS = (
+    (KIND_KUBEJS_LANG, tuple(f"mod{n:02d}@{_PACK_SCOPE}" for n in range(20)), 800),
+    (KIND_KUBEJS_SCRIPT, (f"kubejs@{_PACK_SCOPE}",), 0),
+    (KIND_FTB_QUEST_LANG, (f"ftbquests@{_PACK_SCOPE}",), 800),
+    (KIND_FTB_QUESTS, (f"ftbquests@{_PACK_SCOPE}",), 0),
+)
+
+
+def _create_pack_scope_database(path: Path) -> TranslationDB:
+    """建立 KubeJS／FTB 模組包：語系 kind 各有超過 bulk 上限的已審核列。"""
+    db = TranslationDB(path)
+    entries: list[tuple[str, str, str, str, str]] = []
+    for kind, mods, candidates in _PACK_SPECS:
+        reviewed = _PACK_REVIEWED_ROWS if kind in _LANG_KINDS else 0
+        for index in range(reviewed + (candidates or _PACK_CANDIDATES_PER_KIND)):
+            mod = mods[index % len(mods)]
+            # 詞組在模組之間重複，已審核列與候選才會互相命中
+            phrase = f"Machine Part {index % 400}"
+            key = f"{kind}.{index:05d}"
+            entries.append(
+                (
+                    kind,
+                    mod,
+                    key,
+                    phrase,
+                    "reviewed" if index < reviewed else "unreviewed",
+                )
+            )
+    with db._tx() as conn:
+        conn.executemany(
+            "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) VALUES (?,?,?,?,?)",
+            [
+                (kind, _VERSION, mod, key, phrase)
+                for kind, mod, key, phrase, _ in entries
+            ],
+        )
+        ids = {
+            (kind, mod, key): entry_id
+            for entry_id, kind, mod, key in conn.execute(
+                "SELECT id, kind, mod_id, key FROM entry"
+            )
+        }
+        rows = [
+            (ids[(kind, mod, key)], phrase, status)
+            for kind, mod, key, phrase, status in entries
+        ]
+        conn.executemany(
+            "INSERT INTO translation (entry_id, source, zh_tw, review_status) VALUES (?,?,?,?)",
+            [
+                (entry_id, SRC_AI, f"譯 {phrase}", status)
+                for entry_id, phrase, status in rows
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO entry_origin (entry_id, pack_scope, source_kind, source_path, "
+            "selector, source_locale) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    ids[(kind, mod, key)],
+                    _PACK_SCOPE,
+                    kind,
+                    f"pack/{key}",
+                    f"lang:en_us:{key}",
+                    "en_us",
+                )
+                for kind, mod, key, _phrase, _status in entries
+            ],
+        )
+        db._refresh(conn, [entry_id for entry_id, _, _ in rows])
+    return db
+
+
+_LANG_KINDS = frozenset({KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG})
+
+
+def run_pack_scope_context_gate(root: Path) -> dict[str, object]:
+    """KubeJS／FTB 模組包範圍的候選 context（``include_context=True``）。
+
+    以 SQL 敘述驗證成本而不只看時間：每筆候選的詞組查詢必須走 ``idx_entry_en``，
+    不得出現會掃整個版本的 ``ORDER BY e.id LIMIT 96`` 形式。
+    """
+    started = time.perf_counter()
+    db = _create_pack_scope_database(root / "smart-review-pack-scope.db")
+    metrics: dict[str, object] = {"scope": _PACK_SCOPE}
+    print("pack-scope stage=database_ready", flush=True)
+    try:
+        for kind, _mods, _candidates in _PACK_SPECS:
+            statements: list[str] = []
+            db._conn.set_trace_callback(statements.append)
+            kind_started = time.perf_counter()
+            try:
+                snapshots = db.smart_review_candidates(
+                    version=_VERSION,
+                    kind=kind,
+                    review_status="unreviewed",
+                    limit=_PACK_CANDIDATES_PER_KIND,
+                    include_context=True,
+                )
+            finally:
+                db._conn.set_trace_callback(None)
+            elapsed = time.perf_counter() - kind_started
+            phrase_queries = [sql for sql in statements if "en_us IN (" in sql]
+            metrics[f"{kind}_s"] = round(elapsed, 3)
+            metrics[f"{kind}_phrase_queries"] = len(phrase_queries)
+            print(f"pack-scope stage={kind}", flush=True)
+
+            assert len(snapshots) == _PACK_CANDIDATES_PER_KIND
+            assert any(snapshot.context for snapshot in snapshots)
+            # 已審核列超過 bulk 上限，候選必須逐筆走詞組查詢，且全部走詞組索引
+            assert phrase_queries, f"{kind}: 沒有走到被截斷的詞組查詢路徑"
+            assert all("INDEXED BY idx_entry_en" in sql for sql in phrase_queries)
+            assert not any("ORDER BY e.id LIMIT 96" in sql for sql in phrase_queries)
+            plan = " ".join(
+                str(row[3]) for row in db._q("EXPLAIN QUERY PLAN " + phrase_queries[0])
+            )
+            assert "idx_entry_en" in plan and "idx_entry_version" not in plan
+    finally:
+        db.close()
+    metrics["total_s"] = round(time.perf_counter() - started, 3)
+    print(
+        "SMART_REVIEW_PACK_SCOPE_METRICS=" + json.dumps(metrics, ensure_ascii=False),
+        flush=True,
+    )
+    assert float(metrics["total_s"]) <= _PACK_TOTAL_BUDGET_S
+    return metrics
+
+
+def test_smart_review_pack_scope_context_gate(tmp_path):
+    """驗證 KubeJS／FTB 模組包範圍的候選 context 不會逐筆掃整個版本。"""
+    if os.environ.get("SMART_REVIEW_70K_GATE") != "1":
+        pytest.skip("set SMART_REVIEW_70K_GATE=1 to run the pack-scope context gate")
+    run_pack_scope_context_gate(tmp_path)
 
 
 def test_smart_review_70k_performance_gate(tmp_path):

@@ -92,11 +92,13 @@ def _smart_review_input_budget(
 
 
 def _smart_review_estimated_input_tokens(
-    payload: dict[str, Any], response_schema: dict[str, Any]
+    payload: dict[str, Any],
+    response_schema: dict[str, Any],
+    system_prompt: str = SMART_REVIEW_SYSTEM_PROMPT,
 ) -> float:
     """使用翻譯主流程的本地 estimator 估算完整 provider 輸入。"""
     return estimate_text_tokens(
-        SMART_REVIEW_SYSTEM_PROMPT
+        system_prompt
         + json.dumps(payload, ensure_ascii=False)
         + json.dumps(response_schema, ensure_ascii=False)
     )

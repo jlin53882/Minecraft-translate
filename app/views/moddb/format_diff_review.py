@@ -16,6 +16,7 @@ from app.services_impl.moddb_format_diff_service import (
     FormatDiagnosticsResult,
     FormatSpan,
     analyze_format_diagnostics,
+    diagnostic_action,
 )
 from app.ui import design, kit
 from app.ui.design import C
@@ -38,15 +39,17 @@ def _count_cell(text: str, **style) -> ft.Text:
 def _diagnostic_row(issue: FormatDiagnostic) -> ft.Row:
     """One table row for a structured diagnostic, with the cause spelled out."""
     tone = C.RED if issue.direction == "extra" else C.GOLD
-    action = "缺少" if issue.direction == "missing" else "多出"
+    action = diagnostic_action(issue)
+    count_text = f"{action} {abs(issue.delta)} 個"
+    advice = (
+        "譯文少了原文有的標記，請補回。"
+        if issue.direction == "missing"
+        else "譯文多出原文沒有的標記，請移除。"
+    )
     detail: list[ft.Control] = [
-        _table_cell(
-            f"{action} {abs(issue.delta)} 個", color=tone, weight=ft.FontWeight.W_600
-        ),
+        _table_cell(count_text, color=tone, weight=ft.FontWeight.W_600),
         ft.Text(
-            "譯文少了原文有的標記，請補回。"
-            if issue.direction == "missing"
-            else "譯文多出原文沒有的標記，請移除。",
+            advice,
             size=11,
             color=C.MUTED,
             no_wrap=False,

@@ -33,6 +33,7 @@ _SNAPSHOT_KEYS = (
     "manual_checker",
     "manual_review_status",
     "manual_revision",
+    "source_locale",
     "context",
 )
 

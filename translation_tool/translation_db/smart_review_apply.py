@@ -82,6 +82,7 @@ class SmartReviewApplyMixin:
                     candidate.get("effective_source"),
                     candidate.get("review_status"),
                     candidate.get("effective_revision"),
+                    candidate.get("source_locale"),
                 )
                 if current is None or tuple(current) != expected:
                     history.update_candidate(
@@ -162,7 +163,7 @@ class SmartReviewApplyMixin:
                 _smart_review_current_snapshot_sql(),
                 (row[0],),
             ).fetchone()
-            if current is None or tuple(current) != tuple(row[1:10]):
+            if current is None or tuple(current[:9]) != tuple(row[1:10]):
                 conn.execute(
                     "UPDATE smart_review_candidate SET status='stale', "
                     "validation_error='snapshot_stale', updated_at=CURRENT_TIMESTAMP "
@@ -362,6 +363,7 @@ class SmartReviewApplyMixin:
             candidate.get("effective_source"),
             candidate.get("review_status"),
             candidate.get("effective_revision"),
+            candidate.get("source_locale"),
         )
         manual_snapshot = (
             candidate.get("manual_zh_tw"),

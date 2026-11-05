@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import flet as ft
@@ -18,6 +20,7 @@ from app.ui.dialogs import (
     dialog_dimensions,
     present_page_dialog,
 )
+from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.smart_review_batch_reviewer import SmartReviewBatchReviewer
@@ -35,6 +38,8 @@ _TABS = (
     ("history", "歷史批次", ft.Icons.HISTORY),
 )
 _REVIEW_SUMMARY_REQUEST_DOMAIN = "smart-review-review-summary"
+# 審查中的批次還在執行時，檢查進度有沒有變化的間隔（秒）；只有進度變了才重新讀取
+_REVIEW_SYNC_SECONDS = 2.0
 
 
 class SmartReviewDialog:
@@ -78,12 +83,17 @@ class SmartReviewDialog:
             on_review_changed=lambda: self._refresh_opposite_review("single"),
         )
         self.batch_reviewer = SmartReviewBatchReviewer(
-            self.ctx, on_changed=lambda: self._on_review_changed("batch")
+            self.ctx,
+            on_changed=lambda: self._on_review_changed("batch"),
+            on_refresh=lambda: self._refresh_opposite_review("batch"),
         )
         self._review_summary_loader = SmartReviewCandidateLoader()
         self._review_run_id: str | None = None
         self._review_summary_run_id: str | None = None
         self._review_summary_loading = False
+        self._review_poller = PollerHandle()
+        # 各審查面板最後一次同步時的任務進度；進度沒變就不重讀
+        self._review_synced: dict[str, tuple[Any, ...]] = {}
         self._resume_seq = 0
         self._resume_dialog: ft.AlertDialog | None = None
         self._resume_model_field: ft.TextField | None = None
@@ -179,6 +189,7 @@ class SmartReviewDialog:
             self.history.refresh()
         elif key == "review":
             self._load_review_tab_if_needed()
+        self._update_review_sync()
         self.ctx.update()
 
     def _on_review_changed(self, source: str) -> None:
@@ -272,6 +283,75 @@ class SmartReviewDialog:
         # 先讀一次共用摘要，再讓兩個面板各自載入目前可見候選；
         # 隱藏面板不再延後取得計數，避免切換模式後顯示另一個時間點的數字。
         self._load_review_tab_if_needed(force=True)
+        self._review_synced = {}
+        self._update_review_sync()
+        self.ctx.update()
+
+    # ──────────────── 執行中批次的審查同步 ────────────────
+
+    def _reviewing_running_batch(self) -> bool:
+        """審查頁正在看的批次，就是背景正在寫入結果的那一個。"""
+        return bool(
+            not self.ctx.closed
+            and self.nav.value == "review"
+            and self._review_run_id
+            and self.job.running
+            and self.job.state.run_id == self._review_run_id
+        )
+
+    def _review_batch_just_finished(self) -> bool:
+        """審查頁正在看的批次剛執行完：需要再讀一次最終狀態。"""
+        return bool(
+            not self.ctx.closed
+            and self.nav.value == "review"
+            and self._review_run_id
+            and not self.job.running
+            and self.job.state.run_id == self._review_run_id
+        )
+
+    def _job_progress_signature(self) -> tuple[Any, ...]:
+        """任務進度的簽章；批次完成寫入新結果時它會改變。"""
+        state = self.job.state
+        return (
+            state.stage,
+            state.processed,
+            state.valid,
+            state.invalid,
+            state.request_errors,
+        )
+
+    def _update_review_sync(self) -> None:
+        """依目前分頁與批次決定要不要輪詢：審查中的批次還在執行時才需要。"""
+        if not self._reviewing_running_batch():
+            self._review_poller.stop()
+            return
+        if not self._review_poller.running:
+            self._review_poller.start(self.ctx.page, self._poll_review)
+
+    async def _poll_review(self, alive: Callable[[], bool]) -> None:
+        """批次還在執行時定期同步審查面板，結束後再補同步一次最終狀態。"""
+        while alive() and self._reviewing_running_batch():
+            await asyncio.sleep(_REVIEW_SYNC_SECONDS)
+            if alive() and self._reviewing_running_batch():
+                self.sync_review_panels()
+        if alive() and self._review_batch_just_finished():
+            self.sync_review_panels()
+
+    def sync_review_panels(self) -> None:
+        """任務進度有變化時，讓閒置的審查面板重新讀取目前批次。
+
+        正在操作（選取候選、編輯草稿、動作進行中）的面板不被洗掉；它的同步進度
+        維持不變，下一輪會再試。
+        """
+        signature = self._job_progress_signature()
+        for name, panel in (
+            ("single", self.reviewer),
+            ("batch", self.batch_reviewer),
+        ):
+            if self._review_synced.get(name) == signature or not panel.can_auto_sync():
+                continue
+            panel.refresh()
+            self._review_synced[name] = signature
         self.ctx.update()
 
     def _resume_run(self, run_id: str) -> None:
@@ -506,6 +586,7 @@ class SmartReviewDialog:
         self.run_panel.attach()
         if self.nav.value == "history":
             self.history.refresh()  # 其他分頁開啟時不讀也不畫歷史卡片：切到歷史分頁才載入
+        self._update_review_sync()
 
     def _close(self, _e=None) -> None:
         """關閉視窗；背景校對不受影響，結果回來後會以通知告知。"""
@@ -522,5 +603,6 @@ class SmartReviewDialog:
             return
         self._resume_seq += 1
         self._close_resume_dialog()
+        self._review_poller.stop()
         self.ctx.close()
         self.run_panel.detach()

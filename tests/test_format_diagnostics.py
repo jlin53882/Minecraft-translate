@@ -89,6 +89,29 @@ def test_guide_legacy_wrapper_uses_the_same_structured_contract():
     )
 
 
+@pytest.mark.parametrize(
+    ("kind", "source", "translated", "category"),
+    [
+        ("ftb_quest_lang", "&aBronze dust", "Bronze dust", "color"),
+        ("kubejs_script", "Found <item>diamond</item>", "Found diamond", "markup"),
+        ("guide", "# Title", "Title", "guide"),
+    ],
+)
+def test_quality_category_filter_covers_ftb_kubejs_and_guide_contracts(
+    kind, source, translated, category
+):
+    result = analyze_format_diagnostics(source, translated, kind=kind)
+    assert any(issue.category == category for issue in result.issues) or (
+        category == "guide" and result.guide_issues
+    )
+    assert matches_quality(
+        source,
+        translated,
+        QualityFilter(status="mismatch", token_category=category),
+        kind=kind,
+    )
+
+
 def test_soft_newlines_are_ignored_for_guide_and_patchouli():
     source = "Paragraph one\nParagraph two"
     translated = "段落一\n段落二"

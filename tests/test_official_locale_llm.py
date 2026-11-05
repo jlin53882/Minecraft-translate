@@ -214,6 +214,112 @@ def test_semantic_newline_policies_are_precise_and_kind_scoped() -> None:
     assert PATCHOULI_SEMANTIC_FORMAT_POLICY_PROMPT not in lang_prompt
 
 
+def test_translation_prompt_requires_semantic_completeness_after_custom_rules() -> None:
+    prompt = build_translation_prompt(
+        "基礎提示詞\n如果你不確定如何翻譯，請原樣回傳 value",
+        [
+            {
+                "path": "item.example",
+                "source_text": "Increase speed by 20% while sneaking.",
+                "text": "Increase speed by 20% while sneaking.",
+                "cache_type": "lang",
+            }
+        ],
+        profile="lang",
+    )
+
+    assert "語意完整性契約（高優先）" in prompt
+    assert "主體、動作、對象、條件、否定、數量、單位、時間與因果" in prompt
+    assert "不要因單一片語不確定而整筆複製英文" in prompt
+    assert "數字、否定、條件、比較、因果與操作步驟" in prompt
+
+
+def test_reviewed_translation_for_item_reuses_only_a_unique_full_source() -> None:
+    from translation_tool.core.official_locale import reviewed_translation_for_item
+
+    item = {
+        "source_text": "The Pressure Chamber processes compressed air.",
+        "text": "The Pressure Chamber processes compressed air.",
+        "_reviewed_exact_glossary": [
+            {
+                "en_us": "The Pressure Chamber processes compressed air.",
+                "zh_tw": "壓力室會處理壓縮空氣。",
+            },
+            {"en_us": "Pressure Chamber", "zh_tw": "壓力室"},
+        ],
+    }
+
+    assert reviewed_translation_for_item(item) == "壓力室會處理壓縮空氣。"
+
+
+def test_reviewed_translation_for_item_rejects_conflicting_full_source() -> None:
+    from translation_tool.core.official_locale import reviewed_translation_for_item
+
+    item = {
+        "source_text": "The Pressure Chamber processes compressed air.",
+        "_reviewed_exact_glossary": [
+            {
+                "en_us": "The Pressure Chamber processes compressed air.",
+                "zh_tw": "壓力室會處理壓縮空氣。",
+            },
+            {
+                "en_us": "The Pressure Chamber processes compressed air.",
+                "zh_tw": "氣壓室會處理壓縮空氣。",
+            },
+        ],
+    }
+
+    assert reviewed_translation_for_item(item) is None
+
+
+def test_reviewed_translation_does_not_reuse_term_glossary_as_exact() -> None:
+    from translation_tool.core.official_locale import reviewed_translation_for_item
+
+    item = {
+        "source_text": "The Pressure Chamber processes compressed air.",
+        "_reviewed_glossary": [
+            {
+                "en_us": "The Pressure Chamber processes compressed air.",
+                "zh_tw": "壓力室會處理壓縮空氣。",
+            }
+        ],
+    }
+
+    assert reviewed_translation_for_item(item) is None
+
+
+def test_reviewed_exact_translation_finishes_without_api_credentials(
+    monkeypatch,
+) -> None:
+    from translation_tool.core import lm_translator_main as main
+
+    monkeypatch.setattr(
+        main,
+        "_execute_translation",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("不應呼叫 API 流程")
+        ),
+    )
+    item = {
+        "path": "guide.pressure_chamber",
+        "source_text": "The Pressure Chamber processes compressed air.",
+        "text": "The Pressure Chamber processes compressed air.",
+        "cache_type": "patchouli",
+        "_reviewed_exact_glossary": [
+            {
+                "en_us": "The Pressure Chamber processes compressed air.",
+                "zh_tw": "壓力室會處理壓縮空氣。",
+            }
+        ],
+    }
+
+    result, status = main.translate_batch_smart([item], 1)
+
+    assert status == "AUTO"
+    assert result[0]["text"] == "壓力室會處理壓縮空氣。"
+    assert result[0]["_reviewed_exact"] is True
+
+
 def test_advancement_kind_does_not_inherit_patchouli_soft_reflow_policy() -> None:
     prompt = build_translation_prompt(
         "基礎",
@@ -555,7 +661,7 @@ def test_moddb_sessions_are_shared_by_module_and_isolated_between_modules() -> N
 
     class FakeDB:
         def reviewed_lang_glossary(
-            self, mod_id: str, _version=None, _source_texts=()
+            self, mod_id: str, _version=None, _source_texts=(), **_kw
         ) -> list[dict[str, str]]:
             glossary_calls.append(mod_id)
             return []
@@ -597,6 +703,63 @@ def test_moddb_context_skips_reviewed_glossary_when_disabled(monkeypatch) -> Non
 
     assert calls == []
     assert "_reviewed_glossary" not in items[0]
+
+
+def test_moddb_context_skips_exact_reviewed_glossary_when_disabled(monkeypatch) -> None:
+    from translation_tool.core import lm_moddb_context
+
+    monkeypatch.setattr(
+        lm_moddb_context,
+        "load_config",
+        lambda: {"lm_translator": {"moddb_reviewed_glossary": False}},
+    )
+    items = build_items([(1, KIND_PATCHOULI, "mod-a", "guide.key", "Guide")])
+    calls: list[str] = []
+
+    class FakeDB:
+        def reviewed_lang_glossary(self, *_args, **_kw):
+            calls.append("terms")
+            return []
+
+        def reviewed_exact_glossary(self, *_args, **_kw):
+            calls.append("exact")
+            return []
+
+    _attach_translation_sessions(
+        items, operation_id="disabled-exact-glossary", db=FakeDB()
+    )
+
+    assert calls == []
+    assert "_reviewed_glossary" not in items[0]
+    assert "_reviewed_exact_glossary" not in items[0]
+
+
+def test_moddb_context_clears_stale_reviewed_context_when_disabled(monkeypatch) -> None:
+    from translation_tool.core import lm_moddb_context
+
+    enabled = True
+    monkeypatch.setattr(
+        lm_moddb_context,
+        "load_config",
+        lambda: {"lm_translator": {"moddb_reviewed_glossary": enabled}},
+    )
+    items = build_items([(1, KIND_LANG, "mod-a", "lang.key", "Language")])
+
+    class FakeDB:
+        def reviewed_lang_glossary(self, *_args, **_kw):
+            return [{"en_us": "Language", "zh_tw": "語言"}]
+
+        def reviewed_exact_glossary(self, *_args, **_kw):
+            return [{"en_us": "Language", "zh_tw": "語言"}]
+
+    _attach_translation_sessions(items, operation_id="enabled-glossary", db=FakeDB())
+    assert "_reviewed_glossary" in items[0]
+    assert "_reviewed_exact_glossary" in items[0]
+
+    enabled = False
+    _attach_translation_sessions(items, operation_id="disabled-glossary", db=FakeDB())
+    assert "_reviewed_glossary" not in items[0]
+    assert "_reviewed_exact_glossary" not in items[0]
 
 
 def test_reviewed_glossary_is_batch_scoped_and_conflicts_are_omitted() -> None:
@@ -658,7 +821,7 @@ def test_moddb_context_passes_version_and_source_scope_to_glossary_loader() -> N
     calls = []
 
     class FakeDB:
-        def reviewed_lang_glossary(self, mod_id, version, source_texts):
+        def reviewed_lang_glossary(self, mod_id, version, source_texts, **_kw):
             calls.append((mod_id, version, tuple(source_texts)))
             return []
 
@@ -667,6 +830,49 @@ def test_moddb_context_passes_version_and_source_scope_to_glossary_loader() -> N
     )
 
     assert calls == [("mod-a", "1.21.1", ("Cobblestone",))]
+
+
+def test_moddb_context_attaches_kind_scoped_exact_glossary() -> None:
+    items = build_items(
+        [
+            (
+                1,
+                KIND_PATCHOULI,
+                "mod-a",
+                "guide.pressure",
+                "The Pressure Chamber processes air.",
+            )
+        ]
+    )
+    calls = []
+
+    class FakeDB:
+        def reviewed_lang_glossary(self, _mod_id, _version, _source_texts, **_kw):
+            return []
+
+        def reviewed_exact_glossary(self, mod_id, version, kind, source_texts, **_kw):
+            calls.append((mod_id, version, kind, tuple(source_texts)))
+            return [
+                {
+                    "key": "guide.pressure",
+                    "en_us": "The Pressure Chamber processes air.",
+                    "zh_tw": "壓力室會處理空氣。",
+                }
+            ]
+
+    _attach_translation_sessions(
+        items, operation_id="exact-glossary", db=FakeDB(), version="1.21.1"
+    )
+
+    assert calls == [
+        (
+            "mod-a",
+            "1.21.1",
+            KIND_PATCHOULI,
+            ("The Pressure Chamber processes air.",),
+        )
+    ]
+    assert items[0]["_reviewed_exact_glossary"][0]["zh_tw"] == "壓力室會處理空氣。"
 
 
 def test_official_glossary_keeps_key_specific_duplicate_english_values(
@@ -862,3 +1068,29 @@ def test_item_matches_cache_distinguishes_key_and_source() -> None:
 
     assert [m.target_text for m in a] == ["甲"]
     assert [m.target_text for m in b] == ["乙"]
+
+
+def test_moddb_reviewed_lang_glossary_is_injected_for_kubejs_and_ftb_profiles() -> None:
+    item = {
+        "path": "item.example",
+        "source_text": "Copper Gate",
+        "text": "Copper Gate",
+        "_reviewed_glossary": [{"en_us": "Copper Gate", "zh_tw": "銅製閘門"}],
+    }
+    for profile in ("kubejs", "ftb"):
+        assert "Copper Gate → 銅製閘門" in build_translation_prompt(
+            "基礎", [{**item}], profile=profile
+        ), profile
+
+
+def test_reviewed_lang_glossary_is_injected_for_every_translation_profile() -> None:
+    item = {
+        "path": "item.example",
+        "source_text": "Copper Gate",
+        "text": "Copper Gate",
+        "_reviewed_glossary": [{"en_us": "Copper Gate", "zh_tw": "銅製閘門"}],
+    }
+    for profile in ("lang", "patch", "md", "kubejs", "ftb", "guide", "advancement"):
+        assert "Copper Gate → 銅製閘門" in build_translation_prompt(
+            "基礎", [{**item}], profile=profile
+        ), profile

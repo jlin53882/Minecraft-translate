@@ -27,17 +27,20 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.format_diff_review import FormatDiffReview
-from app.views.moddb.formatting import format_count, visible_breaks
+from app.views.moddb.formatting import format_count, kind_label, visible_breaks
 from translation_tool.utils.log_unit import log_warning
 
 _PREVIEW_SOURCE_ALL = "__all__"
+_PREVIEW_KIND_ALL = "__all__"
 _PREVIEW_ISSUE_ALL = "all"
 PREVIEW_PAGE_SIZE = 50  # 預覽候選每頁顯示的翻譯 Key 數
 _PREVIEW_ISSUE_LABELS = {
     "all": "全部異常類型",
     "minecraft": "Minecraft 格式碼 §",
+    "color": "FTB 色碼 &",
     "newline": "實際換行",
     "placeholder": "佔位符",
+    "markup": "KubeJS 自訂標記",
     "patchouli": "Patchouli 標記",
     "guide": "指南結構",
     "other": "其他格式",
@@ -74,6 +77,11 @@ def clear_preview(panel) -> None:
     panel.repair_preview_pager.visible = False
     panel.repair_preview_search.value = ""
     kit.set_dropdown_options(
+        panel.repair_preview_kind_filter,
+        [(_PREVIEW_KIND_ALL, "全部內容類型")],
+    )
+    panel.repair_preview_kind_filter.value = _PREVIEW_KIND_ALL
+    kit.set_dropdown_options(
         panel.repair_preview_source_filter,
         [(_PREVIEW_SOURCE_ALL, "全部翻譯來源")],
     )
@@ -93,8 +101,12 @@ def update_start_button(panel, *, running: bool | None = None) -> None:
     has_empty_preview = (
         panel._repair_preview is not None and panel._repair_preview.selected_count == 0
     )
+    has_no_preview = panel._repair_preview is None
     panel.repair_start_btn.disabled = (
-        is_running or panel._repair_preview_running or has_empty_preview
+        is_running
+        or panel._repair_preview_running
+        or has_no_preview
+        or has_empty_preview
     )
     panel.repair_mode_group.disabled = is_running or panel._repair_preview_running
 
@@ -304,6 +316,15 @@ def _display_preview_result(panel, options, db_identity, result):
             f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )
     kit.set_dropdown_options(
+        panel.repair_preview_kind_filter,
+        [(_PREVIEW_KIND_ALL, "全部內容類型")]
+        + [
+            (kind, kind_label(kind))
+            for kind in sorted({str(row.kind or "unknown") for row in result.entries})
+        ],
+    )
+    panel.repair_preview_kind_filter.value = _PREVIEW_KIND_ALL
+    kit.set_dropdown_options(
         panel.repair_preview_source_filter,
         [(_PREVIEW_SOURCE_ALL, "全部翻譯來源")]
         + [
@@ -348,9 +369,13 @@ def _preview_groups(result):
 
 
 def _preview_group_matches(
-    group, query: str, source_filter: str, issue_filter: str
+    group, query: str, kind_filter: str, source_filter: str, issue_filter: str
 ) -> bool:
     query = query.strip().casefold()
+    if kind_filter != _PREVIEW_KIND_ALL and not any(
+        str(row.kind or "unknown") == kind_filter for _cache_type, row in group
+    ):
+        return False
     if source_filter != _PREVIEW_SOURCE_ALL and not any(
         str(row.source_id or 0) == source_filter for _cache_type, row in group
     ):
@@ -532,12 +557,15 @@ def refresh_preview_cards(panel, *, update: bool = True, page: int = 1) -> None:
         panel.repair_preview_count.value = "尚未載入候選預覽。"
         return
     query = str(panel.repair_preview_search.value or "")
+    kind_filter = str(panel.repair_preview_kind_filter.value or _PREVIEW_KIND_ALL)
     source_filter = str(panel.repair_preview_source_filter.value or _PREVIEW_SOURCE_ALL)
     issue_filter = str(panel.repair_preview_issue_filter.value or _PREVIEW_ISSUE_ALL)
     groups = [
         group
         for group in _preview_groups(result)
-        if _preview_group_matches(group, query, source_filter, issue_filter)
+        if _preview_group_matches(
+            group, query, kind_filter, source_filter, issue_filter
+        )
     ]
     total_groups = len(_preview_groups(result))
     pager = panel.repair_preview_pager

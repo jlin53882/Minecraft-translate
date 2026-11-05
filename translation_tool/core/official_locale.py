@@ -21,6 +21,10 @@ from translation_tool.core.lm_format_policy import (
     format_policy_for_items,
     normalize_legacy_prompt,
 )
+from translation_tool.core.source_locale import (
+    batch_source_locale,
+    source_locale_supplement,
+)
 from translation_tool.core.terminology_model import (
     MATCH_STANDALONE,
     STANDALONE_ALLOWLIST,
@@ -98,6 +102,18 @@ _TERMINOLOGY_INSTRUCTION = (
     "必須使用對應目標詞，不要把參考整句複製到其他項目。\n"
     "沒有可靠術語映射時，仍要盡力翻譯人類語句；只有 placeholder、格式標記、API 識別字、"
     "程式碼、產品名或其他明確不可翻譯內容才保留原文。不要因為不確定就把整個 value 原樣回傳。"
+)
+
+_SEMANTIC_TRANSLATION_INSTRUCTION = (
+    "\n【語意完整性契約（高優先）】\n"
+    "翻譯前先辨識每筆原文的主體、動作、對象、條件、否定、數量、單位、時間與因果；"
+    "譯文必須保留這些資訊，不可省略、臆加，或把限定條件改成一般敘述。\n"
+    "先翻譯完整的人類語句，再套用術語；術語映射只固定名詞，不可把整筆參考句硬套到不同句型。\n"
+    "同模組已審核參考只用於詞義、語氣與專有名詞一致性；若與目前 payload 的格式、語境或語系衝突，"
+    "以目前原文及格式契約為準。\n"
+    "不要因單一片語不確定而整筆複製英文；只保留 placeholder、資源 ID、命令、標籤、程式碼或明確產品名稱，"
+    "其餘人類語句都要翻成自然的台灣繁體中文。\n"
+    "完成後逐筆自我檢查：原文每個事實是否都有對應譯文？數字、否定、條件、比較、因果與操作步驟是否未被改變？"
 )
 
 
@@ -791,6 +807,42 @@ def official_translation_for_item(item: dict[str, Any]) -> str | None:
     )
 
 
+def reviewed_translation_for_item(item: dict[str, Any]) -> str | None:
+    """只在同模組／版本的完整句審核表有唯一對照時重用譯文。
+
+    ``_reviewed_glossary`` 是提示詞用的術語表，可能只包含片語，不能直接
+    當成整句翻譯。只有 ``_reviewed_exact_glossary`` 通過資料庫的模組／版本／
+    種類範圍與唯一目標檢查後，才可以跳過 LLM；片語或有衝突的對照仍交給 LLM。
+    """
+    source = item.get("source_text") or item.get("text")
+    reviewed = item.get("_reviewed_exact_glossary")
+    if not isinstance(source, str) or not source.strip():
+        return None
+    if not isinstance(reviewed, list):
+        return None
+
+    source_text = source.replace("\r\n", "\n")
+    if not source_text.strip():
+        return None
+
+    targets: set[str] = set()
+    for entry in reviewed:
+        if not isinstance(entry, dict):
+            continue
+        term, target = entry.get("en_us"), entry.get("zh_tw")
+        if not (
+            isinstance(term, str)
+            and isinstance(target, str)
+            and term.strip()
+            and target.strip()
+            and term.replace("\r\n", "\n") == source_text
+        ):
+            continue
+        targets.add(target.strip())
+
+    return next(iter(targets)) if len(targets) == 1 else None
+
+
 def official_exact_translation(key: object, en_us: object, zh_cn: object) -> str | None:
     """提供所有合併與翻譯種類共用的鍵值精確查找。"""
     return load_official_locale_index().lookup_exact(key, en_us, zh_cn)
@@ -805,12 +857,22 @@ def build_translation_prompt(
     include_moddb_reviewed: bool = True,
     item_ids: Sequence[str] | None = None,
 ) -> str:
-    """在基礎提示詞後加入繁中與目前批次的穩定識別碼術語指令。"""
-    sections = [
-        normalize_legacy_prompt(base_prompt).rstrip(),
-        format_policy_for_items(items, profile=profile),
-        _TERMINOLOGY_INSTRUCTION,
-    ]
+    """在基礎提示詞後加入來源語系補充、繁中與目前批次的穩定識別碼術語指令。
+
+    來源語系補充只在批次含非預設且可信的來源語系時加入；它緊接在基礎提示詞之後，
+    確保超過長度上限時被截掉的是後段術語，不是語系指令。
+    """
+    sections = [normalize_legacy_prompt(base_prompt).rstrip()]
+    source_locale = batch_source_locale(items)
+    if source_locale is not None:
+        sections.append(source_locale_supplement(source_locale))
+    sections.extend(
+        [
+            format_policy_for_items(items, profile=profile),
+            _TERMINOLOGY_INSTRUCTION,
+            _SEMANTIC_TRANSLATION_INSTRUCTION,
+        ]
+    )
     index = load_official_locale_index()
     directives = _terminology_directives(
         items,
@@ -839,7 +901,8 @@ def build_translation_prompt(
     # Reviewed Mod DB lang entries are terminology references for every
     # Patchouli-compatible route as well.  They are never written directly;
     # the model still translates the current source item.
-    if profile in {"lang", "patch", "md"} and include_moddb_reviewed:
+    # 所有翻譯類型都注入同模組已審核的 lang 譯文（以 profile 區分的 guide、advancement 也一樣）。
+    if include_moddb_reviewed:
         reviewed = _reviewed_glossary_for_items(items, index)
         if reviewed:
             lines = ["\n【Mod DB 已審核 lang 翻譯參考（目前版本、本批相關）】"]
@@ -1063,6 +1126,7 @@ __all__ = [
     "official_exact_translation",
     "official_terminology_matches_for_item",
     "official_translation_for_item",
+    "reviewed_translation_for_item",
     "terminology_issues",
     "terminology_matches_for_item",
     "terminology_term_allowed",

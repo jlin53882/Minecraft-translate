@@ -20,9 +20,10 @@
     "app/views/merge/merge_widgets.py:MergeWidgetsMixin._init_merge_io_controls": 81,
     "app/views/moddb/bulk_review_dialog.py:BulkReviewDialog._build_controls": 117,
     "app/views/moddb/overview_panel.py:OverviewPanel.__init__": 103,
-    "app/views/moddb/repair_card.py:create_repair_card": 128,
+    "app/views/moddb/repair_card.py:create_repair_card": 140,
     "app/views/moddb/scan_panel.py:ScanPanel._build_options_card": 103,
     "app/views/moddb/smart_review_batch_reviewer.py:SmartReviewBatchReviewer._build_controls": 94,
+    "app/views/moddb/smart_review_dialog.py:SmartReviewDialog.__init__": 84,
     "app/views/moddb/species_dialog.py:SpeciesCandidateDialog._build_controls": 126,
     "app/views/moddb/translate_panel.py:TranslatePanel._apply_repair_summary": 81,
     "app/views/moddb/translate_panel.py:TranslatePanel._build_run_card": 103,
@@ -41,11 +42,11 @@
     "app/views/moddb/entries_panel.py": 1166,
     "app/views/moddb/repair_reviewer.py": 808,
     "app/views/moddb/review_scope_dialog.py": 808,
-    "app/views/moddb/smart_review_batch_reviewer.py": 1071,
-    "app/views/moddb/smart_review_reviewer.py": 835,
+    "app/views/moddb/smart_review_batch_reviewer.py": 1090,
+    "app/views/moddb/smart_review_reviewer.py": 847,
     "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 915,
-    "app/views/moddb/translate_panel.py": 1172,
+    "app/views/moddb/translate_panel.py": 1173,
     "app/views/moddb_view.py": 962
   }
 }

@@ -139,7 +139,7 @@ class SpeciesCandidateDialog:
             color=C.MUTED,
             selectable=True,
         )
-        self.mod_dd = kit.dropdown(
+        self.mod_dd = kit.searchable_dropdown(
             label="模組",
             dense=True,
             width=220,

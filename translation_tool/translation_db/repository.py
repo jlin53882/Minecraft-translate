@@ -28,6 +28,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.source_locale import reviewed_locale_compatible
 from translation_tool.translation_db import (
     change_tracker,
     effective_columns,
@@ -117,6 +118,9 @@ from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
+    reference_locale_sql,
+    source_locale_match_sql,
+    source_locale_sql,
     translation_review_sql,
 )
 from translation_tool.utils.cache_registry import register_cache
@@ -142,9 +146,123 @@ _LAST_ACTIVITY_SQL = (
 )
 _EFFECTIVE_PRIORITY_VERSION = "2"
 _QUALITY_FETCH_BATCH_SIZE = 4_000
-# quality.py 的 token 掃描只會在含 § % $ { \ 或換行的文字出現；GLOB 字元集是其超集，
-# 用來在 SQL 先排除「必定沒有格式 token」的列（Python 仍負責最終判斷）。
-_TOKEN_CHAR_GLOB_SQL = r"'*[§%${\]*'"
+_REVIEWED_EXACT_KINDS = frozenset(
+    {
+        KIND_LANG,
+        KIND_KUBEJS_LANG,
+        KIND_GUIDE,
+        KIND_PATCHOULI,
+        KIND_FTB_QUEST_LANG,
+        KIND_FTB_QUESTS,
+    }
+)
+# 格式診斷（``has_format_structure_marks``）只會在含 § % $ { \ 換行、``&`` 色碼或 ``<`` 標記的
+# 文字出現；GLOB 字元集是其超集，用來在 SQL 先排除「必定沒有格式標記」的列
+# （Python 仍負責最終判斷）。新增標記語法時，這裡必須一起擴充，否則 SQL 會先把該類條目排除，
+# 掃描與修復就找不到它們。
+_TOKEN_CHAR_GLOB_SQL = r"'*[§%${\<&]*'"
+
+
+def _reviewed_exact_sources(
+    source_texts: Sequence[str] | None,
+) -> tuple[str, ...]:
+    """保留非空且穩定去重的完整來源文字。"""
+    return tuple(
+        dict.fromkeys(
+            source
+            for source in source_texts or ()
+            if isinstance(source, str) and source.strip()
+        )
+    )
+
+
+def _reviewed_exact_scope(
+    mod_id: str,
+    mc_version: str | None,
+    kind: str,
+) -> tuple[list[str], list[object]]:
+    """建立完整句查詢的種類、模組來源與版本範圍。"""
+    clauses = [
+        "e.kind = ?",
+        "f.review_status = 'reviewed'",
+        "e.en_us <> ''",
+        "f.zh_tw <> ''",
+        "e.en_us <> f.zh_tw",
+    ]
+    params: list[object] = [kind]
+    scoped_pack = (
+        kind == KIND_KUBEJS_LANG
+        and mod_id.startswith("kubejs@")
+        or kind == KIND_FTB_QUEST_LANG
+        and mod_id.startswith("ftbquests@")
+    )
+    if scoped_pack:
+        # Pack scope isolates the instance; mod_id still isolates KubeJS
+        # namespaces within that instance.
+        clauses.append("e.mod_id = ?")
+        params.append(mod_id)
+        clauses.append(
+            "EXISTS (SELECT 1 FROM entry_origin eo "
+            "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"
+        )
+        params.append(mod_id.split("@", 1)[1])
+    else:
+        clauses.append("e.mod_id = ?")
+        params.append(mod_id)
+    if mc_version:
+        clauses.append("e.mc_version = ?")
+        params.append(mc_version)
+    return clauses, params
+
+
+def _select_reviewed_exact_rows(
+    rows: Sequence[tuple[int, str, str, str]],
+    source_texts: Sequence[str],
+    kind: str,
+    limit: int | None,
+    *,
+    lang_rows: Sequence[tuple[int, str, str, str]] = (),
+) -> list[dict[str, str]]:
+    """篩出格式一致且唯一目標的完整句對照。
+
+    先用同種類（``rows``）的唯一對照；同種類沒有該原文時，才退回同模組／版本 lang
+    （``lang_rows``）的唯一對照。同種類有候選但譯法不唯一時不重用，也不退回 lang。
+    """
+    source_keys = {term_canonical_key(source) for source in source_texts}
+
+    def group(
+        candidates_rows: Sequence[tuple[int, str, str, str]],
+    ) -> dict[str, list[dict[str, str]]]:
+        grouped: dict[str, list[dict[str, str]]] = {}
+        for _entry_id, key, en_us, zh_tw in candidates_rows:
+            if not all(isinstance(value, str) for value in (key, en_us, zh_tw)):
+                continue
+            # 格式一致性以「要翻譯的項目種類」判斷：lang 的譯文也必須符合該種類的規則
+            if quality_state(en_us, zh_tw, kind=kind)[0] != "consistent":
+                continue
+            source_key = term_canonical_key(en_us)
+            if source_key not in source_keys:
+                continue
+            grouped.setdefault(source_key, []).append(
+                {"key": key, "en_us": en_us, "zh_tw": zh_tw}
+            )
+        return grouped
+
+    by_source = group(lang_rows)
+    # 同種類優先：該原文在同種類有候選時，整個以同種類的候選取代 lang 的候選
+    by_source.update(group(rows))
+
+    result: list[dict[str, str]] = []
+    for source_key in sorted(by_source):
+        candidates = by_source[source_key]
+        targets = {entry["zh_tw"].strip() for entry in candidates}
+        if len(targets) != 1:
+            continue
+        result.append(candidates[0])
+        if limit is not None and len(result) >= int(limit):
+            break
+    return result
+
 
 _QUALITY_PAGE_BUFFER_LIMIT = 10_000
 _BATCH_REPLACE_STRIP_CHARS = "".join(
@@ -678,28 +796,36 @@ class TranslationDB(
         version: str,
         items: Iterable[ScanItem],
         convert: Callable[[str], str] | None = None,
+        *,
+        stale_origins: Iterable[EntryOrigin] = (),
     ) -> IngestStats:
         """寫入掃描結果。只新增、不覆蓋；原文已變動者只記錄。
 
         ``convert`` 把簡中轉成繁中（沒有繁中、只有簡中時用）；None 表示不轉換。
         """
-        return self.ingest_many(version, [items], convert)[0]
+        return self.ingest_many(version, [items], convert, stale_origins=stale_origins)[
+            0
+        ]
 
     def ingest_many(
         self,
         version: str,
         batches: Sequence[Iterable[ScanItem]],
         convert: Callable[[str], str] | None = None,
+        *,
+        stale_origins: Iterable[EntryOrigin] = (),
     ) -> list[IngestStats]:
         """在單一交易內寫入多份掃描結果（例如多個 jar），回傳每一份各自的統計。
 
         一個交易只提交一次（每次提交的 WAL 寫入與檢查點是掃描的固定成本）。結果與逐份呼叫 :meth:`ingest` 相同；任何一份失敗整個交易回復。
         """
         grouped = [group_scan_items(items) for items in batches]
+        stale_origins = tuple(stale_origins)
         touched: list[int] = []
         with self._tx() as conn:
             target = DbIngestTarget(conn, version, touched)
             results = [ingest_groups(target, groups, convert) for groups in grouped]
+            target.remove_origins(stale_origins)
             self._refresh(conn, touched)
         return results
 
@@ -3302,6 +3428,70 @@ class TranslationDB(
         )
         return self._row(r) if r else None
 
+    def source_locales_for_entries(
+        self, entry_ids: Sequence[int]
+    ) -> dict[int, str | None]:
+        """每個條目的可信來源語系（由持久化來源身分還原；無法確定為 ``None``）。
+
+        新資料優先使用 ``entry_origin.source_locale``；舊資料則以 selector／來源
+        路徑一次回填式解析。以 ``json_each`` 分段批次查詢，不逐筆 N+1；沒有來源
+        紀錄的條目（例如 jar 掃描）為 ``None``。
+        """
+        from translation_tool.core.source_locale import (
+            locale_from_source_path,
+            locale_from_source_selector,
+            normalize_source_locale,
+        )
+
+        ids = [int(entry_id) for entry_id in entry_ids]
+        result: dict[int, str | None] = {entry_id: None for entry_id in ids}
+        chunk_size = 500
+        for start in range(0, len(ids), chunk_size):
+            chunk = ids[start : start + chunk_size]
+            rows = self._q(
+                "SELECT eo.entry_id, eo.source_locale, eo.selector, eo.source_path "
+                "FROM entry_origin eo "
+                "WHERE eo.entry_id IN (SELECT value FROM json_each(?))",
+                (json.dumps(chunk),),
+            )
+            origins: dict[int, list[tuple[str | None, str, str]]] = {}
+            for entry_id, stored_locale, selector, source_path in rows:
+                origins.setdefault(int(entry_id), []).append(
+                    (
+                        normalize_source_locale(stored_locale),
+                        str(selector),
+                        str(source_path),
+                    )
+                )
+            for entry_id in chunk:
+                source_origins = origins.get(entry_id)
+                if not source_origins:
+                    continue
+                locales: set[str] = set()
+                unknown = False
+                for stored_locale, selector, source_path in source_origins:
+                    if stored_locale is not None:
+                        # 新掃描明確保存的是「選定的原文 locale」。即使是
+                        # zh_tw/zh_cn fallback，也不能再當成伴隨譯文丟掉。
+                        locale = stored_locale
+                    else:
+                        # 舊 schema 沒有角色資訊；只有從 selector/path 還原
+                        # 到非翻譯 locale 才能安全採用，中文來源在舊資料中
+                        # 無法判斷是原文還是伴隨譯文，保守視為 unknown。
+                        locale = locale_from_source_selector(selector)
+                        if locale is None:
+                            locale = locale_from_source_path(source_path)
+                        if locale in {"zh_tw", "zh_cn"}:
+                            locale = None
+                    if locale is None:
+                        unknown = True
+                        continue
+                    locales.add(locale)
+                result[entry_id] = (
+                    next(iter(locales)) if not unknown and len(locales) == 1 else None
+                )
+        return result
+
     def entry_origins(self, entry_id: int) -> list[EntryOrigin]:
         """回傳條目的精確來源；供預覽、清理與格式專用 writer 使用。"""
         return [
@@ -3312,6 +3502,7 @@ class TranslationDB(
                 selector=selector,
                 source_hash=source_hash,
                 format_profile=format_profile,
+                source_locale=source_locale,
             )
             for (
                 pack_scope,
@@ -3320,9 +3511,10 @@ class TranslationDB(
                 selector,
                 source_hash,
                 format_profile,
+                source_locale,
             ) in self._q(
                 "SELECT pack_scope, source_kind, source_path, selector, "
-                "source_hash, format_profile FROM entry_origin "
+                "source_hash, format_profile, source_locale FROM entry_origin "
                 "WHERE entry_id=? ORDER BY source_path, selector",
                 (entry_id,),
             )
@@ -3340,7 +3532,7 @@ class TranslationDB(
         rows = self._q(
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, f.zh_tw, "
             "eo.pack_scope, eo.source_kind, eo.source_path, eo.selector, "
-            "eo.source_hash, eo.format_profile "
+            "eo.source_hash, eo.format_profile, eo.source_locale "
             "FROM entry e JOIN effective f ON f.entry_id=e.id "
             "JOIN entry_origin eo ON eo.entry_id=e.id "
             "WHERE e.mc_version=? AND eo.pack_scope=? "
@@ -3363,6 +3555,7 @@ class TranslationDB(
                     selector=row[9],
                     source_hash=row[10],
                     format_profile=row[11],
+                    source_locale=row[12],
                 ),
             )
             for row in rows
@@ -4981,15 +5174,32 @@ class TranslationDB(
 
     # 其他版本已有「類型／模組／鍵值／原文都相同」的生效譯文（可直接沿用，不必呼叫 AI）
     # 其他版本的譯文必須一致才算（有衝突時不自動沿用，交給 AI 或人工，避免任意挑一版）
-    _REUSABLE_SQL = """(
-        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-        WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-          AND e2.en_us = e.en_us AND e2.mc_version <> e.mc_version) = 1"""
+    @staticmethod
+    def _reusable_peers_sql() -> str:
+        """建立帶來源語系邊界的跨版本重用查詢。"""
+        return (
+            "(SELECT COUNT(DISTINCT f2.zh_tw) "
+            "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
+            "WHERE e2.kind=u.kind AND e2.mod_id=u.mod_id AND e2.key=u.key "
+            "AND e2.en_us=u.en_us "
+            "AND ("
+            "(u.has_source_origin=0 AND NOT EXISTS ("
+            "SELECT 1 FROM entry_origin eo2 WHERE eo2.entry_id=e2.id)) "
+            "OR (u.source_locale NOT LIKE 'unknown:%' "
+            f"AND {source_locale_sql('e2')}=u.source_locale)"
+            "))"
+        )
 
-    _REUSABLE_PEERS_SQL = """(
-        SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-        WHERE e2.kind = u.kind AND e2.mod_id = u.mod_id AND e2.key = u.key
-          AND e2.en_us = u.en_us)"""
+    @staticmethod
+    def _reusable_sql() -> str:
+        """建立單筆跨版本重用條件；只相容沒有來源紀錄的舊資料。"""
+        return (
+            "(SELECT COUNT(DISTINCT f2.zh_tw) "
+            "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
+            "WHERE e2.kind=e.kind AND e2.mod_id=e.mod_id AND e2.key=e.key "
+            "AND e2.en_us=e.en_us AND e2.mc_version<>e.mc_version "
+            f"AND {source_locale_match_sql('e', 'e2')})=1"
+        )
 
     def _untranslated_candidates_cte(
         self, version: str, mod_ids: Sequence[str] | None, *, ordered: bool = True
@@ -5008,7 +5218,10 @@ class TranslationDB(
             params.extend(mod_ids)
         sql = (
             "WITH u AS MATERIALIZED ("
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
+            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
+            f"{source_locale_sql('e')} AS source_locale, "
+            "EXISTS (SELECT 1 FROM entry_origin eo "
+            "WHERE eo.entry_id=e.id) AS has_source_origin "
             "FROM (SELECT i.id FROM entry i WHERE i.mc_version = ?"
             f"{mod_filter} AND i.id NOT IN (SELECT entry_id FROM effective)) c "
             "JOIN entry e ON e.id = c.id WHERE e.en_us <> ''"
@@ -5019,7 +5232,8 @@ class TranslationDB(
     def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
         cte, params = self._untranslated_candidates_cte(version, mod_ids, ordered=False)
-        sql = f"{cte}SELECT COUNT(*) FROM u WHERE {self._REUSABLE_PEERS_SQL} = 1"
+        reusable_peers = self._reusable_peers_sql()
+        sql = f"{cte}SELECT COUNT(*) FROM u WHERE {reusable_peers} = 1"
         return self._cached_count(sql, params)
 
     def count_untranslated(
@@ -5058,9 +5272,10 @@ class TranslationDB(
         """
         if exclude_reusable:
             cte, params = self._untranslated_candidates_cte(version, mod_ids)
+            reusable_peers = self._reusable_peers_sql()
             sql = (
                 f"{cte}SELECT id, kind, mod_id, key, en_us FROM u "
-                f"WHERE {self._REUSABLE_PEERS_SQL} <> 1 ORDER BY kind, mod_id, key"
+                f"WHERE {reusable_peers} <> 1 ORDER BY kind, mod_id, key"
             )
         else:
             where, extra = self._untranslated_where(mod_ids)
@@ -5262,8 +5477,10 @@ class TranslationDB(
                 "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
                 "AND e2.key = e.key AND e2.en_us = e.en_us "
                 "AND e2.mc_version <> e.mc_version "
+                f"AND {source_locale_match_sql('e', 'e2')} "
                 "JOIN effective f2 ON f2.entry_id = e2.id "
-                f"WHERE {where} AND {self._REUSABLE_SQL} ORDER BY e.id, f2.rowid",
+                f"WHERE {where} AND {self._reusable_sql()} "
+                "ORDER BY e.id, f2.rowid",
                 [version, *extra],
             ).fetchall()
             # 譯文已確認一致；來源標記取目前優先序最高者（不可用代碼大小，人工不該被降成 AI）
@@ -5303,22 +5520,43 @@ class TranslationDB(
         )
 
         def load() -> list[list[str]]:
+            pack_scope = None
+            if mod_id.startswith(("kubejs@", "ftbquests@")):
+                pack_scope = mod_id.split("@", 1)[1]
+
             def load_kind(kind: str) -> list[tuple[int, str, str, str, str]]:
                 clauses = [
-                    "e.mod_id = ?",
                     "e.kind = ?",
                     "f.review_status = 'reviewed'",
                     "e.en_us <> ''",
                     "f.zh_tw <> ''",
                     "e.en_us <> f.zh_tw",
                 ]
-                params: list[object] = [mod_id, kind]
+                params: list[object] = [kind]
+                if (kind == KIND_KUBEJS_LANG and mod_id.startswith("kubejs@")) or (
+                    kind == KIND_FTB_QUEST_LANG and mod_id.startswith("ftbquests@")
+                ):
+                    # Pack scope identifies the instance, while ``mod_id``
+                    # identifies the namespace within that instance.  Both
+                    # are required so a sibling KubeJS/FTB namespace cannot
+                    # leak terminology into this prompt.
+                    clauses.append("e.mod_id = ?")
+                    params.append(mod_id)
+                    clauses.append(
+                        "EXISTS (SELECT 1 FROM entry_origin eo "
+                        "WHERE eo.entry_id=e.id AND eo.pack_scope=?)"
+                    )
+                    params.append(pack_scope)
+                else:
+                    clauses.append("e.mod_id = ?")
+                    params.append(mod_id)
                 if mc_version:
                     clauses.append("e.mc_version = ?")
                     params.append(mc_version)
                 return self._q(
                     f"""
-                    SELECT e.id, e.kind, e.key, e.en_us, f.zh_tw
+                    SELECT e.id, e.kind, e.key, e.en_us, f.zh_tw,
+                           {reference_locale_sql("e")}
                     FROM entry e
                     JOIN effective f ON f.entry_id = e.id
                     WHERE {" AND ".join(clauses)}
@@ -5331,9 +5569,11 @@ class TranslationDB(
             # scans and create a temporary ORDER BY tree.  Each kind has an
             # index-friendly stream; merge the already ordered streams in
             # Python so the glossary cache keeps the no-temp-sort contract.
+            kinds = [KIND_LANG, KIND_KUBEJS_LANG]
+            if mod_id == "ftbquests" or mod_id.startswith("ftbquests@"):
+                kinds.append(KIND_FTB_QUEST_LANG)
             rows = heapq.merge(
-                load_kind(KIND_LANG),
-                load_kind(KIND_KUBEJS_LANG),
+                *(load_kind(kind) for kind in kinds),
                 key=lambda row: (str(row[2]), int(row[0])),
             )
             return [
@@ -5343,9 +5583,45 @@ class TranslationDB(
                 and row[3].strip()
                 and row[4].strip()
                 and quality_state(row[3], row[4], kind=str(row[1]))[0] == "consistent"
-            ]
+            ]  # [key, en_us, zh_tw, 參考語系]
 
         return self._cached(cache_key, load)
+
+    def _reviewed_lang_rows_with_name_fallback(
+        self,
+        mod_id: str,
+        mc_version: str | None,
+        source_locale: str | None = None,
+    ) -> list[list[str]]:
+        """與項目來源語系相容的已審核術語列，加上 ``@`` 前面模組名稱的 lang 作為退路。
+
+        KubeJS／FTB 的模組識別帶有 ``名稱@模組包@序號``。同種類沒有的術語才退回該 lang；
+        同種類已有的原文（即使譯法不唯一）不會被 lang 覆蓋或混成衝突。
+        順序很重要：先依來源語系過濾同種類候選，再計算「同種類已有的原文」，最後才補入相容的
+        lang 退路；否則同種類只有不相容語系（例如 pt_br）的術語時，會把相容的 en_us lang
+        退路一併排除。
+        """
+
+        def compatible(rows: list[list[str]]) -> list[list[str]]:
+            return [
+                row for row in rows if reviewed_locale_compatible(source_locale, row[3])
+            ]
+
+        rows = compatible(self._reviewed_lang_candidate_rows(mod_id, mc_version))
+        base_name = mod_id.split("@", 1)[0]
+        if "@" not in mod_id or not base_name:
+            return rows
+        own_sources = {term_canonical_key(row[1]) for row in rows}
+        return [
+            *rows,
+            *(
+                row
+                for row in compatible(
+                    self._reviewed_lang_candidate_rows(base_name, mc_version)
+                )
+                if term_canonical_key(row[1]) not in own_sources
+            ),
+        ]
 
     def reviewed_lang_glossary(
         self,
@@ -5354,8 +5630,15 @@ class TranslationDB(
         source_texts: Sequence[str] | None = None,
         *,
         limit: int | None = 240,
+        source_locale: str | None = None,
     ) -> list[dict[str, str]]:
-        """回傳品質乾淨且已審核的指定模組 lang 術語。"""
+        """回傳品質乾淨且已審核的指定模組 lang 術語。
+
+        ``source_locale`` 是待翻譯項目的來源語系：只採用語系相容的已審核參考
+        （見 ``reviewed_locale_compatible``），未知語系不會被當成相容。
+
+        同種類沒有的術語會退回 ``@`` 前面模組名稱的 lang（KubeJS／FTB 模組包識別）。
+        """
         normalized_sources = tuple(
             dict.fromkeys(
                 source
@@ -5371,7 +5654,9 @@ class TranslationDB(
         # 跨語言大小寫折疊由 Python ``casefold`` 負責；SQLite ``lower`` 只
         # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。候選集合依模組、
         # 版本與資料世代快取，來源相關性仍由每次呼叫的 matcher 判斷。
-        rows = self._reviewed_lang_candidate_rows(mod_id, mc_version)
+        rows = self._reviewed_lang_rows_with_name_fallback(
+            mod_id, mc_version, source_locale
+        )
         matched_sources = matching_terms(
             normalized_sources, tuple(row[1] for row in rows)
         )
@@ -5379,7 +5664,7 @@ class TranslationDB(
             term_canonical_key(matched) for matched in matched_sources
         }
         by_source: dict[str, list[dict[str, str]]] = {}
-        for key, en_us, zh_tw in rows:
+        for key, en_us, zh_tw, _locale in rows:
             if not (
                 isinstance(key, str)
                 and isinstance(en_us, str)
@@ -5401,6 +5686,71 @@ class TranslationDB(
             if limit is not None and len(result) >= max(0, int(limit)):
                 break
         return result
+
+    def reviewed_exact_glossary(
+        self,
+        mod_id: str,
+        mc_version: str | None,
+        kind: str,
+        source_texts: Sequence[str] | None = None,
+        *,
+        limit: int | None = 240,
+        source_locale: str | None = None,
+    ) -> list[dict[str, str]]:
+        """載入同模組／版本／種類的已審核完整來源對照。
+
+        ``source_locale`` 是待翻譯項目的來源語系：參考句必須語系相容
+        （見 ``reviewed_locale_compatible``），否則 en_us 的「Pasta」會被直接當成
+        pt_br 項目的答案並跳過模型；未知語系不會被當成相容。
+
+        這個查詢與 ``reviewed_lang_glossary`` 分開，避免把 guide／Patchouli
+        的完整句混進一般術語提示；翻譯入口只用它做唯一完整句的精確重用。
+        比對範圍是同模組／版本下「同種類」的已審核完整句；同種類沒有該句時退回 ``lang``（模組名稱取 ``@`` 前面的部分）。
+        """
+        normalized_sources = _reviewed_exact_sources(source_texts)
+        if not normalized_sources or (limit is not None and int(limit) <= 0):
+            return []
+        if kind not in _REVIEWED_EXACT_KINDS:
+            return []
+        # An omitted version is not a trustworthy exact-match scope.  Failing
+        # closed prevents a reviewed sentence from one game version being
+        # reused for another version with different terminology or formatting.
+        if not isinstance(mc_version, str) or not mc_version.strip():
+            return []
+
+        def load(
+            source_kind: str, scope_mod_id: str = mod_id
+        ) -> list[tuple[int, str, str, str]]:
+            scope_clauses, scope_params = _reviewed_exact_scope(
+                scope_mod_id, mc_version, source_kind
+            )
+            loaded: list[tuple[int, str, str, str]] = []
+            for start in range(0, len(normalized_sources), _CHUNK):
+                chunk = normalized_sources[start : start + _CHUNK]
+                placeholders = ",".join("?" for _ in chunk)
+                loaded.extend(
+                    row[:4]
+                    for row in self._q(
+                        "SELECT e.id, e.key, e.en_us, f.zh_tw, "
+                        f"{reference_locale_sql('e')} "
+                        "FROM entry e JOIN effective f ON f.entry_id=e.id "
+                        f"WHERE {' AND '.join(scope_clauses)} "
+                        f"AND e.en_us IN ({placeholders}) "
+                        "ORDER BY e.key, e.id",
+                        (*scope_params, *chunk),
+                    )
+                    if reviewed_locale_compatible(source_locale, row[4])
+                )
+            return loaded
+
+        # 同種類沒有該句時，退回同模組／版本 lang 的已審核完整句。KubeJS／FTB 的模組識別
+        # 帶有 ``名稱@模組包@序號``，lang 比對的是 ``@`` 前面的模組名稱。
+        lang_rows = (
+            load(KIND_LANG, mod_id.split("@", 1)[0]) if kind != KIND_LANG else []
+        )
+        return _select_reviewed_exact_rows(
+            load(kind), normalized_sources, kind, limit, lang_rows=lang_rows
+        )
 
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]

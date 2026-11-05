@@ -11,6 +11,31 @@ from translation_tool.translation_db.schema import SRC_MANUAL
 from translation_tool.translation_db.smart_review import run_smart_review
 
 
+def _mark_default_origins(database, mod_id: str | None = None):
+    """讓合成 fixture 明確表示來源是已知的 en_us，而非 unknown。"""
+    params = () if mod_id is None else (mod_id,)
+    rows = database._q(
+        "SELECT e.id, e.mod_id, e.key FROM entry e "
+        "WHERE NOT EXISTS (SELECT 1 FROM entry_origin eo WHERE eo.entry_id=e.id)"
+        + (" AND e.mod_id=?" if mod_id is not None else ""),
+        params,
+    )
+    with database._tx() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO entry_origin "
+            "(entry_id, source_kind, source_path, selector, source_locale) "
+            "VALUES (?, 'lang', ?, ?, 'en_us')",
+            [
+                (
+                    int(entry_id),
+                    f"assets/{row_mod_id}/lang/en_us.json",
+                    f"lang:{key}",
+                )
+                for entry_id, row_mod_id, key in rows
+            ],
+        )
+
+
 @pytest.fixture
 def db(tmp_path):
     """a_rep 與 b_twin 同文同譯；c_boots 同文但譯文不同；other 為另一模組的同文。"""
@@ -25,6 +50,7 @@ def db(tmp_path):
         ],
         fill_other_versions=False,
     )
+    _mark_default_origins(database)
     yield database
     database.close()
 
@@ -99,6 +125,7 @@ def test_page_completes_twins_after_raw_page_boundary(db):
         ],
         fill_other_versions=False,
     )
+    _mark_default_origins(db, "late")
     candidates = db.smart_review_candidates(version="1.20.1", mod_id="late", limit=2)
     twin_id = db._one(
         "SELECT id FROM entry WHERE mod_id=? AND key=?", ("late", "z_twin")
@@ -119,6 +146,7 @@ def test_unbounded_page_reuses_twins_collected_from_complete_selection(db, monke
         ],
         fill_other_versions=False,
     )
+    _mark_default_origins(db, "unbounded")
 
     def fail_unexpected_supplement(*_args, **_kwargs):
         """拒絕在完整資料已讀取後重複查詢 twin。"""

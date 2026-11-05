@@ -23,6 +23,7 @@ from translation_tool.translation_db import (
 from translation_tool.translation_db.quality import (
     format_tokens,
     repair_input_issues,
+    repair_input_issues_for_kind,
     repair_input_issues_from_counts,
 )
 
@@ -44,6 +45,9 @@ _PAIRS = [
     ("$(br)x\\n", "x\n"),
     ("100%", "100%"),
     ("{0} {1}", "{0}"),
+    # 字面 \n（兩個字元）與真換行是不同的東西：前者必須原樣保留
+    ("a\\nb", "a\nb"),
+    ("a\nb", "a\\nb"),
 ]
 
 
@@ -55,6 +59,23 @@ def test_repair_input_issues_from_counts_matches_text_version(source, previous):
     )
 
     assert got == expected
+
+
+@pytest.mark.parametrize("kind", ["lang", "kubejs_lang", "ftb_quest_lang"])
+def test_repair_gate_treats_a_dropped_literal_backslash_n_as_a_hard_issue(kind):
+    eligible, hard, mixed = repair_input_issues_for_kind("a\\n", "a\n", kind=kind)
+
+    assert eligible
+    assert any("字面" in issue for issue in hard)
+    assert mixed  # 同時有真換行差異與硬性問題
+
+
+def test_repair_gate_ignores_a_real_newline_only_difference_as_a_hard_issue():
+    eligible, hard, mixed = repair_input_issues_for_kind("a\nb", "ab", kind="lang")
+
+    assert hard == ()
+    assert eligible  # 硬換行格式：只差換行時仍是可由呼叫端取捨的候選
+    assert not mixed
 
 
 def test_repair_input_issues_from_counts_drops_newline_from_both_counters():

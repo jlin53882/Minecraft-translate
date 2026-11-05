@@ -126,7 +126,7 @@ def build_task_rows(
             continue
         text, tone = STATUS_STYLE.get(status, ("完成", "em"))
         if status == STATUS_RUNNING:
-            text = f"進行中 {task.percent}%" if task.progress > 0 else "準備中"
+            text = f"進行中 {task.percent}%" if task.progress > 0 else "執行中"
         rows.append(
             TaskRow(
                 task_id=task.id,
