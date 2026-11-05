@@ -316,7 +316,7 @@ def test_run_record_time_is_not_counted_as_history_write(monkeypatch):
     state = smart_review_run._open_run_state(
         _Db(),
         session,
-        [object()],
+        [SimpleNamespace(source_locale=None)],  # 預估批數會依來源語系分組
         batch_size=1,
         limit=1,
         version=None,
