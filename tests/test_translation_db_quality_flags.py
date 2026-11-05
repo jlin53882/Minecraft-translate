@@ -778,6 +778,7 @@ def test_reviewed_exact_glossary_does_not_cross_kubejs_namespace(db):
         "1.21.1",
         KIND_KUBEJS_LANG,
         ("Same sentence",),
+        source_locale="en_us",
     ) == [{"key": "same.key", "en_us": "Same sentence", "zh_tw": "甲句"}]
     assert (
         db.reviewed_exact_glossary(

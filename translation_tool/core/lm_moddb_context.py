@@ -8,6 +8,7 @@ from typing import Any
 
 from translation_tool.core.lm_batch_budget import BudgetConfig
 from translation_tool.core.lm_session import TranslationSessionState
+from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUESTS,
     KIND_GUIDE,
@@ -70,23 +71,33 @@ def _item_context(
     return mod_id, str(version) if version else None, kind
 
 
+def _item_locale(item: dict[str, Any]) -> str | None:
+    """項目的來源語系（正規化）；沒有或不合法時為 ``None``（未知，不視為任何語系）。"""
+    return normalize_source_locale(item.get("source_locale"))
+
+
 def _source_text_contexts(
     items: list[dict[str, Any]], mc_version: str | None
 ) -> tuple[
-    dict[tuple[str, str | None], dict[str, None]],
-    dict[tuple[str, str | None, str], dict[str, None]],
+    dict[tuple[str, str | None, str | None], dict[str, None]],
+    dict[tuple[str, str | None, str, str | None], dict[str, None]],
 ]:
-    """一次收集術語與完整句查詢所需的模組／版本／種類來源集合。"""
-    by_context: dict[tuple[str, str | None], dict[str, None]] = {}
-    by_kind_context: dict[tuple[str, str | None, str], dict[str, None]] = {}
+    """一次收集術語與完整句查詢所需的模組／版本／（種類）／來源語系的來源集合。
+
+    已審核參考必須與項目的來源語系相容，所以不同語系的項目各自查詢、各自快取。
+    """
+    by_context: dict[tuple[str, str | None, str | None], dict[str, None]] = {}
+    by_kind_context: dict[tuple[str, str | None, str, str | None], dict[str, None]] = {}
     for item in items:
         mod_id, version, kind = _item_context(item, mc_version)
         source = item.get("source_text") or item.get("text")
         if not isinstance(source, str) or not source.strip():
             continue
-        context_key = (mod_id, version)
+        context_key = (mod_id, version, _item_locale(item))
         by_context.setdefault(context_key, {}).setdefault(source, None)
-        by_kind_context.setdefault((*context_key, kind), {}).setdefault(source, None)
+        by_kind_context.setdefault(
+            (mod_id, version, kind, context_key[2]), {}
+        ).setdefault(source, None)
     return by_context, by_kind_context
 
 
@@ -98,30 +109,35 @@ def _attach_reviewed_context(
     kind: str,
     reviewed_glossary_loader: Callable[..., list[dict[str, str]]] | None,
     reviewed_exact_loader: Callable[..., list[dict[str, str]]] | None,
-    source_texts_by_context: dict[tuple[str, str | None], dict[str, None]],
-    source_texts_by_kind_context: dict[tuple[str, str | None, str], dict[str, None]],
-    glossaries: dict[tuple[str, str | None], list[dict[str, str]]],
-    exact_glossaries: dict[tuple[str, str | None, str], list[dict[str, str]]],
+    source_texts_by_context: dict[tuple[str, str | None, str | None], dict[str, None]],
+    source_texts_by_kind_context: dict[
+        tuple[str, str | None, str, str | None], dict[str, None]
+    ],
+    glossaries: dict[tuple[str, str | None, str | None], list[dict[str, str]]],
+    exact_glossaries: dict[
+        tuple[str, str | None, str, str | None], list[dict[str, str]]
+    ],
 ) -> None:
     """將兩種已審核參考以共用的模組／版本／種類範圍注入項目。"""
     if not mod_id:
         return
+    locale = _item_locale(item)
     if reviewed_glossary_loader is not None:
-        glossary_key = (mod_id, version)
+        glossary_key = (mod_id, version, locale)
         if glossary_key not in glossaries:
             source_texts: Sequence[str] = tuple(
                 source_texts_by_context.get(glossary_key, {})
             )
             glossaries[glossary_key] = reviewed_glossary_loader(
-                mod_id, version, source_texts
+                mod_id, version, source_texts, source_locale=locale
             )
         item["_reviewed_glossary"] = glossaries[glossary_key]
     if reviewed_exact_loader is not None:
-        exact_key = (mod_id, version, kind)
+        exact_key = (mod_id, version, kind, locale)
         if exact_key not in exact_glossaries:
             source_texts = tuple(source_texts_by_kind_context.get(exact_key, {}))
             exact_glossaries[exact_key] = reviewed_exact_loader(
-                mod_id, version, kind, source_texts
+                mod_id, version, kind, source_texts, source_locale=locale
             )
         item["_reviewed_exact_glossary"] = exact_glossaries[exact_key]
 
@@ -158,8 +174,10 @@ def attach_moddb_context(
         reviewed_glossary_loader = None
         reviewed_exact_loader = None
     sessions: dict[str, TranslationSessionState] = {}
-    glossaries: dict[tuple[str, str | None], list[dict[str, str]]] = {}
-    exact_glossaries: dict[tuple[str, str | None, str], list[dict[str, str]]] = {}
+    glossaries: dict[tuple[str, str | None, str | None], list[dict[str, str]]] = {}
+    exact_glossaries: dict[
+        tuple[str, str | None, str, str | None], list[dict[str, str]]
+    ] = {}
     source_texts_by_context, source_texts_by_kind_context = _source_text_contexts(
         items, mc_version
     )
@@ -208,8 +226,10 @@ def attach_reviewed_glossary(
     ):
         _clear_reviewed_context(items)
         return
-    glossaries: dict[tuple[str, str | None], list[dict[str, str]]] = {}
-    exact_glossaries: dict[tuple[str, str | None, str], list[dict[str, str]]] = {}
+    glossaries: dict[tuple[str, str | None, str | None], list[dict[str, str]]] = {}
+    exact_glossaries: dict[
+        tuple[str, str | None, str, str | None], list[dict[str, str]]
+    ] = {}
     by_context, by_kind_context = _source_text_contexts(items, mc_version)
     for item in items:
         mod_id, version, kind = _item_context(item, mc_version)

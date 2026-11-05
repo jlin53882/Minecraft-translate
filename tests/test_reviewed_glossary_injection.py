@@ -36,7 +36,7 @@ def test_attaches_glossary_without_touching_batch_grouping(monkeypatch):
     _config(monkeypatch, True)
     calls = []
 
-    def loader(mod_id, version, sources):
+    def loader(mod_id, version, sources, **_kw):
         calls.append((mod_id, version, tuple(sources)))
         return [{"en": "Gear", "zh_tw": "齒輪"}]
 
@@ -57,7 +57,9 @@ def test_setting_off_clears_previous_glossary(monkeypatch):
     items = _items()
     items[0]["_reviewed_glossary"] = [{"en": "x", "zh_tw": "y"}]
     ctx.attach_reviewed_glossary(
-        items, mc_version="1.21.1", reviewed_glossary_loader=lambda *a: [{"en": "a"}]
+        items,
+        mc_version="1.21.1",
+        reviewed_glossary_loader=lambda *a, **_kw: [{"en": "a"}],
     )
 
     assert "_reviewed_glossary" not in items[0]
@@ -72,7 +74,7 @@ def test_directory_phase_injects_glossary_only_when_a_database_is_open(monkeypat
     _config(monkeypatch, True)
     monkeypatch.setattr(ctx, "load_config", lambda: {"lm_translator": {}})
     db = SimpleNamespace(
-        reviewed_lang_glossary=lambda *a: [{"en": "Gear", "zh_tw": "齒輪"}]
+        reviewed_lang_glossary=lambda *a, **_kw: [{"en": "Gear", "zh_tw": "齒輪"}]
     )
     items = _items()
     lm_translator._inject_reviewed_glossary(items, None)

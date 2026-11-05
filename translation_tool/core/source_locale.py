@@ -105,6 +105,27 @@ def resolve_source_locale(selectors: Iterable[str]) -> str | None:
     return next(iter(source_locales))
 
 
+def reviewed_locale_compatible(
+    item_locale: object, reference_locale: str | None
+) -> bool:
+    """已審核參考（整句重用、術語表）是否可用於這個來源語系的待翻項目。
+
+    ``reference_locale`` 是資料庫查出的參考語系：已知語系 token、``unknown:<id>``
+    （有來源紀錄卻無法確認語系），或空字串（升級前的舊條目，沒有任何來源紀錄，內容是 jar 的英文）。
+
+    - 語系未知的參考永遠不相容，不得自動視為相容。
+    - 舊條目（沒有來源紀錄）只相容於 ``en_us`` 或語系未知的項目（升級前的重用行為）。
+    - 已知語系的參考只相容於語系相同的項目；項目語系未知時不相容。
+    """
+    item = normalize_source_locale(item_locale)
+    reference = reference_locale or ""
+    if reference.startswith("unknown:"):
+        return False
+    if reference == "":
+        return item is None or item == "en_us"
+    return item is not None and item == reference
+
+
 def is_default_source_locale(locale: str | None) -> bool:
     """預設語系（或 unknown）不附加補充段落。"""
     return locale is None or locale in DEFAULT_SOURCE_LOCALES

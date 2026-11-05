@@ -661,7 +661,7 @@ def test_moddb_sessions_are_shared_by_module_and_isolated_between_modules() -> N
 
     class FakeDB:
         def reviewed_lang_glossary(
-            self, mod_id: str, _version=None, _source_texts=()
+            self, mod_id: str, _version=None, _source_texts=(), **_kw
         ) -> list[dict[str, str]]:
             glossary_calls.append(mod_id)
             return []
@@ -717,11 +717,11 @@ def test_moddb_context_skips_exact_reviewed_glossary_when_disabled(monkeypatch) 
     calls: list[str] = []
 
     class FakeDB:
-        def reviewed_lang_glossary(self, *_args):
+        def reviewed_lang_glossary(self, *_args, **_kw):
             calls.append("terms")
             return []
 
-        def reviewed_exact_glossary(self, *_args):
+        def reviewed_exact_glossary(self, *_args, **_kw):
             calls.append("exact")
             return []
 
@@ -746,10 +746,10 @@ def test_moddb_context_clears_stale_reviewed_context_when_disabled(monkeypatch) 
     items = build_items([(1, KIND_LANG, "mod-a", "lang.key", "Language")])
 
     class FakeDB:
-        def reviewed_lang_glossary(self, *_args):
+        def reviewed_lang_glossary(self, *_args, **_kw):
             return [{"en_us": "Language", "zh_tw": "語言"}]
 
-        def reviewed_exact_glossary(self, *_args):
+        def reviewed_exact_glossary(self, *_args, **_kw):
             return [{"en_us": "Language", "zh_tw": "語言"}]
 
     _attach_translation_sessions(items, operation_id="enabled-glossary", db=FakeDB())
@@ -821,7 +821,7 @@ def test_moddb_context_passes_version_and_source_scope_to_glossary_loader() -> N
     calls = []
 
     class FakeDB:
-        def reviewed_lang_glossary(self, mod_id, version, source_texts):
+        def reviewed_lang_glossary(self, mod_id, version, source_texts, **_kw):
             calls.append((mod_id, version, tuple(source_texts)))
             return []
 
@@ -847,10 +847,10 @@ def test_moddb_context_attaches_kind_scoped_exact_glossary() -> None:
     calls = []
 
     class FakeDB:
-        def reviewed_lang_glossary(self, _mod_id, _version, _source_texts):
+        def reviewed_lang_glossary(self, _mod_id, _version, _source_texts, **_kw):
             return []
 
-        def reviewed_exact_glossary(self, mod_id, version, kind, source_texts):
+        def reviewed_exact_glossary(self, mod_id, version, kind, source_texts, **_kw):
             calls.append((mod_id, version, kind, tuple(source_texts)))
             return [
                 {

@@ -28,6 +28,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.source_locale import reviewed_locale_compatible
 from translation_tool.translation_db import (
     change_tracker,
     effective_columns,
@@ -117,6 +118,7 @@ from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
     like_pattern,
+    reference_locale_sql,
     source_locale_match_sql,
     source_locale_sql,
     translation_review_sql,
@@ -5553,7 +5555,8 @@ class TranslationDB(
                     params.append(mc_version)
                 return self._q(
                     f"""
-                    SELECT e.id, e.kind, e.key, e.en_us, f.zh_tw
+                    SELECT e.id, e.kind, e.key, e.en_us, f.zh_tw,
+                           {reference_locale_sql("e")}
                     FROM entry e
                     JOIN effective f ON f.entry_id = e.id
                     WHERE {" AND ".join(clauses)}
@@ -5580,7 +5583,7 @@ class TranslationDB(
                 and row[3].strip()
                 and row[4].strip()
                 and quality_state(row[3], row[4], kind=str(row[1]))[0] == "consistent"
-            ]
+            ]  # [key, en_us, zh_tw, 參考語系]
 
         return self._cached(cache_key, load)
 
@@ -5613,8 +5616,12 @@ class TranslationDB(
         source_texts: Sequence[str] | None = None,
         *,
         limit: int | None = 240,
+        source_locale: str | None = None,
     ) -> list[dict[str, str]]:
         """回傳品質乾淨且已審核的指定模組 lang 術語。
+
+        ``source_locale`` 是待翻譯項目的來源語系：只採用語系相容的已審核參考
+        （見 ``reviewed_locale_compatible``），未知語系不會被當成相容。
 
         同種類沒有的術語會退回 ``@`` 前面模組名稱的 lang（KubeJS／FTB 模組包識別）。
         """
@@ -5633,7 +5640,11 @@ class TranslationDB(
         # 跨語言大小寫折疊由 Python ``casefold`` 負責；SQLite ``lower`` 只
         # 保證 ASCII，不能拿來當 Unicode 的排除式預篩。候選集合依模組、
         # 版本與資料世代快取，來源相關性仍由每次呼叫的 matcher 判斷。
-        rows = self._reviewed_lang_rows_with_name_fallback(mod_id, mc_version)
+        rows = [
+            row
+            for row in self._reviewed_lang_rows_with_name_fallback(mod_id, mc_version)
+            if reviewed_locale_compatible(source_locale, row[3])
+        ]
         matched_sources = matching_terms(
             normalized_sources, tuple(row[1] for row in rows)
         )
@@ -5641,7 +5652,7 @@ class TranslationDB(
             term_canonical_key(matched) for matched in matched_sources
         }
         by_source: dict[str, list[dict[str, str]]] = {}
-        for key, en_us, zh_tw in rows:
+        for key, en_us, zh_tw, _locale in rows:
             if not (
                 isinstance(key, str)
                 and isinstance(en_us, str)
@@ -5672,8 +5683,13 @@ class TranslationDB(
         source_texts: Sequence[str] | None = None,
         *,
         limit: int | None = 240,
+        source_locale: str | None = None,
     ) -> list[dict[str, str]]:
         """載入同模組／版本／種類的已審核完整來源對照。
+
+        ``source_locale`` 是待翻譯項目的來源語系：參考句必須語系相容
+        （見 ``reviewed_locale_compatible``），否則 en_us 的「Pasta」會被直接當成
+        pt_br 項目的答案並跳過模型；未知語系不會被當成相容。
 
         這個查詢與 ``reviewed_lang_glossary`` 分開，避免把 guide／Patchouli
         的完整句混進一般術語提示；翻譯入口只用它做唯一完整句的精確重用。
@@ -5701,14 +5717,17 @@ class TranslationDB(
                 chunk = normalized_sources[start : start + _CHUNK]
                 placeholders = ",".join("?" for _ in chunk)
                 loaded.extend(
-                    self._q(
-                        "SELECT e.id, e.key, e.en_us, f.zh_tw "
+                    row[:4]
+                    for row in self._q(
+                        "SELECT e.id, e.key, e.en_us, f.zh_tw, "
+                        f"{reference_locale_sql('e')} "
                         "FROM entry e JOIN effective f ON f.entry_id=e.id "
                         f"WHERE {' AND '.join(scope_clauses)} "
                         f"AND e.en_us IN ({placeholders}) "
                         "ORDER BY e.key, e.id",
                         (*scope_params, *chunk),
                     )
+                    if reviewed_locale_compatible(source_locale, row[4])
                 )
             return loaded
 

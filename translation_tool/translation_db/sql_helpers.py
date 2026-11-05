@@ -69,6 +69,15 @@ def source_locale_sql(entry_alias: str) -> str:
     )
 
 
+def reference_locale_sql(entry_alias: str) -> str:
+    """已審核參考的來源語系：沒有任何來源紀錄的舊條目回傳空字串，其餘同 ``source_locale_sql``。"""
+    return (
+        "CASE WHEN NOT EXISTS (SELECT 1 FROM entry_origin eo_ref "
+        f"WHERE eo_ref.entry_id={entry_alias}.id) THEN '' "
+        f"ELSE {source_locale_sql(entry_alias)} END"
+    )
+
+
 def source_locale_match_sql(left_alias: str, right_alias: str) -> str:
     """建立可重用的來源語系相容條件。
 
@@ -92,6 +101,7 @@ def source_locale_match_sql(left_alias: str, right_alias: str) -> str:
 __all__ = [
     "effective_review_sql",
     "like_pattern",
+    "reference_locale_sql",
     "source_locale_match_sql",
     "source_locale_sql",
     "translation_review_sql",
