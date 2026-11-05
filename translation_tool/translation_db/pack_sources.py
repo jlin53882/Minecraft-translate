@@ -1116,6 +1116,20 @@ def _append_ftb_lang_item(
             digest=source_digest,
         )
         return
+    # 舊版資料庫的 FTB 語系來源 selector 是 ``lang:<key>``（沒有 locale）。同一個檔案的同一個 key
+    # 剛以新 selector 掃到，就是這筆舊來源的明確證據：精確淘汰舊 selector，避免兩筆來源並存，
+    # 日後輸出時舊來源在重掃描驗證中找不到。
+    result.stale_origins.append(
+        EntryOrigin(
+            pack_scope=scope,
+            source_kind=KIND_FTB_QUEST_LANG,
+            source_path=source_path,
+            selector=f"lang:{lang_key}",
+            source_hash=source_digest,
+            format_profile="ftb-snbt-lang",
+            source_locale=source_locale,
+        )
+    )
     result.items.append(
         _make_item(
             kind=KIND_FTB_QUEST_LANG,

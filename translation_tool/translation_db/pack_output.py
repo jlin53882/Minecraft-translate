@@ -22,7 +22,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from translation_tool.core.format_diagnostics import analyze_format_diagnostics
-from translation_tool.core.source_locale import normalize_source_locale
+from translation_tool.core.source_locale import (
+    locale_from_source_path,
+    normalize_source_locale,
+)
 from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import walk_snbt_file
 from translation_tool.plugins.ftbquests.ftbquests_snbt_inject import (
     patch_lang_snbt_file,
@@ -738,7 +741,27 @@ def _find_rescanned_items(
     kind = origin.source_kind
     if origin.source_kind in {KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS}:
         target_path = target_path.removeprefix("config/ftbquests/quests/")
-    return index.get((kind, target_path, origin.selector), [])
+    exact = index.get((kind, target_path, origin.selector), [])
+    if exact or kind != KIND_FTB_QUEST_LANG:
+        return exact
+    migrated = _ftb_lang_current_selector(origin.selector, origin.source_path)
+    return index.get((kind, target_path, migrated), []) if migrated else []
+
+
+def _ftb_lang_current_selector(selector: str, source_path: str) -> str | None:
+    """舊版 FTB 語系 selector（``lang:<key>``）在新版掃描中的對應 selector。
+
+    只在來源檔案路徑明確帶有 locale（``lang/<locale>.snbt``、``lang/<locale>/…``）時才對應；
+    沒有證據就回傳 ``None``，不猜測。已經是新版格式的 selector 不需要對應。
+    """
+    if not selector.startswith("lang:"):
+        return None
+    value = selector[5:]
+    head = value.split(":", 1)[0]
+    if ":" in value and normalize_source_locale(head) is not None:
+        return None
+    locale = locale_from_source_path(source_path)
+    return f"lang:{locale}:{value}" if locale is not None else None
 
 
 def _kubejs_emitted_selector(selector: str) -> str:

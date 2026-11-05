@@ -24,7 +24,10 @@ from translation_tool.core.guide_translation import (
     is_guide_document,
     render_guide,
 )
-from translation_tool.core.lm_batch_planner import count_planned_batches
+from translation_tool.core.lm_batch_planner import (
+    count_planned_batches,
+    group_items_by_batch_key,
+)
 from translation_tool.core.lm_config_rules import (
     validate_api_keys,
     value_fully_translated,  # noqa: F401 - retained for existing test seams
@@ -945,7 +948,9 @@ def _split_db_cache(
         # 快取命中的譯文也補進資料庫（只新增、不覆蓋），讓過去的 AI 成果不流失
         db_ctx.buffer.add_many(cached_items)
         flush_write_back(db_ctx, "快取命中：")
-    return db_hits + cached_items, items_to_translate
+    # 同 cache type 與來源語系的項目排在一起：預覽批次數、實際批次與續跑清單共用同一個順序，
+    # 混有 en_us、zh_cn、pt_br 的目錄不會因為同批混語系而被 batch_source_locale 拒絕。
+    return db_hits + cached_items, group_items_by_batch_key(items_to_translate)
 
 
 def _plan_directory_batches(items: list[dict[str, Any]]) -> int:

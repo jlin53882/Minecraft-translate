@@ -782,3 +782,122 @@ def test_export_preserves_existing_ftb_zh_tw_keys_not_managed_by_db(tmp_path: Pa
         assert str(translated["unmanaged.key"]) == "既有未管理內容"
     finally:
         db.close()
+
+
+# --- 舊版 FTB 語系 selector（``lang:<key>``）與新版（``lang:<locale>:<key>``）---------
+
+
+def _scan_ftb_pack(db, root: Path) -> str:
+    list(
+        scan_folder_generator(
+            db, root, ScanOptions("1.21.1", include_pack_content=True), workers=1
+        )
+    )
+    return scan_pack_sources(root, "1.21.1").pack_scope
+
+
+def _make_ftb_pack(tmp_path: Path) -> Path:
+    lang = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.snbt").write_text('{quest.title:"English title"}', encoding="utf-8")
+    return tmp_path
+
+
+def _downgrade_ftb_origins_to_legacy(db) -> int:
+    """模擬升級前的資料庫：FTB 語系來源只有 ``lang:<key>``，沒有 locale。"""
+    with db._tx() as conn:
+        rows = conn.execute(
+            "SELECT id, selector FROM entry_origin WHERE source_kind='ftb_quest_lang'"
+        ).fetchall()
+        for row_id, selector in rows:
+            legacy = "lang:" + selector.split(":", 2)[2]
+            conn.execute(
+                "UPDATE entry_origin SET selector=? WHERE id=?", (legacy, row_id)
+            )
+    return len(rows)
+
+
+def _ftb_selectors(db) -> list[str]:
+    return sorted(
+        row[0]
+        for row in db._q(
+            "SELECT selector FROM entry_origin WHERE source_kind='ftb_quest_lang'"
+        )
+    )
+
+
+def test_legacy_ftb_selector_without_rescan_still_passes_rescan_identity(
+    tmp_path: Path,
+):
+    """升級前的資料庫（只有 ``lang:<key>``）不重新掃描、直接輸出，重掃描驗證要能對應。"""
+    root = _make_ftb_pack(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        scope = _scan_ftb_pack(db, root)
+        entry_id = db._one(
+            "SELECT e.id FROM entry e WHERE e.kind='ftb_quest_lang' LIMIT 1"
+        )[0]
+        db.save_manual(entry_id, "繁體標題", propagate=False)
+        assert _downgrade_ftb_origins_to_legacy(db) == 1
+        assert _ftb_selectors(db) == ["lang:quest.title"]
+
+        output = tmp_path.parent / "legacy-no-rescan"
+        report = export_pack_overlay(db, root, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok, (report.unapplied, report.conflicts)
+        assert report.entries_rescan_verified == 1
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw.snbt").open(encoding="utf-8")
+        )
+        assert str(translated["quest.title"]) == "繁體標題"
+    finally:
+        db.close()
+
+
+def test_upgrade_rescan_export_round_trip_retires_the_legacy_selector(tmp_path: Path):
+    """舊資料庫 → 升級 → 重新掃描 → 用既有譯文輸出 → 重掃描驗證成功，且舊 selector 已淘汰。"""
+    root = _make_ftb_pack(tmp_path)
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        scope = _scan_ftb_pack(db, root)
+        entry_id = db._one(
+            "SELECT e.id FROM entry e WHERE e.kind='ftb_quest_lang' LIMIT 1"
+        )[0]
+        db.save_manual(entry_id, "繁體標題", propagate=False)
+        _downgrade_ftb_origins_to_legacy(db)
+
+        _scan_ftb_pack(db, root)  # 升級後重新掃描
+
+        assert _ftb_selectors(db) == ["lang:en_us:quest.title"]
+        output = tmp_path.parent / "legacy-rescanned"
+        report = export_pack_overlay(db, root, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok, (report.unapplied, report.conflicts)
+        assert report.entries_rescan_verified == 1
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw.snbt").open(encoding="utf-8")
+        )
+        assert str(translated["quest.title"]) == "繁體標題"
+    finally:
+        db.close()
+
+
+def test_legacy_ftb_selector_without_path_evidence_is_still_reported(tmp_path: Path):
+    """路徑沒有 locale 證據時不猜測對應：維持「重掃描未找到」，不放行。"""
+    from translation_tool.translation_db.pack_output import _find_rescanned_items
+
+    origin = EntryOrigin(
+        pack_scope="p",
+        source_kind="ftb_quest_lang",
+        source_path="config/ftbquests/quests/lang/notalocale/chapter.snbt",
+        selector="lang:quest.title",
+        source_hash="h",
+        format_profile="ftb-snbt-lang",
+    )
+
+    class Plan:
+        class item:
+            pass
+
+    Plan.item.origin = origin
+    assert _find_rescanned_items(Plan, {}) == []
