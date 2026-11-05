@@ -118,6 +118,7 @@ class ScanOptions:
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
     include_pack_content: bool = True  # instance 根目錄下的 KubeJS／FTB Quests
+    reuse_reviewed: bool = True  # 匯入後沿用其他版本已審核的相同譯文
 
 
 @dataclass
@@ -169,6 +170,9 @@ class ScanReport:
     pack_root_ambiguous: bool = False
     pack_source_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
+    reuse_applied: int = 0  # 沿用其他版本已審核譯文的筆數
+    reuse_conflicts: int = 0  # 各版本已審核譯文不一致、未處理的筆數
+    reuse_skipped_reviewed: int = 0  # 目標已審核而保留的筆數
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
     dry_run: bool = False
@@ -218,6 +222,9 @@ class ScanReport:
             "added_translations": self.stats.added_translations,
             "en_changed": self.stats.en_changed,
             "adopted": self.stats.adopted,
+            "reuse_applied": self.reuse_applied,
+            "reuse_conflicts": self.reuse_conflicts,
+            "reuse_skipped_reviewed": self.reuse_skipped_reviewed,
             "cancelled": self.cancelled,
             "issue_count": len(self.issues),
             "issue_counts": dict(

@@ -175,3 +175,7 @@ Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_ga
 - `app/views/moddb/species_dialog.py` 只處理視窗控制項、掃描與單筆查詢的背景作業，以及結果呈現。
 - `app/views/moddb/species_bulk_lookup.py` 負責批次查詢的背景工作、任務膠囊進度、停止條件與事件通知，不持有任何控制項。
 - 學名快取的網路請求與快取檔案格式由 `translation_tool/utils/species_cache.py` 管理（相同學名同時查詢只送一次請求，等待者共用同一次結果，包括查無與暫時失敗；暫時失敗不寫入快取，之後仍可重試。快取寫入有鎖）；Mod DB 功能不重複實作 API 或快取。
+
+## 版本差異審核
+
+`entry_filters.py` 的 `版本差異審核` 按鈕只建立 `VersionDiffDialog`，傳入目前版本與外層資料變更回呼。對話框的資料處理在 `translation_tool/translation_db/cross_version_review.py`（`CrossVersionReviewMixin`）：`list_differences` 讀取差異，`apply_references` 在 CAS 檢查後寫入，`reuse_reviewed` 供匯入後自動沿用；UI 只負責分頁與按鈕。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證，關閉視窗後的晚到結果會被丟棄。

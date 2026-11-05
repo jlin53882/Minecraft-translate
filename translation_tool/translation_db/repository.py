@@ -40,6 +40,9 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
+from translation_tool.translation_db.cross_version_review import (
+    CrossVersionReviewMixin,
+)
 from translation_tool.translation_db.duplicate_cleanup import DuplicateCleanupMixin
 from translation_tool.translation_db.history_retention import (
     HISTORY_RETENTION_LIMIT,
@@ -353,7 +356,11 @@ _REVERSIBLE_SORTS = {"default": "default_desc", "default_desc": "default"}
 
 
 class TranslationDB(
-    DuplicateCleanupMixin, SmartReviewMixin, BulkReviewMixin, CleanupMixin
+    DuplicateCleanupMixin,
+    SmartReviewMixin,
+    BulkReviewMixin,
+    CrossVersionReviewMixin,
+    CleanupMixin,
 ):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
 

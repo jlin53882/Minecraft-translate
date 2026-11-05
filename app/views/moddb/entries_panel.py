@@ -46,6 +46,7 @@ from app.views.moddb.entry_filters import (
     on_advanced_change,
     open_batch_replace,
     open_bulk_review,
+    open_version_diff,
     prepare_entries_snapshot,
     refresh_entry_filter,
 )
@@ -385,6 +386,7 @@ class EntriesPanel(ft.Column):
         for name in (
             "batch_replace_btn",
             "bulk_review_btn",
+            "version_diff_btn",
             "smart_review_btn",
             "species_scan_btn",
         ):
@@ -421,6 +423,9 @@ class EntriesPanel(ft.Column):
 
     def _open_bulk_review(self, _e=None) -> None:
         open_bulk_review(self, _e)
+
+    def _open_version_diff(self, _e=None) -> None:
+        open_version_diff(self, _e)
 
     def _after_batch_replace(self, result) -> None:
         entry_writes.after_data_change(self)
