@@ -161,7 +161,7 @@ def test_resume_with_locale_short_batches_and_a_413_shrink(db, monkeypatch):
         cancel_check=lambda: bool(seen),  # 第一個請求（en_us 組）完成後取消
     )
     assert [len(batch) for batch in seen] == [2]
-    assert first.status != "completed"
+    assert first.status == "cancelled"
 
     state.update(phase="resume", fail_next=True)
     resumed = resume_smart_review(
@@ -174,6 +174,7 @@ def test_resume_with_locale_short_batches_and_a_413_shrink(db, monkeypatch):
     )
 
     assert resumed.status == "completed"
+    assert resumed.processed_count == 13
     assert resumed.metrics["shrink_count"] == 1  # 只有那次真正的 413 縮批
     resume_ids = [item for batch in seen[1:] for item in batch]
     pt_br_ids = [i for i in resume_ids if i not in seen[0]]
