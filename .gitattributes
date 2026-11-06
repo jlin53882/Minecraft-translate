@@ -1,4 +1,5 @@
 /tools/build_exe.bat text eol=crlf
 
-# 官方語系以位元組計算 sha256 並與 manifest 比對；autocrlf 轉成 CRLF 會讓驗證失敗
+# 官方語系保存與 manifest 相同的位元組（LF），取出時不做換行轉換。
+# 驗證雜湊前會把 CRLF 正規化為 LF，所以已被轉成 CRLF 的舊工作區仍能通過驗證。
 /assets/official_locales/** -text

@@ -107,6 +107,19 @@ def _same_locale_run_length(
     return length
 
 
+def _planned_batch_count(
+    snapshots: Sequence[SmartReviewSnapshot], batch_size: int
+) -> int:
+    """預估批數：每個來源語系組各自依批次大小進位（與實際分批相同的分組規則）。"""
+    grouped = _group_by_source_locale(snapshots)
+    batches, position = 0, 0
+    while position < len(grouped):
+        run = _same_locale_run_length(grouped, position)
+        batches += (run + batch_size - 1) // batch_size
+        position += run
+    return max(1, batches)
+
+
 class _SmartReviewBatchRunner:
     """依序處理所有候選批次；取消與失敗狀態記錄在 ``SmartReviewRunState``。"""
 
@@ -389,7 +402,9 @@ class _SmartReviewBatchRunner:
         """批次完成：前進游標並回報完成事件。"""
         self.state.counts.processed += len(batch)
         cursor.position += len(batch)
-        cursor.adaptive_size = min(cursor.adaptive_size, cursor.current_size)
+        # 不在這裡縮小自適應批次大小：``current_size`` 可能只是因為語系分組或剩餘筆數而變短，
+        # 不是失敗。真正的縮小（超過輸入預算、回應被截斷或結構錯誤）由 ``_BatchCursor.shrink``
+        # 負責，它已經會同步縮小 ``adaptive_size``。
         batch_ctx.actual_count = len(batch)
         self.state.complete_batch(batch_ctx, "completed")
 
@@ -556,7 +571,7 @@ def _open_run_state(
         existing_run_id, initial_counts, snapshots
     )
     planning_started = time.monotonic()
-    planned_batch_count = max(1, (len(snapshots) + batch_size - 1) // batch_size)
+    planned_batch_count = _planned_batch_count(snapshots, batch_size)
     planning_seconds = round(time.monotonic() - planning_started, 3)
     run_record_started = time.monotonic()
     run_id = existing_run_id or db.create_smart_review_run(
