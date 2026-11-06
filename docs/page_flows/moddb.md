@@ -52,7 +52,7 @@ flowchart TD
 
 掃描匯入結束後（非預覽、未取消、選項「沿用其他版本已審核的相同譯文」開啟）`_reuse_reviewed_after_scan` 呼叫 `reuse_reviewed_translations`：只處理本次匯入開始後新增或譯文有變動的條目，參考譯文一致且目標尚未審核才以已審核狀態寫入；衝突與「目標已審核且不同」只計數，摘要列（`ScanPanel._apply_reuse_summary`）顯示結果並提供「檢視版本差異」。
 
-`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `list_cross_version_differences` 在背景載入差異與衝突，`apply_cross_version_references` 套用（目標或參考與畫面不同時略過），`review_manual` 實作「保留目標譯文」，`revert` 復原上一次套用。
+`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `list_cross_version_differences` 在背景載入差異與衝突，`apply_cross_version_references` 套用（目標或參考與畫面不同時略過），`review_manual` 實作「保留目標譯文」，`revert` 復原上一次套用。套用到目標時：目標尚未審核就另寫一列參考來源（已審核列贏過未審核列）；目標已是已審核，則改寫目標目前生效的那一列，不受來源優先序影響。批次套用以勾選決定範圍，目標已審核的條目需先勾「包含目標已審核」，並在第一次按下時要求再確認一次。
 
 ### 掃描匯入
 

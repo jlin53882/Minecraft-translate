@@ -19,6 +19,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .schema import SRC_MANUAL
 from .sql_helpers import source_locale_match_sql
 
 if TYPE_CHECKING:
@@ -210,11 +211,25 @@ def _write_reference(
     batch: str,
     actor: str,
 ) -> int:
-    """把參考譯文以已審核狀態寫入目標條目，回傳歷史編號。"""
+    """把參考譯文以已審核狀態寫入目標條目，回傳歷史編號。
+
+    目標尚未審核時，另寫一列參考來源（已審核列一定贏過未審核列，原本的譯文保留在自己的來源）。
+    目標已經是已審核時，改寫目標目前生效的那一列：否則新列與目標列同為已審核，
+    誰生效取決於來源優先序，參考來源排序較低時套用後畫面不會變。
+    """
+    target_source = (
+        row.target_source
+        if row.target_reviewed and row.target_source is not None
+        else ref.source
+    )
+    if target_source == ref.source:
+        checker = ref.checker
+    else:
+        checker = (ref.checker or "人工") if target_source == SRC_MANUAL else ""
     prev = conn.execute(
         "SELECT zh_tw, checker, review_status, revision FROM translation "
         "WHERE entry_id=? AND source=?",
-        (row.entry_id, ref.source),
+        (row.entry_id, target_source),
     ).fetchone()
     conn.execute(
         "INSERT INTO translation (entry_id, source, zh_tw, checker, review_status) "
@@ -222,11 +237,11 @@ def _write_reference(
         "ON CONFLICT(entry_id, source) DO UPDATE SET "
         "zh_tw=excluded.zh_tw, checker=excluded.checker, "
         "review_status='reviewed', updated_at=CURRENT_TIMESTAMP",
-        (row.entry_id, ref.source, ref.zh_tw, ref.checker),
+        (row.entry_id, target_source, ref.zh_tw, checker),
     )
     written = conn.execute(
         "SELECT checker, revision FROM translation WHERE entry_id=? AND source=?",
-        (row.entry_id, ref.source),
+        (row.entry_id, target_source),
     ).fetchone()
     cur = conn.execute(
         "INSERT INTO history (entry_id, batch, actor, action, old_zh_tw, new_zh_tw, "
@@ -248,7 +263,7 @@ def _write_reference(
             "reviewed",
             prev[3] if prev else None,
             written[1],
-            ref.source,
+            target_source,
         ),
     )
     return int(cur.lastrowid or 0)

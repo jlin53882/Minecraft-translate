@@ -36,6 +36,7 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label, visible_breaks
+from app.views.moddb.version_diff_text import changed_ranges, text_spans
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 20
@@ -357,38 +358,10 @@ class VersionDiffDialog:
         )
 
     def _row_card(self, row: CrossVersionRow) -> ft.Container:
-        target_label = source_label(
-            row.target_source,
-            self._catalog,
-            "reviewed" if row.target_reviewed else None,
-        )
         refs = (
             sorted(row.refs, key=lambda r: (r.reviewed_at, r.version), reverse=True)
             if row.conflict
             else [row.reference]
-        )
-        ref_cols = [self._ref_block(row, ref, row.conflict) for ref in refs]
-        include = bool(self.include_reviewed.value)
-        can_select = selectable(row, include)
-        target = ft.Column(
-            [
-                ft.Text(f"目標：{target_label}", size=11.5, color=C.MUTED),
-                ft.Text(row.target_zh_tw or "（沒有譯文）", size=13, selectable=True),
-                kit.button(
-                    "保留目標譯文",
-                    "ghost",
-                    size="sm",
-                    on_click=lambda _e, r=row: self._keep_target(r),
-                    disabled=not row.target_zh_tw or row.target_reviewed,
-                    tooltip=(
-                        "目標已經是已審核，不需要再標記"
-                        if row.target_reviewed
-                        else "把目前譯文標為已審核，之後匯入不會再被其他版本覆蓋"
-                    ),
-                ),
-            ],
-            spacing=4,
-            expand=True,
         )
         return ft.Container(
             padding=10,
@@ -396,68 +369,163 @@ class VersionDiffDialog:
             border_radius=8,
             content=ft.Column(
                 [
+                    self._row_header(row),
+                    self._source_block(row),
                     ft.Row(
                         [
-                            *(
-                                [
-                                    ft.Checkbox(
-                                        value=row.entry_id in self.selected,
-                                        disabled=not can_select,
-                                        tooltip=(
-                                            None
-                                            if can_select
-                                            else "目標已審核：勾選上方「包含目標已審核」後才能批次套用"
-                                        ),
-                                        on_change=lambda e, r=row: self._toggle_row(
-                                            r, e
-                                        ),
-                                    )
-                                ]
-                                if not row.conflict
-                                else []
-                            ),
-                            ft.Text(
-                                f"{row.mod_id} · {row.key}",
-                                size=13,
-                                weight=ft.FontWeight.W_600,
-                                selectable=True,
+                            ft.Column(
+                                [self._ref_block(row, ref) for ref in refs],
+                                spacing=8,
                                 expand=True,
                             ),
-                            kit.chip(kind_label(row.kind), "neutral"),
-                        ]
+                            self._target_block(row, refs),
+                        ],
+                        spacing=10,
+                        vertical_alignment=ft.CrossAxisAlignment.START,
                     ),
+                ],
+                spacing=8,
+            ),
+        )
+
+    def _row_header(self, row: CrossVersionRow) -> ft.Row:
+        can_select = selectable(row, bool(self.include_reviewed.value))
+        checkbox = ft.Checkbox(
+            value=row.entry_id in self.selected,
+            disabled=not can_select,
+            tooltip=(
+                None
+                if can_select
+                else "目標已審核：勾選上方「包含目標已審核」後才能批次套用"
+            ),
+            on_change=lambda e, r=row: self._toggle_row(r, e),
+        )
+        return ft.Row(
+            [
+                *([] if row.conflict else [checkbox]),
+                ft.Text(
+                    f"{row.mod_id} · {row.key}",
+                    size=13,
+                    weight=ft.FontWeight.W_600,
+                    selectable=True,
+                    expand=True,
+                ),
+                kit.chip(kind_label(row.kind), "neutral"),
+            ]
+        )
+
+    @staticmethod
+    def _source_block(row: CrossVersionRow) -> ft.Container:
+        """原文：獨立一塊、字色較淡，只當參照；格式碼同樣淡化。"""
+        return ft.Container(
+            padding=ft.Padding.symmetric(horizontal=10, vertical=6),
+            border=ft.Border(left=ft.BorderSide(3, C.LINE)),
+            content=ft.Column(
+                [
+                    ft.Text("原文", size=11, color=C.DIM),
                     ft.Text(
-                        visible_breaks(row.en_us),
+                        spans=text_spans(visible_breaks(row.en_us), [], C.EM_BG),
                         size=12,
                         color=C.MUTED,
                         selectable=True,
                     ),
+                ],
+                spacing=2,
+            ),
+        )
+
+    def _ref_block(self, row: CrossVersionRow, ref: VersionRef) -> ft.Container:
+        """參考譯文：綠底；與目標不同的片段加底色（差異太大時不標）。"""
+        marks, _ = changed_ranges(ref.zh_tw, row.target_zh_tw)
+        return ft.Container(
+            padding=10,
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.10, C.EM),
+            content=ft.Column(
+                [
                     ft.Row(
-                        [ft.Column(ref_cols, spacing=8, expand=True), target],
-                        spacing=16,
-                        vertical_alignment=ft.CrossAxisAlignment.START,
+                        [
+                            kit.chip(f"參考 {ref.version}", "em"),
+                            ft.Text(
+                                f"已審核・{_time_text(ref)}", size=11.5, color=C.MUTED
+                            ),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Text(
+                        spans=text_spans(
+                            ref.zh_tw, marks, ft.Colors.with_opacity(0.35, C.EM)
+                        ),
+                        size=13.5,
+                        selectable=True,
+                    ),
+                    kit.button(
+                        f"套用 {ref.version} 的譯文"
+                        if row.conflict
+                        else "套用參考譯文",
+                        "secondary",
+                        size="sm",
+                        on_click=lambda _e, r=row, f=ref: self._apply_one(r, f),
                     ),
                 ],
                 spacing=6,
             ),
         )
 
-    def _ref_block(
-        self, row: CrossVersionRow, ref: VersionRef, conflict: bool
-    ) -> ft.Column:
-        label = f"{ref.version} 已審核・{_time_text(ref)}"
-        return ft.Column(
-            [
-                ft.Text(label, size=11.5, color=C.MUTED),
-                ft.Text(ref.zh_tw, size=13, selectable=True),
-                kit.button(
-                    f"套用 {ref.version} 的譯文" if conflict else "套用參考譯文",
-                    "secondary",
-                    size="sm",
-                    on_click=lambda _e, r=row, f=ref: self._apply_one(r, f),
-                ),
-            ],
-            spacing=4,
+    def _target_block(
+        self, row: CrossVersionRow, refs: list[VersionRef]
+    ) -> ft.Container:
+        """目標譯文：已審核時用金色底，提醒套用會覆蓋已審核內容。"""
+        label = source_label(
+            row.target_source,
+            self._catalog,
+            "reviewed" if row.target_reviewed else None,
+        )
+        tone = C.GOLD if row.target_reviewed else C.MUTED
+        # 與預設參考比對；衝突時各參考不同，這裡就不標，避免誤導
+        marks = (
+            [] if row.conflict else changed_ranges(refs[0].zh_tw, row.target_zh_tw)[1]
+        )
+        return ft.Container(
+            expand=True,
+            padding=10,
+            border_radius=8,
+            bgcolor=ft.Colors.with_opacity(0.10, tone),
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [
+                            kit.chip(
+                                "目標", "gold" if row.target_reviewed else "neutral"
+                            ),
+                            ft.Text(label, size=11.5, color=C.MUTED),
+                        ],
+                        spacing=8,
+                    ),
+                    ft.Text(
+                        spans=text_spans(
+                            row.target_zh_tw or "（沒有譯文）",
+                            marks,
+                            ft.Colors.with_opacity(0.35, tone),
+                        ),
+                        size=13.5,
+                        selectable=True,
+                    ),
+                    kit.button(
+                        "保留目標譯文",
+                        "ghost",
+                        size="sm",
+                        on_click=lambda _e, r=row: self._keep_target(r),
+                        disabled=not row.target_zh_tw or row.target_reviewed,
+                        tooltip=(
+                            "目標已經是已審核，不需要再標記"
+                            if row.target_reviewed
+                            else "把目前譯文標為已審核，之後匯入不會再被其他版本覆蓋"
+                        ),
+                    ),
+                ],
+                spacing=6,
+            ),
         )
 
     # ------------------------------------------------------------------ 動作

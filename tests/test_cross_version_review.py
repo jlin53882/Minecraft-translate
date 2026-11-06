@@ -186,3 +186,40 @@ def test_scan_service_helper_reuses_and_reports(db):
         session, db, ScanOptions(version="26.1", reuse_reviewed=False), off, since
     )
     assert off.reuse_applied == 0
+
+
+@pytest.mark.parametrize(
+    ("ref_source", "target_source"),
+    [
+        (SRC_JAR_TW, 3),  # 參考是模組自帶繁中、目標是釘宮翻譯組（目標來源排序較高）
+        (3, 6),  # 參考是釘宮翻譯組、目標是人工
+        (6, 3),
+        (3, 3),
+    ],
+)
+def test_apply_replaces_a_reviewed_target_whatever_the_sources(
+    db, ref_source, target_source
+):
+    """套用參考譯文後，目標目前顯示的譯文一定要變成參考譯文（不受來源排序影響），且可復原。"""
+    db.ingest(
+        "1.21.1", [ScanItem(KIND_LANG, "foo", "k", "Bright", "亮色", "", ref_source)]
+    )
+    ref = _entry(db, "1.21.1", "k")
+    db.review_manual(ref.id, expected_zh_tw="亮色", propagate=False)
+    db.ingest(
+        "1.20.1", [ScanItem(KIND_LANG, "foo", "k", "Bright", "明亮", "", target_source)]
+    )
+    tgt = _entry(db, "1.20.1", "k")
+    db.review_manual(tgt.id, expected_zh_tw="明亮", propagate=False)
+
+    row = db.list_cross_version_differences("1.20.1", ref_version="1.21.1")[0]
+    result = db.apply_cross_version_references(
+        [ApplyItem(row.entry_id, "1.21.1", row.target_zh_tw, row.reference.zh_tw)]
+    )
+
+    after = _entry(db, "1.20.1", "k")
+    assert result.applied == 1
+    assert (after.zh_tw, after.review_status) == ("亮色", "reviewed")
+    assert db.list_cross_version_differences("1.20.1", ref_version="1.21.1") == []
+    assert db.revert(result.history_id) == 1
+    assert _entry(db, "1.20.1", "k").zh_tw == "明亮"
