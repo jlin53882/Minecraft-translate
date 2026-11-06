@@ -104,3 +104,80 @@ def test_planned_batch_count_follows_the_locale_groups(db, monkeypatch):
         if snapshot.get("event", {}).get("kind") == "batch_start"
     }
     assert totals == {len(sizes)} == {4}
+
+
+def test_resume_with_locale_short_batches_and_a_413_shrink(db, monkeypatch):
+    """續跑＋多語系短批次＋失敗縮批：三者同時發生時，所有候選仍恰好審查一次。
+
+    第一次執行在 en_us 組（2 筆）完成後取消；續跑時 pt_br 組（11 筆）的第一個請求回傳
+    HTTP 413。驗證縮批只計一次（來自真正的失敗），而且 13 筆候選全部都被審查、
+    pt_br 組每筆只成功送出一次。
+    """
+    import requests
+
+    from translation_tool.translation_db.smart_review_run import resume_smart_review
+
+    seen: list[list[str]] = []
+    state = {"phase": "first", "fail_next": False}
+
+    def call(**kwargs):
+        items = kwargs["payload"]["items"]
+        if state["phase"] == "resume" and state["fail_next"]:
+            state["fail_next"] = False
+            response = requests.Response()
+            response.status_code = 413
+            response._content = json.dumps(
+                {"error": {"message": "request payload too large"}}
+            ).encode()
+            raise requests.HTTPError(response=response)
+        seen.append([item["id"] for item in items])
+        return json.dumps(
+            {
+                "items": [
+                    {
+                        "id": item["id"],
+                        "decision": "no_change",
+                        "suggested_zh_tw": "",
+                        "issue_types": [],
+                        "evidence_ids": [],
+                        "confidence": 0.9,
+                        "reason": "目前譯文可保留。",
+                    }
+                    for item in items
+                ]
+            }
+        )
+
+    monkeypatch.setattr(CALL, call)
+    first = run_smart_review(
+        db,
+        model_name="gemini-test",
+        api_key="k",
+        limit=100,
+        version=V,
+        effective_source=None,
+        batch_size=5,
+        lm_config=LM_CONFIG,
+        cancel_check=lambda: bool(seen),  # 第一個請求（en_us 組）完成後取消
+    )
+    assert [len(batch) for batch in seen] == [2]
+    assert first.status != "completed"
+
+    state.update(phase="resume", fail_next=True)
+    resumed = resume_smart_review(
+        db,
+        run_id=first.run_id,
+        api_key="k",
+        model_name="gemini-test",
+        batch_size=5,
+        lm_config=LM_CONFIG,
+    )
+
+    assert resumed.status == "completed"
+    assert resumed.metrics["shrink_count"] == 1  # 只有那次真正的 413 縮批
+    resume_ids = [item for batch in seen[1:] for item in batch]
+    pt_br_ids = [i for i in resume_ids if i not in seen[0]]
+    # 續跑時 pt_br 組每一筆都成功送出且只送一次，en_us 組沒有被漏掉
+    assert len(pt_br_ids) == len(set(pt_br_ids)) == 11
+    assert len({*seen[0], *resume_ids}) == 13
+    assert max(len(batch) for batch in seen[1:]) < 5  # 失敗後確實縮小
