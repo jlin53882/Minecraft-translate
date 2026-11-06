@@ -177,8 +177,35 @@ def test_resume_with_locale_short_batches_and_a_413_shrink(db, monkeypatch):
     assert resumed.processed_count == 13
     assert resumed.metrics["shrink_count"] == 1  # 只有那次真正的 413 縮批
     resume_ids = [item for batch in seen[1:] for item in batch]
-    pt_br_ids = [i for i in resume_ids if i not in seen[0]]
-    # 續跑時 pt_br 組每一筆都成功送出且只送一次，en_us 組沒有被漏掉
-    assert len(pt_br_ids) == len(set(pt_br_ids)) == 11
-    assert len({*seen[0], *resume_ids}) == 13
+    # 已完成的 en_us 組不會重送：續跑只送 pt_br 組的 11 筆，每筆恰好一次
+    assert len(resume_ids) == len(set(resume_ids)) == 11
+    assert set(resume_ids).isdisjoint(seen[0])
+    assert resumed.metrics["invalidated_by_manual_edit_count"] == 0
     assert max(len(batch) for batch in seen[1:]) < 5  # 失敗後確實縮小
+
+
+def test_resume_of_a_completed_run_does_not_resend_reviewed_candidates(db, monkeypatch):
+    """已完成的候選帶有本地證據（context）時，續跑不能把它們當成「已變動」而重審。"""
+    from translation_tool.translation_db.smart_review_run import resume_smart_review
+
+    result, sizes, _events = _run(db, monkeypatch)
+    assert sizes == [2, 5, 5, 1]
+
+    resent: list[int] = []
+
+    def call(**kwargs):
+        resent.append(len(kwargs["payload"]["items"]))
+        raise AssertionError("已完成的候選不該被重新送審")
+
+    monkeypatch.setattr(CALL, call)
+    resumed = resume_smart_review(
+        db,
+        run_id=result.run_id,
+        api_key="k",
+        model_name="gemini-test",
+        batch_size=5,
+        lm_config=LM_CONFIG,
+    )
+
+    assert resent == []
+    assert resumed.metrics["invalidated_by_manual_edit_count"] == 0

@@ -94,11 +94,16 @@ def _resume_fingerprint(
     value: Mapping[str, Any], *, use_original: bool
 ) -> tuple[Any, ...]:
     """建立續跑用的完整快照指紋。"""
+    candidate = value
     original = value.get("original_snapshot") if use_original else None
     source = original if isinstance(original, Mapping) else value
     values: list[Any] = []
     for key in _RESUME_SNAPSHOT_KEYS:
         value = source.get("entry_key") if key == "entry_key" else source.get(key)
+        if key == "context" and source is not candidate and key not in source:
+            # CAS 快照欄位（SMART_REVIEW_CAS_SNAPSHOT_FIELDS）不含 context，
+            # 候選送審時的證據存在候選本身；沒有它就會與續跑重算的證據永遠不同。
+            value = candidate.get(key)
         if key == "context":
             value = json.dumps(
                 value or [], ensure_ascii=False, sort_keys=True, separators=(",", ":")
