@@ -12,6 +12,7 @@
 - 雜湊前會把 CRLF 正規化為 LF（`_file_sha256`）：這些檔案是 JSON，字串中的換行必須跳脫，真正的 CR／LF 只會出現在 token 之間的空白，所以 Windows 的 `core.autocrlf=true` 或解壓縮工具造成的換行轉換不會讓驗證失敗；內容被改動或損壞時雜湊仍然不符。
 - 警告文字分三種：`官方語系完整性驗證失敗：<檔名>（內容的 SHA-256 與 manifest 不符…）`、`找不到或無法讀取 Minecraft 官方語系`（檔案不存在或無法讀取）、`Minecraft 官方語系檔案格式無效`（JSON 無法解析或結構錯誤）。
 - 版本庫以 `.gitattributes` 的 `-text` 保存 LF，`tests/test_official_locale_line_endings.py` 檢查磁碟上的檔案沒有 CRLF；測試見 `tests/test_official_locale_integrity.py`。
+- `-text` 讓 Git 取出時不做換行轉換：新 clone 或重新取出（`git checkout -- assets/official_locales/minecraft`）得到的是 LF，與 manifest 的雜湊一致；已經被舊設定轉成 CRLF 的工作區不會被 `.gitattributes` 改回，但雜湊前的 LF 正規化讓它們仍能通過驗證。
 
 ## 命中優先順序
 
