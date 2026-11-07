@@ -208,7 +208,10 @@ cross-version reuse queries and the cross-version review dialog all build their
 predicate with `same_content_sql()` / `content_mod_sql()`; do not spell
 `e2.mod_id = e.mod_id` for a cross-version comparison. The expression index
 `idx_entry_content_ns (kind, <content module>, key, en_us)` serves it; the
-queries must use the identical expression, and lookups force the index (without
+queries must use the identical expression, and `effective.diff` is a per-entry value (another *version* has a different effective
+translation) and the overview counter counts groups with at least two distinct
+translations across at least two versions, so two pack identities inside one version
+never count as a version difference. The queries force the index (without
 `ANALYZE` statistics the planner scans the table), falling back to no hint on a
 database that lacks it. The original `idx_entry_content` stays for same-version
 lookups, which keep the full `mod_id`. A change to the definition bumps

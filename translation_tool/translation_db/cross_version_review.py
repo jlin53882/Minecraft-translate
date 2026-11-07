@@ -350,25 +350,35 @@ def explain_exclusions(
 
 
 def _classify_exclusions(rows: Sequence[tuple], summary: ExclusionSummary) -> None:
+    """依每個目標的全部參考決定有沒有被擋住的差異；每個目標只計一個原因。
+
+    先逐一評估目標的每個參考（是否已審核、語系是否相容、譯文是否與目標不同），再決定：
+
+    - 有「已審核、語系相容、譯文不同」的參考：差異會被列出，不計。
+    - 否則，有「已審核、譯文不同，但語系不相容」的參考：計為語系不相容（優先）。
+    - 否則，有「尚未審核、譯文不同」的參考：計為參考尚未審核。
+
+    相容但譯文相同的參考不構成差異，也不會掩蓋其他參考被擋住的差異。
+    """
     by_target: dict[int, list[tuple]] = {}
     for row in rows:
         by_target.setdefault(int(row[0]), []).append(row)
     for refs in by_target.values():
-        reviewed = [r for r in refs if r[4] in _REVIEWED_STATES]
-        if any(r[5] and (r[3] != (r[2] or "")) for r in reviewed):
-            continue  # 已經有可列出的參考
-        if reviewed and not any(r[5] for r in reviewed):
-            if all(r[3] == (r[2] or "") for r in reviewed):
-                continue  # 譯文本來就一樣，不是差異
+        target_text = refs[0][2] or ""
+        differing = [r for r in refs if r[3] != target_text]
+        reviewed = [r for r in differing if r[4] in _REVIEWED_STATES]
+        if any(r[5] for r in reviewed):
+            continue  # 已經有可列出的差異
+        if reviewed:
             summary.locale_incompatible += 1
             if str(refs[0][6]).startswith("unknown:"):
                 summary.target_locale_unknown += 1
             if len(summary.samples) < _SAMPLE_LIMIT:
-                _key, target_loc, ref_loc = refs[0][1], refs[0][6], reviewed[0][7]
+                key, target_loc, ref_loc = refs[0][1], refs[0][6], reviewed[0][7]
                 summary.samples.append(
-                    f"{_key}（目標語系 {target_loc}、參考語系 {ref_loc}）"
+                    f"{key}（目標語系 {target_loc}、參考語系 {ref_loc}）"
                 )
-        elif not reviewed and any(r[3] != (r[2] or "") for r in refs):
+        elif differing:
             summary.ref_unreviewed += 1
 
 

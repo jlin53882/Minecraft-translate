@@ -1317,7 +1317,7 @@ class TranslationDB(
                 FROM entry e JOIN effective f ON f.entry_id = e.id
                 WHERE e.en_us <> ''
                 GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
-                HAVING COUNT(DISTINCT f.zh_tw) > 1
+                HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
             )
             """
         )[0]

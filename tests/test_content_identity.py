@@ -173,3 +173,103 @@ def test_overview_counters_use_the_same_content_definition(db):
     full = db._overview_full()
     assert (overview["content"], overview["diff"]) == (1, 0)
     assert (overview["content"], overview["diff"]) == (full["content"], full["diff"])
+
+
+PACK_C = "actuallyadditions@Third Pack@cccccccccccc"
+
+
+def _consistent(db):
+    """衍生欄位與統計摘要都與依原本定義的全庫重算一致（含總覽的版本不同組數）。"""
+    assert effective_columns.verify(db._conn) == []
+    assert db.verify_stat_summary() == []
+    overview, full = db.overview(), db._overview_full()
+    assert (overview["content"], overview["diff"]) == (full["content"], full["diff"])
+    return overview
+
+
+def test_two_pack_identities_in_the_same_version_are_not_a_version_difference(db):
+    """「版本不同」要求至少兩個 Minecraft 版本：同版本兩個整合包翻得不同不算。"""
+    db.ingest("26.1", [_pack(PACK_A, "k", "Sonho", "亮色")])
+    db.ingest("26.1", [_pack(PACK_B, "k", "Sonho", "明亮")])
+
+    assert set(_diff_flags(db).values()) == {0}
+    rows = db.list_entries(
+        criteria=EntryFilter(version="26.1", state="diff"), limit=None
+    )[0]
+    assert rows == []
+    assert _consistent(db)["diff"] == 0
+
+
+def test_diff_needs_a_cross_version_pair_when_a_version_holds_two_identities(db):
+    """26.1 有兩個整合包（亮／明）、1.21.1 一個（亮）：只有跟另一版本不同的兩筆是差異。"""
+    db.ingest("26.1", [_pack(PACK_A, "k", "Sonho", "亮色")])
+    db.ingest("26.1", [_pack(PACK_B, "k", "Sonho", "明亮")])
+    db.ingest("1.21.1", [_pack(PACK_C, "k", "Sonho", "亮色")])
+
+    assert _diff_flags(db) == {
+        ("26.1", PACK_A): 0,  # 跟 1.21.1 相同；同版本的另一個整合包不算
+        ("26.1", PACK_B): 1,
+        ("1.21.1", PACK_C): 1,  # 跟 26.1 的 B 不同
+    }
+    assert _consistent(db)["diff"] == 1  # 一組內容、組內有跨版本差異
+
+
+def test_derived_data_stays_exact_across_edits_deletes_and_moves(db):
+    db.ingest("26.1", [_pack(PACK_A, "k", "Sonho", "亮色")])
+    db.ingest("26.1", [_pack(PACK_B, "k", "Sonho", "明亮")])
+    db.ingest("1.21.1", [_pack(PACK_C, "k", "Sonho", "亮色")])
+    _consistent(db)
+
+    db.save_manual(_entry(db, "26.1", "k", PACK_B).id, "亮色", propagate=False)
+    assert _consistent(db)["diff"] == 0  # 三筆都一樣
+
+    db.save_manual(_entry(db, "1.21.1", "k", PACK_C).id, "別的", propagate=False)
+    assert _consistent(db)["diff"] == 1
+
+    with db._tx() as conn:  # 刪掉唯一的另一版本條目：剩下只有同版本的兩個整合包
+        conn.execute("DELETE FROM entry WHERE mc_version='1.21.1'")
+    assert set(_diff_flags(db).values()) == {0}
+    assert _consistent(db)["diff"] == 0
+
+    db.ingest("1.20.1", [_pack(PACK_C, "k", "Sonho", "第三種")])  # 新增另一版本
+    assert _consistent(db)["diff"] == 1
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3, 4])
+def test_random_operations_keep_every_derived_value_exact(db, seed):
+    """多版本、多個整合包身分、少量譯文，隨機新增／改譯文／刪除：逐步比對觸發器與全庫重算。"""
+    import random
+
+    rng = random.Random(seed)
+    versions = ["1.20.1", "1.21.1", "26.1"]
+    packs = [PACK_A, PACK_B, PACK_C]
+    texts = ["甲", "乙", "丙", ""]
+    for step in range(60):
+        action = rng.choice(["ingest", "ingest", "edit", "delete"])
+        if action == "ingest":
+            db.ingest(
+                rng.choice(versions),
+                [
+                    _pack(
+                        rng.choice(packs),
+                        f"k{rng.randrange(3)}",
+                        "Sonho",
+                        rng.choice(texts),
+                    )
+                ],
+            )
+        else:
+            rows = db._q("SELECT id FROM entry ORDER BY id")
+            if not rows:
+                continue
+            entry_id = rows[rng.randrange(len(rows))][0]
+            if action == "edit":
+                text = rng.choice(texts[:3])
+                db.save_manual(entry_id, text, propagate=False)
+            else:
+                with db._tx() as conn:
+                    conn.execute("DELETE FROM entry WHERE id=?", (entry_id,))
+        try:
+            _consistent(db)
+        except AssertionError as exc:  # 讓失敗訊息帶出是哪一步
+            raise AssertionError(f"seed={seed} step={step} action={action}") from exc

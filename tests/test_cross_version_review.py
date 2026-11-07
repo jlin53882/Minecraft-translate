@@ -600,3 +600,48 @@ def test_rescan_repairs_a_target_whose_source_locale_was_never_recorded(db):
 
     assert [r.key for r in db.list_cross_version_differences("26.1")] == ["k"]
     assert db.explain_cross_version_exclusions("26.1").total == 0
+
+
+def test_exclusions_are_reported_even_when_another_reference_is_compatible(db):
+    """目標「亮色」：參考 A 相容但譯文相同、參考 B 譯文不同卻語系不相容 → 沒有差異可列，
+    但 B 擋掉的差異要被說出來（原本因為 A 相容而兩邊都不算）。"""
+    db.ingest("1.21.1", [_pack_item(PACK_A, "k", "Sonho", "亮色")])
+    a = _entry(db, "1.21.1", "k", PACK_A).id
+    db.review_manual(a, expected_zh_tw="亮色", propagate=False)
+    _origin(db, a, "pt_br", "lang:pt_br:k", "a/pt_br.json")
+
+    pack_c = "actuallyadditions@Third@cccccccccccc"
+    db.ingest("1.20.1", [_pack_item(pack_c, "k", "Sonho", "明亮")])
+    b = _entry(db, "1.20.1", "k", pack_c).id
+    db.review_manual(b, expected_zh_tw="明亮", propagate=False)
+    _origin(db, b, "pt_br", "lang:pt_br:k", "c/pt_br.json")
+    _origin(db, b, "es_es", "lang:es_es:k", "c/es_es.json")  # 混有多個語系：不相容
+
+    db.ingest("26.1", [_pack_item(PACK_B, "k", "Sonho", "亮色")])
+    _origin(
+        db, _entry(db, "26.1", "k", PACK_B).id, "pt_br", "lang:pt_br:k", "b/pt_br.json"
+    )
+
+    assert db.list_cross_version_differences("26.1") == []
+    summary = db.explain_cross_version_exclusions("26.1")
+    assert (summary.locale_incompatible, summary.ref_unreviewed) == (1, 0)
+    assert any("1.20.1" not in s and s.startswith("k（") for s in summary.samples)
+
+
+def test_exclusions_count_each_target_once_with_the_locale_reason_first(db):
+    """同一個目標既有語系不相容的已審核參考、又有未審核參考：只計一次，原因以語系為先。"""
+    db.ingest("1.21.1", [_pack_item(PACK_A, "k", "Sonho", "明亮")])
+    a = _entry(db, "1.21.1", "k", PACK_A).id
+    db.review_manual(a, expected_zh_tw="明亮", propagate=False)
+    _origin(db, a, "pt_br", "lang:pt_br:k", "a/pt_br.json")
+    _origin(db, a, "es_es", "lang:es_es:k", "a/es_es.json")
+    pack_c = "actuallyadditions@Third@cccccccccccc"
+    db.ingest("1.20.1", [_pack_item(pack_c, "k", "Sonho", "光亮")])  # 未審核
+    db.ingest("26.1", [_pack_item(PACK_B, "k", "Sonho", "")])
+    _origin(
+        db, _entry(db, "26.1", "k", PACK_B).id, "pt_br", "lang:pt_br:k", "b/pt_br.json"
+    )
+
+    summary = db.explain_cross_version_exclusions("26.1")
+
+    assert (summary.locale_incompatible, summary.ref_unreviewed) == (1, 0)
