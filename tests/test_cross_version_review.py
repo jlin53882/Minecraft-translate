@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from translation_tool.translation_db import KIND_LANG, ScanItem, TranslationDB
+from translation_tool.translation_db import (
+    KIND_KUBEJS_LANG,
+    KIND_LANG,
+    ScanItem,
+    TranslationDB,
+)
 from translation_tool.translation_db.cross_version_review import (
     ApplyItem,
     QueryCancelled,
@@ -216,6 +221,7 @@ def test_apply_reference_and_stale_guard(db):
     stale = ApplyItem(
         row.entry_id,
         row.reference.version,
+        row.reference.entry_id,
         "別人改過",
         row.reference.zh_tw,
         row.target_source,
@@ -448,3 +454,76 @@ def test_legacy_reference_is_reused_after_import(db):
 
     assert db.reuse_reviewed_translations("26.1", entry_ids=ids).applied == 1
     assert _entry(db, "26.1", "k").zh_tw == "亮色"
+
+
+PACK_A = "actuallyadditions@All the Mods 10 8.3@40b3569cc156"
+PACK_B = "actuallyadditions@All the Mons@bb60be2794c9"
+
+
+def _pack_item(mod, key, en, tw="", *, locale=None):
+    return ScanItem(
+        KIND_KUBEJS_LANG,
+        mod,
+        key,
+        en,
+        tw,
+        "",
+        None,
+        "assets/x/lang/pt_br.json" if locale else "",
+        f"lang:{locale}:{key}" if locale else "",
+        "h",
+        "lang-json" if locale else "",
+        "pack",
+        locale,
+    )
+
+
+@pytest.mark.parametrize("locale", [None, "pt_br"])
+def test_pack_content_matches_across_pack_identities(db, locale):
+    """KubeJS／FTB 的模組識別帶整合包資料夾名稱與路徑雜湊；跨版本只看 @ 前面的命名空間。"""
+    db.ingest(
+        "1.21.1", [_pack_item(PACK_A, "k", "Sonho", "植物學家的夢想", locale=locale)]
+    )
+    ref = _entry(db, "1.21.1", "k", PACK_A)
+    db.review_manual(ref.id, expected_zh_tw="植物學家的夢想", propagate=False)
+    ids = _import(db, "26.1", [_pack_item(PACK_B, "k", "Sonho", "", locale=locale)])
+
+    rows = db.list_cross_version_differences("26.1")
+    assert [(r.mod_id, r.reference.mod_id) for r in rows] == [(PACK_B, PACK_A)]
+
+    assert db.reuse_reviewed_translations("26.1", entry_ids=ids).applied == 1
+    assert _entry(db, "26.1", "k", PACK_B).zh_tw == "植物學家的夢想"
+
+
+def test_pack_content_with_different_namespace_or_plain_lang_is_not_matched(db):
+    db.ingest("1.21.1", [_pack_item(PACK_A, "k", "Sonho", "夢")])
+    ref = _entry(db, "1.21.1", "k", PACK_A)
+    db.review_manual(ref.id, expected_zh_tw="夢", propagate=False)
+    other_ns = "otheradditions@All the Mons@bb60be2794c9"
+    db.ingest("26.1", [_pack_item(other_ns, "k", "Sonho", "")])
+    assert db.list_cross_version_differences("26.1") == []
+
+    # 一般 lang 內容的模組識別不同，仍然不比對
+    db.ingest("1.21.1", [_item("p", "Bright", "", mod="modA")])
+    pid = _entry(db, "1.21.1", "p", "modA").id
+    db.save_manual(pid, "亮", propagate=False)
+    db.review_manual(pid, expected_zh_tw="亮", propagate=False)
+    db.ingest("26.1", [_item("p", "Bright", "明亮", mod="modB")])
+    assert db.list_cross_version_differences("26.1") == []
+
+
+def test_two_pack_identities_in_one_version_are_told_apart_by_entry_id(db):
+    """同一版本有兩個整合包身分、譯文不同 → 衝突；套用時以參考條目編號選定，不會套錯。"""
+    pack_c = "actuallyadditions@Another Pack@aaaaaaaaaaaa"
+    for pack, text in ((PACK_A, "甲"), (pack_c, "乙")):
+        db.ingest("1.21.1", [_pack_item(pack, "k", "Sonho", text)])
+        eid = _entry(db, "1.21.1", "k", pack).id
+        db.review_manual(eid, expected_zh_tw=text, propagate=False)
+    db.ingest("26.1", [_pack_item(PACK_B, "k", "Sonho", "")])
+
+    row = db.list_cross_version_differences("26.1")[0]
+    assert row.conflict and {r.mod_id for r in row.refs} == {PACK_A, pack_c}
+    chosen = next(r for r in row.refs if r.mod_id == pack_c)
+
+    assert db.apply_cross_version_references([_apply_item(row, chosen)]).applied == 1
+    assert _entry(db, "26.1", "k", PACK_B).zh_tw == "乙"

@@ -461,6 +461,12 @@ class VersionDiffDialog:
                         ],
                         spacing=8,
                     ),
+                    *(
+                        # KubeJS／FTB：參考來自不同的整合包身分，標示出來源以便辨認
+                        [ft.Text(f"來自 {ref.mod_id}", size=11, color=C.DIM)]
+                        if ref.mod_id and ref.mod_id != row.mod_id
+                        else []
+                    ),
                     ft.Text(
                         spans=text_spans(
                             ref.zh_tw, marks, ft.Colors.with_opacity(0.35, C.EM)
