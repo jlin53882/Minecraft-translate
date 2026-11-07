@@ -1002,3 +1002,31 @@ def test_moddb_ingest_keeps_chinese_fallback_as_original_text(tmp_path):
         assert row == ("繁中來源",)
     finally:
         db.close()
+
+
+def test_trailing_extra_brace_is_ignored_in_memory_and_reported(tmp_path):
+    lang = tmp_path / "config/ftbquests/quests/lang"
+    for locale, text in (("en_us", "Hello"), ("zh_tw", "你好")):
+        (lang / locale).mkdir(parents=True)
+        # zh_tw 結尾多一個 }
+        extra = "}\n" if locale == "zh_tw" else ""
+        (lang / locale / "chapter.snbt").write_text(
+            f'{{\n\tchapter.AAAA.title: "{text}"\n}}\n{extra}', encoding="utf-8"
+        )
+    broken = lang / "zh_tw" / "chapter.snbt"
+    before = broken.read_bytes()
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    assert [(i.en_us, i.zh_tw) for i in result.items] == [("Hello", "你好")]
+    reasons = [issue["reason"] for issue in result.issues]
+    assert reasons == ["snbt_trailing_braces_ignored"]
+    assert broken.read_bytes() == before  # 原檔不被修改
+
+
+def test_unrepairable_snbt_is_still_reported_as_parse_failed(tmp_path):
+    lang = tmp_path / "config/ftbquests/quests/lang/en_us"
+    lang.mkdir(parents=True)
+    (lang / "chapter.snbt").write_text("{ chapter.AAAA.title: ", encoding="utf-8")
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    assert [issue["reason"] for issue in result.issues] == ["snbt_parse_failed"]

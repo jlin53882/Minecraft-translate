@@ -27,7 +27,7 @@ from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     is_lang_key_ref,
     is_lang_key_ref_like,
     is_tag_condition_text,
-    walk_snbt_file,
+    walk_snbt_file_tolerant,
 )
 from translation_tool.plugins.kubejs.kubejs_lang_selection import (
     count_language_values,
@@ -1007,6 +1007,18 @@ def _scan_kubejs_lang(
         )
 
 
+def _note_dropped_braces(path: Path, dropped: int, result: PackScanResult) -> None:
+    """結尾多餘的 ``}`` 只在記憶體忽略；留下問題紀錄，提醒使用者修正原檔。"""
+    if dropped:
+        result.issues.append(
+            _issue(
+                path,
+                "snbt_trailing_braces_ignored",
+                f"檔案結尾多了 {dropped} 個 }}，已在記憶體忽略後解析；原檔未修改",
+            )
+        )
+
+
 def _read_ftb_lang_file(
     path: Path,
     lang_root: Path,
@@ -1021,7 +1033,7 @@ def _read_ftb_lang_file(
         return
     result.mark_file_read("ftb_quests")
     _, digest = loaded
-    data = walk_snbt_file(str(path))
+    data, dropped = walk_snbt_file_tolerant(str(path))
     if data is None:
         result.issues.append(
             _issue(
@@ -1032,6 +1044,7 @@ def _read_ftb_lang_file(
             )
         )
         return
+    _note_dropped_braces(path, dropped, result)
     locale = _locale_for_lang_file(path, lang_root)
     if not locale:
         result.issues.append(
@@ -1187,7 +1200,7 @@ def _scan_ftb_quest_data_files(
             continue
         result.mark_file_read("ftb_quests")
         _, digest = loaded
-        data = walk_snbt_file(str(path))
+        data, dropped = walk_snbt_file_tolerant(str(path))
         if data is None:
             result.issues.append(
                 _issue(
@@ -1198,6 +1211,7 @@ def _scan_ftb_quest_data_files(
                 )
             )
             continue
+        _note_dropped_braces(path, dropped, result)
         rel = path.relative_to(root).as_posix()
         _scan_quest_value(data, rel, version, scope, digest, result, "root")
         result.mark_source("ftb_quests", rel)
