@@ -206,7 +206,13 @@ counters in `stat_summary.py`, the entry-list "diff" filter, the entry detail
 sibling lists, save/review/bulk-review propagation, `write_back` fills, the
 cross-version reuse queries and the cross-version review dialog all build their
 predicate with `same_content_sql()` / `content_mod_sql()`; do not spell
-`e2.mod_id = e.mod_id` for a cross-version comparison. The expression index
+`e2.mod_id = e.mod_id` for a cross-version comparison. Matching on the namespace
+alone is deliberate (there is no pack-association setting), so each consumer has its
+own write scope: `_same_content` (save/review sync, also used by bulk-review sync) has
+no version or locale requirement and includes another pack of the same version;
+`write_back` fills only blank entries of other versions; the reuse queries and the
+cross-version review require another version and a compatible source locale. The
+expression index
 `idx_entry_content_ns (kind, <content module>, key, en_us)` serves it; the
 queries must use the identical expression, and `effective.diff` is a per-entry value (another *version* has a different effective
 translation) and the overview counter counts groups with at least two distinct

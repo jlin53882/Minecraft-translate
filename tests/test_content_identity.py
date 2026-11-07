@@ -273,3 +273,83 @@ def test_random_operations_keep_every_derived_value_exact(db, seed):
             _consistent(db)
         except AssertionError as exc:  # 讓失敗訊息帶出是哪一步
             raise AssertionError(f"seed={seed} step={step} action={action}") from exc
+
+
+# ---- 跨整合包的寫入範圍（刻意的設計；範圍寫在使用者指南「KubeJS／FTB 的跨整合包範圍」） ----
+FTB_A = "ftbquests@Modpack-A@hash-a"
+FTB_B = "ftbquests@Modpack-B@hash-b"
+
+
+def _ftb_pair(db, text_a="開始", text_b="啟動"):
+    """同一個 Minecraft 版本裡兩個整合包、相同命名空間／鍵值／原文、譯文不同。"""
+    db.ingest("26.1", [_pack(FTB_A, "chapter.start", "Start", text_a)])
+    db.ingest("26.1", [_pack(FTB_B, "chapter.start", "Start", text_b)])
+    return (
+        _entry(db, "26.1", "chapter.start", FTB_A).id,
+        _entry(db, "26.1", "chapter.start", FTB_B).id,
+    )
+
+
+def _texts(db):
+    return {
+        r.mod_id.split("@")[1]: r.zh_tw for r in db.list_entries("26.1", limit=None)[0]
+    }
+
+
+def test_save_and_review_sync_reach_another_pack_in_the_same_version(db):
+    """儲存／人工審核的「同步其他版本」依內容識別，同版本的另一個整合包也在範圍內，
+    不檢查來源語系；關閉同步（propagate=False）就只改自己。"""
+    a, b = _ftb_pair(db)
+
+    assert {i.entry_id for i in db.preview_manual(a, "新", propagate=True)} == {a, b}
+    assert {i.entry_id for i in db.preview_manual(a, "新", propagate=False)} == {a}
+
+    db.save_manual(a, "只改自己", propagate=False)
+    assert _texts(db) == {"Modpack-A": "只改自己", "Modpack-B": "啟動"}
+
+    db.save_manual(a, "一起改", propagate=True)
+    assert _texts(db) == {"Modpack-A": "一起改", "Modpack-B": "一起改"}
+
+    db.review_manual(a, expected_zh_tw="一起改", propagate=True)
+    assert {
+        r.mod_id.split("@")[1]: r.review_status
+        for r in db.list_entries("26.1", limit=None)[0]
+    } == {"Modpack-A": "reviewed", "Modpack-B": "reviewed"}
+
+
+def test_ai_write_back_fills_only_blank_entries_of_other_versions(db):
+    """AI 寫回補空白：只補「其他版本」的空白；同版本另一個整合包不補。"""
+    from translation_tool.translation_db import WriteBackItem
+
+    for version, pack in (("26.1", FTB_A), ("26.1", FTB_B), ("1.21.1", FTB_B)):
+        db.ingest(version, [_pack(pack, "chapter.start", "Start", "")])
+    db.write_back(
+        "26.1",
+        [WriteBackItem(KIND_KUBEJS_LANG, FTB_A, "chapter.start", "Start", "開始")],
+    )
+
+    assert _texts(db) == {"Modpack-A": "開始", "Modpack-B": ""}  # 同版本的 B 沒被補
+    assert _entry(db, "1.21.1", "chapter.start", FTB_B).zh_tw == "開始"  # 其他版本補上
+
+
+def test_bulk_review_sync_follows_the_review_scope_but_translate_reuse_needs_another_version(
+    db,
+):
+    """批量審核的「同步其他版本」沿用人工審核的同步範圍（同版本的另一個整合包也會被同步審核）；
+    翻譯頁的跨版本沿用則一定要來自其他版本。"""
+    from translation_tool.translation_db.schema import SRC_JAR_TW
+
+    _ftb_pair(db, "開始", "開始")  # 兩個整合包譯文相同、都是模組自帶繁中
+    plan = db.preview_bulk_review("26.1", SRC_JAR_TW, propagate=True)
+    result = db.execute_bulk_review(plan)
+    assert (result.reviewed, result.synced) == (1, 1)  # A 審核、B 被同步審核
+    assert {
+        r.mod_id.split("@")[1]: r.review_status
+        for r in db.list_entries("26.1", limit=None)[0]
+    } == {"Modpack-A": "reviewed", "Modpack-B": "reviewed"}
+
+    db.ingest("26.1", [_pack(FTB_A, "other", "Other", "乙")])
+    db.ingest("26.1", [_pack(FTB_B, "other", "Other", "")])
+    assert db.reuse_from_other_versions("26.1") == 0  # 譯文只在同版本的另一個整合包
+    db.ingest("1.21.1", [_pack(FTB_A, "other", "Other", "乙")])
+    assert db.reuse_from_other_versions("26.1") == 1  # 其他版本有，才沿用
