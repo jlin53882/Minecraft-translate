@@ -4,13 +4,13 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **364** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **367** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 326 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 328 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
-| 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
+| 盡力而為（靜默） | 20 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
 |---|---|---|---|
@@ -319,6 +319,9 @@
 | `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:walk_snbt_file` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:_loads_or_none` | BLE001 | 盡力而為（靜默） | 容錯嘗試：解析失敗代表這個候選不成立 |
+| `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:walk_snbt_file_tolerant` | BLE001 | 已記錄／回報 | 先嚴格解析，失敗才嘗試容錯 |
+| `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:walk_snbt_file_tolerant` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py:_read_snbt` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/plugins/kubejs/kubejs_tooltip_extract.py:extract` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw._count_one` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
