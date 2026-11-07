@@ -23,7 +23,6 @@ from ftb_snbt_lib.tag import List as SnbtList
 # 導入我們自訂的日誌工具
 from translation_tool.utils.log_unit import (
     log_debug,
-    log_error,
     log_info,
     log_warning,
 )
@@ -34,7 +33,10 @@ from ...utils.text_processor import (
     convert_snbt_tree_inplace,  # 轉換.snbt 資料夾檔案內容（就地修改）。
     load_replace_rules,  # 載入替換規則。
 )
-from .ftbquests_snbt_extractor import merge_translated_lines
+from .ftbquests_snbt_extractor import (
+    merge_translated_lines,
+    walk_snbt_file_tolerant,
+)
 
 
 def _normalize_config_dir(path: str) -> str:
@@ -131,13 +133,12 @@ def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
 
 
 def _read_snbt(path: str) -> Compound | None:
-    """讀取 SNBT 檔案；失敗時記錄錯誤並回傳 None。"""
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return snbt.load(f)
-    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
-        log_error("SNBT 讀取失敗: %s -> %s", path, e)
-        return None
+    """讀取 SNBT 檔案；結尾多餘的 ``}`` 與掃描端一樣在記憶體忽略，其餘失敗回傳 None。
+
+    回寫會以 ``snbt.dumps`` 重寫整個輸出檔，所以容錯讀取後輸出的檔案括號是平衡的。
+    """
+    data, _dropped = walk_snbt_file_tolerant(path)
+    return data
 
 
 def _write_snbt(path: str, root: Compound) -> None:

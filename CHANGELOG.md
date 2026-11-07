@@ -12,7 +12,7 @@
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
 ### FTB Quests SNBT 結尾多餘括號容錯
-- 掃描 FTB Quests 的 SNBT 時，若檔案結尾多了 `}`（最多 3 個），會在記憶體忽略後解析，不再整個檔案被跳過；只接受「去掉後確實能解析」的情況，其他損壞仍記為 `snbt_parse_failed`。原檔不會被修改，掃描報告會留下 `snbt_trailing_braces_ignored` 提醒修正。輸出前驗證仍用嚴格解析。
+- 掃描 FTB Quests 的 SNBT 時，若檔案結尾多了 `}`（最多 3 個），會在記憶體忽略後解析，不再整個檔案被跳過；只接受「去掉後確實能解析」的情況，其他損壞仍記為 `snbt_parse_failed`。原檔不會被修改，掃描報告會留下 `snbt_trailing_braces_ignored` 提醒修正。輸出前驗證仍用嚴格解析。回寫（`ftbquests_snbt_inject._read_snbt`）讀來源與既有目標時套用同樣的容錯，重寫後的輸出檔括號是平衡的。
 
 ### 翻譯 ZIP 與 mods 資料夾模式選項一致
 - 翻譯 ZIP 模式也提供「包含 KubeJS／FTB Quests」：選資料夾時會匯入其中的 kubejs 與 FTB Quests 譯文，並歸在所選譯文來源標記；單一 ZIP 檔不掃模組包。「讀取模組自帶 zh_tw／zh_cn」「套用替換規則」不再於 ZIP 模式消失，改為顯示並鎖定、附原因說明，切回 mods 模式還原原本的選擇。
