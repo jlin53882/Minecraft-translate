@@ -527,3 +527,52 @@ def test_two_pack_identities_in_one_version_are_told_apart_by_entry_id(db):
 
     assert db.apply_cross_version_references([_apply_item(row, chosen)]).applied == 1
     assert _entry(db, "26.1", "k", PACK_B).zh_tw == "乙"
+
+
+def _origin(db, entry_id, locale, selector="lang:x:k", path="assets/x/lang/x.json"):
+    with db._tx() as conn:
+        conn.execute(
+            "INSERT INTO entry_origin (entry_id, pack_scope, source_kind, source_path, "
+            "selector, source_hash, format_profile, source_locale) "
+            "VALUES (?, 'pack', 'kubejs_lang', ?, ?, 'h', 'lang-json', ?)",
+            (entry_id, path, selector, locale),
+        )
+
+
+def test_exclusions_explain_why_same_content_is_not_listed(db):
+    """內容相同卻沒被列為差異：原因要能說出來（來源語系不相容、參考尚未審核）。"""
+    # 參考已審核，但來源語系混有多個（不相容）
+    db.ingest("1.21.1", [_pack_item(PACK_A, "amb", "Sonho", "夢")])
+    ref = _entry(db, "1.21.1", "amb", PACK_A).id
+    db.review_manual(ref, expected_zh_tw="夢", propagate=False)
+    _origin(db, ref, "pt_br", "lang:pt_br:amb", "a/pt_br.json")
+    _origin(db, ref, "es_es", "lang:es_es:amb", "a/es_es.json")
+    db.ingest("26.1", [_pack_item(PACK_B, "amb", "Sonho", "")])
+    _origin(
+        db,
+        _entry(db, "26.1", "amb", PACK_B).id,
+        "pt_br",
+        "lang:pt_br:amb",
+        "b/pt_br.json",
+    )
+    # 參考只有尚未審核的譯文
+    db.ingest("1.21.1", [_pack_item(PACK_A, "unrev", "Dois", "二")])
+    db.ingest("26.1", [_pack_item(PACK_B, "unrev", "Dois", "")])
+    # 正常可列出的
+    db.ingest("1.21.1", [_pack_item(PACK_A, "ok", "Tres", "三")])
+    ok = _entry(db, "1.21.1", "ok", PACK_A).id
+    db.review_manual(ok, expected_zh_tw="三", propagate=False)
+    db.ingest("26.1", [_pack_item(PACK_B, "ok", "Tres", "")])
+
+    listed = {r.key for r in db.list_cross_version_differences("26.1")}
+    summary = db.explain_cross_version_exclusions("26.1")
+
+    assert listed == {"ok"}
+    assert (summary.locale_incompatible, summary.ref_unreviewed) == (1, 1)
+    assert any("amb" in s and "目標語系 pt_br" in s for s in summary.samples)
+
+
+def test_exclusions_are_empty_when_everything_is_listed(db):
+    _seed_reviewed(db)
+    db.ingest("26.1", [_item("k", "Bright", "明亮")])
+    assert db.explain_cross_version_exclusions("26.1").total == 0

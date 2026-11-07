@@ -27,7 +27,11 @@ from typing import TYPE_CHECKING
 from .content_identity import same_content_sql
 from .query_interrupt import QueryCancelled
 from .schema import SRC_CROSS_VERSION, SRC_MANUAL
-from .sql_helpers import effective_review_sql, source_locale_match_sql
+from .sql_helpers import (
+    effective_review_sql,
+    source_locale_match_sql,
+    source_locale_sql,
+)
 
 if TYPE_CHECKING:
     import sqlite3
@@ -286,6 +290,83 @@ def list_differences(
     return out
 
 
+@dataclass
+class ExclusionSummary:
+    """內容相同、但沒有被列為差異的條目：讓使用者知道「為什麼沒列出來」。"""
+
+    locale_incompatible: int = 0  # 有已審核的參考，但來源語系與目標不相容
+    ref_unreviewed: int = 0  # 其他版本只有尚未審核的譯文（依設計不當參考）
+    samples: list[str] = field(
+        default_factory=list
+    )  # 例：「key（目標語系 pt_br、參考語系 unknown:12）」
+
+    @property
+    def total(self) -> int:
+        return self.locale_incompatible + self.ref_unreviewed
+
+
+_SAMPLE_LIMIT = 3
+
+
+def explain_exclusions(
+    db: TranslationDB,
+    version: str,
+    *,
+    ref_version: str = REFERENCE_LATEST,
+    mod_ids: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    cancel: Callable[[], bool] | None = None,
+) -> ExclusionSummary:
+    """統計目標版本中「內容相同的其他版本有譯文，卻沒被列為差異」的條目與原因。
+
+    只診斷不寫入。已經有可列出的參考（已審核且語系相容）的條目不計；其餘依原因分類：
+    參考已審核但來源語系不相容，或參考尚未審核。
+    """
+    summary = ExclusionSummary()
+    if not db.has_review_state:
+        return summary
+    for ids in _target_id_chunks(db, version, cancel):
+        scope, params = _scope_sql(ids, mod_ids, kinds)
+        ref_clause = " AND e2.mc_version = ?" if ref_version else ""
+        sql = (
+            "SELECT e.id, e.key, ft.zh_tw, fr.zh_tw, "
+            f"{effective_review_sql('fr', True)}, "
+            f"{source_locale_match_sql('e', 'e2')}, "
+            f"{source_locale_sql('e')}, {source_locale_sql('e2')} "
+            "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
+            f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
+            f"AND e2.mc_version <> e.mc_version{ref_clause} "
+            "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
+            f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
+        )
+        args: list[object] = [*([ref_version] if ref_version else []), version, *params]
+        with db._lock:
+            rows = db._conn.execute(sql, args).fetchall()
+        _classify_exclusions(rows, summary)
+    return summary
+
+
+def _classify_exclusions(rows: Sequence[tuple], summary: ExclusionSummary) -> None:
+    by_target: dict[int, list[tuple]] = {}
+    for row in rows:
+        by_target.setdefault(int(row[0]), []).append(row)
+    for refs in by_target.values():
+        reviewed = [r for r in refs if r[4] in _REVIEWED_STATES]
+        if any(r[5] and (r[3] != (r[2] or "")) for r in reviewed):
+            continue  # 已經有可列出的參考
+        if reviewed and not any(r[5] for r in reviewed):
+            if all(r[3] == (r[2] or "") for r in reviewed):
+                continue  # 譯文本來就一樣，不是差異
+            summary.locale_incompatible += 1
+            if len(summary.samples) < _SAMPLE_LIMIT:
+                _key, target_loc, ref_loc = refs[0][1], refs[0][6], reviewed[0][7]
+                summary.samples.append(
+                    f"{_key}（目標語系 {target_loc}、參考語系 {ref_loc}）"
+                )
+        elif not reviewed and any(r[3] != (r[2] or "") for r in refs):
+            summary.ref_unreviewed += 1
+
+
 def _write_reference(
     db: TranslationDB,
     conn: sqlite3.Connection,
@@ -489,6 +570,24 @@ class CrossVersionReviewMixin:
         cancel: Callable[[], bool] | None = None,
     ) -> list[CrossVersionRow]:
         return list_differences(
+            self,  # type: ignore[arg-type]
+            version,
+            ref_version=ref_version,
+            mod_ids=mod_ids,
+            kinds=kinds,
+            cancel=cancel,
+        )
+
+    def explain_cross_version_exclusions(
+        self,
+        version: str,
+        *,
+        ref_version: str = REFERENCE_LATEST,
+        mod_ids: Sequence[str] | None = None,
+        kinds: Sequence[str] | None = None,
+        cancel: Callable[[], bool] | None = None,
+    ) -> ExclusionSummary:
+        return explain_exclusions(
             self,  # type: ignore[arg-type]
             version,
             ref_version=ref_version,

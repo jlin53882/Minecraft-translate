@@ -128,6 +128,11 @@ class VersionDiffDialog:
             [(TAB_DIFF, "差異"), (TAB_CONFLICT, "衝突")], TAB_DIFF, self._on_tab
         )
         self.summary = ft.Text("", size=13, weight=ft.FontWeight.BOLD)
+        # 內容相同卻沒被列為差異的條目與原因（來源語系不相容、參考尚未審核）
+        self.exclusion_note = ft.Text(
+            "", size=12, color=C.GOLD, selectable=True, visible=False
+        )
+        self.exclusions = None
         self.status = ft.Text("", size=12, color=C.MUTED)
         self.progress = ft.ProgressBar(visible=False)
         self.list_col = ft.Column([], spacing=8)
@@ -195,6 +200,7 @@ class VersionDiffDialog:
                         ),
                         self.tabs,
                         self.summary,
+                        self.exclusion_note,
                         self.selection_row,
                         self.status,
                         self.progress,
@@ -268,9 +274,15 @@ class VersionDiffDialog:
         self._set_busy(True, "正在比較各版本已審核的譯文…")
 
         def work() -> None:
-            rows = error = None
+            rows = error = exclusions = None
             try:
                 rows = db.list_cross_version_differences(
+                    version,
+                    ref_version=ref,
+                    mod_ids=mods,
+                    cancel=lambda: self._closed or generation != self._generation,
+                )
+                exclusions = db.explain_cross_version_exclusions(
                     version,
                     ref_version=ref,
                     mod_ids=mods,
@@ -283,7 +295,7 @@ class VersionDiffDialog:
                 error = exc
                 all_mods = []
                 log_exception("版本差異審核載入失敗")
-            self._post(self._loaded, generation, rows, all_mods, error)
+            self._post(self._loaded, generation, rows, all_mods, error, exclusions)
 
         self._launch(
             work,
@@ -292,7 +304,7 @@ class VersionDiffDialog:
             presentation=OperationPresentation.MAINTENANCE,
         )
 
-    def _loaded(self, generation: int, rows, all_mods, error) -> None:
+    def _loaded(self, generation: int, rows, all_mods, error, exclusions=None) -> None:
         if self._closed or generation != self._generation:
             return
         self._set_busy(False)
@@ -306,6 +318,7 @@ class VersionDiffDialog:
         )
         self.mod_dd.value = current if current in all_mods else ALL_MODS
         self.rows = rows
+        self.exclusions = exclusions
         self.selected &= {row.entry_id for row in rows}
         self._confirm_overwrite = False
         self._render()
@@ -340,9 +353,27 @@ class VersionDiffDialog:
                 else ""
             )
         )
+        self._render_exclusions()
         self.selection_row.visible = self.tab == TAB_DIFF and bool(diffs)
         self._render_apply_button(diffs)
         self._safe_update()
+
+    def _render_exclusions(self) -> None:
+        """說明哪些內容相同的條目沒有被列出，以及原因。"""
+        ex = self.exclusions
+        parts: list[str] = []
+        if ex is not None and ex.locale_incompatible:
+            examples = f"（例如 {'、'.join(ex.samples)}）" if ex.samples else ""
+            parts.append(
+                f"另有 {format_count(ex.locale_incompatible)} 筆內容相同、參考已審核，"
+                f"但來源語系與目標不相容而未列出{examples}"
+            )
+        if ex is not None and ex.ref_unreviewed:
+            parts.append(
+                f"{format_count(ex.ref_unreviewed)} 筆其他版本只有尚未審核的譯文，不當參考"
+            )
+        self.exclusion_note.value = "；".join(parts) + "。" if parts else ""
+        self.exclusion_note.visible = bool(parts)
 
     def _render_apply_button(self, diffs: list[CrossVersionRow]) -> None:
         """按鈕顯示已勾選筆數；勾到目標已審核的條目時，第一次按下要再確認一次。"""
