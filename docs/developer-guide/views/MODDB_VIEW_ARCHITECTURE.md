@@ -48,14 +48,14 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
 
 更新範圍的補充規則：
 
-- 對話框（`BulkReviewDialog`、`CleanupDialog`、`SpeciesCandidateDialog`、`SmartReviewDialog`、
+- 對話框（`BulkReviewDialog`、`VersionDiffDialog`、`CleanupDialog`、`SpeciesCandidateDialog`、`SmartReviewDialog`、
   `RepairReviewer`）開啟前以 `isolate` 標成更新邊界，內容只由 `update_regions(self.dialog)`（智慧校對
   是 `SmartReviewContext.update`，其 `dialog` 由 `SmartReviewDialog` 設定）更新；對話框內不得呼叫
   `page.update()`，否則整頁走訪一次要數十到上百毫秒。`app/ui/dialogs.py` 的縮放處理也逐一更新視窗。
 - 條目寫入完成由 `entry_writes.after_data_change` 收尾：背景模式只觸發上層快照（`_refresh_active_panel`
   以 `show_loading` 顯示輕量提示），整個面板由快照套用後的 `flush` 重畫一次，回傳值表示編輯區是否
   由快照重畫。`ModDbView._request_panel_refresh` 先把讀取交給 worker，再重畫載入中提示。
-  載入期間 `EntriesPanel.set_data_loading(True)` 停用批次取代、批量審核與 Smart Review 等依賴
+  載入期間 `EntriesPanel.set_data_loading(True)` 停用批次取代、批量審核、版本差異審核與 Smart Review 等依賴
   範圍資料的入口，快照套用後才恢復；按鈕的停用狀態一改變就直接更新這四顆按鈕，不依賴 `FilterFlush`
   的差異比對（篩選卡可能在載入中被搜尋欄等事件整張送出，比對記錄不知道畫面上已是停用）。
 - `apply_filter_options` 回傳選項或選值是否改變，並把有變的下拉選單登記到 `FilterFlush`；
@@ -175,3 +175,7 @@ Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_ga
 - `app/views/moddb/species_dialog.py` 只處理視窗控制項、掃描與單筆查詢的背景作業，以及結果呈現。
 - `app/views/moddb/species_bulk_lookup.py` 負責批次查詢的背景工作、任務膠囊進度、停止條件與事件通知，不持有任何控制項。
 - 學名快取的網路請求與快取檔案格式由 `translation_tool/utils/species_cache.py` 管理（相同學名同時查詢只送一次請求，等待者共用同一次結果，包括查無與暫時失敗；暫時失敗不寫入快取，之後仍可重試。快取寫入有鎖）；Mod DB 功能不重複實作 API 或快取。
+
+## 版本差異審核
+
+`entry_filters.py` 的 `版本差異審核` 按鈕只建立 `VersionDiffDialog`，傳入目前版本與外層資料變更回呼；匯入頁摘要的「檢視版本差異」另外傳入自動沿用的歷史編號。對話框的資料處理在 `translation_tool/translation_db/cross_version_review.py`（`CrossVersionReviewMixin`）：`list_differences` 分段讀取差異（可取消），`apply_references` 在同一個交易內以 `ApplyItem` 的預期狀態（譯文、生效來源、審核狀態、revision）做 CAS 後寫入，`reuse_reviewed` 供匯入後自動沿用，`explain_exclusions`（`ExclusionSummary`）說明內容相同卻沒被列出的條目與原因；UI 只負責分頁、勾選與按鈕，橘色說明列由 `VersionDiffDialog._render_exclusions` 顯示。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證，關閉視窗或換條件時載入查詢經 `QueryCancelled` 中止。譯文版面由 `version_diff_text.py` 產生（格式碼淡化、小幅差異標色）。

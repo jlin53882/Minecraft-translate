@@ -27,6 +27,10 @@ from translation_tool.core.terminology_model import (
     evidence_context_entry,
     from_official_match,
 )
+from translation_tool.translation_db.content_identity import (
+    content_mod_sql,
+    content_mod_value,
+)
 from translation_tool.translation_db.quality import quality_state
 from translation_tool.translation_db.schema import (
     KIND_FTB_QUEST_LANG,
@@ -298,7 +302,8 @@ class _LocalContextBuilder:
         """分層抓取同 key 的已審核列，再把品質合格的資料排到名額前面。"""
         mc_version, en_us = self.mc_version, self.en_us
         base_sql = (
-            _REVIEWED_ENTRY_COLUMNS + "WHERE e.kind=? AND e.mod_id=? AND e.key=? "
+            _REVIEWED_ENTRY_COLUMNS
+            + f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
         )
         # 先分層抓取，再在本地把品質合格的資料排到 LIMIT 前面；
@@ -326,7 +331,12 @@ class _LocalContextBuilder:
         for suffix, tier_params in tier_queries:
             for row in self.db._q(
                 base_sql + suffix,
-                (self.kind, self.mod_id, self.key, *tier_params),
+                (
+                    self.kind,
+                    content_mod_value(self.kind, self.mod_id),
+                    self.key,
+                    *tier_params,
+                ),
             ):
                 row_id = int(row[0])
                 if row_id not in seen_ids:

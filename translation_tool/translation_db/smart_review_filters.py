@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from translation_tool.core.source_locale import normalize_source_locale
+from translation_tool.translation_db.content_identity import content_mod_sql
 from translation_tool.translation_db.models import SmartReviewSnapshot
 from translation_tool.translation_db.schema import (
     KIND_KUBEJS_LANG,
@@ -201,17 +202,17 @@ def _build_smart_review_selection(
     if require_reviewed_reference:
         reference_cte = (
             "WITH reviewed_reference AS ("
-            "SELECT r.kind, r.mod_id, r.key, r.en_us "
+            f"SELECT r.kind, {content_mod_sql('r')} AS cmod, r.key, r.en_us "
             "FROM entry r JOIN translation rf ON rf.entry_id=r.id "
             "WHERE rf.review_status='reviewed' AND trim(rf.zh_tw)<>'' "
             "AND r.en_us<>'' "
-            "GROUP BY r.kind, r.mod_id, r.key, r.en_us "
+            f"GROUP BY r.kind, {content_mod_sql('r')}, r.key, r.en_us "
             "HAVING COUNT(DISTINCT trim(rf.zh_tw))=1"
             ") "
         )
         reference_join = (
             "JOIN reviewed_reference rr "
-            "ON rr.kind=e.kind AND rr.mod_id=e.mod_id AND rr.key=e.key "
+            f"ON rr.kind=e.kind AND rr.cmod={content_mod_sql('e')} AND rr.key=e.key "
             "AND rr.en_us=e.en_us "
         )
 

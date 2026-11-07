@@ -33,6 +33,7 @@ from app.ui.status_chip import apply_status_style, make_status_chip, set_chip_st
 from app.ui.update_scope import update_regions
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb.formatting import format_count
+from app.views.moddb.version_diff_dialog import VersionDiffDialog
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 
@@ -64,6 +65,8 @@ class ScanPanel(ft.Column):
         self._versions: list[str] = []
         self._db_versions: set[str] = set()
         self.mode = "jar"
+        self._last_scan_version = ""
+        self._last_reuse_history_id: int | None = None
         self.refresh_indicator = ft.Text(
             "背景更新版本清單中…", size=12, color=C.MUTED, visible=False
         )
@@ -173,6 +176,12 @@ class ScanPanel(ft.Column):
         self.jar_tr_row = kit.SwitchRow(
             "讀取模組自帶 zh_tw／zh_cn", "以來源「模組自帶繁中」「簡中轉繁」匯入", True
         )
+        self.reuse_row = kit.SwitchRow(
+            "沿用其他版本已審核的相同譯文",
+            "匯入後，內容相同（類型、模組、鍵值、原文）且其他版本已審核的譯文會套用到這次新增或有變動的條目；"
+            "各版本譯文不一致者只列出，不會處理",
+            True,
+        )
         self.cn_row = kit.SwitchRow(
             "簡中自動轉繁（OpenCC s2twp）",
             "只在沒有繁中時補上，標記為「簡中轉繁」",
@@ -235,6 +244,7 @@ class ScanPanel(ft.Column):
                 self.clean_row,
                 self.nested_row,
                 self.jar_tr_row,
+                self.reuse_row,
                 self.cn_row,
                 self.rules_row,
                 self.book_row,
@@ -295,6 +305,20 @@ class ScanPanel(ft.Column):
             self.stat_failed,
         ) = cards
         self.stats_row = ft.Row(cards, spacing=10)
+        self.reuse_text = ft.Text("", size=12.5, color=C.MUTED, expand=True)
+        self.reuse_btn = kit.button(
+            "檢視版本差異",
+            "secondary",
+            icon=ft.Icons.COMPARE_ARROWS,
+            size="sm",
+            on_click=self._open_version_diff,
+        )
+        self.reuse_row_summary = ft.Row(
+            [self.reuse_text, self.reuse_btn],
+            spacing=10,
+            visible=False,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
         self.run_card = kit.section_card(
             "3　掃描",
             ft.Column(
@@ -312,6 +336,7 @@ class ScanPanel(ft.Column):
                     self.progress_bar,
                     self.log_view,
                     self.stats_row,
+                    self.reuse_row_summary,
                 ],
                 spacing=12,
             ),
@@ -469,6 +494,8 @@ class ScanPanel(ft.Column):
 
     def build_options(self, *, dry_run: bool = False) -> ScanOptions:
         translated = self.mode == "zip"
+        if not dry_run:
+            self._last_scan_version = self.version()
         return ScanOptions(
             version=self.version(),
             read_jar_translations=True if translated else self.jar_tr_row.value,
@@ -481,6 +508,7 @@ class ScanPanel(ft.Column):
             translated=translated,
             translation_source=int(self.source_dd.value or SRC_CUSTOM),
             include_pack_content=not translated and self.pack_row.value,
+            reuse_reviewed=bool(self.reuse_row.value),
         )
 
     def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:
@@ -628,6 +656,32 @@ class ScanPanel(ft.Column):
             format_count(s.get("jars_failed")),
             delta=f"另略過內嵌 jar {skipped:,} 個" if skipped else "",
         )
+        self._apply_reuse_summary(s)
+
+    def _apply_reuse_summary(self, s: dict) -> None:
+        """顯示匯入後沿用其他版本已審核譯文的結果；有衝突或保留項目時可開啟差異審核。"""
+        applied = s.get("reuse_applied") or 0
+        conflicts = s.get("reuse_conflicts") or 0
+        kept = s.get("reuse_skipped_reviewed") or 0
+        self._last_reuse_history_id = s.get("reuse_history_id")
+        self.reuse_row_summary.visible = bool(applied or conflicts or kept)
+        self.reuse_text.value = (
+            f"沿用其他版本已審核譯文 {applied:,} 筆・衝突未處理 {conflicts:,} 筆"
+            f"・目標已審核而保留 {kept:,} 筆"
+        )
+
+    def _open_version_diff(self, _e=None) -> None:
+        version = self._last_scan_version or self.version()
+        if self._get_db() is None or not version:
+            show_snack(self._page, "目前沒有可用的資料庫版本。", C.GOLD)
+            return
+        VersionDiffDialog(
+            self._page,
+            self._get_db,
+            version,
+            lambda _r: self._on_finished and self._on_finished(),
+            last_history_id=self._last_reuse_history_id,
+        ).open()
 
     def _reset_stats(self) -> None:
         for card in (
@@ -639,6 +693,7 @@ class ScanPanel(ft.Column):
             self.stat_failed,
         ):
             card.set_value("—", delta="")
+        self.reuse_row_summary.visible = False
 
     def _set_running(self, running: bool) -> None:
         self.start_btn.disabled = running

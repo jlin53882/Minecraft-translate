@@ -5,8 +5,9 @@
 
 - ``mc_version``：條目的版本（``entry.mc_version``）。
 - ``diff``：與條目清單「版本不同」的定義相同——原文非空，且同內容
-  （``kind``、``mod_id``、``key``、``en_us``）在其他版本的條目也有生效譯文、文字不同。
-  同一版本內同內容只有一個條目，所以等同「同內容各條目的生效譯文不只一種」。
+  （``kind``、內容模組識別、``key``、``en_us``，見 ``content_identity``）在**其他版本**的條目也有
+  生效譯文、文字不同。同一版本可以有多個同內容的條目（KubeJS／FTB 的不同整合包），它們彼此
+  不算版本不同，所以組內各條目的值可能不同，觸發器逐條判斷。
 - ``upd``：生效來源那一筆 ``translation.updated_at``（沒有該列時為 NULL）。
 
 觸發器：生效列新增、改文字或來源、刪除時，重算同內容各條目的 ``diff``；條目刪除
@@ -26,7 +27,11 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-SCHEMA_VERSION = "2"
+from .content_identity import content_mod_expr, content_mod_sql, same_content_sql
+
+# 版本 4：同內容改用 content_identity 的定義（KubeJS／FTB 只看命名空間），且 diff 逐條要求
+# 跨版本（同版本的多個整合包不算），觸發器與索引重建
+SCHEMA_VERSION = "4"
 COLUMNS = {
     "mc_version": "TEXT",
     "diff": "INTEGER NOT NULL DEFAULT 0",
@@ -49,14 +54,25 @@ _INDEX_NAMES = ",".join(f"'{name}'" for name in _INDEXES)
 
 
 def _regroup(content: dict[str, str], exclude: str | None = None) -> str:
-    """重算同內容各條目的 ``diff``；``exclude`` 是視為已不在組內的條目編號。"""
-    group = " AND ".join(f"e2.{c}={content[c]}" for c in _CONTENT_COLUMNS)
-    if exclude is not None:
-        group += f" AND e2.id<>{exclude}"
-    # 不依賴外層列的子查詢只計算一次
+    """重算同內容各條目的 ``diff``；``exclude`` 是視為已不在組內的條目編號。
+
+    ``diff`` 是每個條目各自的值：原文非空，且同內容在**其他版本**的條目也有生效譯文、
+    文字不同。同一版本可以有多個條目（例如兩個整合包），它們彼此不算版本不同，所以
+    組內各條目的值可能不同，要逐條判斷。
+    """
+    group = (
+        f"e2.kind={content['kind']} "
+        f"AND {content_mod_sql('e2')}="
+        f"{content_mod_expr(content['kind'], content['mod_id'])} "
+        f"AND e2.key={content['key']} AND e2.en_us={content['en_us']}"
+    )
+    other = f" AND x.id<>{exclude}" if exclude is not None else ""
     value = (
-        f"({content['en_us']}<>'' AND (SELECT COUNT(DISTINCT f2.zh_tw) FROM entry e2 "
-        f"JOIN effective f2 ON f2.entry_id=e2.id WHERE {group}) > 1)"
+        "(EXISTS (SELECT 1 FROM entry me JOIN entry x "
+        f"ON {same_content_sql('me', 'x')} AND x.mc_version<>me.mc_version{other} "
+        "JOIN effective fx ON fx.entry_id=x.id "
+        "WHERE me.id=effective.entry_id AND me.en_us<>'' "
+        "AND fx.zh_tw<>effective.zh_tw))"
     )
     return (
         f"UPDATE effective SET diff={value} "
@@ -174,12 +190,12 @@ def _trigger_sql() -> dict[str, str]:
 
 
 # 驗證用的期望值刻意沿用條目清單原本的定義（關聯子查詢），與觸發器的算法不同
-_EXPECTED_ROWS = """
+_EXPECTED_ROWS = f"""
     SELECT f.entry_id, e.mc_version,
         EXISTS (
             SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-            WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-              AND e2.en_us = e.en_us AND e.en_us <> '' AND e2.mc_version <> e.mc_version
+            WHERE {same_content_sql("e", "e2")}
+              AND e.en_us <> '' AND e2.mc_version <> e.mc_version
               AND f2.zh_tw <> f.zh_tw),
         t.updated_at
     FROM effective f LEFT JOIN entry e ON e.id = f.entry_id
@@ -267,16 +283,23 @@ def rebuild(conn: sqlite3.Connection) -> None:
     )
 
 
-# 同內容各條目的生效譯文不只一種的組：組內每個有生效譯文的條目都是「版本不同」
-_DIFF_ENTRY_IDS = """
+# 「版本不同」的條目：組內至少有兩種生效譯文、橫跨兩個以上版本才可能有差異（先用這兩個
+# 條件縮小範圍），再逐條確認它跟其他版本的條目有不同的生效譯文
+_DIFF_ENTRY_IDS = f"""
     SELECT e.id FROM (
-        SELECT e.kind, e.mod_id, e.key, e.en_us
+        SELECT e.kind AS kind, {content_mod_sql("e")} AS cmod, e.key AS key,
+               e.en_us AS en_us
         FROM entry e JOIN effective f ON f.entry_id = e.id
         WHERE e.en_us <> ''
-        GROUP BY e.kind, e.mod_id, e.key, e.en_us
-        HAVING COUNT(DISTINCT f.zh_tw) > 1
-    ) g JOIN entry e ON e.kind = g.kind AND e.mod_id = g.mod_id
+        GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
+        HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
+    ) g JOIN entry e ON e.kind = g.kind AND {content_mod_sql("e")} = g.cmod
         AND e.key = g.key AND e.en_us = g.en_us
+    JOIN effective f ON f.entry_id = e.id
+    WHERE EXISTS (
+        SELECT 1 FROM entry x JOIN effective fx ON fx.entry_id = x.id
+        WHERE {same_content_sql("e", "x")} AND x.mc_version <> e.mc_version
+          AND fx.zh_tw <> f.zh_tw)
 """
 
 

@@ -22,9 +22,16 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from translation_tool.translation_db.content_identity import (
+    content_mod_expr,
+    content_mod_sql,
+    same_content_sql,
+)
 from translation_tool.translation_db.sql_helpers import effective_review_sql
 
-STAT_SCHEMA_VERSION = "3"
+# 版本 5：「相同內容」改用 content_identity 的定義（KubeJS／FTB 只看命名空間），版本不同的
+# 組要求橫跨兩個以上版本（同版本的多個整合包不算），摘要重建
+STAT_SCHEMA_VERSION = "5"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
 COUNTER_NAMES = ("content", "mods", "no_source", "diff")
 
@@ -114,33 +121,54 @@ def _counter(name: str, delta: str) -> str:
 
 
 def _siblings(entry_id: str) -> str:
-    """同內容其他條目的生效譯文：筆數、最小值、最大值（原文空白者不計）。"""
-    joins = " AND ".join(f"e2.{c}=e.{c}" for c in _CONTENT_COLUMNS)
+    """同內容其他條目的生效譯文與版本：筆數、譯文最小／最大值、版本最小／最大值，以及
+    這個條目自己的版本（原文空白者不計）。"""
     return (
-        "(SELECT COUNT(*) n, MIN(f2.zh_tw) mn, MAX(f2.zh_tw) mx FROM entry e "
-        f"JOIN entry e2 ON {joins} AND e2.id<>e.id "
+        "(SELECT COUNT(*) n, MIN(f2.zh_tw) mn, MAX(f2.zh_tw) mx, "
+        "MIN(e2.mc_version) vmin, MAX(e2.mc_version) vmax, e.mc_version ver "
+        f"FROM entry e JOIN entry e2 ON {same_content_sql('e', 'e2')} AND e2.id<>e.id "
         "JOIN effective f2 ON f2.entry_id=e2.id "
         f"WHERE e.id={entry_id} AND e.en_us<>'')"
     )
 
 
+def _group_differs(zh_tw: str) -> str:
+    """加入一筆譯文 ``zh_tw`` 後，同內容組是否「版本不同」（需在 ``_siblings`` 的列上求值）。
+
+    組內有兩種以上的譯文，且橫跨兩個以上的版本，就一定存在版本不同的兩筆
+    （兩種譯文若在不同版本，直接成對；若在同一版本，另一版本的條目必與其中一種不同）。
+    """
+    return f"(n>0 AND (mn<>mx OR mn<>{zh_tw}) AND (vmin<>vmax OR vmin<>ver))"
+
+
 def _diff_if_added(zh_tw: str, entry_id: str) -> str:
-    """加入一筆譯文 ``zh_tw`` 會讓同內容組從一致變成不一致時為 1。"""
+    """加入一筆譯文 ``zh_tw`` 會讓同內容組從「版本不同」為否變成為是時為 1。"""
     return (
-        "COALESCE((SELECT CASE WHEN n>0 AND mn=mx AND mn<>"
-        f"{zh_tw} THEN 1 ELSE 0 END FROM {_siblings(entry_id)}),0)"
+        "COALESCE((SELECT CASE WHEN "
+        f"{_group_differs(zh_tw)} AND NOT (n>0 AND mn<>mx AND vmin<>vmax) "
+        f"THEN 1 ELSE 0 END FROM {_siblings(entry_id)}),0)"
     )
 
 
 def _diff_if_replaced(old: str, new: str, entry_id: str) -> str:
-    def differs(zh_tw: str) -> str:
-        return f"(n>0 AND (mn<>mx OR mn<>{zh_tw}))"
-
-    return f"COALESCE((SELECT {differs(new)} - {differs(old)} FROM {_siblings(entry_id)}),0)"
+    return (
+        f"COALESCE((SELECT {_group_differs(new)} - {_group_differs(old)} "
+        f"FROM {_siblings(entry_id)}),0)"
+    )
 
 
 def _unique(row: str, columns: tuple[str, ...]) -> str:
     same = " AND ".join(f"x.{c}={row}.{c}" for c in columns)
+    return f"NOT EXISTS (SELECT 1 FROM entry x WHERE {same} AND x.id<>{row}.id)"
+
+
+def _unique_content(row: str) -> str:
+    """``row`` 是其內容（類型、內容模組識別、鍵值、原文）組中唯一的條目。"""
+    same = (
+        f"x.kind={row}.kind "
+        f"AND {content_mod_sql('x')}={content_mod_expr(f'{row}.kind', f'{row}.mod_id')} "
+        f"AND x.key={row}.key AND x.en_us={row}.en_us"
+    )
     return f"NOT EXISTS (SELECT 1 FROM entry x WHERE {same} AND x.id<>{row}.id)"
 
 
@@ -167,7 +195,7 @@ def _entry_counts(row: str, sign: str) -> str:
     return f"""
         {bucket}
         {_counter("diff", f"{sign}{diff}")}
-        {_counter("content", f"{sign}{_unique(row, _CONTENT_COLUMNS)}")}
+        {_counter("content", f"{sign}{_unique_content(row)}")}
         {_counter("mods", f"{sign}{_unique(row, ('mod_id',))}")}
         {_counter("no_source", f"{sign}({row}.en_us='')")}"""
 
@@ -248,15 +276,18 @@ _FULL_SOURCE_ROWS = f"""
     GROUP BY 1, 2, 3, 4, 5
 """
 _FULL_COUNTERS = {
-    "content": "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)",
+    "content": (
+        f"SELECT COUNT(*) FROM (SELECT 1 FROM entry e "
+        f"GROUP BY e.kind, {content_mod_sql('e')}, e.key, e.en_us)"
+    ),
     "mods": "SELECT COUNT(DISTINCT mod_id) FROM entry",
     "no_source": "SELECT COUNT(*) FROM entry WHERE en_us = ''",
-    "diff": """
+    "diff": f"""
         SELECT COUNT(*) FROM (
             SELECT 1 FROM entry e JOIN effective f ON f.entry_id = e.id
             WHERE e.en_us <> ''
-            GROUP BY e.kind, e.mod_id, e.key, e.en_us
-            HAVING COUNT(DISTINCT f.zh_tw) > 1
+            GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
+            HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
         )""",
 }
 _FULL_COUNTER_ROWS = " UNION ALL ".join(

@@ -12,6 +12,7 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Sequence
 
+from translation_tool.translation_db.content_identity import same_content_sql
 from translation_tool.translation_db.models import (
     BulkReviewCandidate,
     BulkReviewPlan,
@@ -214,9 +215,8 @@ class BulkReviewMixin:
             f"{manual_review}, {revision}, f2.checker, {effective_review}, "
             f"{effective_revision}, f.source "
             "FROM entry e JOIN effective f ON f.entry_id = e.id "
-            "JOIN entry e2 INDEXED BY idx_entry_content "
-            "ON e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key "
-            "AND e2.en_us = e.en_us AND e2.mc_version <> ? "
+            f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
+            "AND e2.mc_version <> ? "
             "LEFT JOIN effective f2 ON f2.entry_id = e2.id "
             "LEFT JOIN translation m ON m.entry_id = e2.id AND m.source = f.source "
             "LEFT JOIN translation et2 ON et2.entry_id = e2.id AND et2.source = f2.source "
