@@ -40,6 +40,19 @@ _POLL_INTERVAL_SEC = 0.2
 # 翻譯 ZIP 匯入時可選的「譯文來源」標記（預設：自訂補充）
 ZIP_SOURCES = (SRC_CUSTOM, SRC_SUBTITLE, SRC_I18N, SRC_JAR_TW, SRC_MANUAL)
 
+JAR_TR_SUB = "以來源「模組自帶繁中」「簡中轉繁」匯入"
+RULES_SUB = "與語系合併相同：自帶繁中與簡轉繁後的文字都會套用「替換規則」"
+ZIP_LOCKED_JAR_TR_SUB = "翻譯 ZIP 固定讀取內附的 zh_tw／zh_cn，不能關閉"
+ZIP_LOCKED_RULES_SUB = "翻譯 ZIP 的譯文逐字匯入，不套用替換規則"
+PACK_ROW_SUB_JAR_MODE = (
+    "從模組包根目錄掃描 kubejs 與 config/ftbquests/quests；"
+    "只收靜態可定位文字，不執行 JS，也不把任務檔直接當成 Resource Pack"
+)
+PACK_ROW_SUB_ZIP_MODE = (
+    "選擇資料夾時，一併匯入其中 kubejs 與 config/ftbquests/quests 的譯文"
+    "（zh_tw 以所選「譯文來源標記」匯入）；只選單一 ZIP 檔時不會掃描"
+)
+
 
 class ScanPanel(ft.Column):
     """掃描匯入頁籤。"""
@@ -170,19 +183,14 @@ class ScanPanel(ft.Column):
             "META-INF/jarjar、META-INF/jars 內的子模組；翻譯 ZIP 則掃描 ZIP 內任何位置的 jar",
             True,
         )
-        self.jar_tr_row = kit.SwitchRow(
-            "讀取模組自帶 zh_tw／zh_cn", "以來源「模組自帶繁中」「簡中轉繁」匯入", True
-        )
+        self._jar_mode_values: dict[kit.SwitchRow, bool] = {}
+        self.jar_tr_row = kit.SwitchRow("讀取模組自帶 zh_tw／zh_cn", JAR_TR_SUB, True)
         self.cn_row = kit.SwitchRow(
             "簡中自動轉繁（OpenCC s2twp）",
             "只在沒有繁中時補上，標記為「簡中轉繁」",
             True,
         )
-        self.rules_row = kit.SwitchRow(
-            "套用替換規則",
-            "與語系合併相同：自帶繁中與簡轉繁後的文字都會套用「替換規則」",
-            True,
-        )
+        self.rules_row = kit.SwitchRow("套用替換規則", RULES_SUB, True)
         self.book_row = kit.SwitchRow(
             "包含手冊、指南與進度文字",
             "Patchouli 手冊、Guide 指南、Advancement 進度內文也匯入，供跨版本沿用",
@@ -190,11 +198,7 @@ class ScanPanel(ft.Column):
             divider=False,
         )
         self.pack_row = kit.SwitchRow(
-            "包含 KubeJS／FTB Quests",
-            "從模組包根目錄掃描 kubejs 與 config/ftbquests/quests；"
-            "只收靜態可定位文字，不執行 JS，也不把任務檔直接當成 Resource Pack",
-            True,
-            divider=False,
+            "包含 KubeJS／FTB Quests", PACK_ROW_SUB_JAR_MODE, True, divider=False
         )
         self.options_card = kit.section_card(
             "2　選擇匯入來源與選項",
@@ -456,11 +460,33 @@ class ScanPanel(ft.Column):
         self.zip_pick_btn.visible = zip_mode
         self.source_dd.visible = zip_mode
         self.mode_note.visible = zip_mode
-        self.jar_tr_row.visible = not zip_mode
-        self.rules_row.visible = not zip_mode
-        self.pack_row.visible = not zip_mode
+        self._apply_mode_locked_rows(zip_mode)
+        self.pack_row.set_sub(
+            PACK_ROW_SUB_ZIP_MODE if zip_mode else PACK_ROW_SUB_JAR_MODE
+        )
         self.start_btn.content = self._start_label()
         self._safe_update()
+
+    def _apply_mode_locked_rows(self, zip_mode: bool) -> None:
+        """翻譯 ZIP 固定讀取自帶 zh_tw、不套替換規則：開關仍顯示，但鎖定並說明原因。
+
+        切回 jar 模式時還原使用者原本的選擇。
+        """
+        locked = {
+            self.jar_tr_row: (True, ZIP_LOCKED_JAR_TR_SUB, JAR_TR_SUB),
+            self.rules_row: (False, ZIP_LOCKED_RULES_SUB, RULES_SUB),
+        }
+        for row, (zip_value, zip_sub, jar_sub) in locked.items():
+            if zip_mode:
+                if not row.disabled_state:
+                    self._jar_mode_values[row] = row.value
+                row.value = zip_value
+                row.set_disabled(True)
+                row.set_sub(zip_sub)
+            else:
+                row.value = self._jar_mode_values.get(row, row.value)
+                row.set_disabled(False)
+                row.set_sub(jar_sub)
 
     def _start_label(self) -> str:
         verb = "匯入" if self.mode == "zip" else "掃描"
@@ -480,7 +506,7 @@ class ScanPanel(ft.Column):
             clean_english=self.clean_row.value,
             translated=translated,
             translation_source=int(self.source_dd.value or SRC_CUSTOM),
-            include_pack_content=not translated and self.pack_row.value,
+            include_pack_content=self.pack_row.value,
         )
 
     def start_clicked(self, _e=None, *, dry_run: bool = False) -> None:
