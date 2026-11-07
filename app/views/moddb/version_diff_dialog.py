@@ -368,6 +368,11 @@ class VersionDiffDialog:
                 f"另有 {format_count(ex.locale_incompatible)} 筆內容相同、參考已審核，"
                 f"但來源語系與目標不相容而未列出{examples}"
             )
+            if ex.target_locale_unknown:
+                parts.append(
+                    f"其中 {format_count(ex.target_locale_unknown)} 筆目標的來源語系未記錄"
+                    "（舊版匯入），重新掃描匯入目標版本即可補上"
+                )
         if ex is not None and ex.ref_unreviewed:
             parts.append(
                 f"{format_count(ex.ref_unreviewed)} 筆其他版本只有尚未審核的譯文，不當參考"

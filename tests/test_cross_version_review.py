@@ -569,10 +569,34 @@ def test_exclusions_explain_why_same_content_is_not_listed(db):
 
     assert listed == {"ok"}
     assert (summary.locale_incompatible, summary.ref_unreviewed) == (1, 1)
+    assert summary.target_locale_unknown == 0  # 這筆是參考混有多個語系，目標語系已知
     assert any("amb" in s and "目標語系 pt_br" in s for s in summary.samples)
 
 
 def test_exclusions_are_empty_when_everything_is_listed(db):
     _seed_reviewed(db)
     db.ingest("26.1", [_item("k", "Bright", "明亮")])
+    assert db.explain_cross_version_exclusions("26.1").total == 0
+
+
+def test_rescan_repairs_a_target_whose_source_locale_was_never_recorded(db):
+    """舊版匯入的條目來源紀錄沒有語系 → 不相容；重新掃描補上語系後就列得出來。"""
+    db.ingest("1.21.1", [_pack_item(PACK_A, "k", "Sonho", "夢", locale="en_us")])
+    ref = _entry(db, "1.21.1", "k", PACK_A)
+    db.review_manual(ref.id, expected_zh_tw="夢", propagate=False)
+    db.ingest("26.1", [_pack_item(PACK_B, "k", "Sonho", "", locale="en_us")])
+    with db._tx() as conn:  # 模擬舊版匯入：來源紀錄沒有語系
+        conn.execute(
+            "UPDATE entry_origin SET source_locale=NULL WHERE entry_id=?",
+            (_entry(db, "26.1", "k", PACK_B).id,),
+        )
+    assert db.list_cross_version_differences("26.1") == []
+    summary = db.explain_cross_version_exclusions("26.1")
+    assert (summary.locale_incompatible, summary.target_locale_unknown) == (1, 1)
+
+    db.ingest(
+        "26.1", [_pack_item(PACK_B, "k", "Sonho", "", locale="en_us")]
+    )  # 重新掃描
+
+    assert [r.key for r in db.list_cross_version_differences("26.1")] == ["k"]
     assert db.explain_cross_version_exclusions("26.1").total == 0

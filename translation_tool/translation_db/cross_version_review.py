@@ -295,6 +295,9 @@ class ExclusionSummary:
     """內容相同、但沒有被列為差異的條目：讓使用者知道「為什麼沒列出來」。"""
 
     locale_incompatible: int = 0  # 有已審核的參考，但來源語系與目標不相容
+    target_locale_unknown: int = (
+        0  # 其中目標的來源語系未記錄（舊版匯入），重新掃描可補上
+    )
     ref_unreviewed: int = 0  # 其他版本只有尚未審核的譯文（依設計不當參考）
     samples: list[str] = field(
         default_factory=list
@@ -358,6 +361,8 @@ def _classify_exclusions(rows: Sequence[tuple], summary: ExclusionSummary) -> No
             if all(r[3] == (r[2] or "") for r in reviewed):
                 continue  # 譯文本來就一樣，不是差異
             summary.locale_incompatible += 1
+            if str(refs[0][6]).startswith("unknown:"):
+                summary.target_locale_unknown += 1
             if len(summary.samples) < _SAMPLE_LIMIT:
                 _key, target_loc, ref_loc = refs[0][1], refs[0][6], reviewed[0][7]
                 summary.samples.append(
