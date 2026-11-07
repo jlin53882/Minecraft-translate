@@ -805,14 +805,19 @@ class TranslationDB(
         convert: Callable[[str], str] | None = None,
         *,
         stale_origins: Iterable[EntryOrigin] = (),
+        entry_ids_out: set[int] | None = None,
     ) -> IngestStats:
         """寫入掃描結果。只新增、不覆蓋；原文已變動者只記錄。
 
         ``convert`` 把簡中轉成繁中（沒有繁中、只有簡中時用）；None 表示不轉換。
         """
-        return self.ingest_many(version, [items], convert, stale_origins=stale_origins)[
-            0
-        ]
+        return self.ingest_many(
+            version,
+            [items],
+            convert,
+            stale_origins=stale_origins,
+            entry_ids_out=entry_ids_out,
+        )[0]
 
     def ingest_many(
         self,
@@ -821,6 +826,7 @@ class TranslationDB(
         convert: Callable[[str], str] | None = None,
         *,
         stale_origins: Iterable[EntryOrigin] = (),
+        entry_ids_out: set[int] | None = None,
     ) -> list[IngestStats]:
         """在單一交易內寫入多份掃描結果（例如多個 jar），回傳每一份各自的統計。
 
@@ -834,6 +840,9 @@ class TranslationDB(
             results = [ingest_groups(target, groups, convert) for groups in grouped]
             target.remove_origins(stale_origins)
             self._refresh(conn, touched)
+        if entry_ids_out is not None:
+            # 只有交易成功提交才回報；呼叫端用它界定「本次匯入」的範圍
+            entry_ids_out.update(touched)
         return results
 
     def scan_preview_target(self, version: str) -> PreviewIngestTarget:

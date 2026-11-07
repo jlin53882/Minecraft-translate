@@ -128,6 +128,7 @@ __all__ = [
     "EntryFilter",
     "EntryRow",
     "QualityFilter",
+    "QueryCancelled",
     "ReviewPreviewItem",
     "ScanOptions",
     "SmartReviewCandidate",
@@ -337,14 +338,20 @@ def _reject_unknown_translation_source(session, source: int) -> None:
     session.set_error()
 
 
-def _reuse_reviewed_after_scan(session, db, options, report, since: str) -> None:
-    """匯入完成後，沿用其他版本已審核的相同譯文；衝突與目標已審核者只回報。"""
+def _reuse_reviewed_after_scan(session, db, options, report) -> None:
+    """匯入完成後，沿用其他版本已審核的相同譯文；衝突與目標已審核者只回報。
+
+    範圍是本次匯入交易實際新增的條目與新增譯文的條目（``report.touched_entry_ids``）。
+    """
     if options.dry_run or not options.reuse_reviewed:
         return
-    result = db.reuse_reviewed_translations(options.version, since=since)
+    result = db.reuse_reviewed_translations(
+        options.version, entry_ids=report.touched_entry_ids
+    )
     report.reuse_applied = result.applied
     report.reuse_conflicts = result.conflicts
     report.reuse_skipped_reviewed = result.skipped_reviewed
+    report.reuse_history_id = result.history_id
     session.set_summary(report.as_dict())
     if result.applied or result.conflicts or result.skipped_reviewed:
         _log_both(
@@ -357,7 +364,6 @@ def _reuse_reviewed_after_scan(session, db, options, report, since: str) -> None
 
 def _consume_scan(session, db, folder, options, cancelled, workers: int) -> None:
     """執行掃描並把進度與摘要寫進 session；完成後依選項沿用其他版本已審核譯文。"""
-    scan_started = db.db_timestamp() if db is not None else ""
     report = None
     with cancel_scope(cancelled):
         for update in scan_folder_generator(
@@ -371,7 +377,7 @@ def _consume_scan(session, db, folder, options, cancelled, workers: int) -> None
                 report = update["report"]
                 session.set_summary(report.as_dict())
     if db is not None and report is not None and not cancelled():
-        _reuse_reviewed_after_scan(session, db, options, report, scan_started)
+        _reuse_reviewed_after_scan(session, db, options, report)
 
 
 def run_moddb_scan_service(

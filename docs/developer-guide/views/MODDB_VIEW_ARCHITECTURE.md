@@ -178,4 +178,4 @@ Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_ga
 
 ## 版本差異審核
 
-`entry_filters.py` 的 `版本差異審核` 按鈕只建立 `VersionDiffDialog`，傳入目前版本與外層資料變更回呼。對話框的資料處理在 `translation_tool/translation_db/cross_version_review.py`（`CrossVersionReviewMixin`）：`list_differences` 讀取差異，`apply_references` 在 CAS 檢查後寫入，`reuse_reviewed` 供匯入後自動沿用；UI 只負責分頁與按鈕。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證，關閉視窗後的晚到結果會被丟棄。
+`entry_filters.py` 的 `版本差異審核` 按鈕只建立 `VersionDiffDialog`，傳入目前版本與外層資料變更回呼；匯入頁摘要的「檢視版本差異」另外傳入自動沿用的歷史編號。對話框的資料處理在 `translation_tool/translation_db/cross_version_review.py`（`CrossVersionReviewMixin`）：`list_differences` 分段讀取差異（可取消），`apply_references` 在同一個交易內以 `ApplyItem` 的預期狀態（譯文、生效來源、審核狀態、revision）做 CAS 後寫入，`reuse_reviewed` 供匯入後自動沿用；UI 只負責分頁、勾選與按鈕。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證，關閉視窗或換條件時載入查詢經 `QueryCancelled` 中止。譯文版面由 `version_diff_text.py` 產生（格式碼淡化、小幅差異標色）。

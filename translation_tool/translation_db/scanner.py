@@ -170,6 +170,9 @@ class ScanReport:
     pack_root_ambiguous: bool = False
     pack_source_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
+    # 本次匯入交易實際新增的條目與新增譯文的條目（供匯入後的跨版本沿用界定範圍）
+    touched_entry_ids: set[int] = field(default_factory=set, repr=False, compare=False)
+    reuse_history_id: int | None = None  # 自動沿用的歷史編號，可整批復原
     reuse_applied: int = 0  # 沿用其他版本已審核譯文的筆數
     reuse_conflicts: int = 0  # 各版本已審核譯文不一致、未處理的筆數
     reuse_skipped_reviewed: int = 0  # 目標已審核而保留的筆數
@@ -222,6 +225,7 @@ class ScanReport:
             "added_translations": self.stats.added_translations,
             "en_changed": self.stats.en_changed,
             "adopted": self.stats.adopted,
+            "reuse_history_id": self.reuse_history_id,
             "reuse_applied": self.reuse_applied,
             "reuse_conflicts": self.reuse_conflicts,
             "reuse_skipped_reviewed": self.reuse_skipped_reviewed,
@@ -1131,8 +1135,11 @@ class _IngestBuffer:
     MAX_JARS = 32
     MAX_ITEMS = 15_000
 
-    def __init__(self, db, version: str, convert) -> None:
+    def __init__(
+        self, db, version: str, convert, touched: set[int] | None = None
+    ) -> None:
         self.db, self.version, self.convert = db, version, convert
+        self.touched = touched
         self.pending: list[tuple[int, JarResult]] = []
         self.items = 0
 
@@ -1148,7 +1155,10 @@ class _IngestBuffer:
             return []
         try:
             stats = self.db.ingest_many(
-                self.version, [r.items for _, r in pending], self.convert
+                self.version,
+                [r.items for _, r in pending],
+                self.convert,
+                entry_ids_out=self.touched,
             )
         except sqlite3.Error as exc:
             names = "、".join(r.name for _, r in pending[:3])
@@ -1173,6 +1183,7 @@ def _ingest_pack_result(
     result: PackScanResult,
     version: str,
     convert: Callable[[str], str] | None,
+    touched: set[int] | None = None,
 ) -> IngestStats:
     """以與 jar 相同的分類規則匯入模組包文字。"""
     if preview is not None:
@@ -1187,6 +1198,7 @@ def _ingest_pack_result(
         [result.items],
         convert,
         stale_origins=result.stale_origins,
+        entry_ids_out=touched,
     )[0]
     db.record_source_references(
         version,
@@ -1361,7 +1373,12 @@ def scan_folder_generator(
             for issue in pack_result.issues:
                 report.add_issue(issue)
             pack_ingest_stats = _ingest_pack_result(
-                db, preview, pack_result, options.version, convert
+                db,
+                preview,
+                pack_result,
+                options.version,
+                convert,
+                report.touched_entry_ids,
             )
             report.stats.add(pack_ingest_stats)
             yield from _pack_source_updates(
@@ -1411,7 +1428,7 @@ def scan_folder_generator(
     }
 
     done = 0
-    buffer = _IngestBuffer(db, options.version, convert)
+    buffer = _IngestBuffer(db, options.version, convert, report.touched_entry_ids)
 
     with (
         scan_executor(

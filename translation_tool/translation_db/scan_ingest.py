@@ -179,7 +179,7 @@ def _read_existing(
 
 
 class DbIngestTarget:
-    """寫入交易內的資料庫；``touched`` 收集新增譯文的條目（交易結束前重算生效譯文）。"""
+    """寫入交易內的資料庫；``touched`` 收集新增的條目與新增譯文的條目（交易結束前重算生效譯文）。"""
 
     def __init__(
         self, conn: sqlite3.Connection, version: str, touched: list[int]
@@ -190,11 +190,14 @@ class DbIngestTarget:
         return _read_existing(self.conn.execute, self.version, kind, mod_id)
 
     def add_entry(self, kind: str, mod_id: str, key: str, en_us: str) -> int:
-        return self.conn.execute(
+        entry_id = self.conn.execute(
             "INSERT INTO entry (kind, mc_version, mod_id, key, en_us) "
             "VALUES (?,?,?,?,?)",
             (kind, self.version, mod_id, key, en_us),
         ).lastrowid
+        # 新條目（即使沒有譯文）也要回報：匯入後的跨版本沿用只處理本次匯入的條目
+        self.touched.append(entry_id)
+        return entry_id
 
     def record_src_change(
         self, kind: str, mod_id: str, key: str, old_en: str, new_en: str

@@ -50,9 +50,9 @@ flowchart TD
 
 ### 跨版本已審核譯文沿用與版本差異審核
 
-掃描匯入結束後（非預覽、未取消、選項「沿用其他版本已審核的相同譯文」開啟）`_reuse_reviewed_after_scan` 呼叫 `reuse_reviewed_translations`：只處理本次匯入開始後新增或譯文有變動的條目，參考譯文一致且目標尚未審核才以已審核狀態寫入；衝突與「目標已審核且不同」只計數，摘要列（`ScanPanel._apply_reuse_summary`）顯示結果並提供「檢視版本差異」。
+掃描匯入結束後（非預覽、未取消、選項「沿用其他版本已審核的相同譯文」開啟）`_reuse_reviewed_after_scan` 呼叫 `reuse_reviewed_translations`：範圍是匯入交易實際新增的條目與新增譯文的條目（`ScanReport.touched_entry_ids`，由 `ingest_many` 的 `entry_ids_out` 回報，不靠時間推測）。參考譯文一致且目標尚未審核才寫入；衝突與「目標已審核且不同」只計數。目標尚未審核時一律另寫獨立的 `SRC_CROSS_VERSION` 列（已審核列贏過未審核列），目標原本的譯文與來源保留在自己的列。摘要列（`ScanPanel._apply_reuse_summary`）顯示結果並提供「檢視版本差異」，摘要帶出歷史編號（`reuse_history_id`），對話框開啟時可直接「復原上一次沿用／套用」。
 
-`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `list_cross_version_differences` 在背景載入差異與衝突，`apply_cross_version_references` 套用（目標或參考與畫面不同時略過），`review_manual` 實作「保留目標譯文」，`revert` 復原上一次套用。套用到目標時：目標尚未審核就另寫一列參考來源（已審核列贏過未審核列）；目標已是已審核，則改寫目標目前生效的那一列，不受來源優先序影響。批次套用以勾選決定範圍，目標已審核的條目需先勾「包含目標已審核」，並在第一次按下時要求再確認一次。
+`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `list_cross_version_differences` 在背景分段載入差異與衝突（每段 500 個目標條目，段與段之間釋放資料庫鎖並檢查是否取消；畫面換條件或關閉時以 `QueryCancelled` 中止），參考版本的「已審核時間」取最後一次審核事件（沒有審核歷史時退回譯文列更新時間），同一秒內以歷史編號分先後。`apply_cross_version_references` 套用：每筆在寫入交易內重新確認目標的譯文、生效來源、審核狀態與 revision，以及參考的譯文與 revision，任何一項與畫面所見不同就略過並計入過期。目標已是已審核時改寫目標目前生效的那一列，不受來源優先序影響。批次套用以勾選決定範圍；目標已審核的條目需先勾「包含目標已審核」，並在第一次按下時要求再確認一次。`review_manual` 實作「保留目標譯文」，`revert` 復原套用。原文區直接顯示原字串，保留換行與空白。
 
 ### 掃描匯入
 

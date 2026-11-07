@@ -96,9 +96,9 @@ def test_scan_writes_in_batches(db, tmp_path, monkeypatch):
     calls: list[int] = []
     real = db.ingest_many
 
-    def spy(version, batches, convert=None):
+    def spy(version, batches, convert=None, **kwargs):
         calls.append(len(batches))
-        return real(version, batches, convert)
+        return real(version, batches, convert, **kwargs)
 
     monkeypatch.setattr(db, "ingest_many", spy)
     updates = list(

@@ -13,6 +13,7 @@ from app.services_impl.moddb_service import (
     REFERENCE_LATEST,
     ApplyItem,
     CrossVersionRow,
+    QueryCancelled,
     VersionRef,
 )
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
@@ -35,7 +36,7 @@ from app.ui.dialogs import (
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
-from app.views.moddb.formatting import format_count, kind_label, visible_breaks
+from app.views.moddb.formatting import format_count, kind_label
 from app.views.moddb.version_diff_text import changed_ranges, text_spans
 from translation_tool.utils.log_unit import log_exception
 
@@ -65,12 +66,7 @@ def selected_items(
 ) -> list[ApplyItem]:
     """批次套用的內容：已勾選且目前仍可勾選的差異，參考譯文取各條目的預設參考。"""
     return [
-        ApplyItem(
-            row.entry_id,
-            row.reference.version,
-            row.target_zh_tw,
-            row.reference.zh_tw,
-        )
+        ApplyItem.from_row(row, row.reference)
         for row in rows
         if row.entry_id in selected and selectable(row, include_reviewed)
     ]
@@ -83,14 +79,22 @@ def _time_text(ref: VersionRef) -> str:
 class VersionDiffDialog:
     """版本差異審核：預設以各條目最近審核的版本當參考，可固定特定版本。"""
 
-    def __init__(self, page: ft.Page, get_db, version: str | None, on_complete) -> None:
+    def __init__(
+        self,
+        page: ft.Page,
+        get_db,
+        version: str | None,
+        on_complete,
+        *,
+        last_history_id: int | None = None,
+    ) -> None:
         self.page = page
         self.get_db = get_db
         self.on_complete = on_complete
         self.rows: list[CrossVersionRow] = []
         self.tab = TAB_DIFF
         self.current_page = 1
-        self.last_history_id: int | None = None
+        self.last_history_id = last_history_id  # 匯入後自動沿用的批次，可直接復原
         self.selected: set[int] = set()
         self._confirm_overwrite = False
         self._busy = False
@@ -154,9 +158,9 @@ class VersionDiffDialog:
             disabled=True,
         )
         self.revert_btn = kit.button(
-            "復原上一次套用", "secondary", on_click=self._revert
+            "復原上一次沿用／套用", "secondary", on_click=self._revert
         )
-        self.revert_btn.visible = False
+        self.revert_btn.visible = self.last_history_id is not None
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
     def _set_ref_options(self, versions: list[str]) -> None:
@@ -267,9 +271,14 @@ class VersionDiffDialog:
             rows = error = None
             try:
                 rows = db.list_cross_version_differences(
-                    version, ref_version=ref, mod_ids=mods
+                    version,
+                    ref_version=ref,
+                    mod_ids=mods,
+                    cancel=lambda: self._closed or generation != self._generation,
                 )
                 all_mods = list(db.mods(version))
+            except QueryCancelled:
+                return  # 畫面已換條件或已關閉：不需要這次的結果
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 all_mods = []
@@ -424,7 +433,7 @@ class VersionDiffDialog:
                 [
                     ft.Text("原文", size=11, color=C.DIM),
                     ft.Text(
-                        spans=text_spans(visible_breaks(row.en_us), [], C.EM_BG),
+                        spans=text_spans(row.en_us, [], C.EM_BG),
                         size=12,
                         color=C.MUTED,
                         selectable=True,
@@ -530,7 +539,7 @@ class VersionDiffDialog:
 
     # ------------------------------------------------------------------ 動作
     def _apply_one(self, row: CrossVersionRow, ref: VersionRef) -> None:
-        item = ApplyItem(row.entry_id, ref.version, row.target_zh_tw, ref.zh_tw)
+        item = ApplyItem.from_row(row, ref)
         self._apply([item], "套用參考譯文")
 
     def _toggle_row(self, row: CrossVersionRow, event) -> None:

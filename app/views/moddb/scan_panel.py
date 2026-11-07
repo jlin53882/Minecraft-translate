@@ -66,6 +66,7 @@ class ScanPanel(ft.Column):
         self._db_versions: set[str] = set()
         self.mode = "jar"
         self._last_scan_version = ""
+        self._last_reuse_history_id: int | None = None
         self.refresh_indicator = ft.Text(
             "背景更新版本清單中…", size=12, color=C.MUTED, visible=False
         )
@@ -662,6 +663,7 @@ class ScanPanel(ft.Column):
         applied = s.get("reuse_applied") or 0
         conflicts = s.get("reuse_conflicts") or 0
         kept = s.get("reuse_skipped_reviewed") or 0
+        self._last_reuse_history_id = s.get("reuse_history_id")
         self.reuse_row_summary.visible = bool(applied or conflicts or kept)
         self.reuse_text.value = (
             f"沿用其他版本已審核譯文 {applied:,} 筆・衝突未處理 {conflicts:,} 筆"
@@ -678,6 +680,7 @@ class ScanPanel(ft.Column):
             self._get_db,
             version,
             lambda _r: self._on_finished and self._on_finished(),
+            last_history_id=self._last_reuse_history_id,
         ).open()
 
     def _reset_stats(self) -> None:

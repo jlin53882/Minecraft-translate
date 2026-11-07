@@ -63,6 +63,7 @@ SRC_I18N = 4
 SRC_CUSTOM = 5
 SRC_MANUAL = 6
 SRC_AI_REPAIR = 7
+SRC_CROSS_VERSION = 8  # 沿用其他版本已審核的譯文（獨立一列，不覆寫目標原本的來源）
 
 SOURCE_NAMES: dict[int, str] = {
     SRC_AI: "AI 機翻",
@@ -73,6 +74,7 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_CUSTOM: "自訂補充",
     SRC_MANUAL: "人工",
     SRC_AI_REPAIR: "AI補譯修正",
+    SRC_CROSS_VERSION: "跨版本沿用",
 }
 
 BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
