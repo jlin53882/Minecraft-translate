@@ -26,13 +26,16 @@ from typing import TYPE_CHECKING
 
 from .query_interrupt import QueryCancelled
 from .schema import SRC_CROSS_VERSION, SRC_MANUAL
-from .sql_helpers import source_locale_match_sql
+from .sql_helpers import effective_review_sql, source_locale_match_sql
 
 if TYPE_CHECKING:
     import sqlite3
 
     from .repository import TranslationDB
 
+# 「已審核」沿用全庫共用的定義（``effective_review_sql``）：舊資料的人工譯文
+# （``legacy_unknown``）畫面同樣顯示「人工已審核」，批量審核與解除審核也都視為已審核。
+_REVIEWED_STATES = ("reviewed", "legacy_unknown")
 REFERENCE_LATEST = ""  # 參考版本＝該條目最近一次被審核的版本
 _REVIEW_ACTION = "review"
 _NOTE_PREFIX = "跨版本沿用自 "
@@ -160,7 +163,7 @@ def _fetch_rows(
     ref_clause = " AND e2.mc_version = ?" if ref_version else ""
     sql = (
         "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
-        "ft.zh_tw, ft.source, ft.review_status, tt.revision, "
+        f"ft.zh_tw, ft.source, {effective_review_sql('ft', True)}, tt.revision, "
         "e2.id, e2.mc_version, fr.zh_tw, fr.source, fr.checker, "
         "COALESCE(hh.at, tr.updated_at, ''), COALESCE(tr.revision, 0), "
         "COALESCE(hh.id, 0) "
@@ -172,7 +175,8 @@ def _fetch_rows(
         "AND e2.mc_version <> e.mc_version "
         f"AND {source_locale_match_sql('e', 'e2')}{ref_clause} "
         "JOIN effective fr ON fr.entry_id = e2.id "
-        "AND fr.review_status = 'reviewed' AND fr.zh_tw <> '' "
+        f"AND {effective_review_sql('fr', True)} IN ('reviewed','legacy_unknown') "
+        "AND fr.zh_tw <> '' "
         "LEFT JOIN translation tr ON tr.entry_id = e2.id AND tr.source = fr.source "
         "LEFT JOIN history hh ON hh.id = (SELECT MAX(h.id) FROM history h "
         f"WHERE h.entry_id = e2.id AND h.action = '{_REVIEW_ACTION}') "
@@ -208,7 +212,7 @@ def _fetch_rows(
                 en_us,
                 tw or "",
                 None if source is None else int(source),
-                status == "reviewed",
+                status in _REVIEWED_STATES,
                 tuple(sorted(grouped[eid], key=_ref_order)),
                 None if revision is None else int(revision),
             )

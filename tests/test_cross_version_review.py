@@ -391,3 +391,60 @@ def test_difference_queries_use_no_temporary_sort(db):
         # 規則禁的是 ORDER BY 的臨時排序；共用語系比對子查詢的 count(DISTINCT)
         # 只在單一條目的少數語系上建暫存結構，不在此限。
         assert "TEMP B-TREE FOR ORDER BY" not in plan, (sql[:80], plan)
+
+
+def _make_legacy(db, version, key):
+    """把該條目的人工譯文改成舊資料的狀態：畫面顯示「人工已審核」，但 review_status 不是 'reviewed'。"""
+    eid = _entry(db, version, key).id
+    with db._tx(keep_review=True) as conn:
+        conn.execute(
+            "UPDATE translation SET review_status='legacy_unknown' "
+            "WHERE entry_id=? AND source=?",
+            (eid, SRC_MANUAL),
+        )
+        db._refresh(conn, [eid])
+
+
+def _manual(db, version, key, text, *, mod="foo"):
+    db.ingest(version, [_item(key, "Bright", "", mod=mod)])
+    eid = _entry(db, version, key, mod).id
+    db.save_manual(eid, text, propagate=False)
+    return eid
+
+
+def test_legacy_manual_translations_count_as_reviewed_references(db):
+    """舊資料的人工譯文（畫面顯示「人工已審核」）也是已審核參考。"""
+    _manual(db, "1.21.1", "k", "需要 %s 級盔甲")
+    _make_legacy(db, "1.21.1", "k")
+    assert _entry(db, "1.21.1", "k").review_status == "legacy_unknown"
+    db.ingest("26.1", [_item("k", "Bright", "適用於 §6§l%s§r級盔甲")])
+
+    rows = db.list_cross_version_differences("26.1", ref_version="1.21.1")
+
+    assert [r.reference.zh_tw for r in rows] == ["需要 %s 級盔甲"]
+
+
+def test_legacy_manual_target_is_treated_as_a_reviewed_target(db):
+    """目標是舊資料的人工譯文：畫面顯示已審核，批次套用預設不可覆蓋，明確套用時改寫並可復原。"""
+    _seed_reviewed(db, text="亮色")
+    _manual(db, "26.1", "k", "明亮")
+    _make_legacy(db, "26.1", "k")
+
+    row = db.list_cross_version_differences("26.1")[0]
+    assert row.target_reviewed
+
+    result = db.apply_cross_version_references([_apply_item(row)])
+    after = _entry(db, "26.1", "k")
+    assert (result.applied, after.zh_tw, after.review_status) == (1, "亮色", "reviewed")
+    assert db.revert(result.history_id) == 1
+    restored = _entry(db, "26.1", "k")
+    assert (restored.zh_tw, restored.review_status) == ("明亮", "legacy_unknown")
+
+
+def test_legacy_reference_is_reused_after_import(db):
+    _manual(db, "1.20.1", "k", "亮色")
+    _make_legacy(db, "1.20.1", "k")
+    ids = _import(db, "26.1", [_item("k", "Bright", "明亮")])
+
+    assert db.reuse_reviewed_translations("26.1", entry_ids=ids).applied == 1
+    assert _entry(db, "26.1", "k").zh_tw == "亮色"
