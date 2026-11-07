@@ -75,7 +75,7 @@ flowchart TD
     K -- 是 --> L["ModDbView._on_scan_finished：必要時 reload_db，失效快照並刷新目前頁"]
 ```
 
-掃描來源可填 `mods` 資料夾或整個模組包根目錄。翻譯 ZIP 模式選資料夾時同樣會掃描模組包（`ScanOptions.translated` 時譯文改用所選來源標記）；選單一 ZIP 檔不掃。`ScanPanel._on_mode` 切到 ZIP 時把 `jar_tr_row`、`rules_row` 鎖定為固定值並以 `SwitchRow.set_sub` 顯示原因，切回時還原。jar 之外，選項「包含 KubeJS／FTB
+掃描來源可填 `mods` 資料夾或整個模組包根目錄。FTB 的 SNBT 結尾多餘的 `}` 由 `walk_snbt_file_tolerant` 在記憶體忽略後解析（原檔不改，問題紀錄 `snbt_trailing_braces_ignored`）；輸出前驗證仍用嚴格的 `walk_snbt_file`。翻譯 ZIP 模式選資料夾時同樣會掃描模組包（`ScanOptions.translated` 時譯文改用所選來源標記）；選單一 ZIP 檔不掃。`ScanPanel._on_mode` 切到 ZIP 時把 `jar_tr_row`、`rules_row` 鎖定為固定值並以 `SwitchRow.set_sub` 顯示原因，切回時還原。jar 之外，選項「包含 KubeJS／FTB
 Quests」會透過共用的 pack source scanner 讀取 `kubejs` 與
 `config/ftbquests/quests`，並沿用 `scan_ingest.py` 的預覽／實際匯入分類。腳本只做
 靜態字串辨識，沒有 JavaScript 執行；每筆來源以相對路徑與 selector 保存於
