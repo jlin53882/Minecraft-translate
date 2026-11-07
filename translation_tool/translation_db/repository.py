@@ -3561,6 +3561,26 @@ class TranslationDB(
             for row in rows
         ]
 
+    @staticmethod
+    def _scope_entry_index(
+        conn: sqlite3.Connection, version: str, pack_scope: str
+    ) -> dict[tuple[str, str], dict[int, str]]:
+        """該模組包有來源紀錄的條目：``{(kind, key): {entry_id: mod_id}}``。
+
+        引用解析要對每個引用找「同一模組包的語言定義」。逐個引用查詢只能用到
+        ``kind`` 前綴，每次掃過整個 kind；一次載入該 scope 的條目再於記憶體比對，
+        成本與引用數無關。
+        """
+        index: dict[tuple[str, str], dict[int, str]] = {}
+        for entry_id, kind, key, mod_id in conn.execute(
+            "SELECT e.id, e.kind, e.key, e.mod_id FROM entry_origin eo "
+            "JOIN entry e ON e.id = eo.entry_id "
+            "WHERE eo.pack_scope=? AND e.mc_version=?",
+            (pack_scope, version),
+        ):
+            index.setdefault((kind, key), {})[int(entry_id)] = mod_id
+        return index
+
     def record_source_references(
         self,
         version: str,
@@ -3587,25 +3607,22 @@ class TranslationDB(
                     (version, scope),
                 )
             rows: list[tuple[Any, ...]] = []
+            scope_entries: dict[str, dict[tuple[str, str], dict[int, str]]] = {}
             for reference in references:
-                where = "e.mc_version=? AND e.kind=? AND e.key=? AND eo.pack_scope=?"
-                params: list[Any] = [
-                    version,
-                    reference.target_kind,
-                    reference.target_key,
-                    reference.pack_scope,
+                if reference.pack_scope not in scope_entries:
+                    scope_entries[reference.pack_scope] = self._scope_entry_index(
+                        conn, version, reference.pack_scope
+                    )
+                by_id = scope_entries[reference.pack_scope].get(
+                    (reference.target_kind, reference.target_key), {}
+                )
+                candidates = [
+                    entry_id
+                    for entry_id, mod_id in by_id.items()
+                    if not reference.target_mod_id or mod_id == reference.target_mod_id
                 ]
-                if reference.target_mod_id:
-                    where += " AND e.mod_id=?"
-                    params.append(reference.target_mod_id)
-                candidates = conn.execute(
-                    "SELECT DISTINCT e.id FROM entry e "
-                    "JOIN entry_origin eo ON eo.entry_id=e.id "
-                    f"WHERE {where}",
-                    params,
-                ).fetchall()
                 if len(candidates) == 1:
-                    status, detail, target_id = "resolved", "", int(candidates[0][0])
+                    status, detail, target_id = "resolved", "", candidates[0]
                 elif not candidates:
                     status, detail, target_id = (
                         "missing",

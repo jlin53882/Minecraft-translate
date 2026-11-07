@@ -87,13 +87,14 @@ def ingest_groups(
     """只新增、不覆蓋；原文已變動者只記錄。回傳這一份掃描結果的統計。"""
     stats = IngestStats()
     for (kind, mod_id), group in groups.items():
-        known, have = target.existing(kind, mod_id)
+        known_map, have = target.existing(kind, mod_id)
+        known = _KnownEntries(kind, known_map)
         for item in group:
-            cur = _find_existing(known, kind, item)
+            cur = known.find(item)
             is_new = cur is None
             if cur is None:
                 eid = target.add_entry(kind, mod_id, item.key, item.en_us)
-                known[item.key] = (eid, item.en_us)
+                known.set(item.key, (eid, item.en_us))
                 stats.new_entries += 1
             elif cur[1] != item.en_us and item.en_us and cur[1]:
                 target.record_src_change(kind, mod_id, item.key, cur[1], item.en_us)
@@ -104,7 +105,7 @@ def ingest_groups(
                 if cur[1] != item.en_us and item.en_us:
                     # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
                     target.adopt_en(eid, item.en_us)
-                    known[item.key] = (eid, item.en_us)
+                    known.set(item.key, (eid, item.en_us))
                     stats.adopted += 1
                 # 這次沒有原文（item.en_us 為空）時，沿用既有原文，只補譯文
 
@@ -125,28 +126,53 @@ def ingest_groups(
     return stats
 
 
-def _find_existing(known: Known, kind: str, item: ScanItem) -> tuple[int, str] | None:
-    """先找原鍵，再只在唯一且原文相同的路徑別名中重用條目。
+class _KnownEntries:
+    """一個 (類型, 模組) 的既有條目，附 canonical key 反查表。
 
-    多個 legacy 別名同時存在時不猜 survivor；讓資料庫清理工具先處理，避免掃描
-    再把翻譯寫到錯誤的條目。
+    別名比對需要「哪些既有鍵與這個鍵的 canonical 相同」。逐筆掃過整個 ``known``
+    會讓同一模組的 N 個項目花 O(N²)（FTB Quests 的任務文字全部屬於同一個模組身分，
+    數千筆就要算上千萬次 canonical），而且整段發生在持有資料庫鎖的寫入交易內。
+    反查表在建立時算一次，之後新增的鍵經 :meth:`set` 同步登記。
     """
-    exact = known.get(item.key)
-    if exact is not None:
-        return exact
-    canonical = canonical_entry_key(kind, item.key)
-    matches_by_id = {
-        value[0]: value
-        for key, value in known.items()
-        if key != item.key
-        and canonical_entry_key(kind, key) == canonical
-        and (not item.en_us or not value[1] or _same_text(value[1], item.en_us))
-    }
-    if len(matches_by_id) != 1:
-        return None
-    match = next(iter(matches_by_id.values()))
-    known[item.key] = match
-    return match
+
+    def __init__(self, kind: str, known: Known) -> None:
+        self.kind = kind
+        self.known = known
+        self._by_canonical: dict[str, list[str]] = {}
+        for key in known:
+            self._register(key)
+
+    def _register(self, key: str) -> None:
+        canonical = canonical_entry_key(self.kind, key)
+        self._by_canonical.setdefault(canonical, []).append(key)
+
+    def set(self, key: str, value: tuple[int, str]) -> None:
+        if key not in self.known:
+            self._register(key)
+        self.known[key] = value
+
+    def find(self, item: ScanItem) -> tuple[int, str] | None:
+        """先找原鍵，再只在唯一且原文相同的路徑別名中重用條目。
+
+        多個 legacy 別名同時存在時不猜 survivor；讓資料庫清理工具先處理，避免掃描
+        再把翻譯寫到錯誤的條目。
+        """
+        exact = self.known.get(item.key)
+        if exact is not None:
+            return exact
+        canonical = canonical_entry_key(self.kind, item.key)
+        matches_by_id = {
+            value[0]: value
+            for key in self._by_canonical.get(canonical, ())
+            if key != item.key
+            for value in (self.known[key],)
+            if not item.en_us or not value[1] or _same_text(value[1], item.en_us)
+        }
+        if len(matches_by_id) != 1:
+            return None
+        match = next(iter(matches_by_id.values()))
+        self.set(item.key, match)
+        return match
 
 
 def _same_text(left: str, right: str) -> bool:
@@ -251,21 +277,27 @@ class DbIngestTarget:
         )
 
     def remove_origins(self, origins: Iterable[EntryOrigin]) -> None:
-        """清除本次完整重掃描確認已失效的精確來源。"""
+        """清除本次完整重掃描確認已失效的精確來源。
+
+        依檔案分組：每個 (模組包, 來源類型, 檔案) 只讀一次該檔現有的來源列，再以主鍵
+        批次刪除。逐筆 ``DELETE ... WHERE selector=?`` 每次都要掃過同檔案所有來源列，
+        一個語系檔有數千筆時是 O(N²)。
+        """
+        stale: dict[tuple[str, str, str], set[str]] = {}
         for origin in origins:
-            self.conn.execute(
-                "DELETE FROM entry_origin WHERE pack_scope=? AND source_kind=? "
-                "AND source_path=? AND selector=? "
-                "AND entry_id IN ("
-                "SELECT id FROM entry WHERE mc_version=?"
-                ")",
-                (
-                    origin.pack_scope,
-                    origin.source_kind,
-                    origin.source_path,
-                    origin.selector,
-                    self.version,
-                ),
+            key = (origin.pack_scope, origin.source_kind, origin.source_path)
+            stale.setdefault(key, set()).add(origin.selector)
+        for (pack_scope, source_kind, source_path), selectors in stale.items():
+            rows = self.conn.execute(
+                "SELECT eo.id, eo.selector FROM entry_origin eo "
+                "JOIN entry e ON e.id = eo.entry_id "
+                "WHERE eo.pack_scope=? AND eo.source_kind=? AND eo.source_path=? "
+                "AND e.mc_version=?",
+                (pack_scope, source_kind, source_path, self.version),
+            ).fetchall()
+            self.conn.executemany(
+                "DELETE FROM entry_origin WHERE id=?",
+                [(row_id,) for row_id, selector in rows if selector in selectors],
             )
 
 
