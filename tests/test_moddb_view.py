@@ -1800,9 +1800,13 @@ def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
         panel.mode == "zip" and panel.source_dd.visible and panel.zip_pick_btn.visible
     )
     assert panel.mode_note.visible is True
+    # zh_tw 固定讀取、不套規則：開關仍顯示但鎖定並說明原因；模組包選項兩種模式都可用
     assert (
-        panel.jar_tr_row.visible is False and panel.rules_row.visible is False
-    )  # zh_tw 不判讀、不套規則
+        panel.jar_tr_row.visible and panel.rules_row.visible and panel.pack_row.visible
+    )
+    assert panel.jar_tr_row.disabled_state and panel.rules_row.disabled_state
+    assert not panel.pack_row.disabled_state
+    assert panel.jar_tr_row.value is True and panel.rules_row.value is False
     assert panel.start_btn.content == "開始匯入 1.21.1"
 
     panel.source_dd.value = str(scan_panel.SRC_SUBTITLE)
@@ -1822,6 +1826,25 @@ def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
     assert (
         panel.start_btn.content == "開始掃描 1.21.1" and panel.rules_row.visible is True
     )
+    assert not panel.rules_row.disabled_state and panel.rules_row.value is True
+
+
+def test_scan_panel_restores_user_choices_after_zip_mode_roundtrip(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.rules_row.value = False
+    panel.jar_tr_row.value = False
+    panel._on_mode("zip")
+    panel._on_mode("jar")
+    assert panel.rules_row.value is False and panel.jar_tr_row.value is False
+
+
+def test_scan_panel_zip_mode_passes_pack_option_through(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel._on_mode("zip")
+    assert panel.build_options().include_pack_content is True
+    panel.pack_row.value = False
+    assert panel.build_options().include_pack_content is False
 
 
 def test_scan_panel_imports_a_translated_zip_directly(db_path, tmp_path, monkeypatch):

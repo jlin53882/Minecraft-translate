@@ -1347,7 +1347,10 @@ def scan_folder_generator(
     pack_result = PackScanResult()
     pack_ingest_stats: IngestStats | None = None
     pack_root_missing = False
-    if options.include_pack_content and not options.translated:
+    # 翻譯 ZIP 模式只有在選資料夾時才有模組包根目錄可掃；單一 ZIP 檔沒有穩定的磁碟路徑。
+    if options.include_pack_content and (
+        not options.translated or Path(folder).is_dir()
+    ):
         pack_roots = discover_pack_roots(folder)
         report.pack_root_candidates = [str(root) for root in pack_roots]
         if not pack_roots:
@@ -1390,6 +1393,12 @@ def scan_folder_generator(
                 "level": "info",
             }
             pack_result = scan_pack_sources(pack_root, options.version)
+            if options.translated:
+                # 與翻譯 ZIP 內的 lang 一致：譯文歸在使用者選的來源標記。
+                pack_result.items = [
+                    replace(item, source=options.translation_source)
+                    for item in pack_result.items
+                ]
             report.pack_items_found = len(pack_result.items)
             report.pack_files_seen = pack_result.files_seen
             report.pack_sources = len(pack_result.sources_found)

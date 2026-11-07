@@ -153,3 +153,46 @@ def test_reference_resolution_statuses(db):
         ("dup.key", "b"): "resolved",
         ("nowhere", ""): "missing",
     }
+
+
+def _write_ftb_lang(root, text="Hello", zh="你好"):
+    for locale, value in (("en_us", text), ("zh_tw", zh)):
+        path = root / "config" / "ftbquests" / "quests" / "lang" / locale
+        path.mkdir(parents=True, exist_ok=True)
+        (path / "chapter.snbt").write_text(
+            f'{{\n\tchapter.AAAA.title: "{value}"\n}}\n', encoding="utf-8"
+        )
+
+
+def _run_scan(db, folder, **options):
+    from translation_tool.translation_db.scanner import (
+        ScanOptions,
+        scan_folder_generator,
+    )
+
+    return list(scan_folder_generator(db, str(folder), ScanOptions(**options)))
+
+
+def test_translated_mode_imports_pack_content_from_folder_with_chosen_source(
+    db, tmp_path
+):
+    from translation_tool.translation_db.schema import SRC_SUBTITLE
+
+    _write_ftb_lang(tmp_path)
+    _run_scan(
+        db,
+        tmp_path,
+        version="26.1",
+        translated=True,
+        translation_source=SRC_SUBTITLE,
+    )
+    rows = db.list_entries("26.1")[0]
+    assert [(r.en_us, r.zh_tw, r.source) for r in rows] == [
+        ("Hello", "你好", SRC_SUBTITLE)
+    ]
+
+
+def test_translated_mode_pack_option_off_skips_pack_content(db, tmp_path):
+    _write_ftb_lang(tmp_path)
+    _run_scan(db, tmp_path, version="26.1", translated=True, include_pack_content=False)
+    assert db.list_entries("26.1")[0] == []
