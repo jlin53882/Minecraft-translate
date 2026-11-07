@@ -24,13 +24,9 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from .content_identity import same_content_sql
 from .query_interrupt import QueryCancelled
-from .schema import (
-    KIND_FTB_QUEST_LANG,
-    KIND_KUBEJS_LANG,
-    SRC_CROSS_VERSION,
-    SRC_MANUAL,
-)
+from .schema import SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import effective_review_sql, source_locale_match_sql
 
 if TYPE_CHECKING:
@@ -41,9 +37,6 @@ if TYPE_CHECKING:
 # 「已審核」沿用全庫共用的定義（``effective_review_sql``）：舊資料的人工譯文
 # （``legacy_unknown``）畫面同樣顯示「人工已審核」，批量審核與解除審核也都視為已審核。
 _REVIEWED_STATES = ("reviewed", "legacy_unknown")
-# KubeJS／FTB 的模組識別是「命名空間@整合包資料夾名稱@路徑雜湊」，同一個整合包在不同版本
-# 的資料夾名稱或路徑不同，識別就不同。這兩種內容比對時只看 ``@`` 前面的命名空間。
-_PACK_KINDS = (KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
 REFERENCE_LATEST = ""  # 參考版本＝該條目最近一次被審核的版本
 _REVIEW_ACTION = "review"
 _NOTE_PREFIX = "跨版本沿用自 "
@@ -160,12 +153,6 @@ def _scope_sql(
     return "".join(f" AND {c}" for c in clauses), params
 
 
-def _namespace_sql(alias: str) -> str:
-    """模組識別 ``命名空間@整合包@雜湊`` 的命名空間（含 ``@``）；沒有 ``@`` 就用整個識別。"""
-    col = f"{alias}.mod_id"
-    return f"(CASE WHEN instr({col}, '@') > 0 THEN substr({col}, 1, instr({col}, '@')) ELSE {col} END)"
-
-
 def _fetch_rows(
     conn: sqlite3.Connection,
     version: str,
@@ -177,64 +164,50 @@ def _fetch_rows(
 ) -> list[CrossVersionRow]:
     """讀取指定目標條目（或整個版本）與其他版本已審核譯文的對照。
 
-    一般內容用 ``(類型, 模組, 鍵值, 原文)`` 比對（走 ``idx_entry_content``）；KubeJS／FTB
-    的 lang 內容模組識別帶整合包身分，改用命名空間比對。
+    「內容相同」用 ``content_identity.same_content_sql``（KubeJS／FTB 只看命名空間），
+    走 ``idx_entry_content_ns``。
     """
     scope, params = _scope_sql(entry_ids, mod_ids, kinds)
     ref_clause = " AND e2.mc_version = ?" if ref_version else ""
+    sql = (
+        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
+        f"ft.zh_tw, ft.source, {effective_review_sql('ft', True)}, tt.revision, "
+        "e2.id, e2.mc_version, fr.zh_tw, fr.source, fr.checker, "
+        "COALESCE(hh.at, tr.updated_at, ''), COALESCE(tr.revision, 0), "
+        "COALESCE(hh.id, 0), e2.mod_id "
+        "FROM entry e "
+        "LEFT JOIN effective ft ON ft.entry_id = e.id "
+        "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
+        f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
+        "AND e2.mc_version <> e.mc_version "
+        f"AND {source_locale_match_sql('e', 'e2')}{ref_clause} "
+        "JOIN effective fr ON fr.entry_id = e2.id "
+        f"AND {effective_review_sql('fr', True)} IN ('reviewed','legacy_unknown') "
+        "AND fr.zh_tw <> '' "
+        "LEFT JOIN translation tr ON tr.entry_id = e2.id AND tr.source = fr.source "
+        "LEFT JOIN history hh ON hh.id = (SELECT MAX(h.id) FROM history h "
+        f"WHERE h.entry_id = e2.id AND h.action = '{_REVIEW_ACTION}') "
+        f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
+    )
+    args: list[object] = [*([ref_version] if ref_version else []), version, *params]
     grouped: dict[int, list[VersionRef]] = {}
     heads: dict[int, tuple] = {}
-    kind_marks = ",".join("?" * len(_PACK_KINDS))
-    for pack in (False, True):
-        mod_match = (
-            f"{_namespace_sql('e2')} = {_namespace_sql('e')}"
-            if pack
-            else "e2.mod_id = e.mod_id"
-        )
-        kind_filter = f" AND e.kind {'IN' if pack else 'NOT IN'} ({kind_marks})"
-        sql = (
-            "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
-            f"ft.zh_tw, ft.source, {effective_review_sql('ft', True)}, tt.revision, "
-            "e2.id, e2.mc_version, fr.zh_tw, fr.source, fr.checker, "
-            "COALESCE(hh.at, tr.updated_at, ''), COALESCE(tr.revision, 0), "
-            "COALESCE(hh.id, 0), e2.mod_id "
-            "FROM entry e "
-            "LEFT JOIN effective ft ON ft.entry_id = e.id "
-            "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
-            f"JOIN entry e2 ON e2.kind = e.kind AND {mod_match} "
-            "AND e2.key = e.key AND e2.en_us = e.en_us "
-            "AND e2.mc_version <> e.mc_version "
-            f"AND {source_locale_match_sql('e', 'e2')}{ref_clause} "
-            "JOIN effective fr ON fr.entry_id = e2.id "
-            f"AND {effective_review_sql('fr', True)} IN ('reviewed','legacy_unknown') "
-            "AND fr.zh_tw <> '' "
-            "LEFT JOIN translation tr ON tr.entry_id = e2.id AND tr.source = fr.source "
-            "LEFT JOIN history hh ON hh.id = (SELECT MAX(h.id) FROM history h "
-            f"WHERE h.entry_id = e2.id AND h.action = '{_REVIEW_ACTION}') "
-            f"WHERE e.mc_version = ? AND e.en_us <> ''{kind_filter}{scope}"
-        )
-        args: list[object] = [
-            *([ref_version] if ref_version else []),
-            version,
-            *_PACK_KINDS,
-            *params,
-        ]
-        for row in conn.execute(sql, args):
-            eid = int(row[0])
-            heads.setdefault(eid, (row[1:5], row[5], row[6], row[7], row[8]))
-            grouped.setdefault(eid, []).append(
-                VersionRef(
-                    int(row[9]),
-                    row[10],
-                    row[11],
-                    int(row[12]),
-                    row[13],
-                    row[14],
-                    int(row[15]),
-                    int(row[16]),
-                    row[17],
-                )
+    for row in conn.execute(sql, args):
+        eid = int(row[0])
+        heads.setdefault(eid, (row[1:5], row[5], row[6], row[7], row[8]))
+        grouped.setdefault(eid, []).append(
+            VersionRef(
+                int(row[9]),
+                row[10],
+                row[11],
+                int(row[12]),
+                row[13],
+                row[14],
+                int(row[15]),
+                int(row[16]),
+                row[17],
             )
+        )
     out = []
     for eid in sorted(grouped):
         (kind, mod_id, key, en_us), tw, source, status, revision = heads[eid]

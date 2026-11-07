@@ -1709,18 +1709,21 @@ def test_content_lookups_use_the_content_index_even_without_statistics(db_path):
     """
     import inspect
 
+    from translation_tool.translation_db.content_identity import content_mod_sql
+
     seed(db_path)
     db = TranslationDB(db_path)
     row = db.list_entries("1.21.1")[0][0]
     for method in (db.entry_detail, db._same_content):
-        assert "INDEXED BY idx_entry_content" in inspect.getsource(method)
+        assert "_content_table" in inspect.getsource(method)
+    assert "INDEXED BY idx_entry_content_ns" in db._content_table()
     plan = _plan(
         db,
-        "SELECT e.id FROM entry e INDEXED BY idx_entry_content "
-        "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.id<>?",
+        f"SELECT e.id FROM {db._content_table()} "
+        f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? AND e.id<>?",
         [row.kind, row.mod_id, row.key, row.id],
     )
-    assert "idx_entry_content (kind=? AND mod_id=? AND key=?)" in plan
+    assert "idx_entry_content_ns (kind=? AND <expr>=? AND key=?)" in plan
 
     # 實際跑一遍：結果仍正確（同內容的其他版本、同鍵值的其他版本）
     detail = db.entry_detail(row.id)

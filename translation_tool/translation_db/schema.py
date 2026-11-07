@@ -345,6 +345,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
             "ON effective (source, review_status)"
         )
+        _install_content_index(conn)
         _install_schema_v3_objects(conn)
         conn.commit()
         _install_smart_review_objects(conn)
@@ -363,10 +364,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
         "ON effective (source, review_status)"
     )
+    _install_content_index(conn)
     _install_schema_v3_objects(conn)
     conn.commit()
     _install_smart_review_objects(conn)
     _install_derived_tables(conn)
+
+
+def _install_content_index(conn: sqlite3.Connection) -> None:
+    """跨版本內容比對的表達式索引（定義見 ``content_identity``）；已存在就略過。"""
+    from .content_identity import create_index_sql  # 與 schema 互相引用，延後匯入
+
+    conn.execute(create_index_sql())
 
 
 def _run_next_migration(conn: sqlite3.Connection, version: int) -> int:

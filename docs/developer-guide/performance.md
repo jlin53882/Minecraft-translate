@@ -197,6 +197,24 @@ on `entry.kind`, so the triggers also watch `kind`; a rule change bumps
 entries and use the row-by-row scan while any exist. Its `verify()` compares
 every entry with a recompute that calls `matches_quality` once per status.
 
+`translation_tool/translation_db/content_identity.py` is the single definition
+of "the same content across versions": `(kind, content module, key, en_us)`,
+where the content module is `entry.mod_id` except for KubeJS/FTB lang entries,
+whose `mod_id` embeds the pack folder name and a path hash and is therefore
+reduced to the namespace before `@`. The `effective.diff` triggers, the overview
+counters in `stat_summary.py`, the entry-list "diff" filter, the entry detail
+sibling lists, save/review/bulk-review propagation, `write_back` fills, the
+cross-version reuse queries and the cross-version review dialog all build their
+predicate with `same_content_sql()` / `content_mod_sql()`; do not spell
+`e2.mod_id = e.mod_id` for a cross-version comparison. The expression index
+`idx_entry_content_ns (kind, <content module>, key, en_us)` serves it; the
+queries must use the identical expression, and lookups force the index (without
+`ANALYZE` statistics the planner scans the table), falling back to no hint on a
+database that lacks it. The original `idx_entry_content` stays for same-version
+lookups, which keep the full `mod_id`. A change to the definition bumps
+`effective_columns.SCHEMA_VERSION` and `stat_summary.STAT_SCHEMA_VERSION`, so
+both derived sets are rebuilt on the next writable open.
+
 Measure list operations through `TranslationDB.list_entries` on independent
 copies of the same database, in a fresh process with the read-only connection
 and an empty `stat_cache`, comparing against the commit before the change.

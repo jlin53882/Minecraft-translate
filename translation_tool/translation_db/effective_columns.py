@@ -26,7 +26,10 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-SCHEMA_VERSION = "2"
+from .content_identity import content_mod_expr, content_mod_sql, same_content_sql
+
+# 版本 3：同內容改用 content_identity 的定義（KubeJS／FTB 只看命名空間），觸發器與索引重建
+SCHEMA_VERSION = "3"
 COLUMNS = {
     "mc_version": "TEXT",
     "diff": "INTEGER NOT NULL DEFAULT 0",
@@ -50,7 +53,12 @@ _INDEX_NAMES = ",".join(f"'{name}'" for name in _INDEXES)
 
 def _regroup(content: dict[str, str], exclude: str | None = None) -> str:
     """重算同內容各條目的 ``diff``；``exclude`` 是視為已不在組內的條目編號。"""
-    group = " AND ".join(f"e2.{c}={content[c]}" for c in _CONTENT_COLUMNS)
+    group = (
+        f"e2.kind={content['kind']} "
+        f"AND {content_mod_sql('e2')}="
+        f"{content_mod_expr(content['kind'], content['mod_id'])} "
+        f"AND e2.key={content['key']} AND e2.en_us={content['en_us']}"
+    )
     if exclude is not None:
         group += f" AND e2.id<>{exclude}"
     # 不依賴外層列的子查詢只計算一次
@@ -174,12 +182,12 @@ def _trigger_sql() -> dict[str, str]:
 
 
 # 驗證用的期望值刻意沿用條目清單原本的定義（關聯子查詢），與觸發器的算法不同
-_EXPECTED_ROWS = """
+_EXPECTED_ROWS = f"""
     SELECT f.entry_id, e.mc_version,
         EXISTS (
             SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-            WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-              AND e2.en_us = e.en_us AND e.en_us <> '' AND e2.mc_version <> e.mc_version
+            WHERE {same_content_sql("e", "e2")}
+              AND e.en_us <> '' AND e2.mc_version <> e.mc_version
               AND f2.zh_tw <> f.zh_tw),
         t.updated_at
     FROM effective f LEFT JOIN entry e ON e.id = f.entry_id
@@ -268,14 +276,15 @@ def rebuild(conn: sqlite3.Connection) -> None:
 
 
 # 同內容各條目的生效譯文不只一種的組：組內每個有生效譯文的條目都是「版本不同」
-_DIFF_ENTRY_IDS = """
+_DIFF_ENTRY_IDS = f"""
     SELECT e.id FROM (
-        SELECT e.kind, e.mod_id, e.key, e.en_us
+        SELECT e.kind AS kind, {content_mod_sql("e")} AS cmod, e.key AS key,
+               e.en_us AS en_us
         FROM entry e JOIN effective f ON f.entry_id = e.id
         WHERE e.en_us <> ''
-        GROUP BY e.kind, e.mod_id, e.key, e.en_us
+        GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
         HAVING COUNT(DISTINCT f.zh_tw) > 1
-    ) g JOIN entry e ON e.kind = g.kind AND e.mod_id = g.mod_id
+    ) g JOIN entry e ON e.kind = g.kind AND {content_mod_sql("e")} = g.cmod
         AND e.key = g.key AND e.en_us = g.en_us
 """
 

@@ -22,9 +22,15 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from translation_tool.translation_db.content_identity import (
+    content_mod_expr,
+    content_mod_sql,
+    same_content_sql,
+)
 from translation_tool.translation_db.sql_helpers import effective_review_sql
 
-STAT_SCHEMA_VERSION = "3"
+# 版本 4：「相同內容」改用 content_identity 的定義（KubeJS／FTB 只看命名空間），摘要重建
+STAT_SCHEMA_VERSION = "4"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
 COUNTER_NAMES = ("content", "mods", "no_source", "diff")
 
@@ -115,10 +121,9 @@ def _counter(name: str, delta: str) -> str:
 
 def _siblings(entry_id: str) -> str:
     """同內容其他條目的生效譯文：筆數、最小值、最大值（原文空白者不計）。"""
-    joins = " AND ".join(f"e2.{c}=e.{c}" for c in _CONTENT_COLUMNS)
     return (
         "(SELECT COUNT(*) n, MIN(f2.zh_tw) mn, MAX(f2.zh_tw) mx FROM entry e "
-        f"JOIN entry e2 ON {joins} AND e2.id<>e.id "
+        f"JOIN entry e2 ON {same_content_sql('e', 'e2')} AND e2.id<>e.id "
         "JOIN effective f2 ON f2.entry_id=e2.id "
         f"WHERE e.id={entry_id} AND e.en_us<>'')"
     )
@@ -141,6 +146,16 @@ def _diff_if_replaced(old: str, new: str, entry_id: str) -> str:
 
 def _unique(row: str, columns: tuple[str, ...]) -> str:
     same = " AND ".join(f"x.{c}={row}.{c}" for c in columns)
+    return f"NOT EXISTS (SELECT 1 FROM entry x WHERE {same} AND x.id<>{row}.id)"
+
+
+def _unique_content(row: str) -> str:
+    """``row`` 是其內容（類型、內容模組識別、鍵值、原文）組中唯一的條目。"""
+    same = (
+        f"x.kind={row}.kind "
+        f"AND {content_mod_sql('x')}={content_mod_expr(f'{row}.kind', f'{row}.mod_id')} "
+        f"AND x.key={row}.key AND x.en_us={row}.en_us"
+    )
     return f"NOT EXISTS (SELECT 1 FROM entry x WHERE {same} AND x.id<>{row}.id)"
 
 
@@ -167,7 +182,7 @@ def _entry_counts(row: str, sign: str) -> str:
     return f"""
         {bucket}
         {_counter("diff", f"{sign}{diff}")}
-        {_counter("content", f"{sign}{_unique(row, _CONTENT_COLUMNS)}")}
+        {_counter("content", f"{sign}{_unique_content(row)}")}
         {_counter("mods", f"{sign}{_unique(row, ('mod_id',))}")}
         {_counter("no_source", f"{sign}({row}.en_us='')")}"""
 
@@ -248,14 +263,17 @@ _FULL_SOURCE_ROWS = f"""
     GROUP BY 1, 2, 3, 4, 5
 """
 _FULL_COUNTERS = {
-    "content": "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)",
+    "content": (
+        f"SELECT COUNT(*) FROM (SELECT 1 FROM entry e "
+        f"GROUP BY e.kind, {content_mod_sql('e')}, e.key, e.en_us)"
+    ),
     "mods": "SELECT COUNT(DISTINCT mod_id) FROM entry",
     "no_source": "SELECT COUNT(*) FROM entry WHERE en_us = ''",
-    "diff": """
+    "diff": f"""
         SELECT COUNT(*) FROM (
             SELECT 1 FROM entry e JOIN effective f ON f.entry_id = e.id
             WHERE e.en_us <> ''
-            GROUP BY e.kind, e.mod_id, e.key, e.en_us
+            GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
             HAVING COUNT(DISTINCT f.zh_tw) > 1
         )""",
 }

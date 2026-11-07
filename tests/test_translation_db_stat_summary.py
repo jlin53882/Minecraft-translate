@@ -135,7 +135,10 @@ def _seed(db):
 
 def test_new_database_installs_ready_summary(db):
     meta = dict(db._q("SELECT key, value FROM meta WHERE key LIKE 'stats%'"))
-    assert meta == {"stats_schema_version": "3", "stats_valid": "1"}
+    assert meta == {
+        "stats_schema_version": stat_summary.STAT_SCHEMA_VERSION,
+        "stats_valid": "1",
+    }
     assert stat_summary.is_installed(db._conn)
     assert_summary_matches(db)
 
