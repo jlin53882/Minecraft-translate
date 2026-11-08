@@ -896,8 +896,7 @@ class TranslationDB(
             stale_cleanup_started = time.perf_counter()
             target.remove_origins(stale_origins)
             _LOG.info(
-                "[ModDB timing] phase=db_remove_stale_origins elapsed=%.3fs "
-                "origins=%d",
+                "[ModDB timing] phase=db_remove_stale_origins elapsed=%.3fs origins=%d",
                 time.perf_counter() - stale_cleanup_started,
                 len(stale_origins),
             )
