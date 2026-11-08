@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Generator, Mapping, Sequence
@@ -100,6 +102,7 @@ _RESOURCE_ID = re.compile(r"^#?[a-z0-9_.-]+:[a-z0-9_./-]+$")
 MAX_NESTED_DEPTH = 3
 _PATCHOULI_LOCALES = frozenset({"en_us", "zh_tw", "zh_cn"})
 _MAX_PATCHOULI_CONTEXT_FILES = 256
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -1193,6 +1196,12 @@ def _ingest_pack_result(
         return preview_ingest_many(preview, [result.items], convert)[0]
     if db is None:
         raise ValueError("模組包來源需要資料庫才能寫入")
+    ingest_started = time.perf_counter()
+    _LOG.info(
+        "[ModDB timing] phase=pack_db_ingest_start items=%d refs=%d",
+        len(result.items),
+        len(result.references),
+    )
     stats = db.ingest_many(
         version,
         [result.items],
@@ -1200,10 +1209,25 @@ def _ingest_pack_result(
         stale_origins=result.stale_origins,
         entry_ids_out=touched,
     )[0]
+    _LOG.info(
+        "[ModDB timing] phase=pack_db_ingest elapsed=%.3fs new=%d "
+        "added_translations=%d existing=%d en_changed=%d",
+        time.perf_counter() - ingest_started,
+        stats.new_entries,
+        stats.added_translations,
+        stats.existing,
+        stats.en_changed,
+    )
+    references_started = time.perf_counter()
     db.record_source_references(
         version,
         result.references,
         pack_scope=result.pack_scope,
+    )
+    _LOG.info(
+        "[ModDB timing] phase=pack_record_references elapsed=%.3fs refs=%d",
+        time.perf_counter() - references_started,
+        len(result.references),
     )
     return stats
 

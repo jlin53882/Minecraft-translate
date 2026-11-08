@@ -10,7 +10,9 @@
 
 from __future__ import annotations
 
+import logging
 import sqlite3
+import time
 from collections.abc import Callable, Iterable
 from typing import Any, Protocol
 
@@ -22,6 +24,9 @@ from translation_tool.core.source_locale import (
 from translation_tool.translation_db.identity import canonical_entry_key
 from translation_tool.translation_db.models import EntryOrigin, IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
+
+_LOG = logging.getLogger(__name__)
+_SLOW_INGEST_GROUP_SECONDS = 1.0
 
 # (kind, mod_id) → 該模組既有條目 {key: (entry_id, en_us)} 與既有譯文 {(entry_id, source)}
 Known = dict[str, tuple[int, str]]
@@ -86,9 +91,23 @@ def ingest_groups(
 ) -> IngestStats:
     """只新增、不覆蓋；原文已變動者只記錄。回傳這一份掃描結果的統計。"""
     stats = IngestStats()
+    completed_groups = 0
+    completed_items = 0
+    groups_started = time.perf_counter()
     for (kind, mod_id), group in groups.items():
+        group_started = time.perf_counter()
         known, have = target.existing(kind, mod_id)
-        for item in group:
+        for item_index, item in enumerate(group, 1):
+            if len(group) >= 1000 and item_index % 1000 == 0:
+                _LOG.info(
+                    "[ModDB timing] phase=db_group_item_progress kind=%s "
+                    "mod_id=%s items=%d/%d elapsed=%.3fs",
+                    kind,
+                    mod_id,
+                    item_index,
+                    len(group),
+                    time.perf_counter() - group_started,
+                )
             cur = _find_existing(known, kind, item)
             is_new = cur is None
             if cur is None:
@@ -122,6 +141,29 @@ def ingest_groups(
                     stats.added_translations += 1
                 else:
                     stats.existing += 1
+        completed_groups += 1
+        completed_items += len(group)
+        elapsed = time.perf_counter() - group_started
+        if elapsed >= _SLOW_INGEST_GROUP_SECONDS:
+            _LOG.warning(
+                "[ModDB slow ingest group] kind=%s mod_id=%s elapsed=%.3fs "
+                "items=%d known=%d",
+                kind,
+                mod_id,
+                elapsed,
+                len(group),
+                len(known),
+            )
+        if completed_groups % 25 == 0 or completed_groups == len(groups):
+            _LOG.info(
+                "[ModDB timing] phase=db_group_progress groups=%d/%d items=%d/%d "
+                "elapsed=%.3fs",
+                completed_groups,
+                len(groups),
+                completed_items,
+                sum(len(items) for items in groups.values()),
+                time.perf_counter() - groups_started,
+            )
     return stats
 
 
@@ -254,22 +296,56 @@ class DbIngestTarget:
         )
 
     def remove_origins(self, origins: Iterable[EntryOrigin]) -> None:
-        """清除本次完整重掃描確認已失效的精確來源。"""
-        for origin in origins:
-            self.conn.execute(
-                "DELETE FROM entry_origin WHERE pack_scope=? AND source_kind=? "
-                "AND source_path=? AND selector=? "
-                "AND entry_id IN ("
-                "SELECT id FROM entry WHERE mc_version=?"
-                ")",
-                (
-                    origin.pack_scope,
-                    origin.source_kind,
-                    origin.source_path,
-                    origin.selector,
-                    self.version,
-                ),
+        """批次清除本次完整重掃描確認已失效的精確來源。
+
+        逐筆刪除會對同一版本的 ``entry`` 反覆執行大型子查詢；大型 FTB
+        掃描可能因此把數千個 stale origin 放大成數十億次索引探查。把
+        origin key 放入連線專屬的暫存表後一次刪除，仍保留來源範圍與版本
+        隔離，但只掃描持久化資料表一次。
+        """
+        origin_keys = {
+            (
+                origin.pack_scope,
+                origin.source_kind,
+                origin.source_path,
+                origin.selector,
             )
+            for origin in origins
+        }
+        if not origin_keys:
+            return
+
+        self.conn.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS _moddb_stale_origins ("
+            "pack_scope TEXT NOT NULL, "
+            "source_kind TEXT NOT NULL, "
+            "source_path TEXT NOT NULL, "
+            "selector TEXT NOT NULL, "
+            "PRIMARY KEY (pack_scope, source_kind, source_path, selector)"
+            ") WITHOUT ROWID"
+        )
+        self.conn.execute("DELETE FROM temp._moddb_stale_origins")
+        self.conn.executemany(
+            "INSERT INTO temp._moddb_stale_origins "
+            "(pack_scope, source_kind, source_path, selector) VALUES (?,?,?,?)",
+            origin_keys,
+        )
+        self.conn.execute(
+            "DELETE FROM entry_origin "
+            "WHERE EXISTS ("
+            "SELECT 1 FROM temp._moddb_stale_origins AS stale "
+            "WHERE stale.pack_scope=entry_origin.pack_scope "
+            "AND stale.source_kind=entry_origin.source_kind "
+            "AND stale.source_path=entry_origin.source_path "
+            "AND stale.selector=entry_origin.selector"
+            ") "
+            "AND EXISTS ("
+            "SELECT 1 FROM entry AS e "
+            "WHERE e.id=entry_origin.entry_id AND e.mc_version=?"
+            ")",
+            (self.version,),
+        )
+        self.conn.execute("DELETE FROM temp._moddb_stale_origins")
 
 
 class PreviewIngestTarget:

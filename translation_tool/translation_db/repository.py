@@ -17,9 +17,11 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import logging
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -145,6 +147,8 @@ from translation_tool.utils.text_matching import (
     matching_terms,
     term_canonical_key,
 )
+
+_LOG = logging.getLogger(__name__)
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -861,14 +865,60 @@ class TranslationDB(
 
         一個交易只提交一次（每次提交的 WAL 寫入與檢查點是掃描的固定成本）。結果與逐份呼叫 :meth:`ingest` 相同；任何一份失敗整個交易回復。
         """
+        ingest_started = time.perf_counter()
+        grouping_started = time.perf_counter()
         grouped = [group_scan_items(items) for items in batches]
+        group_count = sum(len(groups) for groups in grouped)
+        item_count = sum(len(group) for groups in grouped for group in groups.values())
+        _LOG.info(
+            "[ModDB timing] phase=db_group_scan elapsed=%.3fs batches=%d "
+            "groups=%d items=%d",
+            time.perf_counter() - grouping_started,
+            len(grouped),
+            group_count,
+            item_count,
+        )
         stale_origins = tuple(stale_origins)
         touched: list[int] = []
+        transaction_started = time.perf_counter()
         with self._tx() as conn:
             target = DbIngestTarget(conn, version, touched)
+            groups_started = time.perf_counter()
             results = [ingest_groups(target, groups, convert) for groups in grouped]
+            _LOG.info(
+                "[ModDB timing] phase=db_ingest_groups elapsed=%.3fs "
+                "groups=%d items=%d touched=%d",
+                time.perf_counter() - groups_started,
+                group_count,
+                item_count,
+                len(touched),
+            )
+            stale_cleanup_started = time.perf_counter()
             target.remove_origins(stale_origins)
+            _LOG.info(
+                "[ModDB timing] phase=db_remove_stale_origins elapsed=%.3fs "
+                "origins=%d",
+                time.perf_counter() - stale_cleanup_started,
+                len(stale_origins),
+            )
+            refresh_started = time.perf_counter()
             self._refresh(conn, touched)
+            _LOG.info(
+                "[ModDB timing] phase=db_refresh elapsed=%.3fs touched=%d "
+                "stale_origins=%d",
+                time.perf_counter() - refresh_started,
+                len(touched),
+                len(stale_origins),
+            )
+        _LOG.info(
+            "[ModDB timing] phase=db_transaction elapsed=%.3fs total=%.3fs "
+            "groups=%d items=%d touched=%d",
+            time.perf_counter() - transaction_started,
+            time.perf_counter() - ingest_started,
+            group_count,
+            item_count,
+            len(touched),
+        )
         if entry_ids_out is not None:
             # 只有交易成功提交才回報；呼叫端用它界定「本次匯入」的範圍
             entry_ids_out.update(touched)

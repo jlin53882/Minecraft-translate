@@ -10,8 +10,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import logging
 import os
 import re
+import time
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -66,6 +68,19 @@ _TRANSLATE_EXPR = re.compile(
     r"^(?:Text|Component)\.(?:translate|translatable)\s*\(", re.IGNORECASE
 )
 _KUBEJS_LANG_LOCALES = {"en_us", "zh_cn", "zh_tw"}
+_LOG = logging.getLogger(__name__)
+_SLOW_SOURCE_FILE_SECONDS = 1.0
+
+
+def _log_slow_source_operation(kind: str, path: Path, elapsed: float) -> None:
+    if elapsed < _SLOW_SOURCE_FILE_SECONDS:
+        return
+    _LOG.warning(
+        "[ModDB slow source] kind=%s elapsed=%.3fs path=%s",
+        kind,
+        elapsed,
+        path,
+    )
 
 
 def _mask_js_non_code(text: str) -> str:
@@ -344,6 +359,7 @@ def scan_pack_sources(
     include_ftb: bool = True,
 ) -> PackScanResult:
     """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。"""
+    scan_started = time.perf_counter()
     root = Path(pack_root).expanduser().resolve()
     result = PackScanResult(pack_scope=_pack_scope(root))
     if not root.is_dir():
@@ -357,10 +373,54 @@ def scan_pack_sources(
         "ftb_quests": quests.is_dir(),
     }
     if include_kubejs and kubejs.is_dir():
-        _scan_kubejs(kubejs, version, scope, result)
+        phase_started = time.perf_counter()
+        try:
+            _scan_kubejs(kubejs, version, scope, result)
+        finally:
+            breakdown = result.source_breakdown()["kubejs"]
+            _LOG.info(
+                "[ModDB timing] phase=kubejs elapsed=%.3fs files=%d "
+                "read=%d sources=%d items=%d refs=%d",
+                time.perf_counter() - phase_started,
+                breakdown["files_seen"],
+                breakdown["files_read"],
+                breakdown["sources_found"],
+                breakdown["items_found"],
+                breakdown["references_found"],
+            )
     if include_ftb and quests.is_dir():
-        _scan_ftb_quests(quests, version, scope, result)
-    _resolve_reference_targets(result)
+        phase_started = time.perf_counter()
+        try:
+            _scan_ftb_quests(quests, version, scope, result)
+        finally:
+            breakdown = result.source_breakdown()["ftb_quests"]
+            _LOG.info(
+                "[ModDB timing] phase=ftb_quests elapsed=%.3fs files=%d "
+                "read=%d sources=%d items=%d refs=%d",
+                time.perf_counter() - phase_started,
+                breakdown["files_seen"],
+                breakdown["files_read"],
+                breakdown["sources_found"],
+                breakdown["items_found"],
+                breakdown["references_found"],
+            )
+    phase_started = time.perf_counter()
+    try:
+        _resolve_reference_targets(result)
+    finally:
+        _LOG.info(
+            "[ModDB timing] phase=resolve_references elapsed=%.3fs refs=%d",
+            time.perf_counter() - phase_started,
+            len(result.references),
+        )
+    _LOG.info(
+        "[ModDB timing] phase=total elapsed=%.3fs files=%d items=%d refs=%d issues=%d",
+        time.perf_counter() - scan_started,
+        result.files_seen,
+        len(result.items),
+        len(result.references),
+        len(result.issues),
+    )
     return result
 
 
@@ -479,6 +539,7 @@ def _iter_files(root: Path, suffixes: tuple[str, ...], result: PackScanResult):
 
 
 def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
+    started = time.perf_counter()
     try:
         raw = path.read_bytes()
         return raw.decode("utf-8-sig"), hashlib.sha256(raw).hexdigest()
@@ -487,6 +548,8 @@ def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
             _issue(path, "source_read_failed", str(exc), status="parse_failed")
         )
         return None
+    finally:
+        _log_slow_source_operation("read_text", path, time.perf_counter() - started)
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -495,15 +558,21 @@ def _relative(path: Path, root: Path) -> str:
 
 def _scan_kubejs(root: Path, version: str, scope: str, result: PackScanResult) -> None:
     for path in _iter_files(root, (".js",), result):
-        result.mark_file("kubejs")
-        rel = _relative(path, root)
-        result.mark_source("kubejs", rel)
-        loaded = _read_text(path, result)
-        if loaded is None:
-            continue
-        result.mark_file_read("kubejs")
-        text, digest = loaded
-        _scan_kubejs_script(text, rel, digest, scope, version, result)
+        started = time.perf_counter()
+        try:
+            result.mark_file("kubejs")
+            rel = _relative(path, root)
+            result.mark_source("kubejs", rel)
+            loaded = _read_text(path, result)
+            if loaded is None:
+                continue
+            result.mark_file_read("kubejs")
+            text, digest = loaded
+            _scan_kubejs_script(text, rel, digest, scope, version, result)
+        finally:
+            _log_slow_source_operation(
+                "kubejs_script", path, time.perf_counter() - started
+            )
     _scan_kubejs_lang(root, version, scope, result)
     _normalize_kubejs_script_source_locales(result)
 
@@ -1021,7 +1090,13 @@ def _read_ftb_lang_file(
         return
     result.mark_file_read("ftb_quests")
     _, digest = loaded
-    data = walk_snbt_file(str(path))
+    parse_started = time.perf_counter()
+    try:
+        data = walk_snbt_file(str(path))
+    finally:
+        _log_slow_source_operation(
+            "ftb_lang_parse", path, time.perf_counter() - parse_started
+        )
     if data is None:
         result.issues.append(
             _issue(
@@ -1187,7 +1262,13 @@ def _scan_ftb_quest_data_files(
             continue
         result.mark_file_read("ftb_quests")
         _, digest = loaded
-        data = walk_snbt_file(str(path))
+        parse_started = time.perf_counter()
+        try:
+            data = walk_snbt_file(str(path))
+        finally:
+            _log_slow_source_operation(
+                "ftb_data_parse", path, time.perf_counter() - parse_started
+            )
         if data is None:
             result.issues.append(
                 _issue(
@@ -1206,9 +1287,35 @@ def _scan_ftb_quest_data_files(
 def _scan_ftb_quests(
     root: Path, version: str, scope: str, result: PackScanResult
 ) -> None:
-    locale_values = _collect_ftb_lang_values(root, scope, result)
-    _append_ftb_lang_items(locale_values, version, scope, result)
-    _scan_ftb_quest_data_files(root, root / "lang", version, scope, result)
+    phase_started = time.perf_counter()
+    try:
+        locale_values = _collect_ftb_lang_values(root, scope, result)
+    finally:
+        _LOG.info(
+            "[ModDB timing] phase=ftb_lang_files elapsed=%.3fs files=%d items=%d",
+            time.perf_counter() - phase_started,
+            result.files_seen_by_source.get("ftb_quests", 0),
+            len(result.items),
+        )
+    phase_started = time.perf_counter()
+    try:
+        _append_ftb_lang_items(locale_values, version, scope, result)
+    finally:
+        _LOG.info(
+            "[ModDB timing] phase=ftb_lang_items elapsed=%.3fs items=%d",
+            time.perf_counter() - phase_started,
+            len(result.items),
+        )
+    phase_started = time.perf_counter()
+    try:
+        _scan_ftb_quest_data_files(root, root / "lang", version, scope, result)
+    finally:
+        _LOG.info(
+            "[ModDB timing] phase=ftb_data_files elapsed=%.3fs files=%d items=%d",
+            time.perf_counter() - phase_started,
+            result.files_seen_by_source.get("ftb_quests", 0),
+            len(result.items),
+        )
 
 
 def _scan_quest_value(
