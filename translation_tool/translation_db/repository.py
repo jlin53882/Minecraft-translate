@@ -871,8 +871,7 @@ class TranslationDB(
         group_count = sum(len(groups) for groups in grouped)
         item_count = sum(len(group) for groups in grouped for group in groups.values())
         _LOG.info(
-            "[ModDB timing] phase=db_group_scan elapsed=%.3fs batches=%d "
-            "groups=%d items=%d",
+            "[資料庫匯入] 分組完成：耗時 %.3f 秒，批次 %d，群組 %d，項目 %d",
             time.perf_counter() - grouping_started,
             len(grouped),
             group_count,
@@ -886,8 +885,7 @@ class TranslationDB(
             groups_started = time.perf_counter()
             results = [ingest_groups(target, groups, convert) for groups in grouped]
             _LOG.info(
-                "[ModDB timing] phase=db_ingest_groups elapsed=%.3fs "
-                "groups=%d items=%d touched=%d",
+                "[資料庫匯入] 寫入條目與譯文完成：耗時 %.3f 秒，群組 %d，項目 %d，異動條目 %d",
                 time.perf_counter() - groups_started,
                 group_count,
                 item_count,
@@ -896,22 +894,21 @@ class TranslationDB(
             stale_cleanup_started = time.perf_counter()
             target.remove_origins(stale_origins)
             _LOG.info(
-                "[ModDB timing] phase=db_remove_stale_origins elapsed=%.3fs origins=%d",
+                "[資料庫匯入] 清除失效來源完成：耗時 %.3f 秒，來源 %d 筆",
                 time.perf_counter() - stale_cleanup_started,
                 len(stale_origins),
             )
             refresh_started = time.perf_counter()
             self._refresh(conn, touched)
             _LOG.info(
-                "[ModDB timing] phase=db_refresh elapsed=%.3fs touched=%d "
-                "stale_origins=%d",
+                "[資料庫匯入] 重算生效譯文完成：耗時 %.3f 秒，異動條目 %d，失效來源 %d",
                 time.perf_counter() - refresh_started,
                 len(touched),
                 len(stale_origins),
             )
         _LOG.info(
-            "[ModDB timing] phase=db_transaction elapsed=%.3fs total=%.3fs "
-            "groups=%d items=%d touched=%d",
+            "[資料庫匯入] 交易提交完成：交易 %.3f 秒，含分組共 %.3f 秒，"
+            "群組 %d，項目 %d，異動條目 %d",
             time.perf_counter() - transaction_started,
             time.perf_counter() - ingest_started,
             group_count,

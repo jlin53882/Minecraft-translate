@@ -100,8 +100,7 @@ def ingest_groups(
         for item_index, item in enumerate(group, 1):
             if len(group) >= 1000 and item_index % 1000 == 0:
                 _LOG.info(
-                    "[ModDB timing] phase=db_group_item_progress kind=%s "
-                    "mod_id=%s items=%d/%d elapsed=%.3fs",
+                    "[資料庫匯入] 大型群組進度：種類 %s，模組 %s，項目 %d/%d，已耗時 %.3f 秒",
                     kind,
                     mod_id,
                     item_index,
@@ -146,8 +145,8 @@ def ingest_groups(
         elapsed = time.perf_counter() - group_started
         if elapsed >= _SLOW_INGEST_GROUP_SECONDS:
             _LOG.warning(
-                "[ModDB slow ingest group] kind=%s mod_id=%s elapsed=%.3fs "
-                "items=%d known=%d",
+                "[資料庫匯入] 群組處理過慢：種類 %s，模組 %s，耗時 %.3f 秒，"
+                "項目 %d，既有條目 %d",
                 kind,
                 mod_id,
                 elapsed,
@@ -156,8 +155,7 @@ def ingest_groups(
             )
         if completed_groups % 25 == 0 or completed_groups == len(groups):
             _LOG.info(
-                "[ModDB timing] phase=db_group_progress groups=%d/%d items=%d/%d "
-                "elapsed=%.3fs",
+                "[資料庫匯入] 群組進度：%d/%d，項目 %d/%d，已耗時 %.3f 秒",
                 completed_groups,
                 len(groups),
                 completed_items,

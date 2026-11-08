@@ -1198,7 +1198,7 @@ def _ingest_pack_result(
         raise ValueError("模組包來源需要資料庫才能寫入")
     ingest_started = time.perf_counter()
     _LOG.info(
-        "[ModDB timing] phase=pack_db_ingest_start items=%d refs=%d",
+        "[模組包來源] 開始寫入資料庫：項目 %d，跨格式引用 %d",
         len(result.items),
         len(result.references),
     )
@@ -1210,8 +1210,8 @@ def _ingest_pack_result(
         entry_ids_out=touched,
     )[0]
     _LOG.info(
-        "[ModDB timing] phase=pack_db_ingest elapsed=%.3fs new=%d "
-        "added_translations=%d existing=%d en_changed=%d",
+        "[模組包來源] 資料庫寫入完成：耗時 %.3f 秒，新增 %d，補入譯文 %d，"
+        "略過 %d，原文已變動 %d",
         time.perf_counter() - ingest_started,
         stats.new_entries,
         stats.added_translations,
@@ -1225,7 +1225,7 @@ def _ingest_pack_result(
         pack_scope=result.pack_scope,
     )
     _LOG.info(
-        "[ModDB timing] phase=pack_record_references elapsed=%.3fs refs=%d",
+        "[模組包來源] 跨格式引用寫入完成：耗時 %.3f 秒，引用 %d",
         time.perf_counter() - references_started,
         len(result.references),
     )

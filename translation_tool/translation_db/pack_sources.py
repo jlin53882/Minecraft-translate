@@ -76,7 +76,7 @@ def _log_slow_source_operation(kind: str, path: Path, elapsed: float) -> None:
     if elapsed < _SLOW_SOURCE_FILE_SECONDS:
         return
     _LOG.warning(
-        "[ModDB slow source] kind=%s elapsed=%.3fs path=%s",
+        "[模組包來源] 檔案處理過慢：%s，耗時 %.3f 秒，路徑 %s",
         kind,
         elapsed,
         path,
@@ -379,8 +379,8 @@ def scan_pack_sources(
         finally:
             breakdown = result.source_breakdown()["kubejs"]
             _LOG.info(
-                "[ModDB timing] phase=kubejs elapsed=%.3fs files=%d "
-                "read=%d sources=%d items=%d refs=%d",
+                "[模組包來源] KubeJS 分析完成：耗時 %.3f 秒，檔案 %d，讀取 %d，"
+                "可用來源 %d，項目 %d，引用 %d",
                 time.perf_counter() - phase_started,
                 breakdown["files_seen"],
                 breakdown["files_read"],
@@ -395,8 +395,8 @@ def scan_pack_sources(
         finally:
             breakdown = result.source_breakdown()["ftb_quests"]
             _LOG.info(
-                "[ModDB timing] phase=ftb_quests elapsed=%.3fs files=%d "
-                "read=%d sources=%d items=%d refs=%d",
+                "[模組包來源] FTB Quests 分析完成：耗時 %.3f 秒，檔案 %d，讀取 %d，"
+                "可用來源 %d，項目 %d，引用 %d",
                 time.perf_counter() - phase_started,
                 breakdown["files_seen"],
                 breakdown["files_read"],
@@ -409,12 +409,12 @@ def scan_pack_sources(
         _resolve_reference_targets(result)
     finally:
         _LOG.info(
-            "[ModDB timing] phase=resolve_references elapsed=%.3fs refs=%d",
+            "[模組包來源] 解析跨格式引用完成：耗時 %.3f 秒，引用 %d",
             time.perf_counter() - phase_started,
             len(result.references),
         )
     _LOG.info(
-        "[ModDB timing] phase=total elapsed=%.3fs files=%d items=%d refs=%d issues=%d",
+        "[模組包來源] 來源分析總計：耗時 %.3f 秒，檔案 %d，項目 %d，引用 %d，問題 %d",
         time.perf_counter() - scan_started,
         result.files_seen,
         len(result.items),
@@ -549,7 +549,7 @@ def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
         )
         return None
     finally:
-        _log_slow_source_operation("read_text", path, time.perf_counter() - started)
+        _log_slow_source_operation("讀取檔案", path, time.perf_counter() - started)
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -571,7 +571,7 @@ def _scan_kubejs(root: Path, version: str, scope: str, result: PackScanResult) -
             _scan_kubejs_script(text, rel, digest, scope, version, result)
         finally:
             _log_slow_source_operation(
-                "kubejs_script", path, time.perf_counter() - started
+                "KubeJS 腳本分析", path, time.perf_counter() - started
             )
     _scan_kubejs_lang(root, version, scope, result)
     _normalize_kubejs_script_source_locales(result)
@@ -1095,7 +1095,7 @@ def _read_ftb_lang_file(
         data = walk_snbt_file(str(path))
     finally:
         _log_slow_source_operation(
-            "ftb_lang_parse", path, time.perf_counter() - parse_started
+            "FTB 語系檔解析", path, time.perf_counter() - parse_started
         )
     if data is None:
         result.issues.append(
@@ -1267,7 +1267,7 @@ def _scan_ftb_quest_data_files(
             data = walk_snbt_file(str(path))
         finally:
             _log_slow_source_operation(
-                "ftb_data_parse", path, time.perf_counter() - parse_started
+                "FTB 任務資料解析", path, time.perf_counter() - parse_started
             )
         if data is None:
             result.issues.append(
@@ -1292,7 +1292,7 @@ def _scan_ftb_quests(
         locale_values = _collect_ftb_lang_values(root, scope, result)
     finally:
         _LOG.info(
-            "[ModDB timing] phase=ftb_lang_files elapsed=%.3fs files=%d items=%d",
+            "[模組包來源] FTB 語系檔讀取完成：耗時 %.3f 秒，檔案 %d，累計項目 %d",
             time.perf_counter() - phase_started,
             result.files_seen_by_source.get("ftb_quests", 0),
             len(result.items),
@@ -1302,7 +1302,7 @@ def _scan_ftb_quests(
         _append_ftb_lang_items(locale_values, version, scope, result)
     finally:
         _LOG.info(
-            "[ModDB timing] phase=ftb_lang_items elapsed=%.3fs items=%d",
+            "[模組包來源] FTB 語系項目整理完成：耗時 %.3f 秒，累計項目 %d",
             time.perf_counter() - phase_started,
             len(result.items),
         )
@@ -1311,7 +1311,7 @@ def _scan_ftb_quests(
         _scan_ftb_quest_data_files(root, root / "lang", version, scope, result)
     finally:
         _LOG.info(
-            "[ModDB timing] phase=ftb_data_files elapsed=%.3fs files=%d items=%d",
+            "[模組包來源] FTB 任務資料檔分析完成：耗時 %.3f 秒，檔案 %d，累計項目 %d",
             time.perf_counter() - phase_started,
             result.files_seen_by_source.get("ftb_quests", 0),
             len(result.items),
