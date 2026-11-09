@@ -50,6 +50,7 @@ from translation_tool.translation_db.content_identity import (
     content_key_value,
     content_mod_sql,
     content_mod_value,
+    loose_text,
     pack_label,
     same_content_sql,
 )
@@ -4894,7 +4895,11 @@ class TranslationDB(
                         "VALUES (?,?,?,?,?)",
                         (item.kind, version, item.mod_id, item.key, item.en_us),
                     ).lastrowid
-                elif row[1] != item.en_us and row[1]:
+                elif (
+                    row[1] != item.en_us
+                    and row[1]
+                    and loose_text(row[1]) != loose_text(item.en_us)
+                ):
                     conn.execute(
                         "INSERT OR IGNORE INTO src_change "
                         "(kind, mc_version, mod_id, key, old_en, new_en) "

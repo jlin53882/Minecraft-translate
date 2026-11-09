@@ -367,8 +367,32 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _install_content_index(conn)
     _install_schema_v3_objects(conn)
     conn.commit()
+    _purge_trivial_src_changes(conn)
     _install_smart_review_objects(conn)
     _install_derived_tables(conn)
+
+
+def _purge_trivial_src_changes(conn: sqlite3.Connection) -> None:
+    """刪除舊版留下、只差大小寫或空白的「原文已變動」紀錄。
+
+    紀錄只有數百到數千筆，每次開啟檢查一次的成本可忽略；沒有要刪的就不寫入（不留標記，
+    也不改動資料）。
+    """
+    from .content_identity import loose_text  # 與 schema 互相引用，延後匯入
+
+    trivial = [
+        row[0]
+        for row in conn.execute("SELECT id, old_en, new_en FROM src_change")
+        if loose_text(row[1] or "") == loose_text(row[2] or "")
+    ]
+    for start in range(0, len(trivial), 500):
+        chunk = trivial[start : start + 500]
+        conn.execute(
+            f"DELETE FROM src_change WHERE id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        )
+    if trivial:
+        conn.commit()
 
 
 def _install_content_index(conn: sqlite3.Connection) -> None:

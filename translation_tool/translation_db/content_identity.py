@@ -77,6 +77,15 @@ def same_content_sql(left: str, right: str) -> str:
     )
 
 
+def loose_text(text: str) -> str:
+    """比較原文用的寬鬆形式：不分大小寫、連續空白視為一個。
+
+    新版整合包或模組常只改原文的大小寫或空白，譯文仍然適用，所以這樣的差異視為內容相同
+    （跨版本沿用、版本差異審核與掃描時的「原文已變動」判斷都用它）。
+    """
+    return " ".join(text.casefold().split())
+
+
 def other_version_sql(left: str, right: str) -> str:
     """``right`` 是 ``left`` 的「其他版本」的條件（跨版本沿用與版本差異審核使用）。
 

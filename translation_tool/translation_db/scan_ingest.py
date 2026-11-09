@@ -21,6 +21,7 @@ from translation_tool.core.source_locale import (
     locale_from_source_selector,
     normalize_source_locale,
 )
+from translation_tool.translation_db.content_identity import loose_text
 from translation_tool.translation_db.identity import canonical_entry_key
 from translation_tool.translation_db.models import EntryOrigin, IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
@@ -151,13 +152,19 @@ def ingest_groups(
                 eid = target.add_entry(kind, mod_id, item.key, item.en_us)
                 known[item.key] = (eid, item.en_us)
                 stats.new_entries += 1
-            elif cur[1] != item.en_us and item.en_us and cur[1]:
+            elif (
+                cur[1] != item.en_us
+                and item.en_us
+                and cur[1]
+                and loose_text(cur[1]) != loose_text(item.en_us)
+            ):
+                # 只差大小寫或空白不算原文已變動：沿用既有原文，照常補譯文
                 target.record_src_change(kind, mod_id, item.key, cur[1], item.en_us)
                 stats.en_changed += 1
                 continue
             else:
                 eid = cur[0]
-                if cur[1] != item.en_us and item.en_us:
+                if not cur[1] and item.en_us:
                     # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
                     target.adopt_en(eid, item.en_us)
                     known[item.key] = (eid, item.en_us)

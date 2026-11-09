@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from .content_identity import (
     content_key_sql,
     content_mod_sql,
+    loose_text,
     other_version_sql,
     pack_label,
 )
@@ -100,14 +101,6 @@ class CrossVersionRow:
     @property
     def differs(self) -> bool:
         return any(ref.zh_tw != self.target_zh_tw for ref in self.refs)
-
-
-def loose_text(text: str) -> str:
-    """比較原文用的寬鬆形式：不分大小寫、連續空白視為一個。
-
-    新版整合包常只改原文的大小寫或空白，譯文仍然適用，所以這樣的差異視為內容相同。
-    """
-    return " ".join(text.casefold().split())
 
 
 SOURCE_SIMILARITY = (
