@@ -79,7 +79,9 @@ def same_content_sql(left: str, right: str) -> str:
     )
 
 
-_FORMAT_CODE = re.compile(r"%(?:\d+\$)?[-#+ 0,(]*\d*(?:\.\d+)?[A-Za-z%]")
+_FORMAT_CODE = re.compile(
+    r"%(?:\d+\$)?[-#+ 0,(]*\d*(?:\.\d+)?(?:[tT][A-Za-z]|[A-Za-z%])"
+)
 
 
 def loose_text(text: str) -> str:

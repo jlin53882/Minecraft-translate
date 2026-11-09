@@ -68,6 +68,8 @@ def test_loose_text_keeps_newlines_and_format_code_case():
     assert loose_text("Value %s") != loose_text("Value %S")
     assert loose_text("Hello %1$S") == loose_text("hello %1$S")
     assert loose_text("a\r\nb") == loose_text("a\nb")
+    assert loose_text("Date %1$tY") != loose_text("Date %1$ty")
+    assert loose_text("Date %tB") == loose_text("date %tB")
 
 
 def test_newline_change_is_a_source_change(tmp_path):
