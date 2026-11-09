@@ -9,6 +9,7 @@ from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.pack_sources import scan_pack_sources
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
+from translation_tool.translation_db.schema import SRC_JAR_CN
 
 
 def _write_fixture(root):
@@ -973,10 +974,57 @@ def test_kubejs_lang_uses_chinese_fallback_as_the_source_snapshot(tmp_path):
     items = [item for item in result.items if item.source_format == "lang-json"]
 
     assert result.locale_fallbacks == {"demo": "zh_cn"}
+    # 來源快照仍是原文；簡中來源同時是轉繁的候選（zh_cn 供匯入時 OpenCC 轉繁）。
     assert {(item.key, item.en_us, item.zh_cn) for item in items} == {
-        ("a", "簡體來源", ""),
-        ("b", "另一個來源", ""),
+        ("a", "簡體來源", "簡體來源"),
+        ("b", "另一個來源", "另一個來源"),
     }
+    assert all(item.source is None for item in items)
+
+
+def test_moddb_ingest_converts_zh_cn_only_pack_lang_to_zh_tw(tmp_path):
+    """只附 zh_cn.json 的 KubeJS 語系：原文保留簡中，zh_tw 自動簡轉繁（簡中轉繁來源）。"""
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"subtitles.hurt": "幽灵受伤"}), encoding="utf-8"
+    )
+
+    db = TranslationDB(tmp_path / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.20.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        row = db._one(
+            "SELECT e.en_us, ef.zh_tw, ef.source FROM entry e "
+            "JOIN effective ef ON ef.entry_id = e.id "
+            "WHERE e.kind='kubejs_lang' AND e.key='subtitles.hurt'"
+        )
+        assert row[0] == "幽灵受伤"
+        assert row[1] == "幽靈受傷"
+        assert row[2] == SRC_JAR_CN
+    finally:
+        db.close()
+
+
+def test_untranslated_english_value_in_a_chinese_source_is_not_a_translation(tmp_path):
+    """zh_cn 檔裡沒翻的英文值不是譯文：不補 zh_cn，條目仍是未翻譯。"""
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "zh_cn.json").write_text(
+        json.dumps({"a": "Untranslated English", "b": "幽灵受伤"}), encoding="utf-8"
+    )
+
+    result = scan_pack_sources(tmp_path, "1.20.1")
+    items = {i.key: i for i in result.items if i.source_format == "lang-json"}
+
+    assert items["a"].zh_cn == "" and items["a"].zh_tw == ""
+    assert items["b"].zh_cn == "幽灵受伤"
 
 
 def test_moddb_ingest_keeps_chinese_fallback_as_original_text(tmp_path):

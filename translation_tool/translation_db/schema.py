@@ -373,9 +373,25 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 def _install_content_index(conn: sqlite3.Connection) -> None:
     """跨版本內容比對的表達式索引（定義見 ``content_identity``）；已存在就略過。"""
-    from .content_identity import create_index_sql  # 與 schema 互相引用，延後匯入
+    from .content_identity import (  # 與 schema 互相引用，延後匯入
+        INDEX_NAME,
+        create_index_sql,
+    )
 
-    conn.execute(create_index_sql())
+    wanted = create_index_sql()
+    stored = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (INDEX_NAME,)
+    ).fetchone()
+    # 同名但定義不同（內容鍵值的定義改過）的舊索引要換掉，否則查詢雖然正確卻用不到索引
+    if stored is not None and _normalized_sql(stored[0]) != _normalized_sql(
+        wanted.replace(" IF NOT EXISTS", "")
+    ):
+        conn.execute(f"DROP INDEX IF EXISTS {INDEX_NAME}")
+    conn.execute(wanted)
+
+
+def _normalized_sql(sql: str | None) -> str:
+    return " ".join((sql or "").split()).lower()
 
 
 def _run_next_migration(conn: sqlite3.Connection, version: int) -> int:

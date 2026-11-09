@@ -23,6 +23,7 @@ from typing import Any
 import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List
 
+from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     is_extractable_line,
@@ -1034,25 +1035,24 @@ def _append_kubejs_lang_items(
             for key, value in values.items():
                 if not isinstance(key, str) or not isinstance(value, str):
                     continue
-                result.items.append(
-                    _make_item(
-                        kind=KIND_KUBEJS_LANG,
-                        # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
-                        # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
-                        mod_id=f"{namespace}@{scope}",
-                        key=key,
-                        text=value,
-                        rel=rel,
-                        selector=f"lang:{locale}:{key}",
-                        digest=digest,
-                        scope=scope,
-                        version=version,
-                        # A zh_cn/zh_tw file selected as the fallback source is
-                        # the source snapshot, not an already translated value.
-                        translated_locale=locale if locale != source_locale else "",
-                        source_locale=source_locale,
-                    )
+                item = _make_item(
+                    kind=KIND_KUBEJS_LANG,
+                    # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
+                    # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
+                    mod_id=f"{namespace}@{scope}",
+                    key=key,
+                    text=value,
+                    rel=rel,
+                    selector=f"lang:{locale}:{key}",
+                    digest=digest,
+                    scope=scope,
+                    version=version,
+                    # A zh_cn/zh_tw file selected as the fallback source is
+                    # the source snapshot, not an already translated value.
+                    translated_locale=locale if locale != source_locale else "",
+                    source_locale=source_locale,
                 )
+                result.items.append(_with_chinese_source_translation(item))
 
 
 def _scan_kubejs_lang(
@@ -1205,28 +1205,27 @@ def _append_ftb_lang_item(
             source_locale=source_locale,
         )
     )
-    result.items.append(
-        _make_item(
-            kind=KIND_FTB_QUEST_LANG,
-            mod_id=f"ftbquests@{scope}",
-            key=f"{rel}|lang:{lang_key}",
-            text=source,
-            rel=source_path,
-            selector=selector,
-            digest=source_digest,
-            scope=scope,
-            version=version,
-            # When en_us is present it is the source text and zh_tw/zh_cn
-            # are companion translations.  Mark a translated locale only
-            # for a locale-only file; otherwise _make_item would clear the
-            # English source while keeping the existing translation.
-            translated_locale="",
-            zh_cn="" if source_locale == "zh_cn" else locales.get("zh_cn", ("", ""))[0],
-            zh_tw="" if source_locale == "zh_tw" else locales.get("zh_tw", ("", ""))[0],
-            source_format="ftb-snbt-lang",
-            source_locale=source_locale,
-        )
+    item = _make_item(
+        kind=KIND_FTB_QUEST_LANG,
+        mod_id=f"ftbquests@{scope}",
+        key=f"{rel}|lang:{lang_key}",
+        text=source,
+        rel=source_path,
+        selector=selector,
+        digest=source_digest,
+        scope=scope,
+        version=version,
+        # When en_us is present it is the source text and zh_tw/zh_cn
+        # are companion translations.  Mark a translated locale only
+        # for a locale-only file; otherwise _make_item would clear the
+        # English source while keeping the existing translation.
+        translated_locale="",
+        zh_cn="" if source_locale == "zh_cn" else locales.get("zh_cn", ("", ""))[0],
+        zh_tw="" if source_locale == "zh_tw" else locales.get("zh_tw", ("", ""))[0],
+        source_format="ftb-snbt-lang",
+        source_locale=source_locale,
     )
+    result.items.append(_with_chinese_source_translation(item))
 
 
 def _append_ftb_lang_items(
@@ -1615,6 +1614,24 @@ def _make_item(
         pack_scope=scope,
         source_locale=source_locale,
     )
+
+
+def _with_chinese_source_translation(item: ScanItem) -> ScanItem:
+    """來源語系本身就是中文時，來源文字同時是可用的 zh_tw 候選。
+
+    整合包只附 ``zh_cn``（或 ``zh_tw``）語系檔時，該檔被選為來源快照並存進 ``en_us``，
+    ``zh_tw`` 卻是空的，條目會一直顯示「未翻譯」。簡中補上 ``zh_cn``，匯入時由 OpenCC 轉繁
+    （來源「簡中轉繁」）；繁中直接當 ``zh_tw``（來源「模組自帶繁中」）。語系檔裡沒翻的
+    英文值（不含中文字）不是譯文，不補；同一筆已有伴隨的繁中譯文時也不動。
+    """
+    text = item.en_us
+    if not text.strip() or item.zh_tw.strip() or not contains_cjk(text):
+        return item
+    if item.source_locale == "zh_cn":
+        return replace(item, zh_cn=item.zh_cn or text, source=None)
+    if item.source_locale == "zh_tw":
+        return replace(item, zh_tw=text, source=None)
+    return item
 
 
 def _translate_key(expr: str) -> str | None:

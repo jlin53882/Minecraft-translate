@@ -27,11 +27,17 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from .content_identity import content_mod_expr, content_mod_sql, same_content_sql
+from .content_identity import (
+    content_key_expr,
+    content_key_sql,
+    content_mod_expr,
+    content_mod_sql,
+    same_content_sql,
+)
 
 # 版本 4：同內容改用 content_identity 的定義（KubeJS／FTB 只看命名空間），且 diff 逐條要求
 # 跨版本（同版本的多個整合包不算），觸發器與索引重建
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 COLUMNS = {
     "mc_version": "TEXT",
     "diff": "INTEGER NOT NULL DEFAULT 0",
@@ -64,7 +70,9 @@ def _regroup(content: dict[str, str], exclude: str | None = None) -> str:
         f"e2.kind={content['kind']} "
         f"AND {content_mod_sql('e2')}="
         f"{content_mod_expr(content['kind'], content['mod_id'])} "
-        f"AND e2.key={content['key']} AND e2.en_us={content['en_us']}"
+        f"AND {content_key_sql('e2')}="
+        f"{content_key_expr(content['kind'], content['key'])} "
+        f"AND e2.en_us={content['en_us']}"
     )
     other = f" AND x.id<>{exclude}" if exclude is not None else ""
     value = (
@@ -287,14 +295,14 @@ def rebuild(conn: sqlite3.Connection) -> None:
 # 條件縮小範圍），再逐條確認它跟其他版本的條目有不同的生效譯文
 _DIFF_ENTRY_IDS = f"""
     SELECT e.id FROM (
-        SELECT e.kind AS kind, {content_mod_sql("e")} AS cmod, e.key AS key,
-               e.en_us AS en_us
+        SELECT e.kind AS kind, {content_mod_sql("e")} AS cmod,
+               {content_key_sql("e")} AS ckey, e.en_us AS en_us
         FROM entry e JOIN effective f ON f.entry_id = e.id
         WHERE e.en_us <> ''
-        GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
+        GROUP BY e.kind, {content_mod_sql("e")}, {content_key_sql("e")}, e.en_us
         HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
     ) g JOIN entry e ON e.kind = g.kind AND {content_mod_sql("e")} = g.cmod
-        AND e.key = g.key AND e.en_us = g.en_us
+        AND {content_key_sql("e")} = g.ckey AND e.en_us = g.en_us
     JOIN effective f ON f.entry_id = e.id
     WHERE EXISTS (
         SELECT 1 FROM entry x JOIN effective fx ON fx.entry_id = x.id

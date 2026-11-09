@@ -28,6 +28,8 @@ from translation_tool.core.terminology_model import (
     from_official_match,
 )
 from translation_tool.translation_db.content_identity import (
+    content_key_sql,
+    content_key_value,
     content_mod_sql,
     content_mod_value,
 )
@@ -303,7 +305,7 @@ class _LocalContextBuilder:
         mc_version, en_us = self.mc_version, self.en_us
         base_sql = (
             _REVIEWED_ENTRY_COLUMNS
-            + f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? "
+            + f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
         )
         # 先分層抓取，再在本地把品質合格的資料排到 LIMIT 前面；
@@ -334,7 +336,7 @@ class _LocalContextBuilder:
                 (
                     self.kind,
                     content_mod_value(self.kind, self.mod_id),
-                    self.key,
+                    content_key_value(self.kind, self.key),
                     *tier_params,
                 ),
             ):

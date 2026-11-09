@@ -23,6 +23,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from translation_tool.translation_db.content_identity import (
+    content_key_expr,
+    content_key_sql,
     content_mod_expr,
     content_mod_sql,
     same_content_sql,
@@ -31,7 +33,7 @@ from translation_tool.translation_db.sql_helpers import effective_review_sql
 
 # 版本 5：「相同內容」改用 content_identity 的定義（KubeJS／FTB 只看命名空間），版本不同的
 # 組要求橫跨兩個以上版本（同版本的多個整合包不算），摘要重建
-STAT_SCHEMA_VERSION = "5"
+STAT_SCHEMA_VERSION = "6"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
 COUNTER_NAMES = ("content", "mods", "no_source", "diff")
 
@@ -167,7 +169,8 @@ def _unique_content(row: str) -> str:
     same = (
         f"x.kind={row}.kind "
         f"AND {content_mod_sql('x')}={content_mod_expr(f'{row}.kind', f'{row}.mod_id')} "
-        f"AND x.key={row}.key AND x.en_us={row}.en_us"
+        f"AND {content_key_sql('x')}={content_key_expr(f'{row}.kind', f'{row}.key')} "
+        f"AND x.en_us={row}.en_us"
     )
     return f"NOT EXISTS (SELECT 1 FROM entry x WHERE {same} AND x.id<>{row}.id)"
 
@@ -278,7 +281,7 @@ _FULL_SOURCE_ROWS = f"""
 _FULL_COUNTERS = {
     "content": (
         f"SELECT COUNT(*) FROM (SELECT 1 FROM entry e "
-        f"GROUP BY e.kind, {content_mod_sql('e')}, e.key, e.en_us)"
+        f"GROUP BY e.kind, {content_mod_sql('e')}, {content_key_sql('e')}, e.en_us)"
     ),
     "mods": "SELECT COUNT(DISTINCT mod_id) FROM entry",
     "no_source": "SELECT COUNT(*) FROM entry WHERE en_us = ''",
@@ -286,7 +289,7 @@ _FULL_COUNTERS = {
         SELECT COUNT(*) FROM (
             SELECT 1 FROM entry e JOIN effective f ON f.entry_id = e.id
             WHERE e.en_us <> ''
-            GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
+            GROUP BY e.kind, {content_mod_sql("e")}, {content_key_sql("e")}, e.en_us
             HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
         )""",
 }

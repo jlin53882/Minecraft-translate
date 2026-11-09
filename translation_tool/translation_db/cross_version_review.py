@@ -24,7 +24,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .content_identity import same_content_sql
+from .content_identity import other_version_sql, same_content_sql
 from .query_interrupt import QueryCancelled
 from .schema import SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import (
@@ -183,7 +183,7 @@ def _fetch_rows(
         "LEFT JOIN effective ft ON ft.entry_id = e.id "
         "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
         f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
-        "AND e2.mc_version <> e.mc_version "
+        f"AND {other_version_sql('e', 'e2')} "
         f"AND {source_locale_match_sql('e', 'e2')}{ref_clause} "
         "JOIN effective fr ON fr.entry_id = e2.id "
         f"AND {effective_review_sql('fr', True)} IN ('reviewed','legacy_unknown') "
@@ -338,7 +338,7 @@ def explain_exclusions(
             f"{source_locale_sql('e')}, {source_locale_sql('e2')} "
             "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
             f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
-            f"AND e2.mc_version <> e.mc_version{ref_clause} "
+            f"AND {other_version_sql('e', 'e2')}{ref_clause} "
             "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
             f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
         )

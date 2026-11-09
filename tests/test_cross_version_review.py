@@ -15,6 +15,7 @@ from translation_tool.translation_db.cross_version_review import (
     QueryCancelled,
 )
 from translation_tool.translation_db.schema import (
+    KIND_FTB_QUEST_LANG,
     SRC_CROSS_VERSION,
     SRC_JAR_TW,
     SRC_MANUAL,
@@ -527,6 +528,88 @@ def test_two_pack_identities_in_one_version_are_told_apart_by_entry_id(db):
 
     assert db.apply_cross_version_references([_apply_item(row, chosen)]).applied == 1
     assert _entry(db, "26.1", "k", PACK_B).zh_tw == "乙"
+
+
+def _ftb_item(mod, rel, lang_key, en, tw=""):
+    return ScanItem(
+        KIND_FTB_QUEST_LANG,
+        mod,
+        f"{rel}|lang:{lang_key}",
+        en,
+        tw,
+    )
+
+
+def test_ftb_lang_matches_across_lang_file_layouts(db):
+    """FTB 語系鍵值含語系檔路徑：8.2 是單檔（__root__.snbt），8.5 拆成多檔；只看 |lang: 後的語系鍵。"""
+    ftb_old = "ftbquests@All the Mods 10 8.2@14cb3797fa50"
+    ftb_new = "ftbquests@All the Mods 10 8.5@39fa0c9d7170"
+    lang_key = "quest.765CD913CC3896B2.quest_desc"
+    db.ingest(
+        "1.21.1",
+        [_ftb_item(ftb_old, "__root__.snbt", lang_key, "Fire Dragons", "舊譯")],
+    )
+    old = db._one(
+        "SELECT id FROM entry WHERE mod_id=? AND key LIKE ?", (ftb_old, "%quest_desc")
+    )
+    db.review_manual(old[0], expected_zh_tw="舊譯", propagate=False)
+    ids = _import(
+        db,
+        "1.21.1",
+        [_ftb_item(ftb_new, "chapters/ice_fire.snbt", lang_key, "Fire Dragons")],
+    )
+
+    rows = db.list_cross_version_differences("1.21.1")
+    assert [(r.mod_id, r.reference.mod_id) for r in rows] == [(ftb_new, ftb_old)]
+    assert db.reuse_reviewed_translations("1.21.1", entry_ids=ids).applied == 1
+    new = db._one(
+        "SELECT ef.zh_tw FROM entry e JOIN effective ef ON ef.entry_id=e.id "
+        "WHERE e.mod_id=?",
+        (ftb_new,),
+    )
+    assert new == ("舊譯",)
+
+
+def test_ftb_lang_with_a_different_lang_key_is_not_matched(db):
+    ftb_old = "ftbquests@All the Mods 10 8.2@14cb3797fa50"
+    ftb_new = "ftbquests@All the Mods 10 8.5@39fa0c9d7170"
+    db.ingest(
+        "1.21.1", [_ftb_item(ftb_old, "__root__.snbt", "quest.A.title", "Hi", "好")]
+    )
+    old = db._one("SELECT id FROM entry WHERE mod_id=?", (ftb_old,))
+    db.review_manual(old[0], expected_zh_tw="好", propagate=False)
+    db.ingest("1.21.1", [_ftb_item(ftb_new, "chapter.snbt", "quest.B.title", "Hi")])
+    assert db.list_cross_version_differences("1.21.1") == []
+
+
+def test_same_game_version_other_pack_folder_counts_as_another_version(db):
+    """整合包 8.2 與 8.5 都標成 1.21.1：同遊戲版本、不同整合包資料夾也要能沿用與列出差異。"""
+    db.ingest("1.21.1", [_pack_item(PACK_A, "k", "Sonho", "舊譯")])
+    old = _entry(db, "1.21.1", "k", PACK_A)
+    db.review_manual(old.id, expected_zh_tw="舊譯", propagate=False)
+    ids = _import(db, "1.21.1", [_pack_item(PACK_B, "k", "Sonho", "")])
+
+    rows = db.list_cross_version_differences("1.21.1")
+    assert [(r.mod_id, r.reference.mod_id) for r in rows] == [(PACK_B, PACK_A)]
+
+    assert db.reuse_reviewed_translations("1.21.1", entry_ids=ids).applied == 1
+    assert _entry(db, "1.21.1", "k", PACK_B).zh_tw == "舊譯"
+
+
+def test_same_game_version_same_pack_or_plain_lang_is_not_another_version(db):
+    """同一個整合包資料夾、或一般 lang 內容，同遊戲版本都不算其他版本。"""
+    db.ingest("1.21.1", [_pack_item(PACK_A, "k", "Sonho", "舊譯")])
+    db.review_manual(
+        _entry(db, "1.21.1", "k", PACK_A).id, expected_zh_tw="舊譯", propagate=False
+    )
+    assert db.list_cross_version_differences("1.21.1") == []
+
+    db.ingest("1.21.1", [_item("p", "Bright", "", mod="modA")])
+    pid = _entry(db, "1.21.1", "p", "modA").id
+    db.save_manual(pid, "亮", propagate=False)
+    db.review_manual(pid, expected_zh_tw="亮", propagate=False)
+    db.ingest("1.21.1", [_item("p", "Bright", "", mod="modB")])
+    assert db.list_cross_version_differences("1.21.1") == []
 
 
 def _origin(db, entry_id, locale, selector="lang:x:k", path="assets/x/lang/x.json"):

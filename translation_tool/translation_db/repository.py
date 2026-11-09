@@ -46,6 +46,8 @@ from translation_tool.translation_db.content_identity import (
     INDEX_NAME as content_index_name,
 )
 from translation_tool.translation_db.content_identity import (
+    content_key_sql,
+    content_key_value,
     content_mod_sql,
     content_mod_value,
     same_content_sql,
@@ -1354,15 +1356,15 @@ class TranslationDB(
         mods = self._one("SELECT COUNT(DISTINCT mod_id) FROM entry")[0]
         content = self._one(
             "SELECT COUNT(*) FROM (SELECT 1 FROM entry e "
-            f"GROUP BY e.kind, {content_mod_sql('e')}, e.key, e.en_us)"
+            f"GROUP BY e.kind, {content_mod_sql('e')}, {content_key_sql('e')}, e.en_us)"
         )[0]
         diff = self._one(
             f"""
             SELECT COUNT(*) FROM (
-                SELECT e.kind, {content_mod_sql("e")}, e.key, e.en_us
+                SELECT e.kind, {content_mod_sql("e")}, {content_key_sql("e")}, e.en_us
                 FROM entry e JOIN effective f ON f.entry_id = e.id
                 WHERE e.en_us <> ''
-                GROUP BY e.kind, {content_mod_sql("e")}, e.key, e.en_us
+                GROUP BY e.kind, {content_mod_sql("e")}, {content_key_sql("e")}, e.en_us
                 HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
             )
             """
@@ -3839,12 +3841,12 @@ class TranslationDB(
                 r[0]
                 for r in self._q(
                     f"SELECT e.mc_version FROM {self._content_table()} "
-                    f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? "
+                    f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
                     "AND e.en_us=? ORDER BY e.mc_version",
                     (
                         entry.kind,
                         content_mod_value(entry.kind, entry.mod_id),
-                        entry.key,
+                        content_key_value(entry.kind, entry.key),
                         entry.en_us,
                     ),
                 )
@@ -3857,12 +3859,12 @@ class TranslationDB(
                 f"{self._effective_review_sql} "
                 f"FROM {self._content_table()} "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
-                f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? AND e.id<>? "
+                f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? AND e.id<>? "
                 "ORDER BY e.mc_version",
                 (
                     entry.kind,
                     content_mod_value(entry.kind, entry.mod_id),
-                    entry.key,
+                    content_key_value(entry.kind, entry.key),
                     entry_id,
                 ),
             )
@@ -3932,9 +3934,14 @@ class TranslationDB(
             "SELECT e.id, e.mc_version, f.zh_tw, f.source "
             f"FROM {self._content_table()} "
             "LEFT JOIN effective f ON f.entry_id = e.id "
-            f"WHERE e.kind = ? AND {content_mod_sql('e')} = ? AND e.key = ? "
+            f"WHERE e.kind = ? AND {content_mod_sql('e')} = ? AND {content_key_sql('e')} = ? "
             "AND e.en_us = ? ORDER BY e.mc_version",
-            (row[0], content_mod_value(row[0], row[1]), row[2], row[3]),
+            (
+                row[0],
+                content_mod_value(row[0], row[1]),
+                content_key_value(row[0], row[2]),
+                row[3],
+            ),
         ).fetchall()
 
     def preview_manual(
@@ -4909,12 +4916,12 @@ class TranslationDB(
                 if fill_other_versions:
                     blanks = conn.execute(
                         "SELECT e.id FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-                        f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? "
+                        f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
                         "AND e.en_us=? AND e.mc_version<>? AND f.entry_id IS NULL",
                         (
                             item.kind,
                             content_mod_value(item.kind, item.mod_id),
-                            item.key,
+                            content_key_value(item.kind, item.key),
                             item.en_us,
                             version,
                         ),

@@ -1709,7 +1709,10 @@ def test_content_lookups_use_the_content_index_even_without_statistics(db_path):
     """
     import inspect
 
-    from translation_tool.translation_db.content_identity import content_mod_sql
+    from translation_tool.translation_db.content_identity import (
+        content_key_sql,
+        content_mod_sql,
+    )
 
     seed(db_path)
     db = TranslationDB(db_path)
@@ -1720,10 +1723,11 @@ def test_content_lookups_use_the_content_index_even_without_statistics(db_path):
     plan = _plan(
         db,
         f"SELECT e.id FROM {db._content_table()} "
-        f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND e.key=? AND e.id<>?",
+        f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
+        "AND e.id<>?",
         [row.kind, row.mod_id, row.key, row.id],
     )
-    assert "idx_entry_content_ns (kind=? AND <expr>=? AND key=?)" in plan
+    assert "idx_entry_content_ns (kind=? AND <expr>=? AND <expr>=?)" in plan
 
     # 實際跑一遍：結果仍正確（同內容的其他版本、同鍵值的其他版本）
     detail = db.entry_detail(row.id)
