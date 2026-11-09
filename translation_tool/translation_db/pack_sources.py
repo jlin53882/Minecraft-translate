@@ -358,11 +358,16 @@ def scan_pack_sources(
     *,
     include_kubejs: bool = True,
     include_ftb: bool = True,
+    scope: str | None = None,
 ) -> PackScanResult:
-    """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。"""
+    """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。
+
+    ``scope`` 預設由根目錄路徑決定；來源是從 ZIP 抽到暫存目錄時，呼叫端要傳入由 ZIP
+    決定的穩定身分（見 :func:`pack_archive.zip_pack_scope`），否則每次暫存路徑不同。
+    """
     scan_started = time.perf_counter()
     root = Path(pack_root).expanduser().resolve()
-    result = PackScanResult(pack_scope=_pack_scope(root))
+    result = PackScanResult(pack_scope=scope or _pack_scope(root))
     if not root.is_dir():
         result.issues.append(_issue(root, "source_missing", "source_not_directory"))
         return result

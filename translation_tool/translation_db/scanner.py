@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import sqlite3
+import tempfile
 import time
 import zipfile
 from collections import Counter
@@ -58,6 +59,10 @@ from translation_tool.translation_db.identity import (
     patchouli_dir_names,
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
+from translation_tool.translation_db.pack_archive import (
+    extract_pack_members,
+    zip_pack_scope,
+)
 from translation_tool.translation_db.pack_sources import (
     PackScanResult,
     discover_pack_roots,
@@ -1319,6 +1324,142 @@ def _pack_source_updates(
     }
 
 
+def _pack_source_from_zip(folder: Path, options: ScanOptions) -> bool:
+    """翻譯 ZIP 模式選的是單一 ZIP 檔：模組包來源要從 ZIP 內抽出才能掃。"""
+    return options.translated and folder.is_file() and folder.suffix.lower() == ".zip"
+
+
+def _scan_pack_content(
+    db: TranslationDB | None,
+    preview: Any,
+    folder: str | Path,
+    options: ScanOptions,
+    convert: Callable[[str], str] | None,
+    report: ScanReport,
+    has_jars: bool,
+) -> Generator[dict[str, Any], None, tuple[PackScanResult, IngestStats | None, bool]]:
+    """分析並匯入 KubeJS／FTB Quests 模組包來源；回傳 ``(結果, 匯入統計, 找不到根目錄)``。
+
+    選資料夾時直接掃該資料夾；選單一 ZIP 檔時先把 ``kubejs``、``config/ftbquests/quests``
+    抽到暫存目錄再掃，模組包身分由 ZIP 決定（見 ``zip_pack_scope``），暫存目錄用完即刪。
+    """
+    empty = PackScanResult()
+    path = Path(folder)
+    from_zip = _pack_source_from_zip(path, options)
+    if not options.include_pack_content or (
+        options.translated and not path.is_dir() and not from_zip
+    ):
+        return empty, None, False
+    with tempfile.TemporaryDirectory(prefix="moddb_pack_") as tmp:
+        search: str | Path = folder
+        extract_issues: list[dict[str, str]] = []
+        if from_zip:
+            search = Path(tmp).resolve()
+            extract_issues = extract_pack_members(path, search)
+
+        def shown(root: Path) -> str:
+            """畫面與報告顯示：ZIP 來源用 ``ZIP路徑!/內部路徑``，不洩漏暫存目錄。"""
+            if not from_zip:
+                return str(root)
+            inner = root.relative_to(search).as_posix()
+            return str(folder) if inner == "." else f"{folder}!/{inner}"
+
+        pack_roots = discover_pack_roots(search)
+        if from_zip:
+            pack_roots = [
+                root for root in pack_roots if search in (root, *root.parents)
+            ]
+        report.pack_root_candidates = [shown(root) for root in pack_roots]
+        if len(pack_roots) != 1:
+            for issue in extract_issues:
+                report.add_issue(issue)
+            missing = yield from _report_pack_root_problem(
+                folder, report, pack_roots, has_jars
+            )
+            return empty, None, missing
+        pack_root = pack_roots[0]
+        report.pack_root = shown(pack_root)
+        yield {
+            "progress": 0.0,
+            "log": f"📦 模組包來源：開始分析 {report.pack_root}",
+            "level": "info",
+        }
+        pack_result = scan_pack_sources(
+            pack_root,
+            options.version,
+            scope=zip_pack_scope(path) if from_zip else None,
+        )
+        if from_zip:
+            # 問題清單會寫進資料庫與報告：不留暫存目錄路徑，改成 ZIP!/內部路徑。
+            for issue in pack_result.issues:
+                for key, value in issue.items():
+                    issue[key] = str(value).replace(str(search), f"{folder}!")
+        pack_result.issues.extend(extract_issues)
+        if options.translated:
+            # 與翻譯 ZIP 內的 lang 一致：譯文歸在使用者選的來源標記。
+            pack_result.items = [
+                replace(item, source=options.translation_source)
+                for item in pack_result.items
+            ]
+        report.pack_items_found = len(pack_result.items)
+        report.pack_files_seen = pack_result.files_seen
+        report.pack_sources = len(pack_result.sources_found)
+        report.pack_references = len(pack_result.references)
+        report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
+        report.pack_source_breakdown = pack_result.source_breakdown()
+        for issue in pack_result.issues:
+            report.add_issue(issue)
+        stats = _ingest_pack_result(
+            db,
+            preview,
+            pack_result,
+            options.version,
+            convert,
+            report.touched_entry_ids,
+        )
+        report.stats.add(stats)
+        yield from _pack_source_updates(pack_result, stats, dry_run=options.dry_run)
+        return pack_result, stats, False
+
+
+def _report_pack_root_problem(
+    folder: str | Path,
+    report: ScanReport,
+    pack_roots: list[Path],
+    has_jars: bool,
+) -> Generator[dict[str, Any], None, bool]:
+    """找不到或有多個模組包根目錄：回報原因，不自動合併；回傳是否為「找不到」。"""
+    if not pack_roots:
+        if has_jars:
+            yield {
+                "progress": 0.0,
+                "log": (
+                    "📦 模組包來源：未找到 kubejs 或 "
+                    "config/ftbquests/quests，略過 KubeJS／FTB Quests 分析"
+                ),
+                "level": "info",
+            }
+        return True
+    report.pack_root_ambiguous = True
+    choices = "、".join(report.pack_root_candidates[:8])
+    yield {
+        "progress": 0.0,
+        "log": f"📦 模組包來源有多個候選，未自動合併：{choices}；請明確選擇根目錄",
+        "level": "warning",
+    }
+    report.add_issue(
+        {
+            "source_archive": str(folder),
+            "source_member": "",
+            "kind": "pack_source",
+            "status": "pending",
+            "reason": "pack_root_ambiguous",
+            "detail": "multiple pack roots require explicit selection",
+        }
+    )
+    return False
+
+
 def scan_folder_generator(
     db: TranslationDB | None,
     folder: str | Path,
@@ -1347,81 +1488,9 @@ def scan_folder_generator(
         if options.dry_run
         else None
     )
-    pack_result = PackScanResult()
-    pack_ingest_stats: IngestStats | None = None
-    pack_root_missing = False
-    # 翻譯 ZIP 模式只有在選資料夾時才有模組包根目錄可掃；單一 ZIP 檔沒有穩定的磁碟路徑。
-    if options.include_pack_content and (
-        not options.translated or Path(folder).is_dir()
-    ):
-        pack_roots = discover_pack_roots(folder)
-        report.pack_root_candidates = [str(root) for root in pack_roots]
-        if not pack_roots:
-            pack_root_missing = True
-            if jars:
-                yield {
-                    "progress": 0.0,
-                    "log": (
-                        "📦 模組包來源：未找到 kubejs 或 "
-                        "config/ftbquests/quests，略過 KubeJS／FTB Quests 分析"
-                    ),
-                    "level": "info",
-                }
-        elif len(pack_roots) > 1:
-            report.pack_root_ambiguous = True
-            choices = "、".join(report.pack_root_candidates[:8])
-            yield {
-                "progress": 0.0,
-                "log": (
-                    f"📦 模組包來源有多個候選，未自動合併：{choices}；請明確選擇根目錄"
-                ),
-                "level": "warning",
-            }
-            pack_result.issues.append(
-                {
-                    "source_archive": str(folder),
-                    "source_member": "",
-                    "kind": "pack_source",
-                    "status": "pending",
-                    "reason": "pack_root_ambiguous",
-                    "detail": "multiple pack roots require explicit selection",
-                }
-            )
-        else:
-            pack_root = pack_roots[0]
-            report.pack_root = str(pack_root)
-            yield {
-                "progress": 0.0,
-                "log": f"📦 模組包來源：開始分析 {pack_root}",
-                "level": "info",
-            }
-            pack_result = scan_pack_sources(pack_root, options.version)
-            if options.translated:
-                # 與翻譯 ZIP 內的 lang 一致：譯文歸在使用者選的來源標記。
-                pack_result.items = [
-                    replace(item, source=options.translation_source)
-                    for item in pack_result.items
-                ]
-            report.pack_items_found = len(pack_result.items)
-            report.pack_files_seen = pack_result.files_seen
-            report.pack_sources = len(pack_result.sources_found)
-            report.pack_references = len(pack_result.references)
-            report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
-            report.pack_source_breakdown = pack_result.source_breakdown()
-            for issue in pack_result.issues:
-                report.add_issue(issue)
-            pack_ingest_stats = _ingest_pack_result(
-                db,
-                preview,
-                pack_result,
-                options.version,
-                convert,
-                report.touched_entry_ids,
-            )
-            report.stats.add(pack_ingest_stats)
-            yield from _pack_source_updates(
-                pack_result, pack_ingest_stats, dry_run=options.dry_run
-            )
+    pack_result, _pack_ingest_stats, pack_root_missing = yield from _scan_pack_content(
+        db, preview, folder, options, convert, report, bool(jars)
+    )
     has_pack_content = bool(
         pack_result.sources_found
         or pack_result.items

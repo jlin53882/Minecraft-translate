@@ -59,7 +59,7 @@ PACK_ROW_SUB_JAR_MODE = (
 )
 PACK_ROW_SUB_ZIP_MODE = (
     "選擇資料夾時，一併匯入其中 kubejs 與 config/ftbquests/quests 的譯文"
-    "（zh_tw 以所選「譯文來源標記」匯入）；只選單一 ZIP 檔時不會掃描"
+    "（zh_tw 以所選「譯文來源標記」匯入）；單一 ZIP 檔也會讀取其中的這兩個目錄"
 )
 
 
