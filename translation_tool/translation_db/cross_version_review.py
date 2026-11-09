@@ -166,6 +166,7 @@ def _fetch_rows(
     mod_ids: Sequence[str] | None = None,
     kinds: Sequence[str] | None = None,
     ref_pack: str = "",
+    target_pack: str = "",
 ) -> list[CrossVersionRow]:
     """讀取指定目標條目（或整個版本）與其他版本已審核譯文的對照。
 
@@ -200,6 +201,8 @@ def _fetch_rows(
     heads: dict[int, tuple] = {}
     for row in conn.execute(sql, args):
         if ref_pack and pack_label(row[1], row[17]) != ref_pack:
+            continue
+        if target_pack and pack_label(row[1], row[2]) != target_pack:
             continue
         eid = int(row[0])
         heads.setdefault(eid, (row[1:5], row[5], row[6], row[7], row[8]))
@@ -271,11 +274,12 @@ def list_differences(
     kinds: Sequence[str] | None = None,
     cancel: Callable[[], bool] | None = None,
     ref_pack: str = "",
+    target_pack: str = "",
 ) -> list[CrossVersionRow]:
     """目標版本與已審核參考譯文有差異（或各版本衝突）的條目。
 
     ``ref_version`` 空字串＝每個條目取自己最近一次被審核的版本；指定版本時只比較該版本，
-    ``ref_pack`` 再指定其中的整合包資料夾（KubeJS／FTB）。
+    ``ref_pack`` 再指定其中的整合包資料夾（KubeJS／FTB）；``target_pack`` 非空時目標也只取該整合包資料夾的條目。
     分段讀取（每段 ``_ID_CHUNK`` 個目標條目），段與段之間釋放資料庫鎖；``cancel`` 回傳
     True 時拋出 :class:`QueryCancelled`。結果只保留有差異的列，記憶體與差異筆數成正比。
     """
@@ -292,6 +296,7 @@ def list_differences(
                 mod_ids=mod_ids,
                 kinds=kinds,
                 ref_pack=ref_pack,
+                target_pack=target_pack,
             )
         out.extend(row for row in rows if row.differs)
     return out
@@ -327,6 +332,7 @@ def explain_exclusions(
     kinds: Sequence[str] | None = None,
     cancel: Callable[[], bool] | None = None,
     ref_pack: str = "",
+    target_pack: str = "",
 ) -> ExclusionSummary:
     """統計目標版本中「內容相同的其他版本有譯文，卻沒被列為差異」的條目與原因。
 
@@ -343,7 +349,7 @@ def explain_exclusions(
             "SELECT e.id, e.key, ft.zh_tw, fr.zh_tw, "
             f"{effective_review_sql('fr', True)}, "
             f"{source_locale_match_sql('e', 'e2')}, "
-            f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id "
+            f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id, e.mod_id "
             "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
             f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
             f"AND {other_version_sql('e', 'e2')}{ref_clause} "
@@ -355,6 +361,8 @@ def explain_exclusions(
             rows = db._conn.execute(sql, args).fetchall()
         if ref_pack:
             rows = [r for r in rows if pack_label(r[8], r[9]) == ref_pack]
+        if target_pack:
+            rows = [r for r in rows if pack_label(r[8], r[10]) == target_pack]
         _classify_exclusions(rows, summary)
     return summary
 
@@ -594,6 +602,7 @@ class CrossVersionReviewMixin:
         kinds: Sequence[str] | None = None,
         cancel: Callable[[], bool] | None = None,
         ref_pack: str = "",
+        target_pack: str = "",
     ) -> list[CrossVersionRow]:
         return list_differences(
             self,  # type: ignore[arg-type]
@@ -603,6 +612,7 @@ class CrossVersionReviewMixin:
             kinds=kinds,
             cancel=cancel,
             ref_pack=ref_pack,
+            target_pack=target_pack,
         )
 
     def explain_cross_version_exclusions(
@@ -614,6 +624,7 @@ class CrossVersionReviewMixin:
         kinds: Sequence[str] | None = None,
         cancel: Callable[[], bool] | None = None,
         ref_pack: str = "",
+        target_pack: str = "",
     ) -> ExclusionSummary:
         return explain_exclusions(
             self,  # type: ignore[arg-type]
@@ -623,6 +634,7 @@ class CrossVersionReviewMixin:
             kinds=kinds,
             cancel=cancel,
             ref_pack=ref_pack,
+            target_pack=target_pack,
         )
 
     def pack_versions(self, version: str) -> list[str]:
@@ -634,6 +646,14 @@ class CrossVersionReviewMixin:
                 if (label := pack_label(KIND_KUBEJS_LANG, mod_id))
             }
         )
+
+    def pack_mods(self, version: str, pack: str) -> list[str]:
+        """某個遊戲版本中屬於指定整合包資料夾的 KubeJS／FTB 模組識別。"""
+        return [
+            mod_id
+            for mod_id in self.mods(version)  # type: ignore[attr-defined]
+            if pack_label(KIND_KUBEJS_LANG, mod_id) == pack
+        ]
 
     def apply_cross_version_references(
         self, items: Iterable[ApplyItem], *, actor: str = ""

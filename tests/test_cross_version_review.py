@@ -758,3 +758,26 @@ def test_reference_can_be_pinned_to_one_pack_version(db):
         "26.1", ref_version="1.21.1", ref_pack="不存在的整合包"
     )
     assert summary.total == 0
+
+
+def test_target_can_be_pinned_to_one_pack_version(db):
+    """目標選整合包版本：只列該整合包資料夾的條目，其他整合包的條目不列。"""
+    pack_c = "actuallyadditions@Another Pack@aaaaaaaaaaaa"
+    db.ingest("1.20.1", [_pack_item(PACK_A, "k", "Sonho", "甲")])
+    eid = _entry(db, "1.20.1", "k", PACK_A).id
+    db.review_manual(eid, expected_zh_tw="甲", propagate=False)
+    db.ingest(
+        "1.21.1",
+        [
+            _pack_item(PACK_B, "k", "Sonho", "乙"),
+            _pack_item(pack_c, "k", "Sonho", "丙"),
+        ],
+    )
+
+    both = db.list_cross_version_differences("1.21.1")
+    assert {r.mod_id for r in both} == {PACK_B, pack_c}
+    only = db.list_cross_version_differences("1.21.1", target_pack="Another Pack")
+    assert [r.mod_id for r in only] == [pack_c]
+    assert db.pack_mods("1.21.1", "Another Pack") == [pack_c]
+    summary = db.explain_cross_version_exclusions("1.21.1", target_pack="不存在")
+    assert summary.total == 0

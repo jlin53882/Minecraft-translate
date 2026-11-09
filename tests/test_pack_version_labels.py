@@ -122,3 +122,17 @@ def test_reference_options_list_game_versions_and_pack_versions():
     # 目標與參考同一個遊戲版本：仍可指定其中的整合包版本
     same = reference_options(["1.21.1"], {"1.21.1": ["ATM 8.2"]}, "1.21.1")
     assert [v for v, _ in same] == ["__latest__", "1.21.1\tATM 8.2"]
+
+
+def test_target_options_list_game_versions_and_pack_versions():
+    from app.views.moddb.version_diff_dialog import split_reference, target_options
+
+    options = target_options(["1.21.1", "26.1"], {"1.21.1": ["ATM 8.2", "ATM 8.5"]})
+    assert [value for value, _ in options] == [
+        "1.21.1",
+        "1.21.1\tATM 8.2",
+        "1.21.1\tATM 8.5",
+        "26.1",
+    ]
+    assert dict(options)["1.21.1\tATM 8.5"] == "1.21.1 · ATM 8.5"
+    assert split_reference("1.21.1\tATM 8.5") == ("1.21.1", "ATM 8.5")

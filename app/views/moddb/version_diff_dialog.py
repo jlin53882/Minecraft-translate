@@ -87,6 +87,20 @@ def split_reference(value: str | None) -> tuple[str, str]:
     return version, pack
 
 
+def target_options(
+    versions: list[str], packs: dict[str, list[str]]
+) -> list[tuple[str, str]]:
+    """目標下拉選單：遊戲版本，以及其中的整合包版本（只比較該整合包資料夾的條目）。"""
+    options: list[tuple[str, str]] = []
+    for version in versions:
+        options.append((version, version))
+        options += [
+            (f"{version}{PACK_SEP}{pack}", f"{version} · {pack}")
+            for pack in packs.get(version, [])
+        ]
+    return options
+
+
 def reference_options(
     versions: list[str], packs: dict[str, list[str]], target: str | None
 ) -> list[tuple[str, str]]:
@@ -146,10 +160,14 @@ class VersionDiffDialog:
         db = self.get_db()
         versions = list(db.versions()) if db is not None else []
         self.version_dd = kit.dropdown(
-            label="目標版本", dense=True, width=170, on_select=self._on_scope
+            label="目標版本", dense=True, width=300, on_select=self._on_scope
         )
-        kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
-        self.version_dd.value = version if version in versions else None
+        packs = {v: db.pack_versions(v) for v in versions} if db is not None else {}
+        options = target_options(versions, packs)
+        kit.set_dropdown_options(self.version_dd, options)
+        self.version_dd.value = (
+            version if version in {key for key, _ in options} else None
+        )
         self.ref_dd = kit.dropdown(
             label="參考版本", dense=True, width=240, on_select=self._on_scope
         )
@@ -207,7 +225,8 @@ class VersionDiffDialog:
     def _set_ref_options(self, versions: list[str]) -> None:
         db = self.get_db()
         packs = {v: db.pack_versions(v) for v in versions} if db is not None else {}
-        options = reference_options(versions, packs, self.version_dd.value)
+        target_version, _ = split_reference(self.version_dd.value)
+        options = reference_options(versions, packs, target_version)
         kit.set_dropdown_options(self.ref_dd, options)
         if self.ref_dd.value not in {key for key, _ in options}:
             self.ref_dd.value = LATEST_KEY
@@ -273,10 +292,13 @@ class VersionDiffDialog:
         self._generation += 1
 
     # ------------------------------------------------------------------ 載入
-    def _scope(self) -> tuple[str | None, tuple[str, str], list[str] | None]:
+    def _scope(
+        self,
+    ) -> tuple[tuple[str, str] | None, tuple[str, str], list[str] | None]:
         mod = self.mod_dd.value
+        target = self.version_dd.value
         return (
-            self.version_dd.value,
+            split_reference(target) if target else None,
             split_reference(self.ref_dd.value),
             None if mod in (None, "", ALL_MODS) else [str(mod)],
         )
@@ -297,12 +319,13 @@ class VersionDiffDialog:
         self._render()
 
     def _reload(self) -> None:
-        version, (ref, ref_pack), mods = self._scope()
+        target, (ref, ref_pack), mods = self._scope()
         db = self.get_db()
-        if db is None or not version:
+        if db is None or not target:
             self.rows = []
             self._render()
             return
+        version, target_pack = target
         self._generation += 1
         generation = self._generation
         self._set_busy(True, "正在比較各版本已審核的譯文…")
@@ -314,6 +337,7 @@ class VersionDiffDialog:
                     version,
                     ref_version=ref,
                     ref_pack=ref_pack,
+                    target_pack=target_pack,
                     mod_ids=mods,
                     cancel=lambda: self._closed or generation != self._generation,
                 )
@@ -321,10 +345,15 @@ class VersionDiffDialog:
                     version,
                     ref_version=ref,
                     ref_pack=ref_pack,
+                    target_pack=target_pack,
                     mod_ids=mods,
                     cancel=lambda: self._closed or generation != self._generation,
                 )
-                all_mods = list(db.mods(version))
+                all_mods = (
+                    db.pack_mods(version, target_pack)
+                    if target_pack
+                    else list(db.mods(version))
+                )
             except QueryCancelled:
                 return  # 畫面已換條件或已關閉：不需要這次的結果
             except Exception as exc:  # noqa: BLE001 - worker boundary
