@@ -1840,9 +1840,12 @@ def test_scan_panel_zip_rules_require_zh_cn(db_path):
     assert panel.rules_row.disabled_state and panel.rules_row.value is False
     opts = panel.build_options()
     assert opts.read_jar_translations is False and opts.apply_rules is False
+    assert panel.cn_row.disabled_state and panel.cn_row.value is False
+    assert opts.convert_cn is False
     panel.jar_tr_row.value = True
     panel._on_jar_tr_change()
     assert not panel.rules_row.disabled_state and panel.rules_row.value is True
+    assert not panel.cn_row.disabled_state and panel.cn_row.value is True
     assert panel.build_options().apply_rules is True
 
 
