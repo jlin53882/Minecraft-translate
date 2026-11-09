@@ -80,7 +80,7 @@ def same_content_sql(left: str, right: str) -> str:
 
 
 _FORMAT_CODE = re.compile(
-    r"%(?:\d+\$)?[-#+ 0,(]*\d*(?:\.\d+)?(?:[tT][A-Za-z]|[A-Za-z%])"
+    r"%(?:\d+\$|<)?(?:[-#+0,(]| (?=\d))*\d*(?:\.\d+)?(?:[tT][A-Za-z]|[A-Za-z%])"
 )
 
 

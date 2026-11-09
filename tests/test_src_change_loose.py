@@ -70,6 +70,10 @@ def test_loose_text_keeps_newlines_and_format_code_case():
     assert loose_text("a\r\nb") == loose_text("a\nb")
     assert loose_text("Date %1$tY") != loose_text("Date %1$ty")
     assert loose_text("Date %tB") == loose_text("date %tB")
+    assert loose_text("100% time remaining") == loose_text("100% tIme remaining")
+    assert loose_text("100% Time") == loose_text("100% time")
+    assert loose_text("Value %s / %<s") != loose_text("Value %s / %<S")
+    assert loose_text("%<tY") != loose_text("%<ty")
 
 
 def test_newline_change_is_a_source_change(tmp_path):

@@ -141,3 +141,33 @@ def test_scope_change_without_a_database_does_not_raise():
     dialog._reload = lambda: None
     dialog._on_scope()
     assert dialog.current_page == 1
+
+
+def test_loading_a_version_without_the_selected_mod_requeries_all_mods():
+    from app.views.moddb import version_diff_dialog as vdd
+
+    dialog = object.__new__(VersionDiffDialog)
+    dialog._closed = False
+    dialog._generation = 1
+    dialog._set_busy = lambda *a, **k: None
+    dialog.status = SimpleNamespace(value="")
+    dialog.mod_dd = SimpleNamespace(value="old_mod")
+    dialog.current_page = 4
+    reloads = []
+    dialog._reload = lambda: reloads.append(dialog.mod_dd.value)
+    dialog._render = lambda: reloads.append("render")
+    dialog.selected = set()
+    dialog._confirm_overwrite = False
+    dialog._confirm_row = None
+    dialog.rows = ["stale"]
+    original = vdd.kit.set_dropdown_options
+    vdd.kit.set_dropdown_options = lambda *a, **k: None
+    try:
+        dialog._loaded(1, [], ["new_mod"], None, None)
+    finally:
+        vdd.kit.set_dropdown_options = original
+
+    # 舊模組不在新版本：改回全部模組並重新查詢，不沿用舊篩選的結果
+    assert reloads == [vdd.ALL_MODS]
+    assert dialog.current_page == 1
+    assert dialog.rows == ["stale"]

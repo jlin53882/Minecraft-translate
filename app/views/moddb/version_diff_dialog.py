@@ -400,7 +400,14 @@ class VersionDiffDialog:
         kit.set_dropdown_options(
             self.mod_dd, [(ALL_MODS, "全部模組")] + [(m, m) for m in all_mods]
         )
-        self.mod_dd.value = current if current in all_mods else ALL_MODS
+        if current != ALL_MODS and current not in all_mods:
+            # 選的模組不在這個版本：改回「全部模組」並照新條件重新查詢，
+            # 否則畫面顯示全部模組、結果卻仍是舊模組的篩選
+            self.mod_dd.value = ALL_MODS
+            self.current_page = 1
+            self._reload()
+            return
+        self.mod_dd.value = current
         self.rows = rows
         self.exclusions = exclusions
         self.selected &= {row.entry_id for row in rows}
