@@ -139,8 +139,8 @@ def walk_snbt_file_tolerant(path: str) -> tuple[Compound | None, int]:
             if data is None:
                 continue
             log_warning(
-                f"⚠️ SNBT 結尾多了 {dropped} 個 }}，已在記憶體忽略後解析"
-                f"（原檔未修改，請自行修正）: {path}"
+                f"⚠️ SNBT 結尾多了 {dropped} 個 }}，已自動容錯，不影響匯入；"
+                f"輸出時會產生括號平衡的檔案（原檔未修改）: {path}"
             )
             return data, dropped
         raise first_error

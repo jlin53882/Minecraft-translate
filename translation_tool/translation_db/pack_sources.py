@@ -1082,13 +1082,14 @@ def _scan_kubejs_lang(
 
 
 def _note_dropped_braces(path: Path, dropped: int, result: PackScanResult) -> None:
-    """結尾多餘的 ``}`` 只在記憶體忽略；留下問題紀錄，提醒使用者修正原檔。"""
+    """結尾多餘的 ``}`` 只在記憶體忽略；留下問題紀錄（原檔不改，輸出時重寫為平衡括號）。"""
     if dropped:
         result.issues.append(
             _issue(
                 path,
                 "snbt_trailing_braces_ignored",
-                f"檔案結尾多了 {dropped} 個 }}，已在記憶體忽略後解析；原檔未修改",
+                f"檔案結尾多了 {dropped} 個 }}，已自動容錯，不影響匯入；"
+                "輸出時會產生括號平衡的檔案（原檔未修改）",
             )
         )
 
