@@ -91,6 +91,18 @@ def other_version_sql(left: str, right: str) -> str:
     )
 
 
+def pack_label(kind: str, mod_id: str) -> str:
+    """KubeJS／FTB 模組識別「命名空間@整合包資料夾名稱@路徑雜湊」中的整合包資料夾名稱。
+
+    其他內容（或格式不符的識別）回傳空字串。畫面用它區分同一個遊戲版本的多個整合包版本。
+    """
+    if kind in PACK_KINDS:
+        parts = mod_id.split("@")
+        if len(parts) >= 3:
+            return "@".join(parts[1:-1])
+    return ""
+
+
 def content_mod_value(kind: str, mod_id: str) -> str:
     """Python 端的同一個定義（與 :func:`content_mod_expr` 的結果一致）。"""
     if kind in PACK_KINDS and "@" in mod_id:

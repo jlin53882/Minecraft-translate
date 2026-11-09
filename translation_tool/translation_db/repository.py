@@ -50,6 +50,7 @@ from translation_tool.translation_db.content_identity import (
     content_key_value,
     content_mod_sql,
     content_mod_value,
+    pack_label,
     same_content_sql,
 )
 from translation_tool.translation_db.cross_version_review import (
@@ -3834,13 +3835,13 @@ class TranslationDB(
                 (entry_id,),
             )
         ]
-        detail.versions = (
-            [entry.mc_version]
+        appearances = (
+            [(entry.mc_version, entry.mod_id)]
             if not entry.en_us  # 原文未知：沒有可比對的內容，只有自己
             else [
-                r[0]
+                (r[0], r[1])
                 for r in self._q(
-                    f"SELECT e.mc_version FROM {self._content_table()} "
+                    f"SELECT e.mc_version, e.mod_id FROM {self._content_table()} "
                     f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
                     "AND e.en_us=? ORDER BY e.mc_version",
                     (
@@ -3852,6 +3853,8 @@ class TranslationDB(
                 )
             ]
         )
+        detail.versions = [version for version, _mod in appearances]
+        detail.version_packs = [pack_label(entry.kind, mod) for _v, mod in appearances]
         detail.same_key = [
             SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src, review_status)
             for eid, ver, en, tw, src, review_status in self._q(

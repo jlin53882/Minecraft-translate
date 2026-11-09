@@ -8,6 +8,7 @@ from app.services_impl.moddb_service import EntryDetail, format_taipei_time
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.formatting import kind_label
+from translation_tool.translation_db.content_identity import pack_label
 
 
 def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
@@ -15,7 +16,7 @@ def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
     return [
         _key_row(entry.key),
         _mod_row(entry.mod_id, entry.kind),
-        _version_row(entry.mc_version, detail.versions),
+        _version_row(entry, detail),
         *(_origin_rows(detail.origins) if detail.origins else []),
         *(_reference_rows(detail.references) if detail.references else []),
         _time_row(entry),
@@ -41,13 +42,23 @@ def _mod_row(mod_id: str, kind: str) -> ft.Control:
     )
 
 
-def _version_row(current: str, versions: list[str]) -> ft.Control:
+def _version_row(entry, detail: EntryDetail) -> ft.Control:
+    """遊戲版本標籤；KubeJS／FTB 另標整合包資料夾，且只有目前這一筆高亮。
+
+    同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），只寫遊戲版本會變成
+    好幾顆一樣的標籤，看不出各是哪一個。
+    """
+    here = (entry.mc_version, pack_label(entry.kind, entry.mod_id))
+    packs = detail.version_packs or [""] * len(detail.versions)
     return ft.Row(
         [
             kit.section_label("出現於"),
             *(
-                kit.chip(version, "em" if version == current else "neutral")
-                for version in versions
+                kit.chip(
+                    f"{version} · {pack}" if pack else version,
+                    "em" if (version, pack) == here else "neutral",
+                )
+                for version, pack in zip(detail.versions, packs, strict=False)
             ),
         ],
         spacing=6,

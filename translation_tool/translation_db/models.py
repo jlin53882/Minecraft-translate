@@ -536,6 +536,9 @@ class EntryDetail:
     origins: list[EntryOrigin] = field(default_factory=list)
     references: list[SourceReference] = field(default_factory=list)
     versions: list[str] = field(default_factory=list)
+    # 與 versions 一一對應：KubeJS／FTB 內容的整合包資料夾名稱，其餘為空字串。
+    # 同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），只列遊戲版本會重複。
+    version_packs: list[str] = field(default_factory=list)
     same_key: list[SameKeyRow] = field(default_factory=list)
     same_text: list[SameTextRow] = field(default_factory=list)
     history: list[HistoryRow] = field(default_factory=list)

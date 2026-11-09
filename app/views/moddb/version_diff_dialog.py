@@ -38,6 +38,7 @@ from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label
 from app.views.moddb.version_diff_text import changed_ranges, text_spans
+from translation_tool.translation_db.content_identity import pack_label
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 20
@@ -74,6 +75,12 @@ def selected_items(
 
 def _time_text(ref: VersionRef) -> str:
     return ref.reviewed_at[:16] if ref.reviewed_at else "審核時間不明"
+
+
+def _ref_name(kind: str, ref: VersionRef) -> str:
+    """參考的名稱：遊戲版本；KubeJS／FTB 另標整合包資料夾（同一個遊戲版本可有多個整合包版本）。"""
+    pack = pack_label(kind, ref.mod_id)
+    return f"{ref.version} · {pack}" if pack else ref.version
 
 
 class VersionDiffDialog:
@@ -490,7 +497,7 @@ class VersionDiffDialog:
                 [
                     ft.Row(
                         [
-                            kit.chip(f"參考 {ref.version}", "em"),
+                            kit.chip(f"參考 {_ref_name(row.kind, ref)}", "em"),
                             ft.Text(
                                 f"已審核・{_time_text(ref)}", size=11.5, color=C.MUTED
                             ),
@@ -511,7 +518,7 @@ class VersionDiffDialog:
                         selectable=True,
                     ),
                     kit.button(
-                        f"套用 {ref.version} 的譯文"
+                        f"套用 {_ref_name(row.kind, ref)} 的譯文"
                         if row.conflict
                         else "套用參考譯文",
                         "secondary",
