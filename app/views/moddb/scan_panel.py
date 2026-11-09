@@ -663,11 +663,12 @@ class ScanPanel(ft.Column):
         applied = s.get("reuse_applied") or 0
         conflicts = s.get("reuse_conflicts") or 0
         kept = s.get("reuse_skipped_reviewed") or 0
+        changed = s.get("reuse_source_changed") or 0
         self._last_reuse_history_id = s.get("reuse_history_id")
-        self.reuse_row_summary.visible = bool(applied or conflicts or kept)
+        self.reuse_row_summary.visible = bool(applied or conflicts or kept or changed)
         self.reuse_text.value = (
             f"沿用其他版本已審核譯文 {applied:,} 筆・衝突未處理 {conflicts:,} 筆"
-            f"・目標已審核而保留 {kept:,} 筆"
+            f"・目標已審核而保留 {kept:,} 筆・原文不同待判斷 {changed:,} 筆"
         )
 
     def _open_version_diff(self, _e=None) -> None:

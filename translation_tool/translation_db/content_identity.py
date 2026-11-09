@@ -119,6 +119,18 @@ def content_mod_value(kind: str, mod_id: str) -> str:
     return mod_id
 
 
+def content_table_sql(conn, alias: str = "e") -> str:
+    """內容比對查詢的條目表：強制使用內容索引（沒有 ANALYZE 統計時規劃器不會自己選）。
+
+    沒有 ``idx_entry_content_ns``（舊版唯讀資料庫）時不指定索引，查詢仍正確，只是較慢。
+    查詢必須以 ``kind``、內容模組識別與內容鍵值的相等條件存取這張表。
+    """
+    ready = conn.execute(
+        "SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?", (INDEX_NAME,)
+    ).fetchone()
+    return f"entry {alias} INDEXED BY {INDEX_NAME}" if ready else f"entry {alias}"
+
+
 def create_index_sql() -> str:
     return (
         f"CREATE INDEX IF NOT EXISTS {INDEX_NAME} ON entry "

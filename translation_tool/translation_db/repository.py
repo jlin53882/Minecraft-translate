@@ -50,6 +50,7 @@ from translation_tool.translation_db.content_identity import (
     content_key_value,
     content_mod_sql,
     content_mod_value,
+    content_table_sql,
     loose_text,
     pack_label,
     same_content_sql,
@@ -4880,6 +4881,7 @@ class TranslationDB(
         touched: list[int] = []
         with self._tx() as conn:
             effective_priority = self._stored_priority(conn)
+            content_table = content_table_sql(conn)
             for item in items:
                 text = item.zh_tw
                 if not text.strip() or not item.en_us:
@@ -4926,7 +4928,7 @@ class TranslationDB(
                     stats.skipped += 1
                 if fill_other_versions:
                     blanks = conn.execute(
-                        "SELECT e.id FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
+                        f"SELECT e.id FROM {content_table} LEFT JOIN effective f ON f.entry_id = e.id "
                         f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
                         "AND e.en_us=? AND e.mc_version<>? AND f.entry_id IS NULL",
                         (

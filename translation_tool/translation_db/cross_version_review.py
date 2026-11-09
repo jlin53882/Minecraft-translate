@@ -28,6 +28,7 @@ from typing import TYPE_CHECKING
 from .content_identity import (
     content_key_sql,
     content_mod_sql,
+    content_table_sql,
     loose_text,
     other_version_sql,
     pack_label,
@@ -215,7 +216,7 @@ def _fetch_rows(
         "FROM entry e "
         "LEFT JOIN effective ft ON ft.entry_id = e.id "
         "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
-        "JOIN entry e2 ON e2.kind = e.kind "
+        f"JOIN {content_table_sql(conn, 'e2')} ON e2.kind = e.kind "
         f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
         f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
         f"AND {other_version_sql('e', 'e2')} "
@@ -396,7 +397,7 @@ def explain_exclusions(
             f"{source_locale_match_sql('e', 'e2')}, "
             f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id, e.mod_id, e.en_us, e2.en_us "
             "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
-            "JOIN entry e2 ON e2.kind = e.kind "
+            f"JOIN {content_table_sql(db._conn, 'e2')} ON e2.kind = e.kind "
             f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
             f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
             f"AND {other_version_sql('e', 'e2')}{ref_clause} "

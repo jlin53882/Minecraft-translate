@@ -304,7 +304,9 @@ class _LocalContextBuilder:
         """分層抓取同 key 的已審核列，再把品質合格的資料排到名額前面。"""
         mc_version, en_us = self.mc_version, self.en_us
         base_sql = (
-            _REVIEWED_ENTRY_COLUMNS
+            _REVIEWED_ENTRY_COLUMNS.replace(
+                "FROM entry e JOIN", f"FROM {self.db._content_table()} JOIN", 1
+            )
             + f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
             "AND f.review_status='reviewed' AND trim(f.zh_tw)<>'' "
         )

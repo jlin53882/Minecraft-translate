@@ -31,8 +31,9 @@ from translation_tool.translation_db.content_identity import (
 )
 from translation_tool.translation_db.sql_helpers import effective_review_sql
 
-# 版本 5：「相同內容」改用 content_identity 的定義（KubeJS／FTB 只看命名空間），版本不同的
-# 組要求橫跨兩個以上版本（同版本的多個整合包不算），摘要重建
+# 結構版本：「相同內容」以 content_identity 的定義為準（KubeJS／FTB 只看命名空間，FTB 只看
+# 語系鍵），版本不同的組要求橫跨兩個以上版本（同版本的多個整合包不算）。這些定義改變時遞增，
+# 開啟舊資料庫時重建摘要
 STAT_SCHEMA_VERSION = "6"
 NO_SOURCE = -1  # 沒有生效譯文的條目在 stat_src 的來源值
 COUNTER_NAMES = ("content", "mods", "no_source", "diff")

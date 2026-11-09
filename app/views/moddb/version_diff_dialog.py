@@ -158,6 +158,9 @@ class VersionDiffDialog:
         self.last_history_id = last_history_id  # 匯入後自動沿用的批次，可直接復原
         self.selected: set[int] = set()
         self._confirm_overwrite = False
+        self._confirm_row: tuple[int, int] | None = (
+            None  # 逐筆套用要再確認的（條目, 參考）
+        )
         self._busy = False
         self._closed = False
         self._generation = 0
@@ -317,7 +320,9 @@ class VersionDiffDialog:
         )
 
     def _on_scope(self, _e=None) -> None:
-        self._set_ref_options(list(self.get_db().versions()))
+        db = self.get_db()
+        if db is not None:
+            self._set_ref_options(list(db.versions()))
         self.current_page = 1
         self._reload()
 
@@ -325,6 +330,7 @@ class VersionDiffDialog:
         self.tab = key
         self.current_page = 1
         self._confirm_overwrite = False
+        self._confirm_row = None
         self._render()
 
     def _on_page(self, page: int) -> None:
@@ -399,6 +405,7 @@ class VersionDiffDialog:
         self.exclusions = exclusions
         self.selected &= {row.entry_id for row in rows}
         self._confirm_overwrite = False
+        self._confirm_row = None
         self._render()
 
     # ------------------------------------------------------------------ 畫面
@@ -601,9 +608,7 @@ class VersionDiffDialog:
                         selectable=True,
                     ),
                     kit.button(
-                        f"套用 {_ref_name(row.kind, ref)} 的譯文"
-                        if row.conflict
-                        else "套用參考譯文",
+                        self._apply_label(row, ref),
                         "secondary",
                         size="sm",
                         on_click=lambda _e, r=row, f=ref: self._apply_one(r, f),
@@ -612,6 +617,20 @@ class VersionDiffDialog:
                 spacing=6,
             ),
         )
+
+    def _apply_label(self, row: CrossVersionRow, ref: VersionRef) -> str:
+        if self._needs_confirm(row) and self._confirm_row == (
+            row.entry_id,
+            ref.entry_id,
+        ):
+            return (
+                "確認覆蓋已審核譯文並套用"
+                if row.target_reviewed
+                else "確認套用（原文不同）"
+            )
+        if row.conflict:
+            return f"套用 {_ref_name(row.kind, ref)} 的譯文"
+        return "套用參考譯文"
 
     def _target_block(
         self, row: CrossVersionRow, refs: list[VersionRef]
@@ -670,7 +689,18 @@ class VersionDiffDialog:
         )
 
     # ------------------------------------------------------------------ 動作
+    @staticmethod
+    def _needs_confirm(row: CrossVersionRow) -> bool:
+        """覆蓋已審核譯文，或參考譯文是針對不同原文寫的：逐筆套用也要再按一次確認。"""
+        return row.target_reviewed or row.source_changed
+
     def _apply_one(self, row: CrossVersionRow, ref: VersionRef) -> None:
+        token = (row.entry_id, ref.entry_id)
+        if self._needs_confirm(row) and self._confirm_row != token:
+            self._confirm_row = token
+            self._render()
+            return
+        self._confirm_row = None
         item = ApplyItem.from_row(row, ref)
         self._apply([item], "套用參考譯文")
 
@@ -807,6 +837,7 @@ class VersionDiffDialog:
     def _after_write(self) -> None:
         self.selected.clear()
         self._confirm_overwrite = False
+        self._confirm_row = None
         if self.on_complete:
             self.on_complete(None)
         self._reload()

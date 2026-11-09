@@ -375,14 +375,21 @@ def init_schema(conn: sqlite3.Connection) -> None:
 def _purge_trivial_src_changes(conn: sqlite3.Connection) -> None:
     """刪除舊版留下、只差大小寫或空白的「原文已變動」紀錄。
 
-    紀錄只有數百到數千筆，每次開啟檢查一次的成本可忽略；沒有要刪的就不寫入（不留標記，
-    也不改動資料）。
+    每次開啟檢查一次：SQL 先篩出候選（只掃 ``src_change`` 一次，不把整張表讀進 Python），
+    沒有要刪的就不寫入（不留標記，也不改動資料）。SQL 的 ``lower`` 只處理 ASCII，非 ASCII
+    的大小寫差異不會被清掉。
     """
     from .content_identity import loose_text  # 與 schema 互相引用，延後匯入
 
+    # SQL 先以「去掉空白、不分大小寫（ASCII）後相同」篩出候選，Python 只複核這些列；
+    # 不必把整張表讀進記憶體逐列比對
+    compact = "lower(replace(replace(replace(replace({0}, ' ', ''), char(9), ''), char(10), ''), char(13), ''))"
     trivial = [
         row[0]
-        for row in conn.execute("SELECT id, old_en, new_en FROM src_change")
+        for row in conn.execute(
+            "SELECT id, old_en, new_en FROM src_change "
+            f"WHERE {compact.format('old_en')} = {compact.format('new_en')}"
+        )
         if loose_text(row[1] or "") == loose_text(row[2] or "")
     ]
     for start in range(0, len(trivial), 500):

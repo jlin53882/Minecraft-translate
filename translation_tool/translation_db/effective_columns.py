@@ -35,8 +35,8 @@ from .content_identity import (
     same_content_sql,
 )
 
-# 版本 4：同內容改用 content_identity 的定義（KubeJS／FTB 只看命名空間），且 diff 逐條要求
-# 跨版本（同版本的多個整合包不算），觸發器與索引重建
+# 結構版本：同內容以 content_identity 的定義為準（KubeJS／FTB 只看命名空間，FTB 只看語系鍵），
+# diff 逐條要求跨版本（同版本的多個整合包不算）。這些定義改變時遞增，開啟舊資料庫時重建觸發器與索引
 SCHEMA_VERSION = "5"
 COLUMNS = {
     "mc_version": "TEXT",

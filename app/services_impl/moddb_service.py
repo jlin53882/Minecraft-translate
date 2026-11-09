@@ -98,6 +98,7 @@ from translation_tool.translation_db.time_filters import (
 )
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_exception
 from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
@@ -347,20 +348,37 @@ def _reuse_reviewed_after_scan(session, db, options, report) -> None:
     """
     if options.dry_run or not options.reuse_reviewed:
         return
-    result = db.reuse_reviewed_translations(
-        options.version, entry_ids=report.touched_entry_ids
-    )
+    try:
+        result = db.reuse_reviewed_translations(
+            options.version, entry_ids=report.touched_entry_ids
+        )
+    except Exception:  # noqa: BLE001 - 沿用是匯入後的選用步驟，失敗不能讓已提交的匯入變成失敗
+        log_exception("匯入後沿用其他版本已審核譯文失敗")
+        _log_both(
+            session,
+            "[警告] 匯入已完成，但沿用其他版本已審核譯文失敗，可稍後到「版本差異審核」手動處理；"
+            "詳情見後台 log",
+            "warning",
+        )
+        return
     report.reuse_applied = result.applied
     report.reuse_conflicts = result.conflicts
     report.reuse_skipped_reviewed = result.skipped_reviewed
+    report.reuse_source_changed = result.source_changed
     report.reuse_history_id = result.history_id
     session.set_summary(report.as_dict())
-    if result.applied or result.conflicts or result.skipped_reviewed:
+    if (
+        result.applied
+        or result.conflicts
+        or result.skipped_reviewed
+        or result.source_changed
+    ):
         _log_both(
             session,
             f"♻️ 沿用其他版本已審核譯文：沿用 {result.applied:,} 筆、"
             f"衝突未處理 {result.conflicts:,} 筆、目標已審核保留 "
-            f"{result.skipped_reviewed:,} 筆（可到「版本差異審核」檢視與復原）",
+            f"{result.skipped_reviewed:,} 筆、原文不同待判斷 {result.source_changed:,} 筆"
+            "（可到「版本差異審核」檢視與復原）",
         )
 
 
