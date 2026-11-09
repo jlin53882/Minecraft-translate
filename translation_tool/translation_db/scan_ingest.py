@@ -28,8 +28,46 @@ from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_M
 _LOG = logging.getLogger(__name__)
 _SLOW_INGEST_GROUP_SECONDS = 1.0
 
-# (kind, mod_id) → 該模組既有條目 {key: (entry_id, en_us)} 與既有譯文 {(entry_id, source)}
-Known = dict[str, tuple[int, str]]
+
+class KnownEntries(dict[str, tuple[int, str]]):
+    """同一個 (類型, 模組) 的既有條目 ``{key: (entry_id, en_us)}``，附路徑別名索引。
+
+    ``_find_existing`` 要找「鍵值不同、但 ``canonical_entry_key`` 相同」的條目。逐一比對
+    所有已知鍵值是平方級（已知鍵值含本次匯入新增的），所以寫入時就維護
+    ``canonical 鍵值 → 實際鍵值集合``。索引只存鍵值，原文與條目編號一律從 dict 本身讀取，
+    補原文後不會過期。只支援新增與覆寫；刪除類操作沒有用到，明確不支援以免索引失真。
+    """
+
+    def __init__(
+        self, kind: str, entries: Iterable[tuple[str, tuple[int, str]]] = ()
+    ) -> None:
+        super().__init__()
+        self.kind = kind
+        # 以 dict 當有序集合：同一條目有多個別名鍵時，挑選順序與插入順序一致（與逐一比對相同）
+        self._by_canonical: dict[str, dict[str, None]] = {}
+        for key, value in entries:
+            self[key] = value
+
+    def __setitem__(self, key: str, value: tuple[int, str]) -> None:
+        if key not in self:
+            self._by_canonical.setdefault(canonical_entry_key(self.kind, key), {})[
+                key
+            ] = None
+        super().__setitem__(key, value)
+
+    def aliases_of(self, key: str) -> list[str]:
+        """與 ``key`` 的 canonical 鍵值相同、但鍵值不同的已知鍵值。"""
+        same = self._by_canonical.get(canonical_entry_key(self.kind, key), ())
+        return [other for other in same if other != key]
+
+    def _unsupported(self, *args: object, **kwargs: object) -> None:
+        raise TypeError("KnownEntries 只支援新增與覆寫鍵值")
+
+    __delitem__ = pop = popitem = clear = update = setdefault = __ior__ = _unsupported
+
+
+# (kind, mod_id) → 該模組既有條目與既有譯文 {(entry_id, source)}
+Known = KnownEntries
 Have = set[tuple[int, int]]
 # 執行一個查詢並回傳所有列：``(sql, params) -> rows``
 Query = Callable[[str, tuple], Iterable[tuple[Any, ...]]]
@@ -174,13 +212,10 @@ def _find_existing(known: Known, kind: str, item: ScanItem) -> tuple[int, str] |
     exact = known.get(item.key)
     if exact is not None:
         return exact
-    canonical = canonical_entry_key(kind, item.key)
     matches_by_id = {
-        value[0]: value
-        for key, value in known.items()
-        if key != item.key
-        and canonical_entry_key(kind, key) == canonical
-        and (not item.en_us or not value[1] or _same_text(value[1], item.en_us))
+        known[key][0]: known[key]
+        for key in known.aliases_of(item.key)
+        if not item.en_us or not known[key][1] or _same_text(known[key][1], item.en_us)
     }
     if len(matches_by_id) != 1:
         return None
@@ -198,14 +233,17 @@ def _same_text(left: str, right: str) -> bool:
 def _read_existing(
     query: Query, version: str, kind: str, mod_id: str
 ) -> tuple[Known, Have]:
-    known = {
-        key: (eid, en)
-        for eid, key, en in query(
-            "SELECT id, key, en_us FROM entry "
-            "WHERE mc_version=? AND kind=? AND mod_id=?",
-            (version, kind, mod_id),
-        )
-    }
+    known = KnownEntries(
+        kind,
+        (
+            (key, (eid, en))
+            for eid, key, en in query(
+                "SELECT id, key, en_us FROM entry "
+                "WHERE mc_version=? AND kind=? AND mod_id=?",
+                (version, kind, mod_id),
+            )
+        ),
+    )
     have = {
         (eid, src)
         for eid, src in query(
@@ -364,7 +402,7 @@ class PreviewIngestTarget:
             state = (
                 _read_existing(self.query, self.version, kind, mod_id)
                 if self.query is not None
-                else ({}, set())
+                else (KnownEntries(kind), set())
             )
             self._state[(kind, mod_id)] = state
         return state
