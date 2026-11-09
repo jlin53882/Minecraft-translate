@@ -442,6 +442,20 @@ class VersionDiffDialog:
             parts.append(
                 f"{format_count(ex.ref_unreviewed)} 筆其他版本只有尚未審核的譯文，不當參考"
             )
+        if ex is not None and ex.source_changed:
+            examples = (
+                f"（例如 {'、'.join(ex.source_samples)}）" if ex.source_samples else ""
+            )
+            case_only = (
+                f"，其中 {format_count(ex.source_case_only)} 筆只差大小寫或空白"
+                if ex.source_case_only
+                else ""
+            )
+            parts.append(
+                f"{format_count(ex.source_changed)} 筆鍵值相同、其他版本有已審核譯文，"
+                f"但原文不同{case_only}，不算內容相同而未列出{examples}；"
+                "可到條目的「同鍵值・其他版本」逐筆套用"
+            )
         self.exclusion_note.value = "；".join(parts) + "。" if parts else ""
         self.exclusion_note.visible = bool(parts)
 

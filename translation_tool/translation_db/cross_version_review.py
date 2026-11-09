@@ -24,7 +24,13 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .content_identity import other_version_sql, pack_label, same_content_sql
+from .content_identity import (
+    content_key_sql,
+    content_mod_sql,
+    other_version_sql,
+    pack_label,
+    same_content_sql,
+)
 from .query_interrupt import QueryCancelled
 from .schema import KIND_KUBEJS_LANG, SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import (
@@ -314,6 +320,13 @@ class ExclusionSummary:
     samples: list[str] = field(
         default_factory=list
     )  # 例：「key（目標語系 pt_br、參考語系 unknown:12）」
+    source_changed: int = (
+        0  # 類型、模組、鍵值相同，但原文不同，且其他版本有已審核的不同譯文
+    )
+    source_case_only: int = 0  # 其中原文只差大小寫或空白
+    source_samples: list[str] = field(
+        default_factory=list
+    )  # 例：「key：「Mostre Sua Cara」→「Mostre sua Cara」」
 
     @property
     def total(self) -> int:
@@ -364,7 +377,72 @@ def explain_exclusions(
         if target_pack:
             rows = [r for r in rows if pack_label(r[8], r[10]) == target_pack]
         _classify_exclusions(rows, summary)
+        _count_source_changes(
+            db,
+            version,
+            ids,
+            summary,
+            ref_version,
+            ref_pack,
+            target_pack,
+            mod_ids,
+            kinds,
+        )
     return summary
+
+
+def _loose_text(text: str) -> str:
+    """比較「只差大小寫或空白」用的寬鬆形式。"""
+    return " ".join(text.casefold().split())
+
+
+def _count_source_changes(
+    db: TranslationDB,
+    version: str,
+    ids: Sequence[int],
+    summary: ExclusionSummary,
+    ref_version: str,
+    ref_pack: str,
+    target_pack: str,
+    mod_ids: Sequence[str] | None,
+    kinds: Sequence[str] | None,
+) -> None:
+    """統計「鍵值相同、原文不同」而不當成相同內容的條目（依設計不比對，讓使用者知道原因）。
+
+    只計目標尚未審核、且其他版本有已審核且譯文不同的條目；原文只差大小寫或空白的另計。
+    """
+    scope, params = _scope_sql(ids, mod_ids, kinds)
+    ref_clause = " AND e2.mc_version = ?" if ref_version else ""
+    sql = (
+        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, e2.mod_id, e2.en_us, "
+        f"ft.zh_tw, fr.zh_tw, {effective_review_sql('ft', True)} "
+        "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
+        "JOIN entry e2 ON e2.kind = e.kind "
+        f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
+        f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
+        f"AND e2.en_us <> e.en_us AND {other_version_sql('e', 'e2')}{ref_clause} "
+        "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
+        f"AND {effective_review_sql('fr', True)} IN ('reviewed','legacy_unknown') "
+        f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
+    )
+    args: list[object] = [*([ref_version] if ref_version else []), version, *params]
+    with db._lock:
+        rows = db._conn.execute(sql, args).fetchall()
+    seen: set[int] = set()
+    for row in rows:
+        eid = int(row[0])
+        if eid in seen or row[9] in _REVIEWED_STATES or (row[8] == (row[7] or "")):
+            continue
+        if ref_pack and pack_label(row[1], row[5]) != ref_pack:
+            continue
+        if target_pack and pack_label(row[1], row[2]) != target_pack:
+            continue
+        seen.add(eid)
+        summary.source_changed += 1
+        if _loose_text(row[4]) == _loose_text(row[6]):
+            summary.source_case_only += 1
+        if len(summary.source_samples) < _SAMPLE_LIMIT:
+            summary.source_samples.append(f"{row[3]}：「{row[6]}」→「{row[4]}」")
 
 
 def _classify_exclusions(rows: Sequence[tuple], summary: ExclusionSummary) -> None:

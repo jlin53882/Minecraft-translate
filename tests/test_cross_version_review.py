@@ -781,3 +781,32 @@ def test_target_can_be_pinned_to_one_pack_version(db):
     assert db.pack_mods("1.21.1", "Another Pack") == [pack_c]
     summary = db.explain_cross_version_exclusions("1.21.1", target_pack="不存在")
     assert summary.total == 0
+
+
+def test_source_text_change_is_explained_not_matched(db):
+    """鍵值相同但原文不同（例如只改大小寫）：不當成相同內容，但差異審核要說明原因。"""
+    db.ingest("1.20.1", [_pack_item(PACK_A, "k", "Mostre Sua Cara", "露出你的臉")])
+    ref = _entry(db, "1.20.1", "k", PACK_A)
+    db.review_manual(ref.id, expected_zh_tw="露出你的臉", propagate=False)
+    db.ingest("1.21.1", [_pack_item(PACK_B, "k", "Mostre sua Cara")])
+
+    assert db.list_cross_version_differences("1.21.1") == []
+    summary = db.explain_cross_version_exclusions("1.21.1")
+    assert (summary.source_changed, summary.source_case_only) == (1, 1)
+    assert summary.source_samples == ["k：「Mostre Sua Cara」→「Mostre sua Cara」"]
+
+    # 原文真的不同：計入但不算只差大小寫
+    db.ingest("1.21.1", [_pack_item(PACK_B, "k2", "Another text")])
+    db.ingest("1.20.1", [_pack_item(PACK_A, "k2", "Different text", "別的")])
+    ref2 = _entry(db, "1.20.1", "k2", PACK_A)
+    db.review_manual(ref2.id, expected_zh_tw="別的", propagate=False)
+    summary = db.explain_cross_version_exclusions("1.21.1")
+    assert (summary.source_changed, summary.source_case_only) == (2, 1)
+
+    # 已經有譯文且相同的目標不計
+    assert (
+        db.explain_cross_version_exclusions(
+            "1.21.1", ref_pack="不存在的整合包"
+        ).source_changed
+        == 0
+    )
