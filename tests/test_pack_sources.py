@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 
 import pytest
 
@@ -1078,3 +1079,29 @@ def test_unrepairable_snbt_is_still_reported_as_parse_failed(tmp_path):
     (lang / "chapter.snbt").write_text("{ chapter.AAAA.title: ", encoding="utf-8")
     result = scan_pack_sources(tmp_path, "1.21.1")
     assert [issue["reason"] for issue in result.issues] == ["snbt_parse_failed"]
+
+
+def test_translated_zip_reads_zh_cn_only_when_enabled(tmp_path):
+    from translation_tool.translation_db.scanner import ScanOptions, scan_jar
+
+    zpath = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr(
+            "assets/foo/lang/en_us.json", json.dumps({"item.foo.a": "Steel Case"})
+        )
+        zf.writestr(
+            "assets/foo/lang/zh_tw.json", json.dumps({"item.foo.a": "鋼製外殼"})
+        )
+        zf.writestr(
+            "assets/foo/lang/zh_cn.json", json.dumps({"item.foo.a": "钢制外壳"})
+        )
+
+    def run(read_cn: bool):
+        opts = ScanOptions("1.21.1", translated=True, read_jar_translations=read_cn)
+        return {i.key: i for i in scan_jar(zpath, opts, ()).items}
+
+    on, off = run(True), run(False)
+    assert [i.zh_tw for i in on.values()] == ["鋼製外殼"]
+    assert [i.zh_cn for i in on.values()] == ["钢制外壳"]
+    assert [i.zh_tw for i in off.values()] == ["鋼製外殼"]
+    assert [i.zh_cn for i in off.values()] == [""]

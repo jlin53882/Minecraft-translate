@@ -43,8 +43,13 @@ ZIP_SOURCES = (SRC_CUSTOM, SRC_SUBTITLE, SRC_I18N, SRC_JAR_TW, SRC_MANUAL)
 
 JAR_TR_SUB = "以來源「模組自帶繁中」「簡中轉繁」匯入"
 RULES_SUB = "與語系合併相同：自帶繁中與簡轉繁後的文字都會套用「替換規則」"
-ZIP_LOCKED_JAR_TR_SUB = "翻譯 ZIP 固定讀取內附的 zh_tw／zh_cn，不能關閉"
-ZIP_LOCKED_RULES_SUB = "翻譯 ZIP 的譯文逐字匯入，不套用替換規則"
+ZIP_JAR_TR_LABEL = "讀取模組自帶 zh_cn"
+ZIP_JAR_TR_SUB = (
+    "翻譯 ZIP 的 zh_tw 固定逐字匯入；開啟才會一併讀取內附的 zh_cn（簡轉繁後才套規則）"
+)
+ZIP_RULES_SUB = "只作用在 zh_cn 簡轉繁後的文字；zh_tw 仍逐字匯入、不套用替換規則"
+ZIP_RULES_NEEDS_CN_SUB = "需先開啟「讀取模組自帶 zh_cn」才能套用替換規則"
+JAR_TR_LABEL = "讀取模組自帶 zh_tw／zh_cn"
 PACK_ROW_SUB_JAR_MODE = (
     "從模組包根目錄掃描 kubejs 與 config/ftbquests/quests；"
     "只收靜態可定位文字，不執行 JS，也不把任務檔直接當成 Resource Pack"
@@ -187,7 +192,9 @@ class ScanPanel(ft.Column):
             True,
         )
         self._jar_mode_values: dict[kit.SwitchRow, bool] = {}
-        self.jar_tr_row = kit.SwitchRow("讀取模組自帶 zh_tw／zh_cn", JAR_TR_SUB, True)
+        self.jar_tr_row = kit.SwitchRow(
+            JAR_TR_LABEL, JAR_TR_SUB, True, on_change=self._on_jar_tr_change
+        )
         self.reuse_row = kit.SwitchRow(
             "沿用其他版本已審核的相同譯文",
             "匯入後，內容相同（類型、模組、鍵值、原文）且其他版本已審核的譯文會套用到這次新增或有變動的條目；"
@@ -493,25 +500,43 @@ class ScanPanel(ft.Column):
         self._safe_update()
 
     def _apply_mode_locked_rows(self, zip_mode: bool) -> None:
-        """翻譯 ZIP 固定讀取自帶 zh_tw、不套替換規則：開關仍顯示，但鎖定並說明原因。
+        """翻譯 ZIP 的 zh_tw 固定匯入，開關改管 zh_cn；替換規則只在讀 zh_cn 時可開。
 
-        切回 jar 模式時還原使用者原本的選擇。
+        切回 jar 模式時還原標題、說明與使用者原本的選擇。
         """
-        locked = {
-            self.jar_tr_row: (True, ZIP_LOCKED_JAR_TR_SUB, JAR_TR_SUB),
-            self.rules_row: (False, ZIP_LOCKED_RULES_SUB, RULES_SUB),
-        }
-        for row, (zip_value, zip_sub, jar_sub) in locked.items():
-            if zip_mode:
-                if not row.disabled_state:
-                    self._jar_mode_values[row] = row.value
-                row.value = zip_value
-                row.set_disabled(True)
-                row.set_sub(zip_sub)
-            else:
-                row.value = self._jar_mode_values.get(row, row.value)
-                row.set_disabled(False)
-                row.set_sub(jar_sub)
+        if zip_mode:
+            self.jar_tr_row.set_label(ZIP_JAR_TR_LABEL)
+            self.jar_tr_row.set_sub(ZIP_JAR_TR_SUB)
+            self._refresh_zip_rules_row()
+            return
+        self.jar_tr_row.set_label(JAR_TR_LABEL)
+        self.jar_tr_row.set_sub(JAR_TR_SUB)
+        saved = self._jar_mode_values.pop(self.rules_row, None)
+        if saved is not None:
+            self.rules_row.value = saved
+        self.rules_row.set_disabled(False)
+        self.rules_row.set_sub(RULES_SUB)
+
+    def _refresh_zip_rules_row(self) -> None:
+        """ZIP 模式：zh_cn 關閉時替換規則鎖成關閉，重新開啟時還原先前的選擇。"""
+        rules = self.rules_row
+        if self.jar_tr_row.value:
+            saved = self._jar_mode_values.pop(rules, None)
+            if saved is not None:
+                rules.value = saved
+            rules.set_disabled(False)
+            rules.set_sub(ZIP_RULES_SUB)
+            return
+        if not rules.disabled_state:
+            self._jar_mode_values[rules] = rules.value
+        rules.value = False
+        rules.set_disabled(True)
+        rules.set_sub(ZIP_RULES_NEEDS_CN_SUB)
+
+    def _on_jar_tr_change(self, _e=None) -> None:
+        if self.mode == "zip":
+            self._refresh_zip_rules_row()
+            self._safe_update()
 
     def _start_label(self) -> str:
         verb = "匯入" if self.mode == "zip" else "掃描"
@@ -524,11 +549,13 @@ class ScanPanel(ft.Column):
             self._last_scan_version = self.version()
         return ScanOptions(
             version=self.version(),
-            read_jar_translations=True if translated else self.jar_tr_row.value,
+            read_jar_translations=self.jar_tr_row.value,
             convert_cn=self.cn_row.value,
             scan_nested=self.nested_row.value,
             include_patchouli=self.book_row.value,
-            apply_rules=False if translated else self.rules_row.value,
+            apply_rules=self.rules_row.value and self.jar_tr_row.value
+            if translated
+            else self.rules_row.value,
             dry_run=dry_run,
             clean_english=self.clean_row.value,
             translated=translated,

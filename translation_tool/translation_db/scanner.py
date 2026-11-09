@@ -568,10 +568,12 @@ def _guide_items(
     if en is None and not options.translated:
         return []  # 掃描 jar 以原文為準；沒有原文就沒有可匯入的條目
     tw = cn = None
+    # 翻譯 ZIP 固定讀 zh_tw；zh_cn 只在使用者開啟「讀取自帶 zh_cn」時讀取。
     if options.read_jar_translations or options.translated:
         tw = _aligned_blocks(
             en, _read_blocks(zf, budget, members.get("zh_tw")), members.get("zh_tw")
         )
+    if options.read_jar_translations:
         cn = _aligned_blocks(
             en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
         )
@@ -809,12 +811,13 @@ def _items_for_group(
     tw_obj = cn_obj = None
     if options.read_jar_translations or options.translated:
         tw_obj = _read_json_member(zf, budget, members.get("zh_tw"))
+    if options.read_jar_translations:
         cn_obj = _read_json_member(zf, budget, members.get("zh_cn"))
-        if kind == "patchouli" and en is not None:
-            # 手冊譯文以 JSON 路徑和原文對應；格式和 en_us 不同（頁數、欄位、舊版物品 NBT）
-            # 時路徑會對到別頁，匯入只會把錯位的譯文寫進資料庫，所以不採用。
-            tw_obj = _drop_stale_book(tw_obj, en, members.get("zh_tw"))
-            cn_obj = _drop_stale_book(cn_obj, en, members.get("zh_cn"))
+    if kind == "patchouli" and en is not None:
+        # 手冊譯文以 JSON 路徑和原文對應；格式和 en_us 不同（頁數、欄位、舊版物品 NBT）
+        # 時路徑會對到別頁，匯入只會把錯位的譯文寫進資料庫，所以不採用。
+        tw_obj = _drop_stale_book(tw_obj, en, members.get("zh_tw"))
+        cn_obj = _drop_stale_book(cn_obj, en, members.get("zh_cn"))
 
     paths = list(en_items)
     tw_all: dict[str, str] = {}
