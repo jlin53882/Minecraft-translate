@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_service import EntryDetail, format_taipei_time
+from app.services_impl.moddb_service import EntryDetail, format_taipei_time, pack_label
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.formatting import kind_label
-from translation_tool.translation_db.content_identity import pack_label
 
 
 def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
@@ -42,28 +41,37 @@ def _mod_row(mod_id: str, kind: str) -> ft.Control:
     )
 
 
+MAX_VERSION_CHIPS = 6
+
+
 def _version_row(entry, detail: EntryDetail) -> ft.Control:
     """遊戲版本標籤；KubeJS／FTB 另標整合包資料夾，且只有目前這一筆高亮。
 
     同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），只寫遊戲版本會變成
-    好幾顆一樣的標籤，看不出各是哪一個。
+    好幾顆一樣的標籤，看不出各是哪一個。超過 ``MAX_VERSION_CHIPS`` 顆時，目前這一筆排最前面，
+    其餘收合成「另 N 個」，完整清單放在提示文字。
     """
     here = (entry.mc_version, pack_label(entry.kind, entry.mod_id))
     packs = detail.version_packs or [""] * len(detail.versions)
-    return ft.Row(
-        [
-            kit.section_label("出現於"),
-            *(
-                kit.chip(
-                    f"{version} · {pack}" if pack else version,
-                    "em" if (version, pack) == here else "neutral",
-                )
-                for version, pack in zip(detail.versions, packs, strict=False)
-            ),
-        ],
-        spacing=6,
-        wrap=True,
-    )
+    labels = [
+        (version, pack) for version, pack in zip(detail.versions, packs, strict=False)
+    ]
+    labels.sort(key=lambda label: label != here)  # 穩定排序：目前這一筆排最前面
+    shown, hidden = labels[:MAX_VERSION_CHIPS], labels[MAX_VERSION_CHIPS:]
+    chips = [
+        kit.chip(
+            f"{version} · {pack}" if pack else version,
+            "em" if (version, pack) == here else "neutral",
+        )
+        for version, pack in shown
+    ]
+    if hidden:
+        more = kit.chip(f"另 {len(hidden)} 個", "neutral")
+        more.tooltip = "、".join(
+            f"{version} · {pack}" if pack else version for version, pack in hidden
+        )
+        chips.append(more)
+    return ft.Row([kit.section_label("出現於"), *chips], spacing=6, wrap=True)
 
 
 def _time_row(entry) -> ft.Control:

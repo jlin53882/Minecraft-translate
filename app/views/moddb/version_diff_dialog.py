@@ -15,6 +15,7 @@ from app.services_impl.moddb_service import (
     CrossVersionRow,
     QueryCancelled,
     VersionRef,
+    pack_label,
 )
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.tasks.operation_registry import (
@@ -38,7 +39,6 @@ from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label
 from app.views.moddb.version_diff_text import changed_ranges, text_spans
-from translation_tool.translation_db.content_identity import pack_label
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 20
@@ -47,6 +47,8 @@ ALL_MODS = "__all__"
 TAB_DIFF = "diff"
 TAB_CONFLICT = "conflict"
 LATEST_LABEL = "各條目最近審核的版本"
+LATEST_KEY = "__latest__"
+PACK_SEP = "	"  # 參考選項的值：「遊戲版本	整合包資料夾」
 
 
 def split_rows(
@@ -75,6 +77,33 @@ def selected_items(
 
 def _time_text(ref: VersionRef) -> str:
     return ref.reviewed_at[:16] if ref.reviewed_at else "審核時間不明"
+
+
+def split_reference(value: str | None) -> tuple[str, str]:
+    """參考下拉選單的值 → （遊戲版本, 整合包資料夾）；各條目最近審核者為空字串。"""
+    if value in (None, "", LATEST_KEY):
+        return REFERENCE_LATEST, ""
+    version, _, pack = str(value).partition(PACK_SEP)
+    return version, pack
+
+
+def reference_options(
+    versions: list[str], packs: dict[str, list[str]], target: str | None
+) -> list[tuple[str, str]]:
+    """參考下拉選單：各條目最近審核者、固定遊戲版本、固定遊戲版本中的某個整合包版本。
+
+    同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），所以整合包版本
+    另列，包含目標所在的遊戲版本（參考同遊戲版本的其他整合包版本）。
+    """
+    options = [(LATEST_KEY, LATEST_LABEL)]
+    for version in versions:
+        if version != target:
+            options.append((version, f"固定 {version}"))
+        options += [
+            (f"{version}{PACK_SEP}{pack}", f"固定 {version} · {pack}")
+            for pack in packs.get(version, [])
+        ]
+    return options
 
 
 def _ref_name(kind: str, ref: VersionRef) -> str:
@@ -124,7 +153,7 @@ class VersionDiffDialog:
         self.ref_dd = kit.dropdown(
             label="參考版本", dense=True, width=240, on_select=self._on_scope
         )
-        self.ref_dd.value = "__latest__"
+        self.ref_dd.value = LATEST_KEY
         self._set_ref_options(versions)
         self.mod_dd = kit.searchable_dropdown(
             label="模組", dense=True, width=220, on_select=self._on_scope
@@ -176,13 +205,12 @@ class VersionDiffDialog:
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
     def _set_ref_options(self, versions: list[str]) -> None:
-        target = self.version_dd.value
-        options = [("__latest__", LATEST_LABEL)] + [
-            (v, f"固定 {v}") for v in versions if v != target
-        ]
+        db = self.get_db()
+        packs = {v: db.pack_versions(v) for v in versions} if db is not None else {}
+        options = reference_options(versions, packs, self.version_dd.value)
         kit.set_dropdown_options(self.ref_dd, options)
         if self.ref_dd.value not in {key for key, _ in options}:
-            self.ref_dd.value = "__latest__"
+            self.ref_dd.value = LATEST_KEY
 
     def _build_dialog(self) -> None:
         width, height = dialog_dimensions(self.page, max_width=1080)
@@ -245,12 +273,11 @@ class VersionDiffDialog:
         self._generation += 1
 
     # ------------------------------------------------------------------ 載入
-    def _scope(self) -> tuple[str | None, str, list[str] | None]:
-        ref = self.ref_dd.value
+    def _scope(self) -> tuple[str | None, tuple[str, str], list[str] | None]:
         mod = self.mod_dd.value
         return (
             self.version_dd.value,
-            REFERENCE_LATEST if ref in (None, "", "__latest__") else str(ref),
+            split_reference(self.ref_dd.value),
             None if mod in (None, "", ALL_MODS) else [str(mod)],
         )
 
@@ -270,7 +297,7 @@ class VersionDiffDialog:
         self._render()
 
     def _reload(self) -> None:
-        version, ref, mods = self._scope()
+        version, (ref, ref_pack), mods = self._scope()
         db = self.get_db()
         if db is None or not version:
             self.rows = []
@@ -286,12 +313,14 @@ class VersionDiffDialog:
                 rows = db.list_cross_version_differences(
                     version,
                     ref_version=ref,
+                    ref_pack=ref_pack,
                     mod_ids=mods,
                     cancel=lambda: self._closed or generation != self._generation,
                 )
                 exclusions = db.explain_cross_version_exclusions(
                     version,
                     ref_version=ref,
+                    ref_pack=ref_pack,
                     mod_ids=mods,
                     cancel=lambda: self._closed or generation != self._generation,
                 )

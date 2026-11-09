@@ -249,7 +249,7 @@ class EntryFilter:
             raise ValueError(f"未知智慧校對狀態：{self.smart_review}")
         if self.state not in {"all", "none", "diff", "changed", "manual", "ok", "same"}:
             raise ValueError(f"未知條目狀態：{self.state}")
-        if self.query_field not in {"all", "source", "translation", "key"}:
+        if self.query_field not in {"all", "source", "translation", "key", "mod"}:
             raise ValueError(f"未知搜尋欄位：{self.query_field}")
         if self.review_status not in (None, "unreviewed", "reviewed", "legacy_unknown"):
             raise ValueError(f"未知人工審核狀態：{self.review_status}")

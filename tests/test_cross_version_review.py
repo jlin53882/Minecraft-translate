@@ -728,3 +728,33 @@ def test_exclusions_count_each_target_once_with_the_locale_reason_first(db):
     summary = db.explain_cross_version_exclusions("26.1")
 
     assert (summary.locale_incompatible, summary.ref_unreviewed) == (1, 0)
+
+
+def test_reference_can_be_pinned_to_one_pack_version(db):
+    """同一個遊戲版本有多個整合包版本：指定整合包資料夾時，只拿那一個當參考。"""
+    pack_c = "actuallyadditions@Another Pack@aaaaaaaaaaaa"
+    for pack, text in ((PACK_A, "甲"), (pack_c, "乙")):
+        db.ingest("1.21.1", [_pack_item(pack, "k", "Sonho", text)])
+        eid = _entry(db, "1.21.1", "k", pack).id
+        db.review_manual(eid, expected_zh_tw=text, propagate=False)
+    db.ingest("26.1", [_pack_item(PACK_B, "k", "Sonho", "")])
+
+    assert db.pack_versions("1.21.1") == ["All the Mods 10 8.3", "Another Pack"]
+
+    rows = db.list_cross_version_differences(
+        "26.1", ref_version="1.21.1", ref_pack="Another Pack"
+    )
+    assert [(r.conflict, r.reference.zh_tw) for r in rows] == [(False, "乙")]
+    assert (
+        db.list_cross_version_differences(
+            "26.1", ref_version="1.21.1", ref_pack="不存在的整合包"
+        )
+        == []
+    )
+    # 沒指定整合包時維持原樣：兩個參考不同＝衝突
+    assert db.list_cross_version_differences("26.1")[0].conflict
+
+    summary = db.explain_cross_version_exclusions(
+        "26.1", ref_version="1.21.1", ref_pack="不存在的整合包"
+    )
+    assert summary.total == 0

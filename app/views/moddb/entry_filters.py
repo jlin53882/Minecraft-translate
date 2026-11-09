@@ -31,6 +31,7 @@ SEARCH_FIELD_OPTIONS = (
     ("source", "原文"),
     ("translation", "譯文"),
     ("key", "鍵值"),
+    ("mod", "模組來源"),
 )
 
 

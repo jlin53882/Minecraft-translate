@@ -1821,14 +1821,17 @@ class TranslationDB(
                 "source": "e.en_us",
                 "translation": "f.zh_tw",
                 "key": "e.key",
+                "mod": "e.mod_id",
             }
             column = query_columns.get(criteria.query_field)
             if column is None:
+                # 模組識別（KubeJS／FTB 含整合包資料夾與路徑雜湊）也納入：貼上畫面上看到的
+                # 模組識別或整合包名稱，才找得到對應條目
                 where.append(
                     "(e.en_us LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' "
-                    "OR f.zh_tw LIKE ? ESCAPE '\\')"
+                    "OR f.zh_tw LIKE ? ESCAPE '\\' OR e.mod_id LIKE ? ESCAPE '\\')"
                 )
-                params += [like, like, like]
+                params += [like, like, like, like]
             else:
                 where.append(f"{column} LIKE ? ESCAPE '\\'")
                 params.append(like)

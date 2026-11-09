@@ -82,3 +82,43 @@ def test_plain_lang_entries_keep_the_game_version_only(db):
         "1.20.1",
         "1.21.1",
     ]
+
+
+def test_many_appearances_collapse_into_a_count_chip(db):
+    from app.views.moddb.entry_metadata import MAX_VERSION_CHIPS
+
+    packs = [f"atm@All the Mods 10 8.{n}@{n:012x}" for n in range(1, 9)]
+    for mod in packs:
+        db.ingest("1.21.1", [ScanItem(KIND_KUBEJS_LANG, mod, "k", "Click")])
+    entry_id = db._one(
+        "SELECT id FROM entry WHERE mod_id=? AND mc_version='1.21.1'", (packs[6],)
+    )[0]
+
+    chips = _chips(build_entry_metadata(db.entry_detail(entry_id)))
+    texts = [chip_text(c) for c in chips]
+    assert len(chips) == MAX_VERSION_CHIPS + 1
+    assert texts[0] == "1.21.1 · All the Mods 10 8.7"  # 目前這一筆排最前面
+    assert texts[-1] == f"另 {8 - MAX_VERSION_CHIPS} 個"
+    assert chips[-1].tooltip
+
+
+def test_reference_options_list_game_versions_and_pack_versions():
+    from app.views.moddb.version_diff_dialog import (
+        reference_options,
+        split_reference,
+    )
+
+    options = reference_options(
+        ["1.21.1", "26.1"], {"1.21.1": ["ATM 8.2", "ATM 8.5"]}, "26.1"
+    )
+    values = [value for value, _ in options]
+    assert values[0] == "__latest__"
+    assert "26.1" not in values  # 目標版本本身不當整個遊戲版本的參考
+    assert split_reference("1.21.1") == ("1.21.1", "")
+    assert split_reference("1.21.1\tATM 8.5") == ("1.21.1", "ATM 8.5")
+    assert split_reference("__latest__") == ("", "")
+    assert dict(options)["1.21.1\tATM 8.5"] == "固定 1.21.1 · ATM 8.5"
+
+    # 目標與參考同一個遊戲版本：仍可指定其中的整合包版本
+    same = reference_options(["1.21.1"], {"1.21.1": ["ATM 8.2"]}, "1.21.1")
+    assert [v for v, _ in same] == ["__latest__", "1.21.1\tATM 8.2"]

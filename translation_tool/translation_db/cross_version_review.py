@@ -24,9 +24,9 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .content_identity import other_version_sql, same_content_sql
+from .content_identity import other_version_sql, pack_label, same_content_sql
 from .query_interrupt import QueryCancelled
-from .schema import SRC_CROSS_VERSION, SRC_MANUAL
+from .schema import KIND_KUBEJS_LANG, SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import (
     effective_review_sql,
     source_locale_match_sql,
@@ -165,11 +165,13 @@ def _fetch_rows(
     entry_ids: Sequence[int] | None,
     mod_ids: Sequence[str] | None = None,
     kinds: Sequence[str] | None = None,
+    ref_pack: str = "",
 ) -> list[CrossVersionRow]:
     """讀取指定目標條目（或整個版本）與其他版本已審核譯文的對照。
 
     「內容相同」用 ``content_identity.same_content_sql``（KubeJS／FTB 只看命名空間），
-    走 ``idx_entry_content_ns``。
+    走 ``idx_entry_content_ns``。``ref_pack`` 非空時，KubeJS／FTB 的參考只取該整合包資料夾
+    （同一個遊戲版本有多個整合包版本時用來指定其中一個）。
     """
     scope, params = _scope_sql(entry_ids, mod_ids, kinds)
     ref_clause = " AND e2.mc_version = ?" if ref_version else ""
@@ -197,6 +199,8 @@ def _fetch_rows(
     grouped: dict[int, list[VersionRef]] = {}
     heads: dict[int, tuple] = {}
     for row in conn.execute(sql, args):
+        if ref_pack and pack_label(row[1], row[17]) != ref_pack:
+            continue
         eid = int(row[0])
         heads.setdefault(eid, (row[1:5], row[5], row[6], row[7], row[8]))
         grouped.setdefault(eid, []).append(
@@ -266,10 +270,12 @@ def list_differences(
     mod_ids: Sequence[str] | None = None,
     kinds: Sequence[str] | None = None,
     cancel: Callable[[], bool] | None = None,
+    ref_pack: str = "",
 ) -> list[CrossVersionRow]:
     """目標版本與已審核參考譯文有差異（或各版本衝突）的條目。
 
-    ``ref_version`` 空字串＝每個條目取自己最近一次被審核的版本；指定版本時只比較該版本。
+    ``ref_version`` 空字串＝每個條目取自己最近一次被審核的版本；指定版本時只比較該版本，
+    ``ref_pack`` 再指定其中的整合包資料夾（KubeJS／FTB）。
     分段讀取（每段 ``_ID_CHUNK`` 個目標條目），段與段之間釋放資料庫鎖；``cancel`` 回傳
     True 時拋出 :class:`QueryCancelled`。結果只保留有差異的列，記憶體與差異筆數成正比。
     """
@@ -285,6 +291,7 @@ def list_differences(
                 entry_ids=ids,
                 mod_ids=mod_ids,
                 kinds=kinds,
+                ref_pack=ref_pack,
             )
         out.extend(row for row in rows if row.differs)
     return out
@@ -319,6 +326,7 @@ def explain_exclusions(
     mod_ids: Sequence[str] | None = None,
     kinds: Sequence[str] | None = None,
     cancel: Callable[[], bool] | None = None,
+    ref_pack: str = "",
 ) -> ExclusionSummary:
     """統計目標版本中「內容相同的其他版本有譯文，卻沒被列為差異」的條目與原因。
 
@@ -335,7 +343,7 @@ def explain_exclusions(
             "SELECT e.id, e.key, ft.zh_tw, fr.zh_tw, "
             f"{effective_review_sql('fr', True)}, "
             f"{source_locale_match_sql('e', 'e2')}, "
-            f"{source_locale_sql('e')}, {source_locale_sql('e2')} "
+            f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id "
             "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
             f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
             f"AND {other_version_sql('e', 'e2')}{ref_clause} "
@@ -345,6 +353,8 @@ def explain_exclusions(
         args: list[object] = [*([ref_version] if ref_version else []), version, *params]
         with db._lock:
             rows = db._conn.execute(sql, args).fetchall()
+        if ref_pack:
+            rows = [r for r in rows if pack_label(r[8], r[9]) == ref_pack]
         _classify_exclusions(rows, summary)
     return summary
 
@@ -583,6 +593,7 @@ class CrossVersionReviewMixin:
         mod_ids: Sequence[str] | None = None,
         kinds: Sequence[str] | None = None,
         cancel: Callable[[], bool] | None = None,
+        ref_pack: str = "",
     ) -> list[CrossVersionRow]:
         return list_differences(
             self,  # type: ignore[arg-type]
@@ -591,6 +602,7 @@ class CrossVersionReviewMixin:
             mod_ids=mod_ids,
             kinds=kinds,
             cancel=cancel,
+            ref_pack=ref_pack,
         )
 
     def explain_cross_version_exclusions(
@@ -601,6 +613,7 @@ class CrossVersionReviewMixin:
         mod_ids: Sequence[str] | None = None,
         kinds: Sequence[str] | None = None,
         cancel: Callable[[], bool] | None = None,
+        ref_pack: str = "",
     ) -> ExclusionSummary:
         return explain_exclusions(
             self,  # type: ignore[arg-type]
@@ -609,6 +622,17 @@ class CrossVersionReviewMixin:
             mod_ids=mod_ids,
             kinds=kinds,
             cancel=cancel,
+            ref_pack=ref_pack,
+        )
+
+    def pack_versions(self, version: str) -> list[str]:
+        """某個遊戲版本中出現過的整合包資料夾名稱（KubeJS／FTB；由模組清單推得，有快取）。"""
+        return sorted(
+            {
+                label
+                for mod_id in self.mods(version)  # type: ignore[attr-defined]
+                if (label := pack_label(KIND_KUBEJS_LANG, mod_id))
+            }
         )
 
     def apply_cross_version_references(

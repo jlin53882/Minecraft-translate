@@ -61,6 +61,7 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.content_identity import pack_label
 from translation_tool.translation_db.cross_version_review import (
     REFERENCE_LATEST,
     ApplyItem,
@@ -158,6 +159,7 @@ __all__ = [
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
+    "pack_label",
     "preview_new_source_names",
     "quick_date_bounds",
     "run_moddb_scan_service",
