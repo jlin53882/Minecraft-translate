@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import re
+
 from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG
 
 PACK_KINDS = (KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
@@ -77,13 +79,28 @@ def same_content_sql(left: str, right: str) -> str:
     )
 
 
+_FORMAT_CODE = re.compile(r"%(?:\d+\$)?[-#+ 0,(]*\d*(?:\.\d+)?[A-Za-z%]")
+
+
 def loose_text(text: str) -> str:
-    """比較原文用的寬鬆形式：不分大小寫、連續空白視為一個。
+    """比較原文用的寬鬆形式：不分大小寫、同一行內連續空白視為一個。
 
     新版整合包或模組常只改原文的大小寫或空白，譯文仍然適用，所以這樣的差異視為內容相同
     （跨版本沿用、版本差異審核與掃描時的「原文已變動」判斷都用它）。
+    有語義的差異會保留：換行位置（影響遊戲內版面）與格式控制碼的大小寫（``%s`` 與 ``%S`` 的
+    格式化結果不同）。
     """
-    return " ".join(text.casefold().split())
+    lines = []
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        out: list[str] = []
+        last = 0
+        for m in _FORMAT_CODE.finditer(line):
+            out.append(line[last : m.start()].casefold())
+            out.append(m.group())
+            last = m.end()
+        out.append(line[last:].casefold())
+        lines.append(" ".join("".join(out).split()))
+    return "\n".join(lines)
 
 
 def other_version_sql(left: str, right: str) -> str:

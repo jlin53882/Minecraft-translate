@@ -58,3 +58,33 @@ def test_old_trivial_source_changes_are_purged_once_on_open(tmp_path):
 
     TranslationDB(path).close()
     assert _src_changes(path) == 1  # 只剩真的改過的那筆
+
+
+def test_loose_text_keeps_newlines_and_format_code_case():
+    from translation_tool.translation_db.content_identity import loose_text
+
+    assert loose_text("End  Core ") == loose_text("end core")
+    assert loose_text("Line one line two") != loose_text("Line one\nline two")
+    assert loose_text("Value %s") != loose_text("Value %S")
+    assert loose_text("Hello %1$S") == loose_text("hello %1$S")
+    assert loose_text("a\r\nb") == loose_text("a\nb")
+
+
+def test_newline_change_is_a_source_change(tmp_path):
+    path = tmp_path / "t.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Line one line two")])
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Line one\nline two")])
+    assert _src_changes(path) == 1
+    db.close()
+
+
+def test_purge_keeps_newline_only_src_change(tmp_path):
+    path = tmp_path / "t.db"
+    db = TranslationDB(path)
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Line one line two")])
+    db.ingest("1.21.1", [ScanItem(KIND_LANG, "m", "k", "Line one\nline two")])
+    db.close()
+    db = TranslationDB(path)  # 重新開啟會清理無意義的紀錄
+    assert _src_changes(path) == 1
+    db.close()
