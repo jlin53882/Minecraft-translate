@@ -63,6 +63,11 @@ from translation_tool.translation_db.pack_archive import (
     extract_pack_members,
     zip_pack_scope,
 )
+from translation_tool.translation_db.pack_scope_match import (
+    keep_existing_originals,
+    locale_only_items,
+    match_existing_scope,
+)
 from translation_tool.translation_db.pack_sources import (
     PackScanResult,
     discover_pack_roots,
@@ -1384,31 +1389,19 @@ def _scan_pack_content(
             "log": f"📦 模組包來源：開始分析 {report.pack_root}",
             "level": "info",
         }
-        pack_result = scan_pack_sources(
-            pack_root,
-            options.version,
-            scope=zip_pack_scope(path) if from_zip else None,
-        )
+        scope = zip_pack_scope(path) if from_zip else None
+        pack_result = scan_pack_sources(pack_root, options.version, scope=scope)
+        if options.translated:
+            pack_result = yield from _adopt_translated_pack(
+                db, pack_root, options, pack_result
+            )
         if from_zip:
             # 問題清單會寫進資料庫與報告：不留暫存目錄路徑，改成 ZIP!/內部路徑。
             for issue in pack_result.issues:
                 for key, value in issue.items():
                     issue[key] = str(value).replace(str(search), f"{folder}!")
         pack_result.issues.extend(extract_issues)
-        if options.translated:
-            # 與翻譯 ZIP 內的 lang 一致：譯文歸在使用者選的來源標記。
-            pack_result.items = [
-                replace(item, source=options.translation_source)
-                for item in pack_result.items
-            ]
-        report.pack_items_found = len(pack_result.items)
-        report.pack_files_seen = pack_result.files_seen
-        report.pack_sources = len(pack_result.sources_found)
-        report.pack_references = len(pack_result.references)
-        report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
-        report.pack_source_breakdown = pack_result.source_breakdown()
-        for issue in pack_result.issues:
-            report.add_issue(issue)
+        _record_pack_scan(report, pack_result)
         stats = _ingest_pack_result(
             db,
             preview,
@@ -1420,6 +1413,69 @@ def _scan_pack_content(
         report.stats.add(stats)
         yield from _pack_source_updates(pack_result, stats, dry_run=options.dry_run)
         return pack_result, stats, False
+
+
+def _record_pack_scan(report: ScanReport, pack_result: PackScanResult) -> None:
+    """把模組包掃描結果的統計與問題寫進掃描報告。"""
+    report.pack_items_found = len(pack_result.items)
+    report.pack_files_seen = pack_result.files_seen
+    report.pack_sources = len(pack_result.sources_found)
+    report.pack_references = len(pack_result.references)
+    report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
+    report.pack_source_breakdown = pack_result.source_breakdown()
+    for issue in pack_result.issues:
+        report.add_issue(issue)
+
+
+def _adopt_translated_pack(
+    db: TranslationDB | None,
+    pack_root: Path,
+    options: ScanOptions,
+    pack_result: PackScanResult,
+) -> Generator[dict[str, Any], None, PackScanResult]:
+    """翻譯來源的模組包內容：歸在所選譯文來源；只有譯文時對到既有模組包就只補譯文、保留原本英文。"""
+    pack_result = yield from _match_existing_pack(db, pack_root, options, pack_result)
+    # 與翻譯 ZIP 內的 lang 一致：譯文歸在使用者選的來源標記。
+    pack_result.items = [
+        replace(item, source=options.translation_source) for item in pack_result.items
+    ]
+    return pack_result
+
+
+def _match_existing_pack(
+    db: TranslationDB | None,
+    pack_root: Path,
+    options: ScanOptions,
+    pack_result: PackScanResult,
+) -> Generator[dict[str, Any], None, PackScanResult]:
+    match = (
+        match_existing_scope(db, options.version, pack_result.items)
+        if db is not None
+        else None
+    )
+    if match is None:
+        if locale_only_items(pack_result.items):
+            yield {
+                "progress": 0.0,
+                "log": (
+                    "📦 模組包來源只有譯文，資料庫中找不到唯一對得上的既有模組包，"
+                    "將以新的模組包身分新增"
+                ),
+                "level": "info",
+            }
+        return pack_result
+    if match.scope != pack_result.pack_scope:
+        pack_result = scan_pack_sources(pack_root, options.version, scope=match.scope)
+    pack_result.items = keep_existing_originals(pack_result.items, match)
+    yield {
+        "progress": 0.0,
+        "log": (
+            f"📦 對到既有模組包 {match.scope}：{match.overlap}/{match.total} 筆 key 相符，"
+            "相符的條目只補譯文、保留原本的英文"
+        ),
+        "level": "info",
+    }
+    return pack_result
 
 
 def _report_pack_root_problem(

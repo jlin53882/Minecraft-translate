@@ -30,6 +30,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.source_locale import reviewed_locale_compatible
 from translation_tool.translation_db import (
     change_tracker,
@@ -3801,6 +3802,24 @@ class TranslationDB(
                 tuple(params),
             )
         ]
+
+    def pack_entry_keys(
+        self, version: str, kind: str, mod_prefix: str
+    ) -> dict[str, set[str]]:
+        """``{模組包身分: {key}}``：該類型下 ``mod_id`` 為 ``<mod_prefix>@<身分>`` 的條目。
+
+        只收原文不是中文的條目：先前從只有譯文的來源匯入、把中文存成原文的條目，
+        不能當作「同一個模組包」的對照目標。
+        """
+        out: dict[str, set[str]] = {}
+        for mod_id, key, en_us in self._q(
+            "SELECT mod_id, key, en_us FROM entry "
+            "WHERE kind=? AND mod_id>=? AND mod_id<? AND mc_version=?",
+            (kind, f"{mod_prefix}@", f"{mod_prefix}A", version),
+        ):
+            if not contains_cjk(en_us):
+                out.setdefault(mod_id.partition("@")[2], set()).add(key)
+        return out
 
     def entry_references(self, entry_id: int) -> list[SourceReference]:
         """回傳指向指定語言定義的來源引用。"""
