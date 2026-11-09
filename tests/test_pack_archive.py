@@ -210,3 +210,125 @@ def test_single_zip_issue_paths_do_not_leak_temp_directory(tmp_path):
     assert issues
     assert all("moddb_pack_" not in str(v) for i in issues for v in i.values())
     assert all(str(zpath) in i["source_archive"] for i in issues)
+
+
+def _kubejs_files(tip: str, title: str, desc: str) -> dict[str, str]:
+    return {
+        "kubejs/client_scripts/a/main.js": (
+            "ItemEvents.tooltip(event => {\n"
+            f"  event.add('demo:item', Text.of('{tip}'));\n"
+            "});\n"
+        ),
+        "config/ftbquests/quests/chapters/a.snbt": (
+            '{id:"CH1",title:"'
+            + title
+            + '",quests:[{id:"Q1",title:"'
+            + title
+            + '",description:["'
+            + desc
+            + '"]}]}'
+        ),
+    }
+
+
+def test_in_place_translated_pack_fills_zh_tw_into_existing_entries(tmp_path):
+    db = TranslationDB(tmp_path / "t.db")
+    orig = tmp_path / "orig"
+    for name, body in _kubejs_files(
+        "Tooltip text", "First Quest", "Do the thing"
+    ).items():
+        target = orig / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    for _ in scan_folder_generator(
+        db, orig, ScanOptions("1.21.1", include_pack_content=True)
+    ):
+        pass
+    conn = sqlite3.connect(tmp_path / "t.db")
+    kinds = {"kubejs_script", "ftb_quests"}
+    before = conn.execute(
+        "select kind, count(*) from entry where kind in ('kubejs_script','ftb_quests') "
+        "group by 1"
+    ).fetchall()
+    assert {k for k, _ in before} == kinds
+    hashes = conn.execute(
+        "select source_path, selector, source_hash from entry_origin order by 1,2"
+    ).fetchall()
+
+    zpath = _make_zip(
+        tmp_path / "zh.zip",
+        {
+            "Pack/" + n: b
+            for n, b in _kubejs_files("提示文字", "第一個任務", "完成這件事").items()
+        },
+    )
+    report = _scan(db, zpath)
+    assert report.stats.new_entries == 0 and report.stats.en_changed == 0
+    rows = conn.execute(
+        "select e.kind, e.en_us, t.zh_tw from entry e join translation t "
+        "on t.entry_id=e.id where e.kind in ('kubejs_script','ftb_quests') "
+        "order by e.kind, e.key"
+    ).fetchall()
+    assert {r[0] for r in rows} == kinds
+    assert all(r[1] and r[2] for r in rows)
+    assert any(r[2] == "提示文字" for r in rows) and any(
+        r[2] == "第一個任務" for r in rows
+    )
+    assert conn.execute("select count(*) from src_change").fetchone()[0] == 0
+    after = conn.execute(
+        "select source_path, selector, source_hash from entry_origin order by 1,2"
+    ).fetchall()
+    assert after == hashes  # 既有英文來源的雜湊與來源紀錄不被譯文檔蓋掉
+
+
+def test_kubejs_lang_translation_only_zip_fills_zh_tw_into_existing_entries(tmp_path):
+    db = TranslationDB(tmp_path / "t.db")
+    orig = tmp_path / "orig"
+    files = {
+        "kubejs/assets/demo/lang/en_us.json": json.dumps({"item.demo.a": "Alpha"}),
+        "kubejs/client_scripts/lang.js": (
+            "ClientEvents.lang('en_us', event => {\n"
+            "  event.add('item.demo.name', 'Demo Name');\n"
+            "});\n"
+        ),
+    }
+    for name, body in files.items():
+        target = orig / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+    for _ in scan_folder_generator(
+        db, orig, ScanOptions("1.21.1", include_pack_content=True)
+    ):
+        pass
+    zpath = _make_zip(
+        tmp_path / "zh.zip",
+        {
+            "Pack/kubejs/assets/demo/lang/zh_tw.json": json.dumps(
+                {"item.demo.a": "甲"}
+            ),
+            "Pack/kubejs/client_scripts/lang.js": (
+                "ClientEvents.lang('zh_tw', event => {\n"
+                "  event.add('item.demo.name', '示範名稱');\n"
+                "});\n"
+            ),
+        },
+    )
+    report = _scan(db, zpath)
+    assert (
+        report.stats.en_changed == 0
+    )  # ZIP 內的 kubejs/assets/<ns>/lang 另會被一般語言檔掃描匯入為 lang，這裡只看模組包條目
+    rows = (
+        sqlite3.connect(tmp_path / "t.db")
+        .execute(
+            "select e.en_us, t.zh_tw from entry e join translation t on t.entry_id=e.id "
+            "where e.kind='kubejs_lang' order by e.key"
+        )
+        .fetchall()
+    )
+    assert rows == [("Alpha", "甲"), ("Demo Name", "示範名稱")]
+    assert (
+        sqlite3.connect(tmp_path / "t.db")
+        .execute("select count(*) from entry where kind='kubejs_lang'")
+        .fetchone()[0]
+        == 2
+    )

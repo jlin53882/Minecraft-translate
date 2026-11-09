@@ -14,7 +14,9 @@ from collections import defaultdict
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
+from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.translation_db.models import ScanItem
+from translation_tool.translation_db.schema import KIND_FTB_QUESTS, KIND_KUBEJS_SCRIPT
 
 if TYPE_CHECKING:
     from translation_tool.translation_db.repository import TranslationDB
@@ -22,6 +24,8 @@ if TYPE_CHECKING:
 # 掃描到的來源只有譯文（沒有 en_us）時的來源語系
 TRANSLATED_LOCALES = frozenset({"zh_tw", "zh_cn"})
 MIN_OVERLAP_RATIO = 0.5
+# 文字直接寫在 SNBT／JS 裡、沒有語系檔的類型：來源若已就地翻成中文，原文欄會是中文
+IN_PLACE_KINDS = frozenset({KIND_FTB_QUESTS, KIND_KUBEJS_SCRIPT})
 
 
 @dataclass(frozen=True)
@@ -32,8 +36,21 @@ class ScopeMatch:
     total: int
 
 
+def _is_in_place_translation(item: ScanItem) -> bool:
+    return (
+        item.kind in IN_PLACE_KINDS
+        and not item.source_locale
+        and contains_cjk(item.en_us)
+    )
+
+
 def locale_only_items(items: list[ScanItem]) -> list[ScanItem]:
-    return [item for item in items if item.source_locale in TRANSLATED_LOCALES]
+    """只有譯文的項目：語言檔的 zh_tw／zh_cn 來源，或就地翻成中文的 SNBT／JS 文字。"""
+    return [
+        item
+        for item in items
+        if item.source_locale in TRANSLATED_LOCALES or _is_in_place_translation(item)
+    ]
 
 
 def match_existing_scope(
@@ -79,5 +96,11 @@ def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> list[Sc
             item = replace(item, en_us="", zh_tw=item.zh_tw or item.en_us)
         elif known and item.source_locale == "zh_cn":
             item = replace(item, en_us="", zh_cn=item.zh_cn or item.en_us)
+        elif known and _is_in_place_translation(item):
+            # 沒有語系檔的來源與既有條目是同一個檔案、同一個 selector：不再記來源，
+            # 否則會用譯文檔的雜湊蓋掉原本英文來源的雜湊，破壞之後的回寫比對。
+            item = replace(
+                item, en_us="", zh_tw=item.en_us, source_path="", source_selector=""
+            )
         out.append(item)
     return out
