@@ -127,7 +127,10 @@ def test_different_source_text_is_not_reused(db):
     _seed_reviewed(db)
     ids = _import(db, "26.1", [_item("k", "Brighter", "明亮")])
     assert db.reuse_reviewed_translations("26.1", entry_ids=ids).applied == 0
-    assert db.list_cross_version_differences("26.1") == []
+    # 不自動沿用，只在差異審核標為「原文不同」供逐筆判斷
+    assert [r.source_changed for r in db.list_cross_version_differences("26.1")] == [
+        True
+    ]
 
 
 def test_only_the_entry_ids_of_this_import_are_reused(db):
@@ -783,30 +786,55 @@ def test_target_can_be_pinned_to_one_pack_version(db):
     assert summary.total == 0
 
 
-def test_source_text_change_is_explained_not_matched(db):
-    """鍵值相同但原文不同（例如只改大小寫）：不當成相同內容，但差異審核要說明原因。"""
+def test_case_or_whitespace_only_source_change_counts_as_same_content(db):
+    """原文只差大小寫或空白：視為相同內容，匯入後自動沿用其他版本已審核的譯文。"""
     db.ingest("1.20.1", [_pack_item(PACK_A, "k", "Mostre Sua Cara", "露出你的臉")])
     ref = _entry(db, "1.20.1", "k", PACK_A)
     db.review_manual(ref.id, expected_zh_tw="露出你的臉", propagate=False)
-    db.ingest("1.21.1", [_pack_item(PACK_B, "k", "Mostre sua Cara")])
+    ids = _import(db, "1.21.1", [_pack_item(PACK_B, "k", "Mostre  sua cara ")])
 
-    assert db.list_cross_version_differences("1.21.1") == []
-    summary = db.explain_cross_version_exclusions("1.21.1")
-    assert (summary.source_changed, summary.source_case_only) == (1, 1)
-    assert summary.source_samples == ["k：「Mostre Sua Cara」→「Mostre sua Cara」"]
+    rows = db.list_cross_version_differences("1.21.1")
+    assert [(r.source_changed, r.reference.zh_tw) for r in rows] == [
+        (False, "露出你的臉")
+    ]
+    assert db.reuse_reviewed_translations("1.21.1", entry_ids=ids).applied == 1
+    assert _entry(db, "1.21.1", "k", PACK_B).zh_tw == "露出你的臉"
 
-    # 原文真的不同：計入但不算只差大小寫
-    db.ingest("1.21.1", [_pack_item(PACK_B, "k2", "Another text")])
-    db.ingest("1.20.1", [_pack_item(PACK_A, "k2", "Different text", "別的")])
-    ref2 = _entry(db, "1.20.1", "k2", PACK_A)
-    db.review_manual(ref2.id, expected_zh_tw="別的", propagate=False)
-    summary = db.explain_cross_version_exclusions("1.21.1")
-    assert (summary.source_changed, summary.source_case_only) == (2, 1)
 
-    # 已經有譯文且相同的目標不計
-    assert (
-        db.explain_cross_version_exclusions(
-            "1.21.1", ref_pack="不存在的整合包"
-        ).source_changed
-        == 0
+def test_real_source_change_is_listed_but_never_auto_reused(db):
+    """原文真的不同：不自動沿用，但列在差異審核（標記原文不同、附參考原文）讓使用者逐筆套用。"""
+    db.ingest("1.20.1", [_pack_item(PACK_A, "k", "Old text", "舊譯文")])
+    ref = _entry(db, "1.20.1", "k", PACK_A)
+    db.review_manual(ref.id, expected_zh_tw="舊譯文", propagate=False)
+    ids = _import(db, "1.21.1", [_pack_item(PACK_B, "k", "New text")])
+
+    result = db.reuse_reviewed_translations("1.21.1", entry_ids=ids)
+    assert (result.applied, result.source_changed) == (0, 1)
+    assert _entry(db, "1.21.1", "k", PACK_B).zh_tw == ""
+
+    rows = db.list_cross_version_differences("1.21.1")
+    assert [(r.source_changed, r.reference.en_us) for r in rows] == [(True, "Old text")]
+    assert db.apply_cross_version_references([_apply_item(rows[0])]).applied == 1
+    assert _entry(db, "1.21.1", "k", PACK_B).zh_tw == "舊譯文"
+
+
+def test_same_source_reference_wins_over_changed_source_references(db):
+    pack_c = "actuallyadditions@Another Pack@aaaaaaaaaaaa"
+    for pack, en, text in ((PACK_A, "Same", "相同"), (pack_c, "Other words", "不同")):
+        db.ingest("1.20.1", [_pack_item(pack, "k", en, text)])
+        db.review_manual(
+            _entry(db, "1.20.1", "k", pack).id, expected_zh_tw=text, propagate=False
+        )
+    db.ingest("1.21.1", [_pack_item(PACK_B, "k", "same")])
+    row = db.list_cross_version_differences("1.21.1")[0]
+    assert not row.source_changed and not row.conflict
+    assert [r.zh_tw for r in row.refs] == ["相同"]
+
+
+def test_unrelated_source_with_the_same_key_is_not_listed(db):
+    db.ingest("1.20.1", [_pack_item(PACK_A, "k", "Condition Level 2", "條件")])
+    db.review_manual(
+        _entry(db, "1.20.1", "k", PACK_A).id, expected_zh_tw="條件", propagate=False
     )
+    db.ingest("1.21.1", [_pack_item(PACK_B, "k", "This entry needs a key to open")])
+    assert db.list_cross_version_differences("1.21.1") == []

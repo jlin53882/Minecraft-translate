@@ -46,6 +46,7 @@ ACTOR = "使用者"
 ALL_MODS = "__all__"
 TAB_DIFF = "diff"
 TAB_CONFLICT = "conflict"
+TAB_SOURCE = "source"
 LATEST_LABEL = "各條目最近審核的版本"
 LATEST_KEY = "__latest__"
 PACK_SEP = "	"  # 參考選項的值：「遊戲版本	整合包資料夾」
@@ -54,14 +55,24 @@ PACK_SEP = "	"  # 參考選項的值：「遊戲版本	整合包資料夾」
 def split_rows(
     rows: list[CrossVersionRow],
 ) -> tuple[list[CrossVersionRow], list[CrossVersionRow]]:
-    """把差異清單分成（可直接套用的差異, 各版本不一致的衝突）。"""
-    diffs = [row for row in rows if not row.conflict]
-    return diffs, [row for row in rows if row.conflict]
+    """把差異清單分成（可直接套用的差異, 各版本不一致的衝突）；原文不同的另列。"""
+    same_source = [row for row in rows if not row.source_changed]
+    diffs = [row for row in same_source if not row.conflict]
+    return diffs, [row for row in same_source if row.conflict]
+
+
+def source_changed_rows(rows: list[CrossVersionRow]) -> list[CrossVersionRow]:
+    """參考的原文與目標不同（不只差大小寫或空白）的條目：只能逐筆判斷後套用。"""
+    return [row for row in rows if row.source_changed]
 
 
 def selectable(row: CrossVersionRow, include_reviewed: bool) -> bool:
-    """可勾選批次套用：衝突要逐筆挑版本；目標已審核者需先勾「包含目標已審核」。"""
-    return not row.conflict and (include_reviewed or not row.target_reviewed)
+    """可勾選批次套用：衝突與原文不同要逐筆判斷；目標已審核者需先勾「包含目標已審核」。"""
+    return (
+        not row.conflict
+        and not row.source_changed
+        and (include_reviewed or not row.target_reviewed)
+    )
 
 
 def selected_items(
@@ -179,7 +190,9 @@ class VersionDiffDialog:
         kit.set_dropdown_options(self.mod_dd, [(ALL_MODS, "全部模組")])
         self.mod_dd.value = ALL_MODS
         self.tabs = kit.Segmented(
-            [(TAB_DIFF, "差異"), (TAB_CONFLICT, "衝突")], TAB_DIFF, self._on_tab
+            [(TAB_DIFF, "差異"), (TAB_CONFLICT, "衝突"), (TAB_SOURCE, "原文不同")],
+            TAB_DIFF,
+            self._on_tab,
         )
         self.summary = ft.Text("", size=13, weight=ft.FontWeight.BOLD)
         # 內容相同卻沒被列為差異的條目與原因（來源語系不相容、參考尚未審核）
@@ -390,12 +403,15 @@ class VersionDiffDialog:
 
     # ------------------------------------------------------------------ 畫面
     def _current_rows(self) -> list[CrossVersionRow]:
-        diffs, conflicts = split_rows(self.rows)
-        return diffs if self.tab == TAB_DIFF else conflicts
+        return self._tab_rows(*split_rows(self.rows), source_changed_rows(self.rows))
+
+    def _tab_rows(self, diffs, conflicts, changed) -> list[CrossVersionRow]:
+        return {TAB_DIFF: diffs, TAB_CONFLICT: conflicts}.get(self.tab, changed)
 
     def _render(self) -> None:
         diffs, conflicts = split_rows(self.rows)
-        shown = diffs if self.tab == TAB_DIFF else conflicts
+        changed = source_changed_rows(self.rows)
+        shown = self._tab_rows(diffs, conflicts, changed)
         start = (self.current_page - 1) * PAGE_SIZE
         self.list_col.controls = [
             self._row_card(row) for row in shown[start : start + PAGE_SIZE]
@@ -404,6 +420,8 @@ class VersionDiffDialog:
                 "沒有需要審核的差異。"
                 if self.tab == TAB_DIFF
                 else "沒有各版本已審核譯文不一致的條目。"
+                if self.tab == TAB_CONFLICT
+                else "沒有鍵值相同、原文不同的條目。"
             )
         ]
         self.pager.visible = len(shown) > PAGE_SIZE
@@ -411,6 +429,7 @@ class VersionDiffDialog:
         reviewed_total = sum(1 for r in diffs if r.target_reviewed)
         self.summary.value = (
             f"差異 {format_count(len(diffs))} 筆・衝突 {format_count(len(conflicts))} 筆"
+            f"・原文不同 {format_count(len(changed))} 筆"
             + (
                 f"・其中目標已審核 {format_count(reviewed_total)} 筆"
                 "（預設不能批次套用，勾選下方「包含目標已審核」才可勾選）"
@@ -441,20 +460,6 @@ class VersionDiffDialog:
         if ex is not None and ex.ref_unreviewed:
             parts.append(
                 f"{format_count(ex.ref_unreviewed)} 筆其他版本只有尚未審核的譯文，不當參考"
-            )
-        if ex is not None and ex.source_changed:
-            examples = (
-                f"（例如 {'、'.join(ex.source_samples)}）" if ex.source_samples else ""
-            )
-            case_only = (
-                f"，其中 {format_count(ex.source_case_only)} 筆只差大小寫或空白"
-                if ex.source_case_only
-                else ""
-            )
-            parts.append(
-                f"{format_count(ex.source_changed)} 筆鍵值相同、其他版本有已審核譯文，"
-                f"但原文不同{case_only}，不算內容相同而未列出{examples}；"
-                "可到條目的「同鍵值・其他版本」逐筆套用"
             )
         self.exclusion_note.value = "；".join(parts) + "。" if parts else ""
         self.exclusion_note.visible = bool(parts)
@@ -526,7 +531,7 @@ class VersionDiffDialog:
         )
         return ft.Row(
             [
-                *([] if row.conflict else [checkbox]),
+                *([] if row.conflict or row.source_changed else [checkbox]),
                 ft.Text(
                     f"{row.mod_id} · {row.key}",
                     size=13,
@@ -575,6 +580,12 @@ class VersionDiffDialog:
                             ),
                         ],
                         spacing=8,
+                    ),
+                    *(
+                        # 原文不同：列出參考版本的原文，供對照後判斷譯文是否仍適用
+                        [ft.Text(f"參考原文：{ref.en_us}", size=11.5, color=C.GOLD)]
+                        if ref.en_us != row.en_us
+                        else []
                     ),
                     *(
                         # KubeJS／FTB：參考來自不同的整合包身分，標示出來源以便辨認

@@ -48,7 +48,7 @@
     "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 915,
     "app/views/moddb/translate_panel.py": 1173,
-    "app/views/moddb/version_diff_dialog.py": 869,
+    "app/views/moddb/version_diff_dialog.py": 880,
     "app/views/moddb_view.py": 962
   }
 }

@@ -22,6 +22,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from .content_identity import (
@@ -29,7 +30,6 @@ from .content_identity import (
     content_mod_sql,
     other_version_sql,
     pack_label,
-    same_content_sql,
 )
 from .query_interrupt import QueryCancelled
 from .schema import KIND_KUBEJS_LANG, SRC_CROSS_VERSION, SRC_MANUAL
@@ -66,6 +66,7 @@ class VersionRef:
     revision: int = 0
     review_seq: int = 0  # 最後一次審核事件的歷史編號；同一秒內的先後以它為準
     mod_id: str = ""  # 參考條目的模組識別（KubeJS／FTB 可能與目標的整合包身分不同）
+    en_us: str = ""  # 參考條目的原文（原文不同的參考要顯示給使用者對照）
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,9 @@ class CrossVersionRow:
     target_reviewed: bool
     refs: tuple[VersionRef, ...]
     target_revision: int | None = None
+    source_changed: bool = (
+        False  # 參考的原文與目標不同（不只差大小寫或空白）：只能人工逐筆套用
+    )
 
     @property
     def conflict(self) -> bool:
@@ -96,6 +100,30 @@ class CrossVersionRow:
     @property
     def differs(self) -> bool:
         return any(ref.zh_tw != self.target_zh_tw for ref in self.refs)
+
+
+def loose_text(text: str) -> str:
+    """比較原文用的寬鬆形式：不分大小寫、連續空白視為一個。
+
+    新版整合包常只改原文的大小寫或空白，譯文仍然適用，所以這樣的差異視為內容相同。
+    """
+    return " ".join(text.casefold().split())
+
+
+SOURCE_SIMILARITY = (
+    0.6  # 原文不同的參考，與目標原文至少這麼相似才列出（避免鍵值相同但內容無關的條目）
+)
+_SIMILARITY_CHARS = 2000
+
+
+def similar_source(a: str, b: str) -> bool:
+    """兩段原文夠相似，值得讓使用者判斷譯文是否仍適用（例如改措辭、補字、改大小寫）。"""
+    left, right = loose_text(a)[:_SIMILARITY_CHARS], loose_text(b)[:_SIMILARITY_CHARS]
+    if not left or not right:
+        return False
+    return (
+        SequenceMatcher(None, left, right, autojunk=False).ratio() >= SOURCE_SIMILARITY
+    )
 
 
 def _ref_order(ref: VersionRef) -> tuple[str, int, str]:
@@ -139,6 +167,9 @@ class ReuseResult:
     applied: int = 0
     skipped_reviewed: int = 0  # 目標已有人工審核的不同譯文，保留不動
     conflicts: int = 0  # 各版本已審核譯文不一致，只列出不處理
+    source_changed: int = (
+        0  # 其他版本的原文不同（不只差大小寫或空白），只列出不自動沿用
+    )
     stale: int = 0  # 套用時畫面資料已過期而略過
     history_id: int | None = None  # 任一筆歷史編號，可傳給 ``TranslationDB.revert``
     entry_ids: list[int] = field(default_factory=list)
@@ -187,11 +218,13 @@ def _fetch_rows(
         f"ft.zh_tw, ft.source, {effective_review_sql('ft', True)}, tt.revision, "
         "e2.id, e2.mc_version, fr.zh_tw, fr.source, fr.checker, "
         "COALESCE(hh.at, tr.updated_at, ''), COALESCE(tr.revision, 0), "
-        "COALESCE(hh.id, 0), e2.mod_id "
+        "COALESCE(hh.id, 0), e2.mod_id, e2.en_us "
         "FROM entry e "
         "LEFT JOIN effective ft ON ft.entry_id = e.id "
         "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
-        f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
+        "JOIN entry e2 ON e2.kind = e.kind "
+        f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
+        f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
         f"AND {other_version_sql('e', 'e2')} "
         f"AND {source_locale_match_sql('e', 'e2')}{ref_clause} "
         "JOIN effective fr ON fr.entry_id = e2.id "
@@ -223,11 +256,23 @@ def _fetch_rows(
                 int(row[15]),
                 int(row[16]),
                 row[17],
+                row[18],
             )
         )
     out = []
     for eid in sorted(grouped):
         (kind, mod_id, key, en_us), tw, source, status, revision = heads[eid]
+        refs = grouped[eid]
+        # 原文相同（或只差大小寫、空白）的參考才算相同內容；一個都沒有時，列出原文不同的參考
+        # 讓使用者逐筆判斷（原作者可能只是改了措辭，也可能改了意思）
+        same = [r for r in refs if loose_text(r.en_us) == loose_text(en_us)]
+        changed = not same
+        if changed:
+            refs = [r for r in refs if similar_source(r.en_us, en_us)]
+            if not refs:
+                continue
+        else:
+            refs = same
         out.append(
             CrossVersionRow(
                 eid,
@@ -238,8 +283,9 @@ def _fetch_rows(
                 tw or "",
                 None if source is None else int(source),
                 status in _REVIEWED_STATES,
-                tuple(sorted(grouped[eid], key=_ref_order)),
+                tuple(sorted(refs, key=_ref_order)),
                 None if revision is None else int(revision),
+                changed,
             )
         )
     return out
@@ -320,13 +366,6 @@ class ExclusionSummary:
     samples: list[str] = field(
         default_factory=list
     )  # 例：「key（目標語系 pt_br、參考語系 unknown:12）」
-    source_changed: int = (
-        0  # 類型、模組、鍵值相同，但原文不同，且其他版本有已審核的不同譯文
-    )
-    source_case_only: int = 0  # 其中原文只差大小寫或空白
-    source_samples: list[str] = field(
-        default_factory=list
-    )  # 例：「key：「Mostre Sua Cara」→「Mostre sua Cara」」
 
     @property
     def total(self) -> int:
@@ -362,9 +401,11 @@ def explain_exclusions(
             "SELECT e.id, e.key, ft.zh_tw, fr.zh_tw, "
             f"{effective_review_sql('fr', True)}, "
             f"{source_locale_match_sql('e', 'e2')}, "
-            f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id, e.mod_id "
+            f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id, e.mod_id, e.en_us, e2.en_us "
             "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
-            f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
+            "JOIN entry e2 ON e2.kind = e.kind "
+            f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
+            f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
             f"AND {other_version_sql('e', 'e2')}{ref_clause} "
             "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
             f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
@@ -372,77 +413,14 @@ def explain_exclusions(
         args: list[object] = [*([ref_version] if ref_version else []), version, *params]
         with db._lock:
             rows = db._conn.execute(sql, args).fetchall()
+        # 原文只差大小寫或空白視為相同；原文真的不同的參考由差異審核的「原文不同」頁籤列出
+        rows = [r for r in rows if loose_text(r[11]) == loose_text(r[12])]
         if ref_pack:
             rows = [r for r in rows if pack_label(r[8], r[9]) == ref_pack]
         if target_pack:
             rows = [r for r in rows if pack_label(r[8], r[10]) == target_pack]
         _classify_exclusions(rows, summary)
-        _count_source_changes(
-            db,
-            version,
-            ids,
-            summary,
-            ref_version,
-            ref_pack,
-            target_pack,
-            mod_ids,
-            kinds,
-        )
     return summary
-
-
-def _loose_text(text: str) -> str:
-    """比較「只差大小寫或空白」用的寬鬆形式。"""
-    return " ".join(text.casefold().split())
-
-
-def _count_source_changes(
-    db: TranslationDB,
-    version: str,
-    ids: Sequence[int],
-    summary: ExclusionSummary,
-    ref_version: str,
-    ref_pack: str,
-    target_pack: str,
-    mod_ids: Sequence[str] | None,
-    kinds: Sequence[str] | None,
-) -> None:
-    """統計「鍵值相同、原文不同」而不當成相同內容的條目（依設計不比對，讓使用者知道原因）。
-
-    只計目標尚未審核、且其他版本有已審核且譯文不同的條目；原文只差大小寫或空白的另計。
-    """
-    scope, params = _scope_sql(ids, mod_ids, kinds)
-    ref_clause = " AND e2.mc_version = ?" if ref_version else ""
-    sql = (
-        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, e2.mod_id, e2.en_us, "
-        f"ft.zh_tw, fr.zh_tw, {effective_review_sql('ft', True)} "
-        "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
-        "JOIN entry e2 ON e2.kind = e.kind "
-        f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
-        f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
-        f"AND e2.en_us <> e.en_us AND {other_version_sql('e', 'e2')}{ref_clause} "
-        "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
-        f"AND {effective_review_sql('fr', True)} IN ('reviewed','legacy_unknown') "
-        f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
-    )
-    args: list[object] = [*([ref_version] if ref_version else []), version, *params]
-    with db._lock:
-        rows = db._conn.execute(sql, args).fetchall()
-    seen: set[int] = set()
-    for row in rows:
-        eid = int(row[0])
-        if eid in seen or row[9] in _REVIEWED_STATES or (row[8] == (row[7] or "")):
-            continue
-        if ref_pack and pack_label(row[1], row[5]) != ref_pack:
-            continue
-        if target_pack and pack_label(row[1], row[2]) != target_pack:
-            continue
-        seen.add(eid)
-        summary.source_changed += 1
-        if _loose_text(row[4]) == _loose_text(row[6]):
-            summary.source_case_only += 1
-        if len(summary.source_samples) < _SAMPLE_LIMIT:
-            summary.source_samples.append(f"{row[3]}：「{row[6]}」→「{row[4]}」")
 
 
 def _classify_exclusions(rows: Sequence[tuple], summary: ExclusionSummary) -> None:
@@ -586,7 +564,9 @@ def _reuse_one(
 ) -> None:
     if not row.differs:
         return
-    if row.conflict:
+    if row.source_changed:
+        result.source_changed += 1  # 原文不同：不自動沿用，留給差異審核逐筆判斷
+    elif row.conflict:
         result.conflicts += 1
     elif row.target_reviewed:
         result.skipped_reviewed += 1
