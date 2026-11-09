@@ -1831,6 +1831,19 @@ def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
     assert panel.jar_tr_row.label == scan_panel.JAR_TR_LABEL
 
 
+def test_scan_panel_jar_convert_cn_requires_reading_zh_cn(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel.jar_tr_row.value = False
+    panel._on_jar_tr_change()
+    assert panel.cn_row.disabled_state and panel.cn_row.value is False
+    assert not panel.rules_row.disabled_state
+    assert panel.build_options().convert_cn is False
+    panel.jar_tr_row.value = True
+    panel._on_jar_tr_change()
+    assert not panel.cn_row.disabled_state and panel.cn_row.value is True
+
+
 def test_scan_panel_zip_rules_require_zh_cn(db_path):
     panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
     panel.version_field.value = "1.21.1"

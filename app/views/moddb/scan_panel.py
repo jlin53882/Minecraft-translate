@@ -51,6 +51,7 @@ ZIP_RULES_SUB = "只作用在 zh_cn 簡轉繁後的文字；zh_tw 仍逐字匯�
 ZIP_RULES_NEEDS_CN_SUB = "需先開啟「讀取模組自帶 zh_cn」才能套用替換規則"
 ZIP_CONVERT_NEEDS_CN_SUB = "需先開啟「讀取模組自帶 zh_cn」才有簡中可轉繁"
 CONVERT_CN_SUB = "只在沒有繁中時補上，標記為「簡中轉繁」"
+JAR_CONVERT_NEEDS_CN_SUB = "需先開啟「讀取模組自帶 zh_tw／zh_cn」才有簡中可轉繁"
 JAR_TR_LABEL = "讀取模組自帶 zh_tw／zh_cn"
 PACK_ROW_SUB_JAR_MODE = (
     "從模組包根目錄掃描 kubejs 與 config/ftbquests/quests；"
@@ -513,15 +514,12 @@ class ScanPanel(ft.Column):
             return
         self.jar_tr_row.set_label(JAR_TR_LABEL)
         self.jar_tr_row.set_sub(JAR_TR_SUB)
-        for row, jar_sub in (
-            (self.rules_row, RULES_SUB),
-            (self.cn_row, CONVERT_CN_SUB),
-        ):
-            saved = self._jar_mode_values.pop(row, None)
-            if saved is not None:
-                row.value = saved
-            row.set_disabled(False)
-            row.set_sub(jar_sub)
+        saved = self._jar_mode_values.pop(self.rules_row, None)
+        if saved is not None:
+            self.rules_row.value = saved
+        self.rules_row.set_disabled(False)
+        self.rules_row.set_sub(RULES_SUB)
+        self._refresh_jar_convert_row()
 
     def _refresh_zip_rules_row(self) -> None:
         """ZIP 模式：zh_cn 關閉時，簡轉繁與替換規則都鎖成關閉；重新開啟時還原先前的選擇。"""
@@ -543,10 +541,28 @@ class ScanPanel(ft.Column):
             row.set_disabled(True)
             row.set_sub(off_sub)
 
+    def _refresh_jar_convert_row(self) -> None:
+        """mods 模式：沒讀自帶 zh_cn 就沒有簡中可轉繁，簡轉繁鎖成關閉並還原先前選擇。"""
+        row = self.cn_row
+        if self.jar_tr_row.value:
+            saved = self._jar_mode_values.pop(row, None)
+            if saved is not None:
+                row.value = saved
+            row.set_disabled(False)
+            row.set_sub(CONVERT_CN_SUB)
+            return
+        if not row.disabled_state:
+            self._jar_mode_values[row] = row.value
+        row.value = False
+        row.set_disabled(True)
+        row.set_sub(JAR_CONVERT_NEEDS_CN_SUB)
+
     def _on_jar_tr_change(self, _e=None) -> None:
         if self.mode == "zip":
             self._refresh_zip_rules_row()
-            self._safe_update()
+        else:
+            self._refresh_jar_convert_row()
+        self._safe_update()
 
     def _start_label(self) -> str:
         verb = "匯入" if self.mode == "zip" else "掃描"
@@ -560,7 +576,7 @@ class ScanPanel(ft.Column):
         return ScanOptions(
             version=self.version(),
             read_jar_translations=self.jar_tr_row.value,
-            convert_cn=self.cn_row.value and (self.jar_tr_row.value or not translated),
+            convert_cn=self.cn_row.value and self.jar_tr_row.value,
             scan_nested=self.nested_row.value,
             include_patchouli=self.book_row.value,
             apply_rules=self.rules_row.value and self.jar_tr_row.value
