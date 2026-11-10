@@ -1528,7 +1528,7 @@ def _adoption_problems(adopted: AdoptedItems) -> list[tuple[str, str]]:
         (
             "translation_original_differs",
             adopted.original_differs,
-            "筆譯文對應的英文原文在各模組包不同，"
+            "筆譯文對應的英文原文在各模組包不同或未知，"
             + "只補進 key 相符最多的模組包（沒有唯一最多者時未匯入）",
         ),
         (

@@ -695,3 +695,30 @@ def test_translated_zip_skips_differing_originals_when_packs_tie(tmp_path):
     assert [i["reason"] for i in report.issues if i["reason"].startswith("trans")] == [
         "translation_original_differs"
     ]
+
+
+def test_unknown_original_is_only_filled_in_the_best_pack():
+    """原文是空的條目無從比對：不因另一份有英文就跟著補，除非它在 key 相符最多的那一份。"""
+    from translation_tool.translation_db.models import ScanItem
+    from translation_tool.translation_db.pack_scope_match import (
+        ScopeMatch,
+        keep_existing_originals,
+    )
+
+    item = ScanItem(
+        kind="ftb_quest_lang",
+        mod_id="ftbquests@zh.zip@0",
+        key="k",
+        en_us="譯文",
+        source_locale="zh_tw",
+    )
+    originals = {("ftb_quest_lang", "ftbquests", "k"): {"a@1": "", "b@2": "Text"}}
+
+    def filled(best):
+        match = ScopeMatch(("a@1", "b@2"), best, originals, 1, 1)
+        adopted = keep_existing_originals([item], match)
+        return sorted(i.mod_id for i in adopted.items), len(adopted.original_differs)
+
+    assert filled("b@2") == (["ftbquests@b@2"], 1)
+    assert filled("a@1") == (["ftbquests@a@1", "ftbquests@b@2"], 0)
+    assert filled(None) == (["ftbquests@b@2"], 1)

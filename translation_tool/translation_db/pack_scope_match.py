@@ -9,7 +9,8 @@ KubeJS／FTB Quests 條目的身分含模組包身分（``ftbquests@<名稱>@<�
 無法得知它是照哪一份原文翻的，所以逐筆比對各模組包的英文：
 
 - 各模組包的英文相同：每一份都補。
-- 英文不同：只補進重疊度唯一最高的那一份；沒有唯一最高者就不補。
+- 英文不同，或其中一份的原文未知（空白）：只補進重疊度唯一最高的那一份；沒有唯一最高者
+  就不補。
 - 沒有任何模組包有這個 key：不匯入（否則中文會被存成原文）。
 
 找不到重疊度達門檻的模組包時不動，維持以新的模組包身分新增。
@@ -57,7 +58,7 @@ class AdoptedItems:
     items: list[ScanItem] = field(default_factory=list)
     # 沒有任何模組包有這個 key：沒有英文原文可對照，未匯入
     without_original: list[ScanItem] = field(default_factory=list)
-    # 各模組包的英文不同：只補進重疊度唯一最高的模組包，沒有唯一最高者時未匯入
+    # 各模組包的英文不同或有的未知：只補進重疊度唯一最高的模組包，沒有唯一最高者時未匯入
     original_differs: list[ScanItem] = field(default_factory=list)
     # 帶英文的項目只歸在重疊度唯一最高的模組包；沒有唯一最高者時未匯入
     no_single_pack: list[ScanItem] = field(default_factory=list)
@@ -155,10 +156,16 @@ def _as_translation(item: ScanItem) -> ScanItem:
 
 
 def _fill_targets(holders: Mapping[str, str], best: str | None) -> tuple[str, ...]:
-    """這筆譯文要補進哪些模組包：英文都相同才全部補，否則只補唯一最高的那一份。"""
-    if len({loose_text(en) for en in holders.values()}) == 1:
-        return tuple(holders)
-    return (best,) if best is not None and best in holders else ()
+    """這筆譯文要補進哪些模組包：英文都相同才全部補，否則只補唯一最高的那一份。
+
+    原文是空的條目（原文未知）無從比對，不算「英文相同」：只有它屬於唯一最高的那一份
+    時才補。
+    """
+    known = {scope: en for scope, en in holders.items() if en.strip()}
+    only_best = (best,) if best is not None and best in holders else ()
+    if len({loose_text(en) for en in known.values()}) != 1:
+        return only_best
+    return tuple(scope for scope in holders if scope in known or scope == best)
 
 
 def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> AdoptedItems:
