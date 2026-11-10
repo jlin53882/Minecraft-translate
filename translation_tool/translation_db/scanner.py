@@ -1478,8 +1478,11 @@ def _match_existing_pack(
                 "level": "info",
             }
         return pack_result
-    if match.scope != pack_result.pack_scope:
-        pack_result = _scan_pack_for_options(pack_root, options, match.scope)
+    if match.scope == pack_result.pack_scope:
+        # 對到的是這份輸入自己的身分（同一個 ZIP 再匯入）：它就是原始來源，照一般匯入
+        # 更新來源雜湊、引用與過期來源，不是「補譯文進別的模組包」。
+        return pack_result
+    pack_result = _scan_pack_for_options(pack_root, options, match.scope)
     pack_result.adopted_existing = True
     # 譯文輸入不是原模組包的檔案：不清理原包的來源紀錄
     pack_result.stale_origins = []
