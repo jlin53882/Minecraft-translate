@@ -1815,6 +1815,9 @@ class TranslationDB(
         if criteria.mod_id:
             where.append("e.mod_id = ?")
             params.append(criteria.mod_id)
+        elif criteria.pack_mod_ids is not None:
+            where.append("e.mod_id IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps(criteria.pack_mod_ids))
         if criteria.kind:
             where.append("e.kind = ?")
             params.append(criteria.kind)

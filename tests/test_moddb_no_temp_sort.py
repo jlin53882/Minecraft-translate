@@ -142,6 +142,7 @@ def test_list_entries_quality_filters_avoid_temp_sort(db, status):
     "extra",
     [
         {"mod_id": "alpha"},
+        {"pack_mod_ids": ("alpha", "beta")},
         {"kind": "lang"},
         {"source": 6},
         {"review_status": "unreviewed"},

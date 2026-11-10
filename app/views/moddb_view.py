@@ -754,6 +754,7 @@ class ModDbView(ft.Column):
                 "criteria": self.entries._entry_filter(),
                 "version": self.entries.version,
                 "mod_id": self.entries.mod_id,
+                "pack": self.entries.pack,
                 "kind": self.entries.kind,
                 "page": self.entries.pager.current_page,
                 "filter_only": self.entries._filter_only_refresh,

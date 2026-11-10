@@ -243,6 +243,9 @@ class EntryFilter:
     exclude_ids: tuple[int, ...] = ()
     # 只列最近一次智慧校對批次中處於該狀態群組的條目（鍵見 SMART_REVIEW_FILTER_GROUPS）
     smart_review: str | None = None
+    # 整合包版本篩選：只列這些模組識別（該整合包的 KubeJS／FTB 模組，見
+    # TranslationDB.pack_mods）；None 為不限。已選模組時以模組為準。
+    pack_mod_ids: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.smart_review is not None and (
@@ -266,6 +269,10 @@ class EntryFilter:
             "manual_activity_oldest",
         }:
             raise ValueError(f"未知條目排序：{self.sort_by}")
+        if self.pack_mod_ids is not None:
+            object.__setattr__(
+                self, "pack_mod_ids", tuple(dict.fromkeys(self.pack_mod_ids))
+            )
         for name in ("entry_ids", "include_ids", "exclude_ids"):
             values = getattr(self, name)
             if values is not None:

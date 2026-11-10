@@ -109,6 +109,9 @@ def _load_entries_snapshot(db, request: dict, settings, snapshot: dict) -> dict:
         versions=scope["versions"],
         version=scope["version"],
         mods=scope["mods"],
+        packs=scope["packs"],
+        pack=scope["pack"],
+        pack_mod_ids=scope["pack_mod_ids"],
         kinds=scope["kinds"],
         effective_source_codes=scope["source_codes"],
         source=scope["source"],
@@ -147,6 +150,9 @@ def _entries_filter_snapshot(db, settings, request: dict) -> dict:
         "versions": [],
         "version": request.get("version"),
         "mods": [],
+        "packs": [],
+        "pack": request.get("pack"),
+        "pack_mod_ids": request["criteria"].pack_mod_ids,
         "kinds": [],
         "effective_source_codes": (),
         "source": None,
@@ -173,6 +179,9 @@ def _entries_filter_snapshot(db, settings, request: dict) -> dict:
         versions=scope["versions"],
         version=scope["version"],
         mods=scope["mods"],
+        packs=scope["packs"],
+        pack=scope["pack"],
+        pack_mod_ids=scope["pack_mod_ids"],
         kinds=scope["kinds"],
         effective_source_codes=scope["source_codes"],
         source=scope["source"],
@@ -204,6 +213,9 @@ def load_entries_options_snapshot(
         versions=scope["versions"],
         version=scope["version"],
         mods=scope["mods"],
+        packs=scope["packs"],
+        pack=scope["pack"],
+        pack_mod_ids=scope["pack_mod_ids"],
         kinds=scope["kinds"],
         effective_source_codes=scope["source_codes"],
         source=scope["source"],
@@ -215,8 +227,15 @@ def load_entries_options_snapshot(
             resolved.mod_id,
             resolved.kind,
             resolved.source,
+            resolved.pack_mod_ids,
         )
-        != (requested.version, requested.mod_id, requested.kind, requested.source),
+        != (
+            requested.version,
+            requested.mod_id,
+            requested.kind,
+            requested.source,
+            requested.pack_mod_ids,
+        ),
     )
     return snapshot
 
@@ -234,7 +253,12 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
 
     available_mods = db.mods(version) if db and version else []
     kinds = db.kinds(version) if db and version else []
-    mod_id = request.get("mod_id") if request.get("mod_id") in available_mods else None
+    packs = db.pack_versions(version) if db and version else []
+    pack = request.get("pack") if request.get("pack") in packs else None
+    # 整合包版本解析成它的模組清單：清單、筆數與下拉選項都用同一個條件
+    pack_mod_ids = tuple(db.pack_mods(version, pack)) if pack else None
+    allowed_mods = available_mods if pack_mod_ids is None else pack_mod_ids
+    mod_id = request.get("mod_id") if request.get("mod_id") in allowed_mods else None
     kind = request.get("kind") if request.get("kind") in kinds else None
     source_codes = db.effective_source_codes(version) if db and version else ()
     source = requested_criteria.source
@@ -251,12 +275,14 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
         mod_id=mod_id,
         kind=kind,
         source=source,
+        pack_mod_ids=pack_mod_ids,
     )
     # module/source 選單描述的是目前可達的結果 scope，不只是選用的日期／品質進階條件。
     # status、state、搜尋、kind 與固定條目條件都可能從結果中排除某個 module 或 source；
     # 若忽略這些條件，資料庫寫入後下拉選單就可能保留已沒有符合列的 module。
     options_are_filtered = bool(
         criteria.mod_id is not None
+        or criteria.pack_mod_ids is not None
         or criteria.kind is not None
         or criteria.source is not None
         or criteria.state != "all"
@@ -286,6 +312,9 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
         "versions": versions,
         "version": version,
         "mods": mods,
+        "packs": packs,
+        "pack": pack,
+        "pack_mod_ids": pack_mod_ids,
         "kinds": kinds,
         "source_codes": source_codes,
         "source": source,

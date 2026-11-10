@@ -38,6 +38,7 @@ from app.views.moddb.editor_save_state import shadowed_versions, shadowing_sourc
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
+    ALL_PACKS,
     FilterFlush,
     apply_filter_options,
     build_filter_controls,
@@ -123,6 +124,9 @@ class EntriesPanel(ft.Column):
         self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
         self.version: str | None = None
         self.mod_id: str | None = None
+        # 模組包版本篩選：名稱與它解析後的模組清單（由背景快照填入）
+        self.pack: str | None = None
+        self.pack_mod_ids: tuple[str, ...] | None = None
         self.kind: str | None = None
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
@@ -539,6 +543,7 @@ class EntriesPanel(ft.Column):
                 "criteria": criteria,
                 "version": self.version,
                 "mod_id": self.mod_id,
+                "pack": self.pack,
                 "kind": self.kind,
             },
             current_settings(),
@@ -553,6 +558,9 @@ class EntriesPanel(ft.Column):
                 "versions": scope["versions"],
                 "version": scope["version"],
                 "mods": scope["mods"],
+                "packs": scope["packs"],
+                "pack": scope["pack"],
+                "pack_mod_ids": scope["pack_mod_ids"],
                 "kinds": scope["kinds"],
                 "source": scope["source"],
                 "mod_id": scope["mod_id"],
@@ -811,9 +819,22 @@ class EntriesPanel(ft.Column):
     # ------------------------------------------------------------------ 事件
     def _on_version(self, e) -> None:
         self.version = e.control.value
+        self._clear_pack()
         self.mod_id = None
         if self._on_filter_changed is None:
             self._load_mods()
+        refresh_entry_filter(self, full_refresh=True)
+
+    def _clear_pack(self) -> None:
+        self.pack = None
+        self.pack_mod_ids = None
+
+    def _on_pack(self, e) -> None:
+        """換模組包版本：模組清單跟著換，原本選的模組不一定屬於它，所以一併清掉。"""
+        value = e.control.value
+        self._clear_pack()
+        self.pack = None if value in (None, "", ALL_PACKS) else value
+        self.mod_id = None
         refresh_entry_filter(self, full_refresh=True)
 
     def _on_mod(self, e) -> None:
@@ -1083,6 +1104,7 @@ class EntriesPanel(ft.Column):
         """從批次機翻跳進來：只列「特殊字元不一致、沒寫入」的條目，並預填 AI 譯文供修正。"""
         self._sync_database_identity(self._database_identity(self.db()))
         self.version = version
+        self._clear_pack()
         self.mod_id = None
         self.kind = None
         self.version_dd.value = version

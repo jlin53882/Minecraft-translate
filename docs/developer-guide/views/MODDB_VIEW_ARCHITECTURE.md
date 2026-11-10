@@ -155,6 +155,8 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 `AdvancedFilters` 的 `sort_by` 由排序下拉值與方向狀態組合：`default`／`default_desc` 與各日期排序的 `*_newest`／`*_oldest`；日期欄位由 `picked_date` 轉成本地日期，日期條件在「時間依據」為不限時間時會自動改用條目匯入時間。。清單因日期範圍而為空時，`EntriesPanel._render_list` 呼叫 `AdvancedFilters.announce_no_data`：由 `TranslationDB.time_data_range` 查出該時間依據實際最早／最晚時間，顯示在空狀態並彈出提示。
 
+模組包版本篩選不另外寫一套查詢：`panel_refresh._resolve_entries_scope` 在背景執行緒把選到的模組包版本解析成 `EntryFilter.pack_mod_ids`（該模組包的模組識別清單），`TranslationDB._filter_sql` 與 `option_facets` 的摘要查詢都以 `mod_id IN (...)` 套用，已選模組時以模組為準。面板只保存名稱與解析結果（`EntriesPanel.pack`、`EntriesPanel.pack_mod_ids`），不在 UI 執行緒查資料庫。
+
 會影響結果範圍的條件同時作用於模組、類型與目前生效來源選單：模組與來源由 `panel_refresh._resolve_entries_scope` 交給 `TranslationDB.filter_option_values`，類型由 `TranslationDB.kind_option_values` 產生，兩者都使用與條目列相同的 predicate（類型選單排除類型本身的選擇，因此不會只剩下已選的類型）。它會保留使用者目前選定、但在新條件下沒有交集的模組／來源，讓查詢結果正確顯示為空；不可因為選單沒有交集而清除條件並放寬到其他範圍。
 
 ## 修復結果逐筆審查

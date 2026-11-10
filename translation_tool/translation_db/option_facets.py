@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -50,6 +51,9 @@ def _summary_where(criteria: EntryFilter) -> tuple[list[str], list]:
     """版本、類型、無譯文與審核狀態在 ``stat_src`` 上的條件（需先確認 :func:`summary_eligible`）。"""
     where = ["mc_version = ?"]
     params: list = [criteria.version]
+    if criteria.pack_mod_ids is not None:
+        where.append("mod_id IN (SELECT value FROM json_each(?))")
+        params.append(json.dumps(criteria.pack_mod_ids))
     if criteria.kind:
         where.append("kind = ?")
         params.append(criteria.kind)

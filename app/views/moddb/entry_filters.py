@@ -25,6 +25,7 @@ from app.views.moddb.version_diff_dialog import VersionDiffDialog
 
 ALL_REVIEW_STATES = "__all__"
 ALL_MODS = "全部模組"
+ALL_PACKS = "全部模組包版本"
 ALL_KINDS = "全部類型"
 SEARCH_FIELD_OPTIONS = (
     ("all", "全部內容"),
@@ -60,6 +61,7 @@ def apply_filter_options(panel, snapshot: dict) -> bool:
             panel._db_identity = identity
     dropdowns = {
         "version": panel.version_dd,
+        "pack": panel.pack_dd,
         "mod": panel.mod_dd,
         "kind": panel.kind_dd,
         "source": panel.source_filter.dropdown,
@@ -87,6 +89,7 @@ def apply_filter_options(panel, snapshot: dict) -> bool:
     )
     panel.version = snapshot.get("version")
     panel.version_dd.value = panel.version
+    options_changed["pack"] = _apply_pack_options(panel, snapshot)
     mods = snapshot.get("mods", [])
     options_changed["mod"] = kit.set_dropdown_options(
         panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
@@ -183,6 +186,21 @@ def refresh_after_database_change(panel) -> None:
     )
 
 
+def _apply_pack_options(panel, snapshot: dict) -> bool:
+    """模組包版本選項：選了遊戲版本才有清單；該版本沒有 KubeJS／FTB 內容時只有「全部」。"""
+    packs = snapshot.get("packs", [])
+    changed = kit.set_dropdown_options(
+        panel.pack_dd, [(ALL_PACKS, ALL_PACKS), *((p, p) for p in packs)]
+    )
+    panel.pack = snapshot.get("pack")
+    panel.pack_mod_ids = snapshot.get("pack_mod_ids")
+    panel.pack_dd.value = panel.pack or ALL_PACKS
+    disabled = not packs
+    changed = changed or panel.pack_dd.disabled != disabled
+    panel.pack_dd.disabled = disabled
+    return changed
+
+
 def prepare_entries_snapshot(panel, snapshot: dict) -> tuple[dict, bool]:
     """同步快照的資料庫身分，必要時丟棄舊 scope 並重新查詢。"""
     if "identity" not in snapshot:
@@ -214,6 +232,12 @@ def _build_controls(panel) -> None:
     panel.version_dd = kit.dropdown(
         label="遊戲版本", dense=True, width=220, on_select=panel._on_version
     )
+    panel.pack_dd = kit.dropdown(
+        label="模組包版本", dense=True, width=220, on_select=panel._on_pack
+    )
+    kit.set_dropdown_options(panel.pack_dd, [(ALL_PACKS, ALL_PACKS)])
+    panel.pack_dd.value = ALL_PACKS
+    panel.pack_dd.disabled = True
     panel.mod_dd = kit.searchable_dropdown(
         label="模組", dense=True, width=220, on_select=panel._on_mod
     )
@@ -341,6 +365,7 @@ def _build_filter_card(panel) -> None:
                     ft.Row(
                         [
                             panel.version_dd,
+                            panel.pack_dd,
                             panel.mod_dd,
                             panel.kind_dd,
                             panel.source_filter.dropdown,
@@ -385,6 +410,7 @@ def entry_filter(panel) -> EntryFilter:
     return EntryFilter(
         version=panel.version or "",
         mod_id=panel.mod_id,
+        pack_mod_ids=panel.pack_mod_ids,
         kind=panel.kind,
         state=panel.state,
         query=panel.query,
