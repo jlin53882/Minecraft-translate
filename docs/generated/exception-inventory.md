@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **364** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **370** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 326 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 332 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 19 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -39,6 +39,7 @@
 | `app/services_impl/moddb_retranslate_service.py:_flush_repair_cache` | BLE001 | 已記錄／回報 | DB results survive cache failure |
 | `app/services_impl/moddb_retranslate_service.py:run_moddb_retranslate_service` | BLE001 | 已記錄／回報 | service boundary reports failure in TaskSession |
 | `app/services_impl/moddb_service.py:warm_stats_quietly` | BLE001 | 已記錄／回報 | 統計預熱失敗不影響任務結果 |
+| `app/services_impl/moddb_service.py:_reuse_reviewed_after_scan` | BLE001 | 已記錄／回報 | 沿用是匯入後的選用步驟，失敗不能讓已提交的匯入變成失敗 |
 | `app/services_impl/moddb_service.py:run_moddb_scan_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束 |
 | `app/services_impl/moddb_smart_review_service.py:_apply_moddb_smart_review_legacy_batch` | BLE001 | 已記錄／回報 | one bad candidate must not stop the batch |
 | `app/services_impl/moddb_translate_service.py:_flush_buffer` | BLE001 | 已記錄／回報 | 持久化失敗需重試並回報 |
@@ -191,6 +192,11 @@
 | `app/views/moddb/species_suggestion.py:SpeciesSuggestion._launch` | BLE001 | 已記錄／回報 | restore UI after launch failure |
 | `app/views/moddb/translate_panel.py:TranslatePanel._launch_retranslation_worker` | BLE001 | 已記錄／回報 | caller restores the UI state |
 | `app/views/moddb/translate_panel.py:TranslatePanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
+| `app/views/moddb/version_diff_dialog.py:VersionDiffDialog._reload.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/version_diff_dialog.py:VersionDiffDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/version_diff_dialog.py:VersionDiffDialog._keep_target.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/version_diff_dialog.py:VersionDiffDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/version_diff_dialog.py:VersionDiffDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
 | `app/views/moddb_view.py:_load_overview_snapshot` | BLE001 | 已記錄／回報 | 顯示載入失敗並恢復頁面 |
 | `app/views/moddb_view.py:ModDbView._request_overview_refresh.load` | BLE001 | 已記錄／回報 | page may detach during load |
 | `app/views/moddb_view.py:ModDbView._request_overview_refresh` | BLE001 | 已記錄／回報 | restore state on launch failure |

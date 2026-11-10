@@ -61,6 +61,13 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.content_identity import pack_label
+from translation_tool.translation_db.cross_version_review import (
+    REFERENCE_LATEST,
+    ApplyItem,
+    CrossVersionRow,
+    VersionRef,
+)
 from translation_tool.translation_db.models import QUALITY_TOKEN_CATEGORIES
 from translation_tool.translation_db.quality import token_issues, whitespace_note
 from translation_tool.translation_db.query_interrupt import (
@@ -91,11 +98,13 @@ from translation_tool.translation_db.time_filters import (
 )
 from translation_tool.utils.cancellation import cancel_scope
 from translation_tool.utils.config_manager import load_config
+from translation_tool.utils.log_unit import log_exception
 from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
     "QUALITY_TOKEN_CATEGORIES",
+    "REFERENCE_LATEST",
     "SOURCE_NAMES",
     "SRC_AI",
     "SRC_CUSTOM",
@@ -108,17 +117,20 @@ __all__ = [
     "STATUS_FOUND",
     "STATUS_NOT_FOUND",
     "STATUS_RATE_LIMITED",
+    "ApplyItem",
     "BatchReplaceChange",
     "BatchReplacePlan",
     "BatchReplaceResult",
     "BulkReviewCandidate",
     "BulkReviewPlan",
     "BulkReviewResult",
+    "CrossVersionRow",
     "DbSettings",
     "EntryDetail",
     "EntryFilter",
     "EntryRow",
     "QualityFilter",
+    "QueryCancelled",
     "ReviewPreviewItem",
     "ScanOptions",
     "SmartReviewCandidate",
@@ -129,6 +141,7 @@ __all__ = [
     "SpeciesScanResult",
     "TimeFilter",
     "TranslationDB",
+    "VersionRef",
     "VersionStat",
     "cached_species_lookup",
     "current_settings",
@@ -147,6 +160,7 @@ __all__ = [
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
+    "pack_label",
     "preview_new_source_names",
     "quick_date_bounds",
     "run_moddb_scan_service",
@@ -327,6 +341,65 @@ def _reject_unknown_translation_source(session, source: int) -> None:
     session.set_error()
 
 
+def _reuse_reviewed_after_scan(session, db, options, report) -> None:
+    """匯入完成後，沿用其他版本已審核的相同譯文；衝突與目標已審核者只回報。
+
+    範圍是本次匯入交易實際新增的條目與新增譯文的條目（``report.touched_entry_ids``）。
+    """
+    if options.dry_run or not options.reuse_reviewed:
+        return
+    try:
+        result = db.reuse_reviewed_translations(
+            options.version, entry_ids=report.touched_entry_ids
+        )
+    except Exception:  # noqa: BLE001 - 沿用是匯入後的選用步驟，失敗不能讓已提交的匯入變成失敗
+        log_exception("匯入後沿用其他版本已審核譯文失敗")
+        _log_both(
+            session,
+            "[警告] 匯入已完成，但沿用其他版本已審核譯文失敗，可稍後到「版本差異審核」手動處理；"
+            "詳情見後台 log",
+            "warning",
+        )
+        return
+    report.reuse_applied = result.applied
+    report.reuse_conflicts = result.conflicts
+    report.reuse_skipped_reviewed = result.skipped_reviewed
+    report.reuse_source_changed = result.source_changed
+    report.reuse_history_id = result.history_id
+    session.set_summary(report.as_dict())
+    if (
+        result.applied
+        or result.conflicts
+        or result.skipped_reviewed
+        or result.source_changed
+    ):
+        _log_both(
+            session,
+            f"♻️ 沿用其他版本已審核譯文：沿用 {result.applied:,} 筆、"
+            f"衝突未處理 {result.conflicts:,} 筆、目標已審核保留 "
+            f"{result.skipped_reviewed:,} 筆、原文不同待判斷 {result.source_changed:,} 筆"
+            "（可到「版本差異審核」檢視與復原）",
+        )
+
+
+def _consume_scan(session, db, folder, options, cancelled, workers: int) -> None:
+    """執行掃描並把進度與摘要寫進 session；完成後依選項沿用其他版本已審核譯文。"""
+    report = None
+    with cancel_scope(cancelled):
+        for update in scan_folder_generator(
+            db, folder, options, should_cancel=cancelled, workers=workers
+        ):
+            if update.get("log"):
+                _log_both(session, update["log"], update.get("level", "info"))
+            if update.get("progress") is not None:
+                session.set_progress(update["progress"])
+            if update.get("report") is not None:
+                report = update["report"]
+                session.set_summary(report.as_dict())
+    if db is not None and report is not None and not cancelled():
+        _reuse_reviewed_after_scan(session, db, options, report)
+
+
 def run_moddb_scan_service(
     folder: str,
     options: ScanOptions,
@@ -372,17 +445,7 @@ def run_moddb_scan_service(
             + (f"，資料庫 {db.path}" if db is not None else "（預覽模式，不寫入）"),
         )
         workers = resolve_worker_count("moddb_scan", load_config())
-        with cancel_scope(cancelled):
-            for update in scan_folder_generator(
-                db, folder, options, should_cancel=cancelled, workers=workers
-            ):
-                if update.get("log"):
-                    _log_both(session, update["log"], update.get("level", "info"))
-                if update.get("progress") is not None:
-                    session.set_progress(update["progress"])
-                report = update.get("report")
-                if report is not None:
-                    session.set_summary(report.as_dict())
+        _consume_scan(session, db, folder, options, cancelled, workers)
     except Exception as exc:  # noqa: BLE001 - 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束
         logger.error(
             "Mod 資料庫掃描失敗（版本 %s，來源 %s）: %s\n%s",

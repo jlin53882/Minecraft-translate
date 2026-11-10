@@ -6,7 +6,7 @@
 
 - `ModDbView`（`app/views/moddb_view.py`）持有唯一的資料庫連線 `_db`、四個頁籤的顯示切換，以及跨頁籤的快照失效與背景刷新。
 - 四個頁籤位於 `app/views/moddb/`：`OverviewPanel`（`overview_panel.py`）、`EntriesPanel`（`entries_panel.py`）、`ScanPanel`（`scan_panel.py`）、`TranslatePanel`（`translate_panel.py`）。
-- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）與批量審核對話框 `BulkReviewDialog`（`bulk_review_dialog.py`）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
+- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）與批量審核對話框 `BulkReviewDialog`（`bulk_review_dialog.py`）、版本差異審核對話框 `VersionDiffDialog`（`version_diff_dialog.py`，另可由匯入摘要開啟）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
 - 學名候選對話框 `SpeciesCandidateDialog`（`species_dialog.py`）由條目校對頁開啟；它只讀取目前範圍的 `entry.en_us`，逐筆查詢時才使用學名快取／Wikipedia API，不寫入翻譯資料表。
 - 實際寫入與掃描邏輯在 `app/services_impl/` 下的 moddb 系列模組（例如 `moddb_service.py`、`moddb_translate_service.py`、`moddb_retranslate_service.py`），資料庫方法在 `translation_tool/translation_db/repository.py`。
 
@@ -48,6 +48,14 @@ flowchart TD
 
 搜尋、狀態、來源、審核狀態、智慧校對狀態與進階條件變更（版本、模組、類型沒換）分兩段載入（`defer_options`）：第一段只讀清單當頁與總筆數，先顯示清單；模組／來源下拉選項（需要整個版本的掃描、重畫成本也比清單高）由 `FilterOptionsLoader` 在第二段背景補上：條件穩定 0.25 秒（沒有更新的請求）才開始查，輸入中的每個字都不重算；同一時間只跑一個查詢、只保留最新請求，回來時條件已不同就丟棄，選項與選值沒變就不重畫篩選列，有變時只更新有變的下拉選單（`FilterFlush`），進階條件摘要與資料操作按鈕的狀態有變才更新那一列。搜尋框停筆 0.22 秒才查詢；條件又變了時，進行中的舊查詢會被中斷（`QueryInterrupt`，結果本來就不會顯示），新查詢不必等舊的掃完。沒有選模組／來源的搜尋，整個版本的逐列比對只掃一次（切成編號區間、多條唯讀連線同時掃），同一份分面同時回答總筆數與下拉選項。
 
+### 跨版本已審核譯文沿用與版本差異審核
+
+掃描匯入結束後（非預覽、未取消、選項「沿用其他版本已審核的相同譯文」開啟）`_reuse_reviewed_after_scan` 呼叫 `reuse_reviewed_translations`：範圍是匯入交易實際新增的條目與新增譯文的條目（`ScanReport.touched_entry_ids`，由 `ingest_many` 的 `entry_ids_out` 在交易提交後回報）。「內容相同」只有一個定義（`content_identity.py` 的 `same_content_sql`）：類型、內容模組識別、鍵值、原文都相同；跨版本沿用與版本差異審核（`cross_version_review.py`）比對原文時再放寬一層：只差大小寫或空白（`loose_text`；換行位置與 `%s`／`%S` 這類格式控制碼的大小寫有語義，不視為相同）視為相同，所以新版整合包只改了原文大小寫，譯文照樣沿用。原文真的不同時不自動沿用，但只要與目標原文夠相似（`similar_source`，`SOURCE_SIMILARITY`），差異審核的「原文不同」頁籤就會列出（`CrossVersionRow.source_changed`，附參考版本的原文），只能逐筆套用、不能批次勾選（逐筆套用到已審核的目標，或參考譯文是針對不同原文寫的，第一次按下只進入確認狀態，再按一次才套用，`_apply_one`），自動沿用只計數（`ReuseResult.source_changed`）；原文差太多（鍵值相同但內容無關）的不列。有原文相同的參考時只用那些參考。掃描匯入判斷「原文已變動」（`src_change`）時同樣用 `loose_text`：同一個條目的原文只差大小寫或空白不記錄、不算已變動，沿用既有原文並照常補譯文；舊版留下的這類紀錄在開啟資料庫時由 `_purge_trivial_src_changes` 刪除（SQL 先篩候選、不把整張表讀進記憶體）。KubeJS／FTB 的 lang 內容模組識別是「命名空間@整合包資料夾名稱@路徑雜湊」，不同版本的整合包資料夾通常不同，所以內容模組識別只取 `@` 前面的命名空間，其餘內容用完整的模組識別。FTB Quests 語系的鍵值是「語系檔相對路徑|lang:語系鍵」，語系檔怎麼切分是整合包版型的細節（單檔或拆成多檔），所以內容鍵值（`content_key_sql`）只取 `|lang:` 後面的語系鍵，資料庫儲存的鍵值不變。條目清單的「版本不同」篩選與觸發器維護的 `effective.diff`、條目詳情的「同鍵值・其他版本」、儲存與審核的同步範圍、批量審核同步、翻譯頁的跨版本沿用、智慧校對的同鍵值證據、版本差異審核與匯入後自動沿用都用同一個定義，並走表達式索引 `idx_entry_content_ns`。命名空間比對是刻意的設計，沒有整合包關聯設定，所以各寫入路徑的範圍不同：儲存與人工審核的同步（`_same_content`，批量審核的同步沿用它）不要求不同版本、也不檢查來源語系，同版本的另一個整合包也在範圍內，由同步開關控制，預覽會列出每一筆；AI 寫回補空白（`write_back`）只補其他版本的空白；翻譯頁沿用（`reuse_from_other_versions`）要求不同版本且來源語系相容；匯入後自動沿用與版本差異審核要求來源語系相容（沿用若失敗，`_reuse_reviewed_after_scan` 只記錄警告與後台 log，不讓已提交的匯入變成失敗；匯入摘要另列「原文不同待判斷」筆數，`ReuseResult.source_changed`），且「其他版本」以 `other_version_sql` 判斷：遊戲版本不同，或 KubeJS／FTB 的同遊戲版本、不同整合包資料夾（同一整合包的 8.2 與 8.5 常標成同一個遊戲版本）。只附 `zh_cn`（或 `zh_tw`）語系檔的 KubeJS／FTB 內容，來源文字同時是 zh_tw 候選（`_with_chinese_source_translation`，簡中經 OpenCC 轉繁，來源「簡中轉繁」），不會停在「未翻譯」。對話框以 `explain_cross_version_exclusions` 說明「內容相同卻沒被列出」的條目與原因（參考已審核但來源語系與目標不相容、其他版本只有尚未審核的譯文），語系不相容的會附上目標與參考的語系例子，目標的來源語系未記錄（舊版匯入的來源紀錄沒有語系，語系視為 `unknown`）時提示重新掃描匯入目標版本，重新掃描會把來源紀錄的語系補上；對話框在參考來自不同整合包身分時標示「來自 …」，同一版本有多個整合包身分的參考時以參考條目編號區分。同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），條目詳情的「出現於」與差異審核的參考標籤，對 KubeJS／FTB 內容會附上整合包資料夾名稱（`pack_label`，例如「1.21.1 · All the Mods 10 8.3」），目前這一筆以強調色標示。出現於的標籤超過 `MAX_VERSION_CHIPS` 顆時，目前這一筆排最前面，其餘收合成「另 N 個」（完整清單在提示文字）。差異審核的「參考版本」下拉選單除了各條目最近審核的版本與固定遊戲版本，也列出每個遊戲版本中的整合包版本（`reference_options`，值為「遊戲版本	整合包資料夾」，`split_reference` 拆回兩段；`TranslationDB.pack_versions` 由模組清單推得），選整合包版本時 `ref_pack` 只取該整合包資料夾的參考，目標與參考同一個遊戲版本時也可以指定其中的整合包版本。「目標版本」下拉選單同樣列出遊戲版本與其中的整合包版本（`target_options`），選整合包版本時 `target_pack` 只列該整合包資料夾的條目，模組下拉選單也縮成該整合包的模組（`TranslationDB.pack_mods`）。條目校對的搜尋欄位有「全部內容」「原文」「譯文」「鍵值」「模組來源」：「模組來源」比對模組識別（KubeJS／FTB 為「命名空間@整合包資料夾@路徑雜湊」，可貼上畫面所見的識別或只打整合包名稱），「全部內容」也包含模組識別，「鍵值」只比對鍵值。
+
+「已審核」沿用全庫共用的定義（`effective_review_sql`）：舊資料的人工譯文（`legacy_unknown`，畫面同樣顯示「人工已審核」）也算已審核，可當參考，也算已審核的目標。參考譯文一致且目標尚未審核才寫入；衝突與「目標已審核且不同」只計數。目標尚未審核時一律另寫獨立的 `SRC_CROSS_VERSION` 列（已審核列贏過未審核列），目標原本的譯文與來源保留在自己的列。摘要列（`ScanPanel._apply_reuse_summary`）顯示結果並提供「檢視版本差異」，摘要帶出歷史編號（`reuse_history_id`），對話框開啟時可直接「復原上一次沿用／套用」。
+
+`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `list_cross_version_differences` 在背景分段載入差異與衝突（每段 500 個目標條目，段與段之間釋放資料庫鎖並檢查是否取消；畫面換條件或關閉時以 `QueryCancelled` 中止），參考版本的「已審核時間」取最後一次審核事件（沒有審核歷史時退回譯文列更新時間），同一秒內以歷史編號分先後。`apply_cross_version_references` 套用：每筆在寫入交易內重新確認目標的譯文、生效來源、審核狀態與 revision，以及參考的條目編號、譯文與 revision，任何一項與畫面所見不同就略過並計入過期。目標已是已審核時改寫目標目前生效的那一列，不受來源優先序影響。批次套用以勾選決定範圍；目標已審核的條目需先勾「包含目標已審核」，並在第一次按下時要求再確認一次。`review_manual` 實作「保留目標譯文」，`revert` 復原套用。原文區直接顯示原字串，保留換行與空白。
+
 ### 掃描匯入
 
 ```mermaid
@@ -58,7 +66,8 @@ flowchart TD
     D --> E["launch_page_operation 執行 run_moddb_scan_service"]
     E --> F["open_database（預覽時 create=False）"]
     F --> G["scan_folder_generator 逐步產生 log、progress、report"]
-    G --> H["_poll 每 0.2 秒呼叫 sync_from_session"]
+    G --> G2["_consume_scan：完成後呼叫 _reuse_reviewed_after_scan（選項開啟、非預覽、未取消）"]
+    G2 --> H["_poll 每 0.2 秒呼叫 sync_from_session"]
     H --> I{"狀態為 DONE 或 ERROR？"}
     I -- 否 --> H
     I -- 是 --> J["_apply_summary 更新統計卡（預覽與實際掃描同一組卡片）並刷新版本清單"]
@@ -74,6 +83,7 @@ Quests」會透過共用的 pack source scanner 讀取 `kubejs` 與
 內容處置紀錄，不會產生假條目。`kubejs_lang`、`ftb_quest_lang`、`ftb_quests` 與
 `kubejs_script` 不會被當作一般 Resource Pack lang；回寫分別交給 KubeJS Lang、FTB
 config 與 KubeJS script pipeline。
+匯入選項「沿用其他版本已審核的相同譯文」（`reuse_row`，預設開啟）決定掃描完成後是否執行跨版本沿用，結果顯示在統計卡下方的摘要列（`reuse_row_summary`）。
 
 取消掃描時 `cancel_clicked` 只呼叫 `session.request_cancel()`，等待目前處理中的檔案停止。
 
@@ -324,7 +334,7 @@ flowchart TD
 
 | 操作 | 預覽 | 執行結果 |
 |---|---|---|
-| 掃描匯入 | 新增／補入／略過／原文已變動／補上原文（卡片說明標「預覽（未寫入）」） | 同一組卡片與數字 |
+| 掃描匯入 | 新增／補入／略過／原文已變動／補上原文（卡片說明標「預覽（未寫入）」）；匯入後沿用的摘要列：沿用／衝突未處理／目標已審核保留（預覽不執行沿用，不顯示） | 同一組卡片與數字；沿用摘要只在實際掃描後出現 |
 | 資料清理 | `cleanup_plan_lines`：檢查檔標記與可刪筆數、各類別筆數、已有譯文或歷史的筆數、逐項略過原因 | 同一組欄位（「已刪除」），提示訊息另附略過總數 |
 | 批次取代 | `batch_replace_counts_text`：可替換、含跨版本、略過、品質惡化、品質混合變化（最後確認視窗用相同用語） | `batch_replace_result_text`：已替換＋同一組欄位（跨版本與品質筆數取自送出寫入的預覽計畫），另加被來源優先序遮住的筆數 |
 | 批量審核 | 符合、納入、同步其他版本（其中改寫不同譯文） | `bulk_review_result_text`：納入、已審核、同步其他版本（附預覽筆數）、已被其他操作改動而略過 |

@@ -13,8 +13,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import sqlite3
+import time
 import zipfile
 from collections import Counter
 from collections.abc import Callable, Generator, Mapping, Sequence
@@ -100,6 +102,7 @@ _RESOURCE_ID = re.compile(r"^#?[a-z0-9_.-]+:[a-z0-9_./-]+$")
 MAX_NESTED_DEPTH = 3
 _PATCHOULI_LOCALES = frozenset({"en_us", "zh_tw", "zh_cn"})
 _MAX_PATCHOULI_CONTEXT_FILES = 256
+_LOG = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,7 @@ class ScanOptions:
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
     include_pack_content: bool = True  # instance 根目錄下的 KubeJS／FTB Quests
+    reuse_reviewed: bool = True  # 匯入後沿用其他版本已審核的相同譯文
 
 
 @dataclass
@@ -169,6 +173,13 @@ class ScanReport:
     pack_root_ambiguous: bool = False
     pack_source_breakdown: dict[str, dict[str, int]] = field(default_factory=dict)
     stats: IngestStats = field(default_factory=IngestStats)
+    # 本次匯入交易實際新增的條目與新增譯文的條目（供匯入後的跨版本沿用界定範圍）
+    touched_entry_ids: set[int] = field(default_factory=set, repr=False, compare=False)
+    reuse_history_id: int | None = None  # 自動沿用的歷史編號，可整批復原
+    reuse_applied: int = 0  # 沿用其他版本已審核譯文的筆數
+    reuse_conflicts: int = 0  # 各版本已審核譯文不一致、未處理的筆數
+    reuse_skipped_reviewed: int = 0  # 目標已審核而保留的筆數
+    reuse_source_changed: int = 0  # 其他版本的原文不同、不自動沿用而留給差異審核的筆數
     issues: list[dict[str, str]] = field(default_factory=list)
     cancelled: bool = False
     dry_run: bool = False
@@ -218,6 +229,11 @@ class ScanReport:
             "added_translations": self.stats.added_translations,
             "en_changed": self.stats.en_changed,
             "adopted": self.stats.adopted,
+            "reuse_history_id": self.reuse_history_id,
+            "reuse_applied": self.reuse_applied,
+            "reuse_conflicts": self.reuse_conflicts,
+            "reuse_skipped_reviewed": self.reuse_skipped_reviewed,
+            "reuse_source_changed": self.reuse_source_changed,
             "cancelled": self.cancelled,
             "issue_count": len(self.issues),
             "issue_counts": dict(
@@ -1124,8 +1140,11 @@ class _IngestBuffer:
     MAX_JARS = 32
     MAX_ITEMS = 15_000
 
-    def __init__(self, db, version: str, convert) -> None:
+    def __init__(
+        self, db, version: str, convert, touched: set[int] | None = None
+    ) -> None:
         self.db, self.version, self.convert = db, version, convert
+        self.touched = touched
         self.pending: list[tuple[int, JarResult]] = []
         self.items = 0
 
@@ -1141,7 +1160,10 @@ class _IngestBuffer:
             return []
         try:
             stats = self.db.ingest_many(
-                self.version, [r.items for _, r in pending], self.convert
+                self.version,
+                [r.items for _, r in pending],
+                self.convert,
+                entry_ids_out=self.touched,
             )
         except sqlite3.Error as exc:
             names = "、".join(r.name for _, r in pending[:3])
@@ -1166,6 +1188,7 @@ def _ingest_pack_result(
     result: PackScanResult,
     version: str,
     convert: Callable[[str], str] | None,
+    touched: set[int] | None = None,
 ) -> IngestStats:
     """以與 jar 相同的分類規則匯入模組包文字。"""
     if preview is not None:
@@ -1175,16 +1198,38 @@ def _ingest_pack_result(
         return preview_ingest_many(preview, [result.items], convert)[0]
     if db is None:
         raise ValueError("模組包來源需要資料庫才能寫入")
+    ingest_started = time.perf_counter()
+    _LOG.info(
+        "[模組包來源] 開始寫入資料庫：項目 %d，跨格式引用 %d",
+        len(result.items),
+        len(result.references),
+    )
     stats = db.ingest_many(
         version,
         [result.items],
         convert,
         stale_origins=result.stale_origins,
+        entry_ids_out=touched,
     )[0]
+    _LOG.info(
+        "[模組包來源] 資料庫寫入完成：耗時 %.3f 秒，新增 %d，補入譯文 %d，"
+        "略過 %d，原文已變動 %d",
+        time.perf_counter() - ingest_started,
+        stats.new_entries,
+        stats.added_translations,
+        stats.existing,
+        stats.en_changed,
+    )
+    references_started = time.perf_counter()
     db.record_source_references(
         version,
         result.references,
         pack_scope=result.pack_scope,
+    )
+    _LOG.info(
+        "[模組包來源] 跨格式引用寫入完成：耗時 %.3f 秒，引用 %d",
+        time.perf_counter() - references_started,
+        len(result.references),
     )
     return stats
 
@@ -1354,7 +1399,12 @@ def scan_folder_generator(
             for issue in pack_result.issues:
                 report.add_issue(issue)
             pack_ingest_stats = _ingest_pack_result(
-                db, preview, pack_result, options.version, convert
+                db,
+                preview,
+                pack_result,
+                options.version,
+                convert,
+                report.touched_entry_ids,
             )
             report.stats.add(pack_ingest_stats)
             yield from _pack_source_updates(
@@ -1404,7 +1454,7 @@ def scan_folder_generator(
     }
 
     done = 0
-    buffer = _IngestBuffer(db, options.version, convert)
+    buffer = _IngestBuffer(db, options.version, convert, report.touched_entry_ids)
 
     with (
         scan_executor(

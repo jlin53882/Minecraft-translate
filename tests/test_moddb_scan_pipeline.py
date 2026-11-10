@@ -16,6 +16,7 @@ from app.views.pipeline.pipeline_actions import PipelineActions
 from app.views.pipeline.pipeline_config import PipelineConfig
 from translation_tool.translation_db import (
     KIND_LANG,
+    EntryOrigin,
     ScanItem,
     TranslationDB,
     scan_pool,
@@ -80,6 +81,57 @@ def test_ingest_many_matches_sequential_ingest(tmp_path):
     many.close()
 
 
+def test_stale_origin_cleanup_is_batched_and_version_scoped(db):
+    stale = ScanItem(
+        KIND_LANG,
+        "demo",
+        "stale",
+        "Stale text",
+        source_path="lang/en_us.json",
+        source_selector="stale",
+        pack_scope="pack-a",
+    )
+    keep = ScanItem(
+        KIND_LANG,
+        "demo",
+        "keep",
+        "Keep text",
+        source_path="lang/en_us.json",
+        source_selector="keep",
+        pack_scope="pack-a",
+    )
+    other_scope = ScanItem(
+        KIND_LANG,
+        "demo",
+        "other-scope",
+        "Other scope text",
+        source_path="lang/en_us.json",
+        source_selector="stale",
+        pack_scope="pack-b",
+    )
+
+    db.ingest("1.20.1", [stale])
+    db.ingest("1.21.1", [stale, keep, other_scope])
+    db.ingest(
+        "1.21.1",
+        [],
+        stale_origins=[
+            EntryOrigin("pack-a", KIND_LANG, "lang/en_us.json", "stale"),
+            EntryOrigin("pack-a", KIND_LANG, "lang/en_us.json", "stale"),
+        ],
+    )
+
+    assert db._q(
+        "SELECT e.mc_version, eo.pack_scope, eo.selector "
+        "FROM entry_origin eo JOIN entry e ON e.id=eo.entry_id "
+        "ORDER BY e.mc_version, eo.pack_scope, eo.selector"
+    ) == [
+        ("1.20.1", "pack-a", "stale"),
+        ("1.21.1", "pack-a", "keep"),
+        ("1.21.1", "pack-b", "stale"),
+    ]
+
+
 def test_ingest_many_commits_once_and_rolls_back_together(db):
     before = db.count_entries()
     bad = [ScanItem(KIND_LANG, "foo", "a", "Alpha", "甲", ""), None]
@@ -96,9 +148,9 @@ def test_scan_writes_in_batches(db, tmp_path, monkeypatch):
     calls: list[int] = []
     real = db.ingest_many
 
-    def spy(version, batches, convert=None):
+    def spy(version, batches, convert=None, **kwargs):
         calls.append(len(batches))
-        return real(version, batches, convert)
+        return real(version, batches, convert, **kwargs)
 
     monkeypatch.setattr(db, "ingest_many", spy)
     updates = list(

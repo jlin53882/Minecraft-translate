@@ -197,6 +197,33 @@ on `entry.kind`, so the triggers also watch `kind`; a rule change bumps
 entries and use the row-by-row scan while any exist. Its `verify()` compares
 every entry with a recompute that calls `matches_quality` once per status.
 
+`translation_tool/translation_db/content_identity.py` is the single definition
+of "the same content across versions": `(kind, content module, key, en_us)`,
+where the content module is `entry.mod_id` except for KubeJS/FTB lang entries,
+whose `mod_id` embeds the pack folder name and a path hash and is therefore
+reduced to the namespace before `@`. The `effective.diff` triggers, the overview
+counters in `stat_summary.py`, the entry-list "diff" filter, the entry detail
+sibling lists, save/review/bulk-review propagation, `write_back` fills, the
+cross-version reuse queries and the cross-version review dialog all build their
+predicate with `same_content_sql()` / `content_mod_sql()`; do not spell
+`e2.mod_id = e.mod_id` for a cross-version comparison. Matching on the namespace
+alone is deliberate (there is no pack-association setting), so each consumer has its
+own write scope: `_same_content` (save/review sync, also used by bulk-review sync) has
+no version or locale requirement and includes another pack of the same version;
+`write_back` fills only blank entries of other versions; the reuse queries and the
+cross-version review require another version and a compatible source locale. The
+expression index
+`idx_entry_content_ns (kind, <content module>, key, en_us)` serves it; the
+queries must use the identical expression, and `effective.diff` is a per-entry value (another *version* has a different effective
+translation) and the overview counter counts groups with at least two distinct
+translations across at least two versions, so two pack identities inside one version
+never count as a version difference. The queries force the index (without
+`ANALYZE` statistics the planner scans the table), falling back to no hint on a
+database that lacks it. The original `idx_entry_content` stays for same-version
+lookups, which keep the full `mod_id`. A change to the definition bumps
+`effective_columns.SCHEMA_VERSION` and `stat_summary.STAT_SCHEMA_VERSION`, so
+both derived sets are rebuilt on the next writable open.
+
 Measure list operations through `TranslationDB.list_entries` on independent
 copies of the same database, in a fresh process with the read-only connection
 and an empty `stat_cache`, comparing against the commit before the change.

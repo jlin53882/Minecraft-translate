@@ -21,6 +21,7 @@ from app.views.moddb.smart_review_marks import (
 )
 from app.views.moddb.source_filter import ALL_SOURCES, ReviewStatusFilter, SourceFilter
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
+from app.views.moddb.version_diff_dialog import VersionDiffDialog
 
 ALL_REVIEW_STATES = "__all__"
 ALL_MODS = "全部模組"
@@ -30,6 +31,7 @@ SEARCH_FIELD_OPTIONS = (
     ("source", "原文"),
     ("translation", "譯文"),
     ("key", "鍵值"),
+    ("mod", "模組來源"),
 )
 
 
@@ -141,6 +143,7 @@ class FilterFlush:
                     for button in (
                         panel.batch_replace_btn,
                         panel.bulk_review_btn,
+                        panel.version_diff_btn,
                         panel.smart_review_btn,
                         panel.species_scan_btn,
                     )
@@ -264,6 +267,14 @@ def _build_controls(panel) -> None:
         size="sm",
         on_click=panel._open_bulk_review,
     )
+    panel.version_diff_btn = kit.button(
+        "版本差異審核",
+        "secondary",
+        icon=ft.Icons.COMPARE_ARROWS,
+        size="sm",
+        on_click=panel._open_version_diff,
+        tooltip="比較其他版本已審核的相同內容，套用或保留目標譯文",
+    )
     panel.smart_review_btn = kit.button(
         "智慧校對",
         "secondary",
@@ -315,6 +326,7 @@ def _build_filter_card(panel) -> None:
             panel.advanced_filters.clear_button,
             panel.batch_replace_btn,
             panel.bulk_review_btn,
+            panel.version_diff_btn,
             panel.smart_review_btn,
             panel.species_scan_btn,
         ],
@@ -470,6 +482,16 @@ def open_bulk_review(panel, _e=None) -> None:
         mod_id=panel.mod_id,
         kind=panel.kind,
         effective_source=panel.source_filter.code,
+    ).open()
+
+
+def open_version_diff(panel, _e=None) -> None:
+    """開啟版本差異審核，目標版本預設為目前檢視的版本。"""
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+    VersionDiffDialog(
+        panel._page, panel.db, panel.version, panel._after_batch_replace
     ).open()
 
 

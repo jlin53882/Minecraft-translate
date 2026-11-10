@@ -10,8 +10,10 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import logging
 import os
 import re
+import time
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -21,6 +23,7 @@ from typing import Any
 import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import Compound, List
 
+from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.source_locale import normalize_source_locale
 from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     is_extractable_line,
@@ -66,6 +69,19 @@ _TRANSLATE_EXPR = re.compile(
     r"^(?:Text|Component)\.(?:translate|translatable)\s*\(", re.IGNORECASE
 )
 _KUBEJS_LANG_LOCALES = {"en_us", "zh_cn", "zh_tw"}
+_LOG = logging.getLogger(__name__)
+_SLOW_SOURCE_FILE_SECONDS = 1.0
+
+
+def _log_slow_source_operation(kind: str, path: Path, elapsed: float) -> None:
+    if elapsed < _SLOW_SOURCE_FILE_SECONDS:
+        return
+    _LOG.warning(
+        "[模組包來源] 檔案處理過慢：%s，耗時 %.3f 秒，路徑 %s",
+        kind,
+        elapsed,
+        path,
+    )
 
 
 def _mask_js_non_code(text: str) -> str:
@@ -344,6 +360,7 @@ def scan_pack_sources(
     include_ftb: bool = True,
 ) -> PackScanResult:
     """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。"""
+    scan_started = time.perf_counter()
     root = Path(pack_root).expanduser().resolve()
     result = PackScanResult(pack_scope=_pack_scope(root))
     if not root.is_dir():
@@ -357,10 +374,54 @@ def scan_pack_sources(
         "ftb_quests": quests.is_dir(),
     }
     if include_kubejs and kubejs.is_dir():
-        _scan_kubejs(kubejs, version, scope, result)
+        phase_started = time.perf_counter()
+        try:
+            _scan_kubejs(kubejs, version, scope, result)
+        finally:
+            breakdown = result.source_breakdown()["kubejs"]
+            _LOG.info(
+                "[模組包來源] KubeJS 分析完成：耗時 %.3f 秒，檔案 %d，讀取 %d，"
+                "可用來源 %d，項目 %d，引用 %d",
+                time.perf_counter() - phase_started,
+                breakdown["files_seen"],
+                breakdown["files_read"],
+                breakdown["sources_found"],
+                breakdown["items_found"],
+                breakdown["references_found"],
+            )
     if include_ftb and quests.is_dir():
-        _scan_ftb_quests(quests, version, scope, result)
-    _resolve_reference_targets(result)
+        phase_started = time.perf_counter()
+        try:
+            _scan_ftb_quests(quests, version, scope, result)
+        finally:
+            breakdown = result.source_breakdown()["ftb_quests"]
+            _LOG.info(
+                "[模組包來源] FTB Quests 分析完成：耗時 %.3f 秒，檔案 %d，讀取 %d，"
+                "可用來源 %d，項目 %d，引用 %d",
+                time.perf_counter() - phase_started,
+                breakdown["files_seen"],
+                breakdown["files_read"],
+                breakdown["sources_found"],
+                breakdown["items_found"],
+                breakdown["references_found"],
+            )
+    phase_started = time.perf_counter()
+    try:
+        _resolve_reference_targets(result)
+    finally:
+        _LOG.info(
+            "[模組包來源] 解析跨格式引用完成：耗時 %.3f 秒，引用 %d",
+            time.perf_counter() - phase_started,
+            len(result.references),
+        )
+    _LOG.info(
+        "[模組包來源] 來源分析總計：耗時 %.3f 秒，檔案 %d，項目 %d，引用 %d，問題 %d",
+        time.perf_counter() - scan_started,
+        result.files_seen,
+        len(result.items),
+        len(result.references),
+        len(result.issues),
+    )
     return result
 
 
@@ -479,6 +540,7 @@ def _iter_files(root: Path, suffixes: tuple[str, ...], result: PackScanResult):
 
 
 def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
+    started = time.perf_counter()
     try:
         raw = path.read_bytes()
         return raw.decode("utf-8-sig"), hashlib.sha256(raw).hexdigest()
@@ -487,6 +549,8 @@ def _read_text(path: Path, result: PackScanResult) -> tuple[str, str] | None:
             _issue(path, "source_read_failed", str(exc), status="parse_failed")
         )
         return None
+    finally:
+        _log_slow_source_operation("讀取檔案", path, time.perf_counter() - started)
 
 
 def _relative(path: Path, root: Path) -> str:
@@ -495,15 +559,21 @@ def _relative(path: Path, root: Path) -> str:
 
 def _scan_kubejs(root: Path, version: str, scope: str, result: PackScanResult) -> None:
     for path in _iter_files(root, (".js",), result):
-        result.mark_file("kubejs")
-        rel = _relative(path, root)
-        result.mark_source("kubejs", rel)
-        loaded = _read_text(path, result)
-        if loaded is None:
-            continue
-        result.mark_file_read("kubejs")
-        text, digest = loaded
-        _scan_kubejs_script(text, rel, digest, scope, version, result)
+        started = time.perf_counter()
+        try:
+            result.mark_file("kubejs")
+            rel = _relative(path, root)
+            result.mark_source("kubejs", rel)
+            loaded = _read_text(path, result)
+            if loaded is None:
+                continue
+            result.mark_file_read("kubejs")
+            text, digest = loaded
+            _scan_kubejs_script(text, rel, digest, scope, version, result)
+        finally:
+            _log_slow_source_operation(
+                "KubeJS 腳本分析", path, time.perf_counter() - started
+            )
     _scan_kubejs_lang(root, version, scope, result)
     _normalize_kubejs_script_source_locales(result)
 
@@ -965,25 +1035,24 @@ def _append_kubejs_lang_items(
             for key, value in values.items():
                 if not isinstance(key, str) or not isinstance(value, str):
                     continue
-                result.items.append(
-                    _make_item(
-                        kind=KIND_KUBEJS_LANG,
-                        # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
-                        # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
-                        mod_id=f"{namespace}@{scope}",
-                        key=key,
-                        text=value,
-                        rel=rel,
-                        selector=f"lang:{locale}:{key}",
-                        digest=digest,
-                        scope=scope,
-                        version=version,
-                        # A zh_cn/zh_tw file selected as the fallback source is
-                        # the source snapshot, not an already translated value.
-                        translated_locale=locale if locale != source_locale else "",
-                        source_locale=source_locale,
-                    )
+                item = _make_item(
+                    kind=KIND_KUBEJS_LANG,
+                    # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵
+                    # 沒有另加 pack_scope 欄位，不能讓不同模組包共用同一個 namespace。
+                    mod_id=f"{namespace}@{scope}",
+                    key=key,
+                    text=value,
+                    rel=rel,
+                    selector=f"lang:{locale}:{key}",
+                    digest=digest,
+                    scope=scope,
+                    version=version,
+                    # A zh_cn/zh_tw file selected as the fallback source is
+                    # the source snapshot, not an already translated value.
+                    translated_locale=locale if locale != source_locale else "",
+                    source_locale=source_locale,
                 )
+                result.items.append(_with_chinese_source_translation(item))
 
 
 def _scan_kubejs_lang(
@@ -1021,7 +1090,13 @@ def _read_ftb_lang_file(
         return
     result.mark_file_read("ftb_quests")
     _, digest = loaded
-    data = walk_snbt_file(str(path))
+    parse_started = time.perf_counter()
+    try:
+        data = walk_snbt_file(str(path))
+    finally:
+        _log_slow_source_operation(
+            "FTB 語系檔解析", path, time.perf_counter() - parse_started
+        )
     if data is None:
         result.issues.append(
             _issue(
@@ -1130,28 +1205,27 @@ def _append_ftb_lang_item(
             source_locale=source_locale,
         )
     )
-    result.items.append(
-        _make_item(
-            kind=KIND_FTB_QUEST_LANG,
-            mod_id=f"ftbquests@{scope}",
-            key=f"{rel}|lang:{lang_key}",
-            text=source,
-            rel=source_path,
-            selector=selector,
-            digest=source_digest,
-            scope=scope,
-            version=version,
-            # When en_us is present it is the source text and zh_tw/zh_cn
-            # are companion translations.  Mark a translated locale only
-            # for a locale-only file; otherwise _make_item would clear the
-            # English source while keeping the existing translation.
-            translated_locale="",
-            zh_cn="" if source_locale == "zh_cn" else locales.get("zh_cn", ("", ""))[0],
-            zh_tw="" if source_locale == "zh_tw" else locales.get("zh_tw", ("", ""))[0],
-            source_format="ftb-snbt-lang",
-            source_locale=source_locale,
-        )
+    item = _make_item(
+        kind=KIND_FTB_QUEST_LANG,
+        mod_id=f"ftbquests@{scope}",
+        key=f"{rel}|lang:{lang_key}",
+        text=source,
+        rel=source_path,
+        selector=selector,
+        digest=source_digest,
+        scope=scope,
+        version=version,
+        # When en_us is present it is the source text and zh_tw/zh_cn
+        # are companion translations.  Mark a translated locale only
+        # for a locale-only file; otherwise _make_item would clear the
+        # English source while keeping the existing translation.
+        translated_locale="",
+        zh_cn="" if source_locale == "zh_cn" else locales.get("zh_cn", ("", ""))[0],
+        zh_tw="" if source_locale == "zh_tw" else locales.get("zh_tw", ("", ""))[0],
+        source_format="ftb-snbt-lang",
+        source_locale=source_locale,
     )
+    result.items.append(_with_chinese_source_translation(item))
 
 
 def _append_ftb_lang_items(
@@ -1187,7 +1261,13 @@ def _scan_ftb_quest_data_files(
             continue
         result.mark_file_read("ftb_quests")
         _, digest = loaded
-        data = walk_snbt_file(str(path))
+        parse_started = time.perf_counter()
+        try:
+            data = walk_snbt_file(str(path))
+        finally:
+            _log_slow_source_operation(
+                "FTB 任務資料解析", path, time.perf_counter() - parse_started
+            )
         if data is None:
             result.issues.append(
                 _issue(
@@ -1206,9 +1286,35 @@ def _scan_ftb_quest_data_files(
 def _scan_ftb_quests(
     root: Path, version: str, scope: str, result: PackScanResult
 ) -> None:
-    locale_values = _collect_ftb_lang_values(root, scope, result)
-    _append_ftb_lang_items(locale_values, version, scope, result)
-    _scan_ftb_quest_data_files(root, root / "lang", version, scope, result)
+    phase_started = time.perf_counter()
+    try:
+        locale_values = _collect_ftb_lang_values(root, scope, result)
+    finally:
+        _LOG.info(
+            "[模組包來源] FTB 語系檔讀取完成：耗時 %.3f 秒，檔案 %d，累計項目 %d",
+            time.perf_counter() - phase_started,
+            result.files_seen_by_source.get("ftb_quests", 0),
+            len(result.items),
+        )
+    phase_started = time.perf_counter()
+    try:
+        _append_ftb_lang_items(locale_values, version, scope, result)
+    finally:
+        _LOG.info(
+            "[模組包來源] FTB 語系項目整理完成：耗時 %.3f 秒，累計項目 %d",
+            time.perf_counter() - phase_started,
+            len(result.items),
+        )
+    phase_started = time.perf_counter()
+    try:
+        _scan_ftb_quest_data_files(root, root / "lang", version, scope, result)
+    finally:
+        _LOG.info(
+            "[模組包來源] FTB 任務資料檔分析完成：耗時 %.3f 秒，檔案 %d，累計項目 %d",
+            time.perf_counter() - phase_started,
+            result.files_seen_by_source.get("ftb_quests", 0),
+            len(result.items),
+        )
 
 
 def _scan_quest_value(
@@ -1508,6 +1614,24 @@ def _make_item(
         pack_scope=scope,
         source_locale=source_locale,
     )
+
+
+def _with_chinese_source_translation(item: ScanItem) -> ScanItem:
+    """來源語系本身就是中文時，來源文字同時是可用的 zh_tw 候選。
+
+    整合包只附 ``zh_cn``（或 ``zh_tw``）語系檔時，該檔被選為來源快照並存進 ``en_us``，
+    ``zh_tw`` 卻是空的，條目會一直顯示「未翻譯」。簡中補上 ``zh_cn``，匯入時由 OpenCC 轉繁
+    （來源「簡中轉繁」）；繁中直接當 ``zh_tw``（來源「模組自帶繁中」）。語系檔裡沒翻的
+    英文值（不含中文字）不是譯文，不補；同一筆已有伴隨的繁中譯文時也不動。
+    """
+    text = item.en_us
+    if not text.strip() or item.zh_tw.strip() or not contains_cjk(text):
+        return item
+    if item.source_locale == "zh_cn":
+        return replace(item, zh_cn=item.zh_cn or text, source=None)
+    if item.source_locale == "zh_tw":
+        return replace(item, zh_tw=text, source=None)
+    return item
 
 
 def _translate_key(expr: str) -> str | None:

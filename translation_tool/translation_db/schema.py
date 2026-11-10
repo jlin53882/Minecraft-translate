@@ -63,6 +63,7 @@ SRC_I18N = 4
 SRC_CUSTOM = 5
 SRC_MANUAL = 6
 SRC_AI_REPAIR = 7
+SRC_CROSS_VERSION = 8  # 沿用其他版本已審核的譯文（獨立一列，不覆寫目標原本的來源）
 
 SOURCE_NAMES: dict[int, str] = {
     SRC_AI: "AI 機翻",
@@ -73,6 +74,7 @@ SOURCE_NAMES: dict[int, str] = {
     SRC_CUSTOM: "自訂補充",
     SRC_MANUAL: "人工",
     SRC_AI_REPAIR: "AI補譯修正",
+    SRC_CROSS_VERSION: "跨版本沿用",
 }
 
 BUILTIN_SOURCE_NAMES: dict[int, str] = dict(SOURCE_NAMES)
@@ -343,6 +345,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
             "ON effective (source, review_status)"
         )
+        _install_content_index(conn)
         _install_schema_v3_objects(conn)
         conn.commit()
         _install_smart_review_objects(conn)
@@ -361,10 +364,65 @@ def init_schema(conn: sqlite3.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_effective_source_review "
         "ON effective (source, review_status)"
     )
+    _install_content_index(conn)
     _install_schema_v3_objects(conn)
     conn.commit()
+    _purge_trivial_src_changes(conn)
     _install_smart_review_objects(conn)
     _install_derived_tables(conn)
+
+
+def _purge_trivial_src_changes(conn: sqlite3.Connection) -> None:
+    """刪除舊版留下、只差大小寫或空白的「原文已變動」紀錄。
+
+    每次開啟檢查一次：SQL 先篩出候選（只掃 ``src_change`` 一次，不把整張表讀進 Python），
+    沒有要刪的就不寫入（不留標記，也不改動資料）。SQL 的 ``lower`` 只處理 ASCII，非 ASCII
+    的大小寫差異不會被清掉。
+    """
+    from .content_identity import loose_text  # 與 schema 互相引用，延後匯入
+
+    # SQL 先以「去掉空白、不分大小寫（ASCII）後相同」篩出候選，Python 只複核這些列；
+    # 不必把整張表讀進記憶體逐列比對
+    compact = "lower(replace(replace(replace(replace({0}, ' ', ''), char(9), ''), char(10), ''), char(13), ''))"
+    trivial = [
+        row[0]
+        for row in conn.execute(
+            "SELECT id, old_en, new_en FROM src_change "
+            f"WHERE {compact.format('old_en')} = {compact.format('new_en')}"
+        )
+        if loose_text(row[1] or "") == loose_text(row[2] or "")
+    ]
+    for start in range(0, len(trivial), 500):
+        chunk = trivial[start : start + 500]
+        conn.execute(
+            f"DELETE FROM src_change WHERE id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        )
+    if trivial:
+        conn.commit()
+
+
+def _install_content_index(conn: sqlite3.Connection) -> None:
+    """跨版本內容比對的表達式索引（定義見 ``content_identity``）；已存在就略過。"""
+    from .content_identity import (  # 與 schema 互相引用，延後匯入
+        INDEX_NAME,
+        create_index_sql,
+    )
+
+    wanted = create_index_sql()
+    stored = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='index' AND name=?", (INDEX_NAME,)
+    ).fetchone()
+    # 同名但定義不同（內容鍵值的定義改過）的舊索引要換掉，否則查詢雖然正確卻用不到索引
+    if stored is not None and _normalized_sql(stored[0]) != _normalized_sql(
+        wanted.replace(" IF NOT EXISTS", "")
+    ):
+        conn.execute(f"DROP INDEX IF EXISTS {INDEX_NAME}")
+    conn.execute(wanted)
+
+
+def _normalized_sql(sql: str | None) -> str:
+    return " ".join((sql or "").split()).lower()
 
 
 def _run_next_migration(conn: sqlite3.Connection, version: int) -> int:

@@ -17,9 +17,11 @@ from __future__ import annotations
 import hashlib
 import heapq
 import json
+import logging
 import re
 import sqlite3
 import threading
+import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import contextmanager
@@ -40,6 +42,22 @@ from translation_tool.translation_db import (
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
+from translation_tool.translation_db.content_identity import (
+    INDEX_NAME as content_index_name,
+)
+from translation_tool.translation_db.content_identity import (
+    content_key_sql,
+    content_key_value,
+    content_mod_sql,
+    content_mod_value,
+    content_table_sql,
+    loose_text,
+    pack_label,
+    same_content_sql,
+)
+from translation_tool.translation_db.cross_version_review import (
+    CrossVersionReviewMixin,
+)
 from translation_tool.translation_db.duplicate_cleanup import DuplicateCleanupMixin
 from translation_tool.translation_db.history_retention import (
     HISTORY_RETENTION_LIMIT,
@@ -134,6 +152,8 @@ from translation_tool.utils.text_matching import (
     matching_terms,
     term_canonical_key,
 )
+
+_LOG = logging.getLogger(__name__)
 
 _ENTRY_COLS = "e.id, e.kind, e.mc_version, e.mod_id, e.key, e.en_us"
 _CHUNK = 400  # SQLite 變數上限相容的批次大小
@@ -353,9 +373,15 @@ _REVERSIBLE_SORTS = {"default": "default_desc", "default_desc": "default"}
 
 
 class TranslationDB(
-    DuplicateCleanupMixin, SmartReviewMixin, BulkReviewMixin, CleanupMixin
+    DuplicateCleanupMixin,
+    SmartReviewMixin,
+    BulkReviewMixin,
+    CrossVersionReviewMixin,
+    CleanupMixin,
 ):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
+
+    _content_ns_index_ready: bool | None = None
 
     # 品質篩選翻頁用：(條件鍵, 已排序的符合列, 符合總數)，整個程式只留最近一份。
     # 篩選在背景 worker 的唯讀連線掃描、翻頁卻在主連線，所以不能放在連線物件上；
@@ -440,6 +466,25 @@ class TranslationDB(
         except (TypeError, ValueError):
             registry = {}
         return SourceCatalog.from_registry(registry)
+
+    def _content_table(self, alias: str = "e") -> str:
+        """內容比對查詢的條目表：強制使用內容索引（沒有 ANALYZE 統計時規劃器不會自己選）。
+
+        舊版唯讀資料庫沒有 ``idx_entry_content_ns`` 時不指定索引（查詢仍正確，只是較慢）。
+        """
+        ready = self._content_ns_index_ready
+        if ready is None:
+            ready = self._content_ns_index_ready = bool(
+                self._q(
+                    "SELECT 1 FROM sqlite_schema WHERE type='index' AND name=?",
+                    (content_index_name,),
+                )
+            )
+        return (
+            f"entry {alias} INDEXED BY {content_index_name}"
+            if ready
+            else f"entry {alias}"
+        )
 
     def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
         """回傳指定優先序使用的標準生效來源排序。"""
@@ -798,14 +843,19 @@ class TranslationDB(
         convert: Callable[[str], str] | None = None,
         *,
         stale_origins: Iterable[EntryOrigin] = (),
+        entry_ids_out: set[int] | None = None,
     ) -> IngestStats:
         """寫入掃描結果。只新增、不覆蓋；原文已變動者只記錄。
 
         ``convert`` 把簡中轉成繁中（沒有繁中、只有簡中時用）；None 表示不轉換。
         """
-        return self.ingest_many(version, [items], convert, stale_origins=stale_origins)[
-            0
-        ]
+        return self.ingest_many(
+            version,
+            [items],
+            convert,
+            stale_origins=stale_origins,
+            entry_ids_out=entry_ids_out,
+        )[0]
 
     def ingest_many(
         self,
@@ -814,19 +864,65 @@ class TranslationDB(
         convert: Callable[[str], str] | None = None,
         *,
         stale_origins: Iterable[EntryOrigin] = (),
+        entry_ids_out: set[int] | None = None,
     ) -> list[IngestStats]:
         """在單一交易內寫入多份掃描結果（例如多個 jar），回傳每一份各自的統計。
 
         一個交易只提交一次（每次提交的 WAL 寫入與檢查點是掃描的固定成本）。結果與逐份呼叫 :meth:`ingest` 相同；任何一份失敗整個交易回復。
         """
+        ingest_started = time.perf_counter()
+        grouping_started = time.perf_counter()
         grouped = [group_scan_items(items) for items in batches]
+        group_count = sum(len(groups) for groups in grouped)
+        item_count = sum(len(group) for groups in grouped for group in groups.values())
+        _LOG.info(
+            "[資料庫匯入] 分組完成：耗時 %.3f 秒，批次 %d，群組 %d，項目 %d",
+            time.perf_counter() - grouping_started,
+            len(grouped),
+            group_count,
+            item_count,
+        )
         stale_origins = tuple(stale_origins)
         touched: list[int] = []
+        transaction_started = time.perf_counter()
         with self._tx() as conn:
             target = DbIngestTarget(conn, version, touched)
+            groups_started = time.perf_counter()
             results = [ingest_groups(target, groups, convert) for groups in grouped]
+            _LOG.info(
+                "[資料庫匯入] 寫入條目與譯文完成：耗時 %.3f 秒，群組 %d，項目 %d，異動條目 %d",
+                time.perf_counter() - groups_started,
+                group_count,
+                item_count,
+                len(touched),
+            )
+            stale_cleanup_started = time.perf_counter()
             target.remove_origins(stale_origins)
+            _LOG.info(
+                "[資料庫匯入] 清除失效來源完成：耗時 %.3f 秒，來源 %d 筆",
+                time.perf_counter() - stale_cleanup_started,
+                len(stale_origins),
+            )
+            refresh_started = time.perf_counter()
             self._refresh(conn, touched)
+            _LOG.info(
+                "[資料庫匯入] 重算生效譯文完成：耗時 %.3f 秒，異動條目 %d，失效來源 %d",
+                time.perf_counter() - refresh_started,
+                len(touched),
+                len(stale_origins),
+            )
+        _LOG.info(
+            "[資料庫匯入] 交易提交完成：交易 %.3f 秒，含分組共 %.3f 秒，"
+            "群組 %d，項目 %d，異動條目 %d",
+            time.perf_counter() - transaction_started,
+            time.perf_counter() - ingest_started,
+            group_count,
+            item_count,
+            len(touched),
+        )
+        if entry_ids_out is not None:
+            # 只有交易成功提交才回報；呼叫端用它界定「本次匯入」的範圍
+            entry_ids_out.update(touched)
         return results
 
     def scan_preview_target(self, version: str) -> PreviewIngestTarget:
@@ -1262,16 +1358,17 @@ class TranslationDB(
     def _overview_full(self) -> dict:
         mods = self._one("SELECT COUNT(DISTINCT mod_id) FROM entry")[0]
         content = self._one(
-            "SELECT COUNT(*) FROM (SELECT 1 FROM entry GROUP BY kind, mod_id, key, en_us)"
+            "SELECT COUNT(*) FROM (SELECT 1 FROM entry e "
+            f"GROUP BY e.kind, {content_mod_sql('e')}, {content_key_sql('e')}, e.en_us)"
         )[0]
         diff = self._one(
-            """
+            f"""
             SELECT COUNT(*) FROM (
-                SELECT e.kind, e.mod_id, e.key, e.en_us
+                SELECT e.kind, {content_mod_sql("e")}, {content_key_sql("e")}, e.en_us
                 FROM entry e JOIN effective f ON f.entry_id = e.id
                 WHERE e.en_us <> ''
-                GROUP BY e.kind, e.mod_id, e.key, e.en_us
-                HAVING COUNT(DISTINCT f.zh_tw) > 1
+                GROUP BY e.kind, {content_mod_sql("e")}, {content_key_sql("e")}, e.en_us
+                HAVING COUNT(DISTINCT f.zh_tw) > 1 AND COUNT(DISTINCT e.mc_version) > 1
             )
             """
         )[0]
@@ -1375,10 +1472,10 @@ class TranslationDB(
             return "entry e INDEXED BY idx_qflags_same_as_source"
         return "entry e"
 
-    _DIFF_SQL = """EXISTS (
+    _DIFF_SQL = f"""EXISTS (
         SELECT 1 FROM entry e2 JOIN effective f2 ON f2.entry_id = e2.id
-        WHERE e2.kind = e.kind AND e2.mod_id = e.mod_id AND e2.key = e.key
-          AND e2.en_us = e.en_us AND e.en_us <> '' AND e2.mc_version <> e.mc_version
+        WHERE {same_content_sql("e", "e2")}
+          AND e.en_us <> '' AND e2.mc_version <> e.mc_version
           AND (f.zh_tw IS NULL OR f2.zh_tw <> f.zh_tw))"""
 
     def _query_source(self) -> str:
@@ -1726,14 +1823,17 @@ class TranslationDB(
                 "source": "e.en_us",
                 "translation": "f.zh_tw",
                 "key": "e.key",
+                "mod": "e.mod_id",
             }
             column = query_columns.get(criteria.query_field)
             if column is None:
+                # 模組識別（KubeJS／FTB 含整合包資料夾與路徑雜湊）也納入：貼上畫面上看到的
+                # 模組識別或整合包名稱，才找得到對應條目
                 where.append(
                     "(e.en_us LIKE ? ESCAPE '\\' OR e.key LIKE ? ESCAPE '\\' "
-                    "OR f.zh_tw LIKE ? ESCAPE '\\')"
+                    "OR f.zh_tw LIKE ? ESCAPE '\\' OR e.mod_id LIKE ? ESCAPE '\\')"
                 )
-                params += [like, like, like]
+                params += [like, like, like, like]
             else:
                 where.append(f"{column} LIKE ? ESCAPE '\\'")
                 params.append(like)
@@ -3740,29 +3840,41 @@ class TranslationDB(
                 (entry_id,),
             )
         ]
-        detail.versions = (
-            [entry.mc_version]
+        appearances = (
+            [(entry.mc_version, entry.mod_id)]
             if not entry.en_us  # 原文未知：沒有可比對的內容，只有自己
             else [
-                r[0]
+                (r[0], r[1])
                 for r in self._q(
-                    "SELECT mc_version FROM entry INDEXED BY idx_entry_content "
-                    "WHERE kind=? AND mod_id=? AND key=? "
-                    "AND en_us=? ORDER BY mc_version",
-                    (entry.kind, entry.mod_id, entry.key, entry.en_us),
+                    f"SELECT e.mc_version, e.mod_id FROM {self._content_table()} "
+                    f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
+                    "AND e.en_us=? ORDER BY e.mc_version",
+                    (
+                        entry.kind,
+                        content_mod_value(entry.kind, entry.mod_id),
+                        content_key_value(entry.kind, entry.key),
+                        entry.en_us,
+                    ),
                 )
             ]
         )
+        detail.versions = [version for version, _mod in appearances]
+        detail.version_packs = [pack_label(entry.kind, mod) for _v, mod in appearances]
         detail.same_key = [
             SameKeyRow(eid, ver, en, en == entry.en_us, tw or "", src, review_status)
             for eid, ver, en, tw, src, review_status in self._q(
                 "SELECT e.id, e.mc_version, e.en_us, f.zh_tw, f.source, "
                 f"{self._effective_review_sql} "
-                "FROM entry e INDEXED BY idx_entry_content "
+                f"FROM {self._content_table()} "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
-                "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.id<>? "
+                f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? AND e.id<>? "
                 "ORDER BY e.mc_version",
-                (entry.kind, entry.mod_id, entry.key, entry_id),
+                (
+                    entry.kind,
+                    content_mod_value(entry.kind, entry.mod_id),
+                    content_key_value(entry.kind, entry.key),
+                    entry_id,
+                ),
             )
         ]
         detail.same_text = (
@@ -3828,11 +3940,16 @@ class TranslationDB(
             ).fetchall()
         return conn.execute(
             "SELECT e.id, e.mc_version, f.zh_tw, f.source "
-            "FROM entry e INDEXED BY idx_entry_content "
+            f"FROM {self._content_table()} "
             "LEFT JOIN effective f ON f.entry_id = e.id "
-            "WHERE e.kind = ? AND e.mod_id = ? AND e.key = ? AND e.en_us = ? "
-            "ORDER BY e.mc_version",
-            row,
+            f"WHERE e.kind = ? AND {content_mod_sql('e')} = ? AND {content_key_sql('e')} = ? "
+            "AND e.en_us = ? ORDER BY e.mc_version",
+            (
+                row[0],
+                content_mod_value(row[0], row[1]),
+                content_key_value(row[0], row[2]),
+                row[3],
+            ),
         ).fetchall()
 
     def preview_manual(
@@ -4764,6 +4881,7 @@ class TranslationDB(
         touched: list[int] = []
         with self._tx() as conn:
             effective_priority = self._stored_priority(conn)
+            content_table = content_table_sql(conn)
             for item in items:
                 text = item.zh_tw
                 if not text.strip() or not item.en_us:
@@ -4779,7 +4897,11 @@ class TranslationDB(
                         "VALUES (?,?,?,?,?)",
                         (item.kind, version, item.mod_id, item.key, item.en_us),
                     ).lastrowid
-                elif row[1] != item.en_us and row[1]:
+                elif (
+                    row[1] != item.en_us
+                    and row[1]
+                    and loose_text(row[1]) != loose_text(item.en_us)
+                ):
                     conn.execute(
                         "INSERT OR IGNORE INTO src_change "
                         "(kind, mc_version, mod_id, key, old_en, new_en) "
@@ -4806,10 +4928,16 @@ class TranslationDB(
                     stats.skipped += 1
                 if fill_other_versions:
                     blanks = conn.execute(
-                        "SELECT e.id FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-                        "WHERE e.kind=? AND e.mod_id=? AND e.key=? AND e.en_us=? "
-                        "AND e.mc_version<>? AND f.entry_id IS NULL",
-                        (item.kind, item.mod_id, item.key, item.en_us, version),
+                        f"SELECT e.id FROM {content_table} LEFT JOIN effective f ON f.entry_id = e.id "
+                        f"WHERE e.kind=? AND {content_mod_sql('e')}=? AND {content_key_sql('e')}=? "
+                        "AND e.en_us=? AND e.mc_version<>? AND f.entry_id IS NULL",
+                        (
+                            item.kind,
+                            content_mod_value(item.kind, item.mod_id),
+                            content_key_value(item.kind, item.key),
+                            item.en_us,
+                            version,
+                        ),
                     ).fetchall()
                     for (bid,) in blanks:
                         done = conn.execute(
@@ -5152,8 +5280,8 @@ class TranslationDB(
                 )
                 siblings = conn.execute(
                     "SELECT t.entry_id, t.revision, t.checker, t.review_status "
-                    "FROM entry e0 JOIN entry e ON e.kind=e0.kind AND e.mod_id=e0.mod_id "
-                    "AND e.key=e0.key AND e.en_us=e0.en_us AND e.mc_version<>e0.mc_version "
+                    f"FROM entry e0 JOIN entry e ON {same_content_sql('e0', 'e')} "
+                    "AND e.mc_version<>e0.mc_version "
                     "JOIN translation t ON t.entry_id=e.id AND t.source=? AND t.zh_tw=? "
                     f"{live_only}"
                     "WHERE e0.id=?",
@@ -5180,8 +5308,7 @@ class TranslationDB(
         return (
             "(SELECT COUNT(DISTINCT f2.zh_tw) "
             "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
-            "WHERE e2.kind=u.kind AND e2.mod_id=u.mod_id AND e2.key=u.key "
-            "AND e2.en_us=u.en_us "
+            f"WHERE {same_content_sql('u', 'e2')} "
             "AND ("
             "(u.has_source_origin=0 AND NOT EXISTS ("
             "SELECT 1 FROM entry_origin eo2 WHERE eo2.entry_id=e2.id)) "
@@ -5196,8 +5323,7 @@ class TranslationDB(
         return (
             "(SELECT COUNT(DISTINCT f2.zh_tw) "
             "FROM entry e2 JOIN effective f2 ON f2.entry_id=e2.id "
-            "WHERE e2.kind=e.kind AND e2.mod_id=e.mod_id AND e2.key=e.key "
-            "AND e2.en_us=e.en_us AND e2.mc_version<>e.mc_version "
+            f"WHERE {same_content_sql('e', 'e2')} AND e2.mc_version<>e.mc_version "
             f"AND {source_locale_match_sql('e', 'e2')})=1"
         )
 
@@ -5474,8 +5600,7 @@ class TranslationDB(
             rows = conn.execute(
                 "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
-                "JOIN entry e2 ON e2.kind = e.kind AND e2.mod_id = e.mod_id "
-                "AND e2.key = e.key AND e2.en_us = e.en_us "
+                f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
                 "AND e2.mc_version <> e.mc_version "
                 f"AND {source_locale_match_sql('e', 'e2')} "
                 "JOIN effective f2 ON f2.entry_id = e2.id "
