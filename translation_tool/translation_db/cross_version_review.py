@@ -85,9 +85,7 @@ class CrossVersionRow:
     target_reviewed: bool
     refs: tuple[VersionRef, ...]
     target_revision: int | None = None
-    source_changed: bool = (
-        False  # 參考的原文與目標不同（不只差大小寫或空白）：只能人工逐筆套用
-    )
+    source_changed: bool = False  # 參考的原文與目標不同（不只差大小寫或空白）：不自動沿用，由人工確認後套用
 
     @property
     def conflict(self) -> bool:

@@ -62,17 +62,13 @@ def split_rows(
 
 
 def source_changed_rows(rows: list[CrossVersionRow]) -> list[CrossVersionRow]:
-    """參考的原文與目標不同（不只差大小寫或空白）的條目：只能逐筆判斷後套用。"""
+    """參考的原文與目標不同（不只差大小寫或空白）的條目：套用前要再確認一次。"""
     return [row for row in rows if row.source_changed]
 
 
 def selectable(row: CrossVersionRow, include_reviewed: bool) -> bool:
-    """可勾選批次套用：衝突與原文不同要逐筆判斷；目標已審核者需先勾「包含目標已審核」。"""
-    return (
-        not row.conflict
-        and not row.source_changed
-        and (include_reviewed or not row.target_reviewed)
-    )
+    """可勾選批次套用：衝突要逐筆挑參考；目標已審核者需先勾「包含目標已審核」。"""
+    return not row.conflict and (include_reviewed or not row.target_reviewed)
 
 
 def selected_items(
@@ -329,6 +325,7 @@ class VersionDiffDialog:
     def _on_tab(self, key: str) -> None:
         self.tab = key
         self.current_page = 1
+        self.selected.clear()  # 勾選只對目前頁籤有效，換頁籤不帶過去
         self._confirm_overwrite = False
         self._confirm_row = None
         self._render()
@@ -419,6 +416,10 @@ class VersionDiffDialog:
     def _current_rows(self) -> list[CrossVersionRow]:
         return self._tab_rows(*split_rows(self.rows), source_changed_rows(self.rows))
 
+    def _batch_rows(self) -> list[CrossVersionRow]:
+        """目前頁籤可以勾選批次套用的條目：差異、原文不同；衝突只能逐筆。"""
+        return [] if self.tab == TAB_CONFLICT else self._current_rows()
+
     def _tab_rows(self, diffs, conflicts, changed) -> list[CrossVersionRow]:
         return {TAB_DIFF: diffs, TAB_CONFLICT: conflicts}.get(self.tab, changed)
 
@@ -452,8 +453,9 @@ class VersionDiffDialog:
             )
         )
         self._render_exclusions()
-        self.selection_row.visible = self.tab == TAB_DIFF and bool(diffs)
-        self._render_apply_button(diffs)
+        batch = self._batch_rows()
+        self.selection_row.visible = bool(batch)
+        self._render_apply_button(batch)
         self._safe_update()
 
     def _render_exclusions(self) -> None:
@@ -478,13 +480,16 @@ class VersionDiffDialog:
         self.exclusion_note.value = "；".join(parts) + "。" if parts else ""
         self.exclusion_note.visible = bool(parts)
 
-    def _render_apply_button(self, diffs: list[CrossVersionRow]) -> None:
-        """按鈕顯示已勾選筆數；勾到目標已審核的條目時，第一次按下要再確認一次。"""
+    def _render_apply_button(self, rows: list[CrossVersionRow]) -> None:
+        """按鈕顯示已勾選筆數；勾到目標已審核或原文不同的條目時，第一次按下要再確認一次。"""
         include = bool(self.include_reviewed.value)
-        items = selected_items(diffs, self.selected, include)
-        overwrite = self._overwrite_count(diffs)
+        items = selected_items(rows, self.selected, include)
+        overwrite = self._overwrite_count(rows)
+        changed = self._source_changed_count(rows)
         if self._confirm_overwrite and overwrite:
             label = f"確認覆蓋 {format_count(overwrite)} 筆已審核譯文並套用 {format_count(len(items))} 筆"
+        elif self._confirm_overwrite and changed:
+            label = f"確認套用 {format_count(changed)} 筆原文不同的參考譯文"
         else:
             label = f"套用已勾選（{format_count(len(items))} 筆）"
         self.apply_selected_btn.content = label
@@ -496,6 +501,17 @@ class VersionDiffDialog:
             1
             for row in diffs
             if row.target_reviewed
+            and row.entry_id in self.selected
+            and selectable(row, include)
+        )
+
+    def _source_changed_count(self, rows: list[CrossVersionRow]) -> int:
+        """已勾選、參考譯文是針對不同原文寫的條目數。"""
+        include = bool(self.include_reviewed.value)
+        return sum(
+            1
+            for row in rows
+            if row.source_changed
             and row.entry_id in self.selected
             and selectable(row, include)
         )
@@ -545,7 +561,7 @@ class VersionDiffDialog:
         )
         return ft.Row(
             [
-                *([] if row.conflict or row.source_changed else [checkbox]),
+                *([] if row.conflict else [checkbox]),
                 ft.Text(
                     f"{row.mod_id} · {row.key}",
                     size=13,
@@ -717,14 +733,15 @@ class VersionDiffDialog:
         else:
             self.selected.discard(row.entry_id)
         self._confirm_overwrite = False
-        self._render_apply_button(split_rows(self.rows)[0])
+        self._render_apply_button(self._batch_rows())
         self._safe_update()
 
     def _select_all(self, _e=None) -> None:
-        """勾選目前所有可批次套用的差異（含其他頁；是否含目標已審核看上方勾選）。"""
+        """勾選目前頁籤所有可批次套用的條目（含其他頁；是否含目標已審核看上方勾選）。"""
         include = bool(self.include_reviewed.value)
-        diffs, _conflicts = split_rows(self.rows)
-        self.selected |= {row.entry_id for row in diffs if selectable(row, include)}
+        self.selected |= {
+            row.entry_id for row in self._batch_rows() if selectable(row, include)
+        }
         self._confirm_overwrite = False
         self._render()
 
@@ -741,14 +758,16 @@ class VersionDiffDialog:
         self._render()
 
     def _apply_selected(self, _e=None) -> None:
-        diffs, _conflicts = split_rows(self.rows)
+        rows = self._batch_rows()
         include = bool(self.include_reviewed.value)
-        items = selected_items(diffs, self.selected, include)
+        items = selected_items(rows, self.selected, include)
         if not items:
             return
-        if self._overwrite_count(diffs) and not self._confirm_overwrite:
-            self._confirm_overwrite = True  # 會覆蓋已審核譯文：再按一次才執行
-            self._render_apply_button(diffs)
+        risky = self._overwrite_count(rows) or self._source_changed_count(rows)
+        if risky and not self._confirm_overwrite:
+            # 會覆蓋已審核譯文，或參考譯文是照不同原文翻的：再按一次才執行
+            self._confirm_overwrite = True
+            self._render_apply_button(rows)
             self._safe_update()
             return
         self._confirm_overwrite = False
