@@ -80,6 +80,8 @@ class SameSourceAIEntry:
     revision: int | None = None
     checker: str = ""
     review_status: str | None = None
+    # 原文的可信來源語系；查詢後由服務層補上，無法確定為 None
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)

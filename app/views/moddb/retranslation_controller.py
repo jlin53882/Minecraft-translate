@@ -28,6 +28,7 @@ from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.formatting import format_count, kind_label, visible_breaks
+from app.views.moddb.source_text_label import source_text_label
 from translation_tool.utils.log_unit import log_warning
 
 _PREVIEW_SOURCE_ALL = "__all__"
@@ -420,7 +421,7 @@ def _build_preview_detail(panel, group) -> list:
                 ft.Text(f"來源譯文（{len(group)} 筆）", size=11.5, color=C.MUTED),
                 ft.IconButton(
                     icon=ft.Icons.CONTENT_COPY,
-                    tooltip="複製英文原文",
+                    tooltip="複製原文",
                     on_click=lambda _e, text=first_row.en_us: _copy_preview_text(
                         panel, text
                     ),
@@ -534,7 +535,7 @@ def _build_preview_group_card(panel, group, index: int, total: int):
 def _build_preview_format_review(cache_type, row, *, show_source):
     review = FormatDiffReview(
         context_label=source_label(row.source_id),
-        source_label="英文原文・en_us",
+        source_label=source_text_label(row.kind, row.source_locale),
         target_label=f"{cache_profile_label(cache_type)}・目前譯文",
         compact=True,
         show_source=show_source,

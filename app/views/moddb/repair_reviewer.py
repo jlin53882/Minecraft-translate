@@ -31,6 +31,7 @@ from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
+from app.views.moddb.source_text_label import source_text_label, source_text_name
 
 # 套用被拒絕時的原因說明（``stale:<原因>`` 的原因部分）；空字串是沒有可歸類的原因。
 _STALE_MESSAGES = {
@@ -281,7 +282,11 @@ class RepairReviewer:
         column_width = max(300, (available - 16) / 2)
         left = ft.Column(
             [
-                self._card("英文原文", str(item.get("en_us") or ""), tone="dia"),
+                self._card(
+                    source_text_name(item.get("kind"), item.get("source_locale")),
+                    str(item.get("en_us") or ""),
+                    tone="dia",
+                ),
                 self._card(
                     "保留中的舊譯文",
                     str(item.get("old_translation") or ""),
@@ -438,7 +443,15 @@ class RepairReviewer:
             self.format_status.value = "格式檢查通過。"
             self.format_status.color = C.EM
         self.format_diff_viewer.render(source, draft, diff_result, kind=kind)
-        self.format_review.render(source, draft, diff_result, kind=kind)
+        self.format_review.render(
+            source,
+            draft,
+            diff_result,
+            kind=kind,
+            source_label=source_text_label(
+                kind, (self.item or {}).get("source_locale")
+            ),
+        )
 
     def _is_finished(self) -> bool:
         return (

@@ -2,22 +2,31 @@
 
 from __future__ import annotations
 
-from app.views.moddb.format_diff_review import (
+from app.views.moddb.format_diff_review import FormatDiffReview
+from app.views.moddb.source_text_label import (
     ENGLISH_SOURCE_LABEL,
-    FormatDiffReview,
     source_text_label,
+    source_text_name,
 )
 from translation_tool.translation_db.models import ScanItem
 from translation_tool.translation_db.repository import TranslationDB
 
 
 def test_label_follows_the_source_locale():
-    assert source_text_label("en_us", has_origin=True) == ENGLISH_SOURCE_LABEL
-    assert source_text_label("pt_br", has_origin=True) == "原文・pt_br"
-    # jar 掃描不記來源，原文一定是 en_us
-    assert source_text_label(None, has_origin=False) == ENGLISH_SOURCE_LABEL
-    # 有來源紀錄卻還原不出語系：不推斷成英文
-    assert source_text_label(None, has_origin=True) == "原文・語系未知"
+    assert source_text_label("kubejs_lang", "en_us") == ENGLISH_SOURCE_LABEL
+    assert source_text_label("kubejs_lang", "pt_br") == "原文・pt_br"
+    assert source_text_name("ftb_quest_lang", "ru_ru") == "原文（ru_ru）"
+    assert source_text_name("lang", "en_us") == "英文原文"
+
+
+def test_unknown_locale_is_english_only_for_kinds_without_locale_files():
+    # jar 內容、KubeJS 腳本字串、FTB 任務結構沒有記語系：原文是英文
+    for kind in ("lang", "patchouli", "kubejs_script", "ftb_quests"):
+        assert source_text_label(kind, None) == ENGLISH_SOURCE_LABEL
+    # 語系由語系檔決定的種類還原不出語系：不推斷成英文
+    for kind in ("kubejs_lang", "ftb_quest_lang"):
+        assert source_text_label(kind, None) == "原文・語系未知"
+        assert source_text_name(kind, "") == "原文（語系未知）"
 
 
 def _pack_item(key: str, text: str, locale: str) -> ScanItem:

@@ -43,6 +43,7 @@ from app.views.moddb.smart_review_reviewer_state import (
     STATUS_LABEL,
     SmartReviewReviewerState,
 )
+from app.views.moddb.source_text_label import source_text_name
 
 _STATUS_TONE = {
     SmartReviewStatus.READY: "em",
@@ -580,7 +581,9 @@ class SmartReviewReviewer:
         """建立 AI 說明與左右檢視欄，讓理由不必捲到頁面下方才看得到。"""
         left = ft.Column(
             [
-                self._text_card("英文原文", row.en_us, "dia"),
+                self._text_card(
+                    source_text_name(row.kind, row.source_locale), row.en_us, "dia"
+                ),
                 self._text_card(
                     f"目前譯文（來源：{self._source_label(row)} · 審核：{row.review_status or '未標記'}）",
                     row.current_zh_tw,

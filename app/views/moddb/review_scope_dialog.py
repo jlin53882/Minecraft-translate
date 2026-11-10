@@ -29,6 +29,7 @@ from app.views.moddb.background_read import run_read
 from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import impact_text, shorten
 from app.views.moddb.operation_summaries import manual_review_result_text
+from app.views.moddb.source_text_label import source_text_parts
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 
@@ -541,6 +542,12 @@ class ReviewScopeController:
             padding=ft.Padding.only(bottom=2),
         )
 
+    def _source_text_parts(self, entry: EntryRow) -> tuple[str, str]:
+        """原文欄的名稱與語系；語系取自編輯面板已載入的條目詳情，不另外查資料庫。"""
+        detail = getattr(self.panel, "detail", None)
+        loaded = detail is not None and detail.entry.id == entry.id
+        return source_text_parts(entry.kind, detail.source_locale if loaded else None)
+
     def _build_entry_comparison(self, entry: EntryRow, db: TranslationDB) -> ft.Column:
         catalog = source_catalog_for(db)
         source_name = source_label(entry.source, catalog, entry.review_status)
@@ -566,7 +573,7 @@ class ReviewScopeController:
                 ft.Row(
                     [
                         self._build_language_box(
-                            "英文原文", "en_us", entry.en_us, "dia"
+                            *self._source_text_parts(entry), entry.en_us, "dia"
                         ),
                         self._build_language_box(
                             "繁體中文譯文", "zh_tw", entry.zh_tw, "em", quality
