@@ -534,6 +534,8 @@ class EntryDetail:
     entry: EntryRow
     translations: list[TranslationRow] = field(default_factory=list)
     origins: list[EntryOrigin] = field(default_factory=list)
+    # 原文欄的可信來源語系（KubeJS／FTB 沒有 en_us 時會以其他語系為原文）；無法確定為 None
+    source_locale: str | None = None
     references: list[SourceReference] = field(default_factory=list)
     versions: list[str] = field(default_factory=list)
     # 與 versions 一一對應：KubeJS／FTB 內容的整合包資料夾名稱，其餘為空字串。

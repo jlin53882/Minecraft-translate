@@ -53,7 +53,7 @@ from app.views.moddb.entry_filters import (
 from app.views.moddb.entry_metadata import build_entry_metadata
 from app.views.moddb.entry_row_tile import EntryTilePool
 from app.views.moddb.entry_save_result import apply_save_result
-from app.views.moddb.format_diff_review import FormatDiffReview
+from app.views.moddb.format_diff_review import FormatDiffReview, source_text_label
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
     format_count,
@@ -739,6 +739,9 @@ class EntriesPanel(ft.Column):
             self.tw_field.value or "",
             metadata=[self.source_chip, self.review_chip, self.smart_chip],
             kind=entry.kind,
+            source_label=source_text_label(
+                detail.source_locale, has_origin=bool(detail.origins)
+            ),
         )
         if impact is not None and impact.entry_id == entry.id:
             self._update_format_hints()

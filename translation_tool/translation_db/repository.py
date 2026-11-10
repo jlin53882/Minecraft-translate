@@ -3856,6 +3856,7 @@ class TranslationDB(
             return None
         detail = EntryDetail(entry=entry)
         detail.origins = self.entry_origins(entry_id)
+        detail.source_locale = self.source_locales_for_entries([entry_id]).get(entry_id)
         detail.references = self.entry_references(entry_id)
         translation_review = translation_review_sql(
             "translation", self.has_review_state

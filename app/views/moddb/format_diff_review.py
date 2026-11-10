@@ -26,6 +26,20 @@ from app.views.moddb.format_issue_rendering import (
     diagnostic_tone,
 )
 
+ENGLISH_SOURCE_LABEL = "英文原文・en_us"
+
+
+def source_text_label(locale: str | None, *, has_origin: bool) -> str:
+    """原文面板的標題：依條目實際的來源語系顯示，不一律標成英文。
+
+    KubeJS／FTB Quests 的語系檔沒有 en_us 時，掃描會以其他語系（例如 pt_br）為原文。
+    沒有來源紀錄的條目來自 jar 掃描，原文一定是 en_us；有來源紀錄卻還原不出語系時
+    標為未知，不推斷成英文。
+    """
+    if locale == "en_us" or (locale is None and not has_origin):
+        return ENGLISH_SOURCE_LABEL
+    return f"原文・{locale}" if locale else "原文・語系未知"
+
 
 def _table_cell(text: str, *, width: float | None = None, expand=None, **style):
     style.setdefault("size", 12)
@@ -101,7 +115,7 @@ class FormatDiffReview:
         self,
         *,
         context_label: str,
-        source_label: str = "英文原文・en_us",
+        source_label: str = ENGLISH_SOURCE_LABEL,
         target_label: str = "目前譯文・zh_tw",
         editable_control: ft.Control | None = None,
         edit_notice: ft.Control | None = None,
@@ -162,7 +176,10 @@ class FormatDiffReview:
         *,
         metadata: Sequence[ft.Control] = (),
         kind: str | None = None,
+        source_label: str | None = None,
     ) -> FormatDiagnosticsResult:
+        if source_label is not None:
+            self.source_label = source_label
         source_text = source_text or ""
         target_text = target_text or ""
         kind = kind or "lang"
