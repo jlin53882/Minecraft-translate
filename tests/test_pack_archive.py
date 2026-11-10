@@ -455,23 +455,25 @@ def test_keep_existing_originals_drops_source_of_every_item():
     assert all(not i.source_path and not i.source_selector for i in out)
 
 
-def test_without_zh_cn_keeps_zh_tw_and_drops_cn_only():
-    from translation_tool.translation_db.models import ScanItem
-    from translation_tool.translation_db.scanner import _without_zh_cn
-
-    def item(key, **kw):
-        return ScanItem(
-            kind="ftb_quest_lang", mod_id="q", key=key, **{"en_us": "", **kw}
-        )
-
-    out = _without_zh_cn(
-        [
-            item("a", en_us="简", zh_cn="简", zh_tw="繁", source_locale="zh_cn"),
-            item("b", zh_cn="简", source_locale="zh_cn"),
-            item("c", en_us="E", zh_cn="简", zh_tw="繁", source_locale="en_us"),
-        ]
+def test_zh_cn_off_reads_only_zh_tw_with_matching_origin(tmp_path):
+    files = {
+        "Pack/" + n: b
+        for loc, text in (("zh_cn", "简"), ("zh_tw", "繁"))
+        for n, b in _pack_files(loc, {"chapter.A.title": text}).items()
+    }
+    zpath = _make_zip(tmp_path / "both.zip", files)
+    db = TranslationDB(tmp_path / "t.db")
+    opts = ScanOptions(
+        "1.21.1",
+        translated=True,
+        include_pack_content=True,
+        read_jar_translations=False,
     )
-    assert [(i.key, i.en_us, i.zh_tw, i.zh_cn) for i in out] == [
-        ("a", "", "繁", ""),
-        ("c", "E", "繁", ""),
-    ]
+    report = None
+    for update in scan_folder_generator(db, zpath, opts):
+        report = update.get("report", report)
+    assert report.stats.new_entries == 1
+    assert not [i for i in report.issues if "zh_cn" in str(i)]
+    conn = sqlite3.connect(tmp_path / "t.db")
+    paths = [r[0] for r in conn.execute("select source_path from entry_origin")]
+    assert paths and all("zh_tw" in p for p in paths)

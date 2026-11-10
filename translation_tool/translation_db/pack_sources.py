@@ -181,6 +181,8 @@ class PackScanResult:
     pack_scope: str = ""
     # 只有譯文的內容對到資料庫既有模組包：引用索引屬於原模組包，不能用這次的結果取代
     adopted_existing: bool = False
+    # 使用者關閉「讀取 zh_cn」：發現與讀取語系時就排除 zh_cn，不解析、不回報其問題
+    skip_zh_cn: bool = False
     items: list[ScanItem] = field(default_factory=list)
     # 目前掃描確認為空白的 KubeJS lang 事件；若舊版掃描曾建立 origin，
     # 匯入時只移除該精確來源，不刪除條目或其他來源。
@@ -361,6 +363,7 @@ def scan_pack_sources(
     include_kubejs: bool = True,
     include_ftb: bool = True,
     scope: str | None = None,
+    read_zh_cn: bool = True,
 ) -> PackScanResult:
     """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。
 
@@ -369,7 +372,9 @@ def scan_pack_sources(
     """
     scan_started = time.perf_counter()
     root = Path(pack_root).expanduser().resolve()
-    result = PackScanResult(pack_scope=scope or _pack_scope(root))
+    result = PackScanResult(
+        pack_scope=scope or _pack_scope(root), skip_zh_cn=not read_zh_cn
+    )
     if not root.is_dir():
         result.issues.append(_issue(root, "source_missing", "source_not_directory"))
         return result
@@ -681,6 +686,8 @@ def _scan_kubejs_event(
     lang_locale = _kubejs_lang_locale(event_name, args, rel, result)
     if event_name == "ClientEvents.lang" and lang_locale is None:
         return lang_occurrence
+    if result.skip_zh_cn and lang_locale == "zh_cn":
+        return lang_occurrence
     args_code = _mask_js_non_code(args)
     for match in _EVENT_ADD.finditer(args_code):
         call_args = _extract_js_call_args(args, match.end())
@@ -939,7 +946,10 @@ def _collect_kubejs_lang_paths(
         if len(parts) < 4 or parts[-2] != "lang":
             continue
         namespace = parts[1] if len(parts) > 1 else "kubejs"
-        files_by_namespace[namespace][normalize_locale(path.stem)].append(path)
+        locale = normalize_locale(path.stem)
+        if result.skip_zh_cn and locale == "zh_cn":
+            continue
+        files_by_namespace[namespace][locale].append(path)
     return files_by_namespace
 
 
@@ -1104,6 +1114,8 @@ def _read_ftb_lang_file(
     result: PackScanResult,
     locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]],
 ) -> None:
+    if result.skip_zh_cn and _locale_for_lang_file(path, lang_root) == "zh_cn":
+        return
     result.mark_file("ftb_quests")
     loaded = _read_text(path, result)
     if loaded is None:

@@ -1420,23 +1420,13 @@ def _scan_pack_content(
 def _scan_pack_for_options(
     pack_root: Path, options: ScanOptions, scope: str | None
 ) -> PackScanResult:
-    """掃描模組包；翻譯來源關閉「讀取模組自帶 zh_cn」時，不採用 zh_cn 的內容。"""
-    result = scan_pack_sources(pack_root, options.version, scope=scope)
-    if options.translated and not options.read_jar_translations:
-        result.items = _without_zh_cn(result.items)
-    return result
-
-
-def _without_zh_cn(items: list[ScanItem]) -> list[ScanItem]:
-    """去掉項目裡的 zh_cn；以 zh_cn 當來源的項目只留下同項目的 zh_tw，沒有就整筆丟掉。"""
-    out: list[ScanItem] = []
-    for item in items:
-        if item.source_locale == "zh_cn":
-            if not item.zh_tw:
-                continue
-            item = replace(item, en_us="", source_locale="zh_tw")
-        out.append(replace(item, zh_cn=""))
-    return out
+    """掃描模組包；翻譯來源關閉「讀取模組自帶 zh_cn」時，掃描器不讀 zh_cn 語系。"""
+    return scan_pack_sources(
+        pack_root,
+        options.version,
+        scope=scope,
+        read_zh_cn=options.read_jar_translations or not options.translated,
+    )
 
 
 def _record_pack_scan(report: ScanReport, pack_result: PackScanResult) -> None:
