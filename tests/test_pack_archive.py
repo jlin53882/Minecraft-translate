@@ -405,7 +405,7 @@ def test_match_total_counts_distinct_keys(tmp_path):
 
     class FakeDB:
         def pack_entry_keys(self, version, kind, prefix):
-            return {"pack1": {"k"}}
+            return {"pack1": {"k": "K"}}
 
     items = [
         ScanItem(
@@ -449,14 +449,17 @@ def test_keep_existing_originals_drops_source_of_every_item():
             source_hash="H2",
         )
 
-    match = ScopeMatch("p@1", frozenset({("ftb_quests", "q@p@1", "title")}), 1, 1)
-    out, skipped = keep_existing_originals(
+    match = ScopeMatch(
+        ("p@1",), "p@1", {("ftb_quests", "q", "title"): {"p@1": "Title"}}, 1, 1
+    )
+    adopted = keep_existing_originals(
         [item("title", "標題"), item("sub", "Sub"), item("extra", "多的")], match
     )
+    out = adopted.items
     assert [(i.en_us, i.zh_tw) for i in out] == [("", "標題"), ("Sub", "")]
     assert all(not i.source_path and not i.source_selector for i in out)
     # 既有模組包沒有這個 key、又只有中文：不能把中文存成該模組包的原文
-    assert [i.key for i in skipped] == ["extra"]
+    assert [i.key for i in adopted.without_original] == ["extra"]
 
 
 def test_zh_cn_off_reads_only_zh_tw_with_matching_origin(tmp_path):
@@ -582,3 +585,113 @@ def test_translated_zip_skips_keys_missing_from_matched_pack(tmp_path):
     assert conn.execute(
         "select en_us from entry where key like '%quest.C.title'"
     ).fetchall() == [("New",)]
+
+
+def _quest_file(quests: list[tuple[str, str]]) -> dict[str, str]:
+    body = ",".join(f'{{id:"{qid}",title:"{title}"}}' for qid, title in quests)
+    return {"config/ftbquests/quests/chapters/a.snbt": f'{{id:"CH1",quests:[{body}]}}'}
+
+
+def _import_pack_versions(db, tmp_path: Path, packs: dict[str, list[tuple[str, str]]]):
+    for name, quests in packs.items():
+        _write_files(tmp_path / name, _quest_file(quests))
+        for _ in scan_folder_generator(
+            db, tmp_path / name, ScanOptions("1.21.1", include_pack_content=True)
+        ):
+            pass
+
+
+def _translations_by_pack(db_path: Path) -> dict[str, dict[str, str | None]]:
+    """``{模組包資料夾名: {英文原文: 譯文}}``。"""
+    out: dict[str, dict[str, str | None]] = {}
+    conn = sqlite3.connect(db_path)
+    for mod_id, en_us, zh_tw in conn.execute(
+        "select e.mod_id, e.en_us, t.zh_tw from entry e "
+        "left join translation t on t.entry_id=e.id"
+    ):
+        out.setdefault(mod_id.split("@")[1], {})[en_us] = zh_tw
+    return out
+
+
+def test_translated_zip_fills_every_pack_version_with_the_same_original(tmp_path):
+    """同版本並存兩份內容相同的模組包：譯文兩份都補，不因平手而整批以新身分新增。"""
+    db = TranslationDB(tmp_path / "t.db")
+    quests = [("Q1", "First Quest"), ("Q2", "Second Quest")]
+    _import_pack_versions(db, tmp_path, {"pack82": quests, "pack85": quests})
+    zpath = _make_zip(
+        tmp_path / "zh.zip", _quest_file([("Q1", "第一個任務"), ("Q2", "第二個任務")])
+    )
+
+    report = _scan(db, zpath)
+
+    filled = {"First Quest": "第一個任務", "Second Quest": "第二個任務"}
+    assert _translations_by_pack(tmp_path / "t.db") == {
+        "pack82": filled,
+        "pack85": filled,
+    }
+    assert report.stats.new_entries == 0 and report.stats.en_changed == 0
+    assert not [i for i in report.issues if i["reason"].startswith("translation_")]
+
+
+def test_translated_zip_fills_only_best_pack_where_originals_differ(tmp_path):
+    """英文在兩份模組包不同的條目，只補進 key 相符最多的那一份，並列入問題。"""
+    db = TranslationDB(tmp_path / "t.db")
+    _import_pack_versions(
+        db,
+        tmp_path,
+        {
+            "pack82": [("Q1", "First Quest"), ("Q2", "Old wording")],
+            "pack85": [
+                ("Q1", "First Quest"),
+                ("Q2", "New wording"),
+                ("Q3", "Third Quest"),
+            ],
+        },
+    )
+    zpath = _make_zip(
+        tmp_path / "zh.zip",
+        _quest_file([("Q1", "第一個任務"), ("Q2", "新的說法"), ("Q3", "第三個任務")]),
+    )
+
+    report = _scan(db, zpath)
+
+    assert _translations_by_pack(tmp_path / "t.db") == {
+        "pack82": {"First Quest": "第一個任務", "Old wording": None},
+        "pack85": {
+            "First Quest": "第一個任務",
+            "New wording": "新的說法",
+            "Third Quest": "第三個任務",
+        },
+    }
+    assert report.stats.en_changed == 0
+    differs = [
+        i for i in report.issues if i["reason"] == "translation_original_differs"
+    ]
+    assert len(differs) == 1 and differs[0]["detail"].startswith("1 筆")
+
+
+def test_translated_zip_skips_differing_originals_when_packs_tie(tmp_path):
+    """兩份模組包 key 相符數相同、英文又不同：不猜，該筆不補進任何一份。"""
+    db = TranslationDB(tmp_path / "t.db")
+    _import_pack_versions(
+        db,
+        tmp_path,
+        {
+            "pack82": [("Q1", "First Quest"), ("Q2", "Old wording")],
+            "pack85": [("Q1", "First Quest"), ("Q2", "New wording")],
+        },
+    )
+    zpath = _make_zip(
+        tmp_path / "zh.zip", _quest_file([("Q1", "第一個任務"), ("Q2", "新的說法")])
+    )
+
+    report = _scan(db, zpath)
+
+    assert _translations_by_pack(tmp_path / "t.db") == {
+        "pack82": {"First Quest": "第一個任務", "Old wording": None},
+        "pack85": {"First Quest": "第一個任務", "New wording": None},
+    }
+    assert report.stats.new_entries == 0 and report.stats.en_changed == 0
+    assert [i["reason"] for i in report.issues if i["reason"].startswith("trans")] == [
+        "translation_original_differs"
+    ]

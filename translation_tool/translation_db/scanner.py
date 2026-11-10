@@ -64,6 +64,7 @@ from translation_tool.translation_db.pack_archive import (
     zip_pack_scope,
 )
 from translation_tool.translation_db.pack_scope_match import (
+    AdoptedItems,
     carries_translation,
     keep_existing_originals,
     locale_only_items,
@@ -1479,44 +1480,64 @@ def _match_existing_pack(
                 "level": "info",
             }
         return pack_result
-    same_scope = match.scope == pack_result.pack_scope
-    if same_scope and not carries_translation(pack_result.items, match):
+    if pack_result.pack_scope in match.scopes and not carries_translation(
+        pack_result.items, match
+    ):
         # 對到這份輸入自己的身分，內容也不是譯文（同一個 ZIP 再匯入）：它就是原始來源，
         # 照一般匯入更新來源雜湊、引用與過期來源。
         return pack_result
     # 同一個身分但內容已是中文（原資料夾就地翻譯後再匯入）一樣只補譯文：照一般匯入
     # 會把中文當成新原文，全部記成原文已變動而補不進譯文。
-    if not same_scope:
-        pack_result = _scan_pack_for_options(pack_root, options, match.scope)
+    adopted = keep_existing_originals(pack_result.items, match)
     pack_result.adopted_existing = True
     # 譯文輸入不是原模組包的檔案：不清理原包的來源紀錄
     pack_result.stale_origins = []
-    pack_result.items, skipped = keep_existing_originals(pack_result.items, match)
-    if skipped:
-        detail = (
-            f"{len(skipped)} 筆譯文在既有模組包 {match.scope} 中沒有對應的 key，"
-            "沒有英文原文可對照，未匯入"
-        )
+    pack_result.items = adopted.items
+    for reason, detail in _adoption_problems(adopted):
         pack_result.issues.append(
             {
                 "source_archive": str(pack_root),
                 "source_member": "",
                 "kind": "pack_source",
                 "status": "pending",
-                "reason": "translation_without_original",
+                "reason": reason,
                 "detail": detail,
             }
         )
         yield {"progress": 0.0, "log": f"📦 {detail}", "level": "warning"}
+    names = "、".join(match.scopes)
     yield {
         "progress": 0.0,
         "log": (
-            f"📦 對到既有模組包 {match.scope}：{match.overlap}/{match.total} 筆 key 相符，"
+            f"📦 對到既有模組包 {names}：最多 {match.overlap}/{match.total} 筆 key 相符，"
             "相符的條目只補譯文、保留原本的英文"
         ),
         "level": "info",
     }
     return pack_result
+
+
+def _adoption_problems(adopted: AdoptedItems) -> list[tuple[str, str]]:
+    """譯文補進既有模組包時沒匯入的項目：``[(問題代碼, 說明)]``。"""
+    cases = (
+        (
+            "translation_without_original",
+            adopted.without_original,
+            "筆譯文在對到的既有模組包中沒有對應的 key，沒有英文原文可對照，未匯入",
+        ),
+        (
+            "translation_original_differs",
+            adopted.original_differs,
+            "筆譯文對應的英文原文在各模組包不同，"
+            + "只補進 key 相符最多的模組包（沒有唯一最多者時未匯入）",
+        ),
+        (
+            "translation_pack_ambiguous",
+            adopted.no_single_pack,
+            "筆帶英文的項目沒有唯一對得上的模組包，未匯入",
+        ),
+    )
+    return [(reason, f"{len(items)} {text}") for reason, items, text in cases if items]
 
 
 def _report_pack_root_problem(
