@@ -419,3 +419,59 @@ def test_match_total_counts_distinct_keys(tmp_path):
     ]
     match = match_existing_scope(FakeDB(), "1.21.1", items)
     assert match is not None and match.total == 1 and match.overlap == 1
+
+
+def test_collision_issue_does_not_leak_temp_path(tmp_path):
+    zpath = _make_zip(
+        tmp_path / "clash.zip", {"kubejs/a.js": "x", "kubejs/a.js/b.js": "y"}
+    )
+    dest = tmp_path / "out"
+    dest.mkdir()
+    issues = extract_pack_members(zpath, dest)
+    assert issues and str(dest) not in " ".join(issues[0].values())
+
+
+def test_keep_existing_originals_drops_source_of_every_item():
+    from translation_tool.translation_db.models import ScanItem
+    from translation_tool.translation_db.pack_scope_match import (
+        ScopeMatch,
+        keep_existing_originals,
+    )
+
+    def item(key, text):
+        return ScanItem(
+            kind="ftb_quests",
+            mod_id="q@p@1",
+            key=key,
+            en_us=text,
+            source_path="zh.snbt",
+            source_selector=key,
+            source_hash="H2",
+        )
+
+    match = ScopeMatch("p@1", frozenset({("ftb_quests", "q@p@1", "title")}), 1, 1)
+    out = keep_existing_originals([item("title", "標題"), item("sub", "Sub")], match)
+    assert [(i.en_us, i.zh_tw) for i in out] == [("", "標題"), ("Sub", "")]
+    assert all(not i.source_path and not i.source_selector for i in out)
+
+
+def test_without_zh_cn_keeps_zh_tw_and_drops_cn_only():
+    from translation_tool.translation_db.models import ScanItem
+    from translation_tool.translation_db.scanner import _without_zh_cn
+
+    def item(key, **kw):
+        return ScanItem(
+            kind="ftb_quest_lang", mod_id="q", key=key, **{"en_us": "", **kw}
+        )
+
+    out = _without_zh_cn(
+        [
+            item("a", en_us="简", zh_cn="简", zh_tw="繁", source_locale="zh_cn"),
+            item("b", zh_cn="简", source_locale="zh_cn"),
+            item("c", en_us="E", zh_cn="简", zh_tw="繁", source_locale="en_us"),
+        ]
+    )
+    assert [(i.key, i.en_us, i.zh_tw, i.zh_cn) for i in out] == [
+        ("a", "", "繁", ""),
+        ("c", "E", "繁", ""),
+    ]

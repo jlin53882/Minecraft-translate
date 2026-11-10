@@ -147,6 +147,11 @@ def extract_pack_members(
             except OSError as exc:
                 # 例如 ``a.js`` 與 ``a.js/b.js`` 同時存在：檔案與目錄互相衝突
                 issues.append(
-                    _issue(archive, info.filename, "archive_write_failed", str(exc))
+                    _issue(
+                        archive,
+                        info.filename,
+                        "archive_write_failed",
+                        exc.strerror or "無法寫入暫存檔",
+                    )
                 )
     return issues

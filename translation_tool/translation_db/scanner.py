@@ -1420,11 +1420,23 @@ def _scan_pack_content(
 def _scan_pack_for_options(
     pack_root: Path, options: ScanOptions, scope: str | None
 ) -> PackScanResult:
-    """掃描模組包；翻譯來源關閉「讀取模組自帶 zh_cn」時，不採用 zh_cn 語系的項目。"""
+    """掃描模組包；翻譯來源關閉「讀取模組自帶 zh_cn」時，不採用 zh_cn 的內容。"""
     result = scan_pack_sources(pack_root, options.version, scope=scope)
     if options.translated and not options.read_jar_translations:
-        result.items = [item for item in result.items if item.source_locale != "zh_cn"]
+        result.items = _without_zh_cn(result.items)
     return result
+
+
+def _without_zh_cn(items: list[ScanItem]) -> list[ScanItem]:
+    """去掉項目裡的 zh_cn；以 zh_cn 當來源的項目只留下同項目的 zh_tw，沒有就整筆丟掉。"""
+    out: list[ScanItem] = []
+    for item in items:
+        if item.source_locale == "zh_cn":
+            if not item.zh_tw:
+                continue
+            item = replace(item, en_us="", source_locale="zh_tw")
+        out.append(replace(item, zh_cn=""))
+    return out
 
 
 def _record_pack_scan(report: ScanReport, pack_result: PackScanResult) -> None:
@@ -1479,6 +1491,8 @@ def _match_existing_pack(
     if match.scope != pack_result.pack_scope:
         pack_result = _scan_pack_for_options(pack_root, options, match.scope)
     pack_result.adopted_existing = True
+    # 譯文輸入不是原模組包的檔案：不清理原包的來源紀錄
+    pack_result.stale_origins = []
     pack_result.items = keep_existing_originals(pack_result.items, match)
     yield {
         "progress": 0.0,

@@ -89,12 +89,13 @@ def match_existing_scope(
 def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> list[ScanItem]:
     """對到既有條目的項目：中文當譯文、原文留空，ingest 會沿用資料庫裡的英文只補譯文。
 
-    對到既有條目的項目一律不再記來源（路徑、selector）：這份輸入不是原模組包的檔案，
-    記進去會讓原模組包多出不存在的來源，或用譯文檔的雜湊蓋掉原本英文來源的雜湊，
-    破壞之後的回寫比對。
+    所有項目都不再記來源（路徑、selector）：這份輸入不是原模組包的檔案，記進去會讓
+    原模組包多出不存在的來源，或用譯文檔的雜湊蓋掉原本英文來源的雜湊，破壞之後的回寫比對。
     """
     out: list[ScanItem] = []
     for item in items:
+        # 譯文輸入的檔案不是原模組包的檔案（含混合檔裡沒翻的英文項目）：全部不記來源
+        item = replace(item, source_path="", source_selector="")
         if (item.kind, item.mod_id, item.key) not in match.existing:
             out.append(item)
             continue
@@ -104,5 +105,5 @@ def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> list[Sc
             item = replace(item, en_us="", zh_cn=item.zh_cn or item.en_us)
         elif _is_in_place_translation(item):
             item = replace(item, en_us="", zh_tw=item.en_us)
-        out.append(replace(item, source_path="", source_selector=""))
+        out.append(item)
     return out
