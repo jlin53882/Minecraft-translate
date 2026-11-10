@@ -450,9 +450,13 @@ def test_keep_existing_originals_drops_source_of_every_item():
         )
 
     match = ScopeMatch("p@1", frozenset({("ftb_quests", "q@p@1", "title")}), 1, 1)
-    out = keep_existing_originals([item("title", "標題"), item("sub", "Sub")], match)
+    out, skipped = keep_existing_originals(
+        [item("title", "標題"), item("sub", "Sub"), item("extra", "多的")], match
+    )
     assert [(i.en_us, i.zh_tw) for i in out] == [("", "標題"), ("Sub", "")]
     assert all(not i.source_path and not i.source_selector for i in out)
+    # 既有模組包沒有這個 key、又只有中文：不能把中文存成該模組包的原文
+    assert [i.key for i in skipped] == ["extra"]
 
 
 def test_zh_cn_off_reads_only_zh_tw_with_matching_origin(tmp_path):
@@ -477,3 +481,104 @@ def test_zh_cn_off_reads_only_zh_tw_with_matching_origin(tmp_path):
     conn = sqlite3.connect(tmp_path / "t.db")
     paths = [r[0] for r in conn.execute("select source_path from entry_origin")]
     assert paths and all("zh_tw" in p for p in paths)
+
+
+def _write_files(folder: Path, files: dict[str, str]) -> None:
+    for name, body in files.items():
+        target = folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+
+
+def test_same_folder_translated_in_place_fills_zh_tw(tmp_path):
+    """原資料夾先掃英文、就地翻成中文後以翻譯來源再匯入：只補譯文，不記成原文已變動。"""
+    db = TranslationDB(tmp_path / "t.db")
+    pack = tmp_path / "pack"
+    _write_files(pack, _kubejs_files("Tooltip text", "First Quest", "Do the thing"))
+    for _ in scan_folder_generator(
+        db, pack, ScanOptions("1.21.1", include_pack_content=True)
+    ):
+        pass
+    conn = sqlite3.connect(tmp_path / "t.db")
+    origins = conn.execute(
+        "select source_path, selector, source_hash from entry_origin order by 1,2"
+    ).fetchall()
+
+    _write_files(pack, _kubejs_files("提示文字", "第一個任務", "完成這件事"))
+    report = _scan(db, pack)
+
+    assert report.stats.new_entries == 0 and report.stats.en_changed == 0
+    assert conn.execute("select count(*) from src_change").fetchone()[0] == 0
+    rows = conn.execute(
+        "select e.en_us, t.zh_tw from entry e join translation t on t.entry_id=e.id"
+    ).fetchall()
+    assert len(rows) == 4
+    assert {r[0] for r in rows} == {"Tooltip text", "First Quest", "Do the thing"}
+    assert {r[1] for r in rows} == {"提示文字", "第一個任務", "完成這件事"}
+    after = conn.execute(
+        "select source_path, selector, source_hash from entry_origin order by 1,2"
+    ).fetchall()
+    assert after == origins
+
+
+def test_same_zip_reimport_without_translations_stays_a_normal_import(tmp_path):
+    """同一個 ZIP 再匯入、內容不是譯文：照一般匯入，來源紀錄仍在。"""
+    zpath = _make_zip(
+        tmp_path / "p.zip",
+        _pack_files("zh_tw", {"chapter.A.title": "FTB", "quest.B.title": "OK"}),
+    )
+    db = TranslationDB(tmp_path / "t.db")
+    _scan(db, zpath)
+    conn = sqlite3.connect(tmp_path / "t.db")
+    count = conn.execute("select count(*) from entry_origin").fetchone()[0]
+    assert count == 2
+
+    again = _scan(db, zpath)
+
+    assert again.stats.new_entries == 0 and again.stats.en_changed == 0
+    assert conn.execute("select count(*) from entry_origin").fetchone()[0] == count
+    assert not [
+        i for i in again.issues if i["reason"] == "translation_without_original"
+    ]
+
+
+def test_translated_zip_skips_keys_missing_from_matched_pack(tmp_path):
+    """對到既有模組包後，該模組包沒有的 key 不匯入：否則中文會被存成它的原文。"""
+    db = TranslationDB(tmp_path / "t.db")
+    orig = tmp_path / "orig"
+    _import_english_pack(db, orig, {"chapter.A.title": "Hello", "quest.B.title": "Bye"})
+    zpath = _make_zip(
+        tmp_path / "zh.zip",
+        _pack_files(
+            "zh_tw",
+            {
+                "chapter.A.title": "你好",
+                "quest.B.title": "再見",
+                "quest.C.title": "新任務",
+                "quest.D.title": "另一個",
+            },
+        ),
+    )
+
+    report = _scan(db, zpath)
+
+    conn = sqlite3.connect(tmp_path / "t.db")
+    rows = conn.execute("select en_us from entry order by key").fetchall()
+    assert [r[0] for r in rows] == ["Hello", "Bye"]
+    assert report.stats.new_entries == 0
+    skipped = [
+        i for i in report.issues if i["reason"] == "translation_without_original"
+    ]
+    assert len(skipped) == 1 and skipped[0]["detail"].startswith("2 筆")
+    assert str(tmp_path / "moddb_pack_") not in skipped[0]["source_archive"]
+
+    # 原模組包之後補上這個 key 的英文：正常新增，不會被先前的中文卡成原文已變動
+    _import_english_pack(
+        db,
+        orig,
+        {"chapter.A.title": "Hello", "quest.B.title": "Bye", "quest.C.title": "New"},
+    )
+    assert conn.execute("select count(*) from src_change").fetchone()[0] == 0
+    assert conn.execute(
+        "select en_us from entry where key like '%quest.C.title'"
+    ).fetchall() == [("New",)]

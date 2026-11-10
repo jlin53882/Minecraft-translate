@@ -64,6 +64,7 @@ from translation_tool.translation_db.pack_archive import (
     zip_pack_scope,
 )
 from translation_tool.translation_db.pack_scope_match import (
+    carries_translation,
     keep_existing_originals,
     locale_only_items,
     match_existing_scope,
@@ -1478,15 +1479,35 @@ def _match_existing_pack(
                 "level": "info",
             }
         return pack_result
-    if match.scope == pack_result.pack_scope:
-        # 對到的是這份輸入自己的身分（同一個 ZIP 再匯入）：它就是原始來源，照一般匯入
-        # 更新來源雜湊、引用與過期來源，不是「補譯文進別的模組包」。
+    same_scope = match.scope == pack_result.pack_scope
+    if same_scope and not carries_translation(pack_result.items, match):
+        # 對到這份輸入自己的身分，內容也不是譯文（同一個 ZIP 再匯入）：它就是原始來源，
+        # 照一般匯入更新來源雜湊、引用與過期來源。
         return pack_result
-    pack_result = _scan_pack_for_options(pack_root, options, match.scope)
+    # 同一個身分但內容已是中文（原資料夾就地翻譯後再匯入）一樣只補譯文：照一般匯入
+    # 會把中文當成新原文，全部記成原文已變動而補不進譯文。
+    if not same_scope:
+        pack_result = _scan_pack_for_options(pack_root, options, match.scope)
     pack_result.adopted_existing = True
     # 譯文輸入不是原模組包的檔案：不清理原包的來源紀錄
     pack_result.stale_origins = []
-    pack_result.items = keep_existing_originals(pack_result.items, match)
+    pack_result.items, skipped = keep_existing_originals(pack_result.items, match)
+    if skipped:
+        detail = (
+            f"{len(skipped)} 筆譯文在既有模組包 {match.scope} 中沒有對應的 key，"
+            "沒有英文原文可對照，未匯入"
+        )
+        pack_result.issues.append(
+            {
+                "source_archive": str(pack_root),
+                "source_member": "",
+                "kind": "pack_source",
+                "status": "pending",
+                "reason": "translation_without_original",
+                "detail": detail,
+            }
+        )
+        yield {"progress": 0.0, "log": f"📦 {detail}", "level": "warning"}
     yield {
         "progress": 0.0,
         "log": (
