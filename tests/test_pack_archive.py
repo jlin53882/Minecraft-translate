@@ -332,3 +332,90 @@ def test_kubejs_lang_translation_only_zip_fills_zh_tw_into_existing_entries(tmp_
         .fetchone()[0]
         == 2
     )
+
+
+def test_extract_reports_file_directory_collision(tmp_path):
+    zpath = _make_zip(
+        tmp_path / "clash.zip",
+        {"kubejs/a.js": "x", "kubejs/a.js/b.js": "y", "kubejs/ok.js": "z"},
+    )
+    dest = tmp_path / "out"
+    dest.mkdir()
+    issues = extract_pack_members(zpath, dest)
+    assert [i["reason"] for i in issues] == ["archive_write_failed"]
+    assert (dest / "kubejs" / "ok.js").is_file()
+
+
+def test_translated_zip_does_not_touch_original_origins_or_references(
+    tmp_path, monkeypatch
+):
+    db = TranslationDB(tmp_path / "t.db")
+    _import_english_pack(db, tmp_path / "orig", {"chapter.A.title": "Hello"})
+    conn = sqlite3.connect(tmp_path / "t.db")
+    before = conn.execute(
+        "select source_path, source_hash from entry_origin order by 1"
+    ).fetchall()
+    assert before
+    calls = []
+    original = TranslationDB.record_source_references
+    monkeypatch.setattr(
+        TranslationDB,
+        "record_source_references",
+        lambda self, *a, **k: calls.append(1) or original(self, *a, **k),
+    )
+    zpath = _make_zip(
+        tmp_path / "zh.zip",
+        {
+            "Pack/" + n: b
+            for n, b in _pack_files("zh_tw", {"chapter.A.title": "你好"}).items()
+        },
+    )
+    _scan(db, zpath)
+    after = conn.execute(
+        "select source_path, source_hash from entry_origin order by 1"
+    ).fetchall()
+    assert after == before
+    assert calls == []
+
+
+def test_zh_cn_only_zip_is_ignored_when_zh_cn_reading_is_off(tmp_path):
+    zpath = _make_zip(
+        tmp_path / "cn.zip",
+        {
+            "Pack/" + n: b
+            for n, b in _pack_files("zh_cn", {"chapter.A.title": "你好"}).items()
+        },
+    )
+    db = TranslationDB(tmp_path / "t.db")
+    opts = ScanOptions(
+        "1.21.1",
+        translated=True,
+        include_pack_content=True,
+        read_jar_translations=False,
+    )
+    report = None
+    for update in scan_folder_generator(db, zpath, opts):
+        report = update.get("report", report)
+    assert report.stats.new_entries == 0
+
+
+def test_match_total_counts_distinct_keys(tmp_path):
+    from translation_tool.translation_db.models import ScanItem
+    from translation_tool.translation_db.pack_scope_match import match_existing_scope
+
+    class FakeDB:
+        def pack_entry_keys(self, version, kind, prefix):
+            return {"pack1": {"k"}}
+
+    items = [
+        ScanItem(
+            kind="kubejs_lang",
+            mod_id=f"ns@pack@{i}",
+            key="k",
+            en_us="你",
+            source_locale="zh_tw",
+        )
+        for i in range(3)
+    ]
+    match = match_existing_scope(FakeDB(), "1.21.1", items)
+    assert match is not None and match.total == 1 and match.overlap == 1

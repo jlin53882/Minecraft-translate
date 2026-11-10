@@ -1234,11 +1234,13 @@ def _ingest_pack_result(
         stats.en_changed,
     )
     references_started = time.perf_counter()
-    db.record_source_references(
-        version,
-        result.references,
-        pack_scope=result.pack_scope,
-    )
+    # 譯文補進既有模組包時，引用索引是原模組包的完整快照，不能被這次的內容取代
+    if not result.adopted_existing:
+        db.record_source_references(
+            version,
+            result.references,
+            pack_scope=result.pack_scope,
+        )
     _LOG.info(
         "[模組包來源] 跨格式引用寫入完成：耗時 %.3f 秒，引用 %d",
         time.perf_counter() - references_started,
@@ -1390,7 +1392,7 @@ def _scan_pack_content(
             "level": "info",
         }
         scope = zip_pack_scope(path) if from_zip else None
-        pack_result = scan_pack_sources(pack_root, options.version, scope=scope)
+        pack_result = _scan_pack_for_options(pack_root, options, scope)
         if options.translated:
             pack_result = yield from _adopt_translated_pack(
                 db, pack_root, options, pack_result
@@ -1413,6 +1415,16 @@ def _scan_pack_content(
         report.stats.add(stats)
         yield from _pack_source_updates(pack_result, stats, dry_run=options.dry_run)
         return pack_result, stats, False
+
+
+def _scan_pack_for_options(
+    pack_root: Path, options: ScanOptions, scope: str | None
+) -> PackScanResult:
+    """掃描模組包；翻譯來源關閉「讀取模組自帶 zh_cn」時，不採用 zh_cn 語系的項目。"""
+    result = scan_pack_sources(pack_root, options.version, scope=scope)
+    if options.translated and not options.read_jar_translations:
+        result.items = [item for item in result.items if item.source_locale != "zh_cn"]
+    return result
 
 
 def _record_pack_scan(report: ScanReport, pack_result: PackScanResult) -> None:
@@ -1465,7 +1477,8 @@ def _match_existing_pack(
             }
         return pack_result
     if match.scope != pack_result.pack_scope:
-        pack_result = scan_pack_sources(pack_root, options.version, scope=match.scope)
+        pack_result = _scan_pack_for_options(pack_root, options, match.scope)
+    pack_result.adopted_existing = True
     pack_result.items = keep_existing_originals(pack_result.items, match)
     yield {
         "progress": 0.0,

@@ -141,6 +141,12 @@ def extract_pack_members(
                     _issue(archive, info.filename, "archive_read_failed", str(exc))
                 )
                 continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            except OSError as exc:
+                # 例如 ``a.js`` 與 ``a.js/b.js`` 同時存在：檔案與目錄互相衝突
+                issues.append(
+                    _issue(archive, info.filename, "archive_write_failed", str(exc))
+                )
     return issues

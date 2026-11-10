@@ -179,6 +179,8 @@ class PackScanResult:
     """一個模組包的掃描結果；不包含任何資料庫寫入副作用。"""
 
     pack_scope: str = ""
+    # 只有譯文的內容對到資料庫既有模組包：引用索引屬於原模組包，不能用這次的結果取代
+    adopted_existing: bool = False
     items: list[ScanItem] = field(default_factory=list)
     # 目前掃描確認為空白的 KubeJS lang 事件；若舊版掃描曾建立 origin，
     # 匯入時只移除該精確來源，不刪除條目或其他來源。

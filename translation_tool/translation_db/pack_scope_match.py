@@ -67,6 +67,7 @@ def match_existing_scope(
     wanted: dict[tuple[str, str], set[str]] = defaultdict(set)
     for item in candidates:
         wanted[(item.kind, item.mod_id.partition("@")[0])].add(item.key)
+    total = sum(len(keys) for keys in wanted.values())
     overlap: dict[str, int] = defaultdict(int)
     existing: dict[str, set[tuple[str, str, str]]] = defaultdict(set)
     for (kind, prefix), keys in wanted.items():
@@ -78,29 +79,30 @@ def match_existing_scope(
     if not ranked or ranked[0][1] == 0:
         return None
     best_scope, best = ranked[0]
-    if best / len(candidates) < min_ratio:
+    if best / total < min_ratio:
         return None
     if len(ranked) > 1 and ranked[1][1] == best:
         return None  # 兩個以上同樣吻合：不猜
-    return ScopeMatch(
-        best_scope, frozenset(existing[best_scope]), best, len(candidates)
-    )
+    return ScopeMatch(best_scope, frozenset(existing[best_scope]), best, total)
 
 
 def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> list[ScanItem]:
-    """對到既有條目的項目：中文當譯文、原文留空，ingest 會沿用資料庫裡的英文只補譯文。"""
+    """對到既有條目的項目：中文當譯文、原文留空，ingest 會沿用資料庫裡的英文只補譯文。
+
+    對到既有條目的項目一律不再記來源（路徑、selector）：這份輸入不是原模組包的檔案，
+    記進去會讓原模組包多出不存在的來源，或用譯文檔的雜湊蓋掉原本英文來源的雜湊，
+    破壞之後的回寫比對。
+    """
     out: list[ScanItem] = []
     for item in items:
-        known = (item.kind, item.mod_id, item.key) in match.existing
-        if known and item.source_locale == "zh_tw":
+        if (item.kind, item.mod_id, item.key) not in match.existing:
+            out.append(item)
+            continue
+        if item.source_locale == "zh_tw":
             item = replace(item, en_us="", zh_tw=item.zh_tw or item.en_us)
-        elif known and item.source_locale == "zh_cn":
+        elif item.source_locale == "zh_cn":
             item = replace(item, en_us="", zh_cn=item.zh_cn or item.en_us)
-        elif known and _is_in_place_translation(item):
-            # 沒有語系檔的來源與既有條目是同一個檔案、同一個 selector：不再記來源，
-            # 否則會用譯文檔的雜湊蓋掉原本英文來源的雜湊，破壞之後的回寫比對。
-            item = replace(
-                item, en_us="", zh_tw=item.en_us, source_path="", source_selector=""
-            )
-        out.append(item)
+        elif _is_in_place_translation(item):
+            item = replace(item, en_us="", zh_tw=item.en_us)
+        out.append(replace(item, source_path="", source_selector=""))
     return out
