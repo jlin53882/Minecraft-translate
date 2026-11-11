@@ -38,7 +38,6 @@ from app.views.moddb.editor_save_state import shadowed_versions, shadowing_sourc
 from app.views.moddb.entry_filters import (
     ALL_KINDS,
     ALL_MODS,
-    ALL_PACKS,
     FilterFlush,
     apply_filter_options,
     build_filter_controls,
@@ -831,9 +830,8 @@ class EntriesPanel(ft.Column):
 
     def _on_pack(self, e) -> None:
         """換模組包版本：模組清單跟著換，原本選的模組不一定屬於它，所以一併清掉。"""
-        value = e.control.value
         self._clear_pack()
-        self.pack = None if value in (None, "", ALL_PACKS) else value
+        self.pack = self.pack_filter.scope
         self.mod_id = None
         refresh_entry_filter(self, full_refresh=True)
 

@@ -48,7 +48,7 @@ flowchart TD
 
 搜尋、狀態、來源、審核狀態、智慧校對狀態與進階條件變更（版本、模組、類型沒換）分兩段載入（`defer_options`）：第一段只讀清單當頁與總筆數，先顯示清單；模組／來源下拉選項（需要整個版本的掃描、重畫成本也比清單高）由 `FilterOptionsLoader` 在第二段背景補上：條件穩定 0.25 秒（沒有更新的請求）才開始查，輸入中的每個字都不重算；同一時間只跑一個查詢、只保留最新請求，回來時條件已不同就丟棄，選項與選值沒變就不重畫篩選列，有變時只更新有變的下拉選單（`FilterFlush`），進階條件摘要與資料操作按鈕的狀態有變才更新那一列。搜尋框停筆 0.22 秒才查詢；條件又變了時，進行中的舊查詢會被中斷（`QueryInterrupt`，結果本來就不會顯示），新查詢不必等舊的掃完。沒有選模組／來源的搜尋，整個版本的逐列比對只掃一次（切成編號區間、多條唯讀連線同時掃），同一份分面同時回答總筆數與下拉選項。
 
-篩選列的順序是遊戲版本、模組包版本、模組。模組包版本選單（`pack_dd`，`entry_filters._apply_pack_options`）的選項在選定遊戲版本後由 `panel_refresh._resolve_entries_scope` 以 `TranslationDB.pack_versions` 列出；該版本沒有 KubeJS／FTB Quests 內容時只有「全部模組包版本」並停用。選了模組包版本後，`_resolve_entries_scope` 用 `TranslationDB.pack_mods` 把它解析成模組清單，放進 `EntryFilter.pack_mod_ids`，條目清單、筆數與模組／類型／來源選項都用這個條件；`EntriesPanel._on_pack` 會清掉已選的模組，`EntriesPanel._on_version` 會清掉已選的模組包版本。批次取代沿用同一個 `EntryFilter`；批量審核、智慧校對與學名掃描只預填版本、模組與類型，不帶模組包版本。
+篩選列的順序是遊戲版本、模組包版本、模組。模組包版本選單（`pack_dd`，`entry_filters._apply_pack_options`）的選項在選定遊戲版本後由 `panel_refresh._resolve_entries_scope` 以 `TranslationDB.pack_scopes` 列出（值是模組包身分「資料夾名稱@路徑雜湊」，顯示文字由 `pack_scope_options` 產生：資料夾名稱，不同位置的同名資料夾加上雜湊前六碼）；名稱只是匯入時所選資料夾或 ZIP 的名稱，自建內容也會列出；該版本沒有 KubeJS／FTB Quests 內容時只有「全部模組包版本」並停用。選了模組包版本後，`_resolve_entries_scope` 用 `TranslationDB.pack_scope_mods` 把它解析成模組清單，放進 `EntryFilter.pack_mod_ids`，條目清單、筆數與模組／類型／來源選項都用這個條件；`EntriesPanel._on_pack` 會清掉已選的模組，`EntriesPanel._on_version` 會清掉已選的模組包版本。批次取代沿用同一個 `EntryFilter`。批次機翻頁（`TranslatePanel.pack_dd`）、批量審核（`BulkReviewDialog.pack_dd`）與學名掃描（`SpeciesCandidateDialog.pack_dd`）也有同樣的選單，後兩者開啟時預填條目頁目前的模組包版本：機翻頁在畫面端用 `mods_in_pack` 把模組包版本換算成模組清單（`TranslatePanel.mod_ids`），批量審核的範圍記在 `BulkReviewPlan.pack_scope`、執行前重查用同一個範圍，學名掃描把它交給 `scan_species_candidates`。智慧校對只預填版本、模組與類型，不帶模組包版本。
 
 ### 跨版本已審核譯文沿用與版本差異審核
 

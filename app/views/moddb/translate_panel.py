@@ -16,13 +16,6 @@ from app.services_impl.moddb_retranslate_service import (
     format_repair_live,
     run_moddb_retranslate_service,
 )
-from app.services_impl.moddb_service import (
-    NO_PACK_SCOPE_HINT,
-    PACK_SCOPE_HINT,
-    mods_in_pack,
-    pack_scope_options,
-    pack_scopes_of,
-)
 from app.services_impl.moddb_translate_service import (
     DEFAULT_LIMIT,
     TranslateOptions,
@@ -55,6 +48,7 @@ from app.views.moddb.operation_summaries import (
     translation_kpi_titles,
     translation_scope_text,
 )
+from app.views.moddb.pack_scope_dropdown import PackModScope, PackScopeDropdown
 from app.views.moddb.repair_card import create_repair_card, repair_copy
 from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
@@ -65,7 +59,6 @@ _POLL_INTERVAL_SEC = 0.2
 # 四張統計卡的標題列同高（「檢視」按鈕出現時卡片不會變高）
 STAT_HEAD_HEIGHT = BUTTON_HEIGHTS["sm"] + 2
 ALL_MODS = "__all__"
-ALL_PACKS = "__all_packs__"
 LARGE_RUN_WARNING = 5000  # 不限筆數且超過這個數量時提醒額度
 
 
@@ -134,21 +127,13 @@ class TranslatePanel(ft.Column):
         self.version_dd = kit.dropdown(
             label="遊戲版本", dense=True, width=220, on_select=self._on_scope_changed
         )
-        self.pack_dd = kit.dropdown(
-            label="模組包版本",
-            dense=True,
-            width=220,
-            on_select=self._on_scope_changed,
-            tooltip=NO_PACK_SCOPE_HINT,
-            disabled=True,
-        )
-        kit.set_dropdown_options(self.pack_dd, [(ALL_PACKS, "全部模組包版本")])
-        self.pack_dd.value = ALL_PACKS
-        # 目前遊戲版本的完整模組清單：模組包版本與模組選單都由它在畫面端換算
-        self._version_mods: list[str] = []
+        self.pack_filter = PackScopeDropdown(self._on_scope_changed)
+        self.pack_dd = self.pack_filter.control
         self.mod_dd = kit.searchable_dropdown(
             label="模組", dense=True, width=260, on_select=self._on_scope_changed
         )
+        # 模組包版本與模組選單由目前版本的模組清單在畫面端換算
+        self.scope_mods = PackModScope(self.pack_filter, self.mod_dd, all_mods=ALL_MODS)
         self.limit_field = kit.text_field(
             "單次上限（筆，0 = 不限）",
             hint="例如 2000",
@@ -482,9 +467,10 @@ class TranslatePanel(ft.Column):
         if kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions]):
             changed_dropdowns.append(self.version_dd)
         self.version_dd.value = snapshot.get("version")
-        self._version_mods = list(snapshot.get("mods", []))
-        self.pack_dd.value = snapshot.get("pack") or ALL_PACKS
-        changed_dropdowns.extend(self._apply_pack_and_mod_options())
+        self.pack_filter.select(snapshot.get("pack"))
+        changed_dropdowns.extend(
+            self.scope_mods.set_version_mods(snapshot.get("mods", []))
+        )
         self.mod_dd.value = snapshot.get("mod", ALL_MODS)
         if values_before != tuple(dd.value for dd in scope_dropdowns):
             changed_dropdowns.extend(
@@ -512,38 +498,7 @@ class TranslatePanel(ft.Column):
     def _refresh_mods(self) -> None:
         db = self._get_db()
         version = self.version_dd.value
-        self._version_mods = list(db.mods(version)) if db and version else []
-        self._apply_pack_and_mod_options()
-
-    def _pack_scope(self) -> str | None:
-        value = self.pack_dd.value
-        return None if value in (None, "", ALL_PACKS) else str(value)
-
-    def _apply_pack_and_mod_options(self) -> list[ft.Control]:
-        """依目前版本的模組清單更新模組包版本與模組選單；回傳選項有變的下拉選單。
-
-        選了遊戲版本才有模組包版本可選；選了模組包版本後，模組選單只剩它的模組。
-        選值已不在選項裡時退回「全部」。
-        """
-        changed: list[ft.Control] = []
-        packs = pack_scopes_of(self._version_mods)
-        options = [(ALL_PACKS, "全部模組包版本"), *pack_scope_options(packs)]
-        if kit.set_dropdown_options(self.pack_dd, options):
-            changed.append(self.pack_dd)
-        if self._pack_scope() not in packs:
-            self.pack_dd.value = ALL_PACKS
-        if self.pack_dd.disabled != (not packs):
-            self.pack_dd.disabled = not packs
-            changed.append(self.pack_dd)
-        self.pack_dd.tooltip = PACK_SCOPE_HINT if packs else NO_PACK_SCOPE_HINT
-        mods = mods_in_pack(self._version_mods, self._pack_scope())
-        if kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
-        ):
-            changed.append(self.mod_dd)
-        if self.mod_dd.value not in [ALL_MODS, *mods]:
-            self.mod_dd.value = ALL_MODS
-        return changed
+        self.scope_mods.set_version_mods(db.mods(version) if db and version else [])
 
     def _scope_refresh_in_background(self) -> bool:
         return callable(self._request_scope_refresh) and has_background_scheduler(
@@ -555,14 +510,14 @@ class TranslatePanel(ft.Column):
         background = self._scope_refresh_in_background()
         control = getattr(e, "control", None) if e is not None else None
         if control is self.version_dd:
-            self.pack_dd.value = ALL_PACKS
+            self.pack_filter.select(None)
             self.mod_dd.value = ALL_MODS
             if not background:
                 self._refresh_mods()
         elif control is self.pack_dd:
             # 換模組包版本：模組選單立刻換成它的模組（畫面端換算，不必等背景快照）
             self.mod_dd.value = ALL_MODS
-            self._apply_pack_and_mod_options()
+            self.scope_mods.refresh()
         self._clear_repair_preview()
         if background:
             self.count_text.value = "正在計算此範圍的筆數…"
@@ -573,12 +528,8 @@ class TranslatePanel(ft.Column):
             self._request_scope_refresh()
 
     def mod_ids(self) -> tuple[str, ...]:
-        """機翻範圍的模組：選了模組就是它；只選模組包版本時是該模組包的所有模組；都沒選為全部。"""
-        value = self.mod_dd.value
-        if value and value != ALL_MODS:
-            return (value,)
-        scope = self._pack_scope()
-        return tuple(mods_in_pack(self._version_mods, scope)) if scope else ()
+        """機翻範圍的模組（見 ``PackModScope.mod_ids``）；空 tuple 為全部模組。"""
+        return self.scope_mods.mod_ids()
 
     def limit(self) -> int:
         try:

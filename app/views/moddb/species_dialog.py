@@ -8,8 +8,6 @@ from dataclasses import dataclass
 import flet as ft
 
 from app.services_impl.moddb_service import (
-    NO_PACK_SCOPE_HINT,
-    PACK_SCOPE_HINT,
     STATUS_FOUND,
     STATUS_NOT_FOUND,
     STATUS_RATE_LIMITED,
@@ -17,7 +15,6 @@ from app.services_impl.moddb_service import (
     SpeciesLookup,
     SpeciesScanResult,
     cached_species_lookup,
-    pack_scope_options,
     scan_species_candidates,
     species_kind_options,
     species_pack_options,
@@ -44,12 +41,12 @@ from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb import species_bulk_lookup as bulk
 from app.views.moddb.formatting import kind_label
+from app.views.moddb.pack_scope_dropdown import PackScopeDropdown, pack_scope_label
 from translation_tool.utils.log_unit import log_exception
 
 # 候選列表每頁顯示幾筆（候選數量不設上限，用頁碼切換）。
 PAGE_SIZE = 50
 ALL_MODS = "__all__"
-ALL_PACKS = "__all_packs__"
 ALL_KINDS = "__all__"
 ALL_SOURCES = "__all__"
 # 批次查詢時畫面最多每隔這麼久才重繪一次。
@@ -103,7 +100,6 @@ class SpeciesCandidateDialog:
         self.get_db = get_db
         self.version = version
         self.pack_scope = (pack_scope or "").strip() or None
-        self._scope_packs: tuple[str, ...] = ()
         self.mod_id = mod_id
         self.kind = kind
         self.effective_source = effective_source
@@ -131,7 +127,7 @@ class SpeciesCandidateDialog:
     def _scope_text(self) -> str:
         version = self.version or "未選擇版本"
         if self.pack_scope:
-            version += f"・{pack_scope_options([self.pack_scope])[0][1]}"
+            version += f"・{pack_scope_label(self.pack_scope)}"
         mod = self.mod_id or "全部模組"
         kind = kind_label(self.kind) if self.kind else "全部類型"
         source = (
@@ -149,19 +145,8 @@ class SpeciesCandidateDialog:
             color=C.MUTED,
             selectable=True,
         )
-        self.pack_dd = kit.dropdown(
-            label="模組包版本",
-            dense=True,
-            width=220,
-            on_select=self._on_pack,
-            tooltip=PACK_SCOPE_HINT,
-        )
-        kit.set_dropdown_options(
-            self.pack_dd,
-            [(ALL_PACKS, "全部模組包版本")]
-            + (pack_scope_options([self.pack_scope]) if self.pack_scope else []),
-        )
-        self.pack_dd.value = self.pack_scope or ALL_PACKS
+        self.pack_filter = PackScopeDropdown(self._on_pack, initial=self.pack_scope)
+        self.pack_dd = self.pack_filter.control
         self.mod_dd = kit.searchable_dropdown(
             label="模組",
             dense=True,
@@ -342,8 +327,10 @@ class SpeciesCandidateDialog:
                     self._flush(force=True)
                 return
             modules, sources_by_mod, kinds, packs = result
-            self._scope_packs = tuple(packs)
-            self._refresh_pack_options()
+            # 只列有學名候選的模組包；原本選的不在清單裡時退回「全部」
+            self.pack_filter.set_scopes(packs)
+            self.pack_scope = self.pack_filter.scope
+            self.scope.value = self._scope_text()
             self._scope_modules = tuple(modules)
             self._scope_sources_by_mod = {
                 key: tuple(values) for key, values in sources_by_mod.items()
@@ -363,26 +350,9 @@ class SpeciesCandidateDialog:
             presentation=OperationPresentation.MAINTENANCE,
         )
 
-    def _refresh_pack_options(self) -> None:
-        """模組包版本選單只列有學名候選的模組包；這個版本沒有時只有「全部」並停用。"""
-        options = [
-            (ALL_PACKS, "全部模組包版本"),
-            *pack_scope_options(self._scope_packs),
-        ]
-        kit.set_dropdown_options(self.pack_dd, options)
-        if self.pack_scope not in self._scope_packs:
-            self.pack_scope = None
-        self.pack_dd.value = self.pack_scope or ALL_PACKS
-        self.pack_dd.disabled = self._busy or self.job.running or not self._scope_packs
-        self.pack_dd.tooltip = (
-            PACK_SCOPE_HINT if self._scope_packs else NO_PACK_SCOPE_HINT
-        )
-        self.scope.value = self._scope_text()
-
     def _on_pack(self, _e=None) -> None:
         """模組包版本變更時模組清單跟著換，已選的模組不一定屬於它，所以一併清掉。"""
-        value = self.pack_dd.value
-        self.pack_scope = None if value in (None, "", ALL_PACKS) else str(value)
+        self.pack_scope = self.pack_filter.scope
         self.mod_id = None
         self.mod_dd.value = ALL_MODS
         self.scope.value = self._scope_text()
@@ -958,7 +928,7 @@ class SpeciesCandidateDialog:
         self._busy = busy
         self.scan_btn.disabled = busy or self.job.running
         self.loose_check.disabled = busy or self.job.running
-        self.pack_dd.disabled = busy or self.job.running or not self._scope_packs
+        self.pack_filter.set_busy(busy or self.job.running)
         self.mod_dd.disabled = busy or self.job.running
         self.source_dd.disabled = busy or self.job.running
         self._sync_query_all_enabled()

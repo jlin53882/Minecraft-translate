@@ -2715,6 +2715,7 @@ def test_bulk_review_prefills_entry_scope_without_running_preview(monkeypatch):
         "mod_id": "accessories",
         "kind": "lang",
         "effective_source": 7,
+        "pack_scope": None,  # 條目頁沒有選模組包版本
         "opened": True,
     }
 

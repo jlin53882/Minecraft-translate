@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.views.moddb.pack_scope_dropdown import ALL_PACKS
 from app.views.moddb.panel_refresh import _resolve_entries_scope
 from translation_tool.translation_db.models import EntryFilter, ScanItem
 from translation_tool.translation_db.repository import TranslationDB
@@ -147,7 +148,7 @@ def test_translate_page_pack_limits_the_mod_list_and_scope():
     module, panel = _translate_panel()
     panel.apply_refresh_snapshot(_translate_snapshot())
     assert [o.key for o in panel.pack_dd.options] == [
-        module.ALL_PACKS,
+        ALL_PACKS,
         PACK_83,
         PACK_85,
     ]
@@ -169,14 +170,14 @@ def test_translate_page_pack_limits_the_mod_list_and_scope():
 
     panel.version_dd.value = "1.21.1"
     panel._on_scope_changed(SimpleNamespace(control=panel.version_dd))
-    assert panel.pack_dd.value == module.ALL_PACKS and panel.mod_ids() == ()
+    assert panel.pack_dd.value == ALL_PACKS and panel.mod_ids() == ()
 
 
 def test_translate_page_without_pack_content_keeps_all(db):
-    module, panel = _translate_panel()
+    _module, panel = _translate_panel()
     panel.apply_refresh_snapshot(_translate_snapshot(mods=["jarmod"]))
     assert panel.pack_dd.disabled
-    assert [o.key for o in panel.pack_dd.options] == [module.ALL_PACKS]
+    assert [o.key for o in panel.pack_dd.options] == [ALL_PACKS]
 
 
 def test_translate_snapshot_counts_only_the_selected_pack(db):
@@ -241,7 +242,7 @@ def test_bulk_review_scope_follows_the_pack(db):
 
 
 def test_bulk_review_dialog_lists_packs_and_passes_the_scope(db):
-    from app.views.moddb.bulk_review_dialog import ALL_PACKS, BulkReviewDialog
+    from app.views.moddb.bulk_review_dialog import BulkReviewDialog
     from tests.conftest import mock_page
     from tests.test_bulk_review import _drain
 

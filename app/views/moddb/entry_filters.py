@@ -4,12 +4,7 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_service import (
-    NO_PACK_SCOPE_HINT,
-    PACK_SCOPE_HINT,
-    EntryFilter,
-    pack_scope_options,
-)
+from app.services_impl.moddb_service import EntryFilter
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -19,6 +14,7 @@ from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.editor_drafts import reset_editor_for_database_change
 from app.views.moddb.formatting import STATE_LABELS, kind_label
+from app.views.moddb.pack_scope_dropdown import PackScopeDropdown
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
 from app.views.moddb.smart_review_marks import (
     ALL_SMART_REVIEW,
@@ -30,7 +26,6 @@ from app.views.moddb.version_diff_dialog import VersionDiffDialog
 
 ALL_REVIEW_STATES = "__all__"
 ALL_MODS = "全部模組"
-ALL_PACKS = "全部模組包版本"
 ALL_KINDS = "全部類型"
 SEARCH_FIELD_OPTIONS = (
     ("all", "全部內容"),
@@ -193,18 +188,10 @@ def refresh_after_database_change(panel) -> None:
 
 def _apply_pack_options(panel, snapshot: dict) -> bool:
     """模組包版本選項：選了遊戲版本才有清單；該版本沒有 KubeJS／FTB 內容時只有「全部」。"""
-    packs = snapshot.get("packs", [])
-    changed = kit.set_dropdown_options(
-        panel.pack_dd, [(ALL_PACKS, ALL_PACKS), *pack_scope_options(packs)]
-    )
     panel.pack = snapshot.get("pack")
     panel.pack_mod_ids = snapshot.get("pack_mod_ids")
-    panel.pack_dd.value = panel.pack or ALL_PACKS
-    disabled = not packs
-    changed = changed or panel.pack_dd.disabled != disabled
-    panel.pack_dd.disabled = disabled
-    panel.pack_dd.tooltip = NO_PACK_SCOPE_HINT if disabled else PACK_SCOPE_HINT
-    return changed
+    panel.pack_filter.select(panel.pack)
+    return panel.pack_filter.set_scopes(snapshot.get("packs", []))
 
 
 def prepare_entries_snapshot(panel, snapshot: dict) -> tuple[dict, bool]:
@@ -238,13 +225,8 @@ def _build_controls(panel) -> None:
     panel.version_dd = kit.dropdown(
         label="遊戲版本", dense=True, width=220, on_select=panel._on_version
     )
-    panel.pack_dd = kit.dropdown(
-        label="模組包版本", dense=True, width=220, on_select=panel._on_pack
-    )
-    kit.set_dropdown_options(panel.pack_dd, [(ALL_PACKS, ALL_PACKS)])
-    panel.pack_dd.value = ALL_PACKS
-    panel.pack_dd.disabled = True
-    panel.pack_dd.tooltip = NO_PACK_SCOPE_HINT
+    panel.pack_filter = PackScopeDropdown(panel._on_pack)
+    panel.pack_dd = panel.pack_filter.control
     panel.mod_dd = kit.searchable_dropdown(
         label="模組", dense=True, width=220, on_select=panel._on_mod
     )
@@ -515,7 +497,7 @@ def open_bulk_review(panel, _e=None) -> None:
         mod_id=panel.mod_id,
         kind=panel.kind,
         effective_source=panel.source_filter.code,
-        pack_scope=panel.pack,
+        pack_scope=getattr(panel, "pack", None),
     ).open()
 
 
@@ -542,7 +524,7 @@ def open_species_scan(panel, _e=None) -> None:
         panel.kind,
         on_open_entry=panel.open_species_entry,
         effective_source=panel.source_filter.code,
-        pack_scope=panel.pack,
+        pack_scope=getattr(panel, "pack", None),
     ).open()
 
 

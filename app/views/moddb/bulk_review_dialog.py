@@ -6,13 +6,7 @@ import sqlite3
 
 import flet as ft
 
-from app.services_impl.moddb_service import (
-    NO_PACK_SCOPE_HINT,
-    PACK_SCOPE_HINT,
-    BulkReviewPlan,
-    BulkReviewResult,
-    pack_scope_options,
-)
+from app.services_impl.moddb_service import BulkReviewPlan, BulkReviewResult
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.tasks.operation_registry import (
     CancellationPolicy,
@@ -35,12 +29,12 @@ from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label, shorten
 from app.views.moddb.operation_summaries import bulk_review_result_text
+from app.views.moddb.pack_scope_dropdown import PackScopeDropdown
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
 ACTOR = "使用者"
 ALL_MODS = "__all__"
-ALL_PACKS = "__all_packs__"
 ALL_KINDS = "__all__"
 ALL_SOURCES = "__all__"
 PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認批量審核範圍後才能執行。"
@@ -79,7 +73,6 @@ class BulkReviewDialog:
         self._closed = False
         self._opened = False
         self._scope_modules: tuple[str, ...] = ()
-        self._scope_packs: tuple[str, ...] = ()
         self._scope_sources_by_mod: dict[str | None, tuple[int, ...]] = {}
         self._source_catalog = source_catalog_for(self.get_db())
         self._build_controls(
@@ -88,7 +81,9 @@ class BulkReviewDialog:
             initial_kind=kind,
             initial_effective_source=effective_source,
         )
-        self._build_pack_control(pack_scope)
+        # 完整選項由背景範圍查詢補上；先放呼叫端的預填值
+        self.pack_filter = PackScopeDropdown(self._on_pack, initial=pack_scope)
+        self.pack_dd = self.pack_filter.control
         self._build_dialog()
         self._start_scope_options_load()
 
@@ -285,27 +280,6 @@ class BulkReviewDialog:
         self._scope_seq += 1
         self._generation += 1
 
-    def _build_pack_control(self, initial_pack: str | None) -> None:
-        """模組包版本選單；完整選項由背景範圍查詢補上，這裡只放呼叫端的預填值。"""
-        self.pack_dd = kit.dropdown(
-            label="模組包版本",
-            dense=True,
-            width=220,
-            on_select=self._on_pack,
-            tooltip=PACK_SCOPE_HINT,
-        )
-        initial = (initial_pack or "").strip() or ALL_PACKS
-        kit.set_dropdown_options(
-            self.pack_dd,
-            [(ALL_PACKS, "全部模組包版本")]
-            + (pack_scope_options([initial]) if initial != ALL_PACKS else []),
-        )
-        self.pack_dd.value = initial
-
-    def _selected_pack(self) -> str | None:
-        value = self.pack_dd.value
-        return None if value in (None, "", ALL_PACKS) else str(value)
-
     # ------------------------------------------------------------------ 選項
     def _selected_scope(self) -> tuple[str | None, str | None, int | None]:
         """目前選擇的（模組, 類型, 來源）；「全部」轉成 None。"""
@@ -360,7 +334,7 @@ class BulkReviewDialog:
         version = self.version_dd.value
         quality_pass_only = bool(self.quality_check.value)
         mod_id, kind, source = self._selected_scope()
-        pack_scope = self._selected_pack()
+        pack_scope = self.pack_filter.scope
         self._scope_loading = True
         self.status.visible = True
         self.status.value = "正在更新需要審核的模組、來源與類型選單…"
@@ -404,8 +378,7 @@ class BulkReviewDialog:
                 self._safe_update()
             return
         versions, modules, sources_by_mod, kinds, packs = result
-        self._scope_packs = tuple(packs)
-        self._refresh_packs()
+        self.pack_filter.set_scopes(packs)
         current_version = self.version_dd.value
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         self.version_dd.value = current_version if current_version in versions else None
@@ -432,20 +405,6 @@ class BulkReviewDialog:
         keys = {key for key, _label in options}
         if self.kind_dd.value not in keys:
             self.kind_dd.value = ALL_KINDS
-
-    def _refresh_packs(self) -> None:
-        """只顯示有未審核候選的模組包版本；這個版本沒有時只有「全部」並停用。"""
-        options = [
-            (ALL_PACKS, "全部模組包版本"),
-            *pack_scope_options(self._scope_packs),
-        ]
-        kit.set_dropdown_options(self.pack_dd, options)
-        if self.pack_dd.value not in {key for key, _label in options}:
-            self.pack_dd.value = ALL_PACKS
-        self.pack_dd.disabled = self._busy or not self._scope_packs
-        self.pack_dd.tooltip = (
-            PACK_SCOPE_HINT if self._scope_packs else NO_PACK_SCOPE_HINT
-        )
 
     def _refresh_mods(self) -> None:
         """只顯示目前有未審核候選的模組，並保持目前選擇值有效。"""
@@ -476,7 +435,7 @@ class BulkReviewDialog:
 
     def _on_version(self, _e=None) -> None:
         """版本選擇變更時重載需要審核的模組、類型與來源，並使舊預覽失效。"""
-        self.pack_dd.value = ALL_PACKS
+        self.pack_filter.select(None)
         self.mod_dd.value = ALL_MODS
         self.kind_dd.value = ALL_KINDS
         self.source_dd.value = ALL_SOURCES
@@ -538,7 +497,7 @@ class BulkReviewDialog:
         source = None if source_value == ALL_SOURCES else int(source_value)
         source_text = "全部來源" if source is None else str(source)
         mod_id, kind, _source = self._selected_scope()
-        pack_scope = self._selected_pack()
+        pack_scope = self.pack_filter.scope
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
         generation = self._generation
@@ -936,7 +895,7 @@ class BulkReviewDialog:
         self._busy = busy
         self.preview_btn.disabled = busy
         self.version_dd.disabled = busy
-        self.pack_dd.disabled = busy or not self._scope_packs
+        self.pack_filter.set_busy(busy)
         self.source_dd.disabled = busy
         self.quality_check.disabled = busy
         self.sync_switch.disabled = busy
