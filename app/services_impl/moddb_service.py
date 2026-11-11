@@ -30,6 +30,7 @@ from app.services_impl.moddb_species_service import (
     lookup_species_name,
     scan_species_candidates,
     species_kind_options,
+    species_pack_options,
     species_scope_options,
 )
 from app.services_impl.pipelines._pipeline_logging import (
@@ -174,6 +175,7 @@ __all__ = [
     "run_moddb_scan_service",
     "scan_species_candidates",
     "species_kind_options",
+    "species_pack_options",
     "species_scope_options",
     "strip_quotes",
     "summarize_database",

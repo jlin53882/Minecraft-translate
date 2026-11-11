@@ -264,3 +264,37 @@ def test_bulk_review_dialog_lists_packs_and_passes_the_scope(db):
     _drain(page)
     assert dialog.plan is not None and dialog.plan.pack_scope == PACK_85
     assert len(dialog.plan.candidates) == 3
+
+
+# ------------------------------------------------------------------ 學名掃描
+def test_species_scan_scope_follows_the_pack(db):
+    from app.services_impl.moddb_service import (
+        scan_species_candidates,
+        species_kind_options,
+        species_pack_options,
+        species_scope_options,
+    )
+
+    def latin(namespace, scope, key, name):
+        item = _pack_item(namespace, scope, key)
+        return ScanItem(
+            **{**item.__dict__, "en_us": name}  # 學名格式：屬名 種名
+        )
+
+    db.ingest(
+        "1.21.1",
+        [
+            latin("alpha", PACK_83, "item.agave.latin", "Agave tequilana"),
+            latin("alpha", PACK_85, "item.akebia.latin", "Akebia quinata"),
+            ScanItem("lang", "jarmod", "item.cucumber.latin", "Cucumis sativus"),
+        ],
+    )
+    assert species_pack_options(db, "1.21.1") == (PACK_83, PACK_85)
+    modules, _sources = species_scope_options(db, "1.21.1", pack_scope=PACK_85)
+    assert modules == (f"alpha@{PACK_85}",)
+    assert species_kind_options(db, "1.21.1", pack_scope=PACK_85) == ("kubejs_lang",)
+
+    in_pack = scan_species_candidates(db, "1.21.1", pack_scope=PACK_85)
+    assert [c.value for c in in_pack.candidates] == ["Akebia quinata"]
+    everything = scan_species_candidates(db, "1.21.1")
+    assert len(everything.candidates) == 3
