@@ -777,6 +777,7 @@ class ModDbView(ft.Column):
         if key == "translate":
             return {
                 "version": self.translate.version_dd.value,
+                "pack": self.translate._pack_scope(),
                 "mod": self.translate.mod_dd.value,
                 "limit": self.translate.limit(),
                 "reuse": bool(self.translate.reuse_row.value),

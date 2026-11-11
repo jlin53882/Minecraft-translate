@@ -8,6 +8,8 @@ from app.services_impl.moddb_service import (
     QueryInterrupt,
     database_data_generation,
     moddb_read_snapshot,
+    mods_in_pack,
+    pack_scopes_of,
     version_choices,
 )
 from app.services_impl.moddb_source_service import (
@@ -334,9 +336,13 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         else (versions[0] if versions else None)
     )
     mods = db.mods(version) if db and version else []
+    packs = pack_scopes_of(mods)
+    pack = request.get("pack") if request.get("pack") in packs else None
+    pack_mods = mods_in_pack(mods, pack)
     selected_mod = request.get("mod")
-    mod = selected_mod if selected_mod == ALL_MODS or selected_mod in mods else ALL_MODS
-    mod_ids = () if mod == ALL_MODS else (mod,)
+    mod = selected_mod if selected_mod in pack_mods else ALL_MODS
+    # 選了模組包版本、沒選模組：範圍是該模組包的所有模組
+    mod_ids = (mod,) if mod != ALL_MODS else (tuple(pack_mods) if pack else ())
     missing = db.count_untranslated(version, mod_ids) if db and version else 0
     reusable = (
         db.count_reusable(version, mod_ids)
@@ -349,6 +355,7 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         versions=versions,
         version=version,
         mods=mods,
+        pack=pack,
         mod=mod,
         missing=missing,
         reusable=reusable,

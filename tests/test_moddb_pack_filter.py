@@ -116,3 +116,82 @@ def test_same_folder_name_in_two_places_stays_two_options(db):
     ]
     picked = _scope(db, version="1.21.1", pack=other)
     assert picked["mods"] == [f"gamma@{other}"]
+
+
+# ------------------------------------------------------------------ 批次機翻頁
+def _translate_panel():
+    from app.views.moddb import translate_panel
+    from tests.conftest import mock_page
+
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    page.run_task = lambda *_a, **_k: None
+    return translate_panel, translate_panel.TranslatePanel(
+        page, lambda: None, request_refresh=lambda: None
+    )
+
+
+def _translate_snapshot(**extra):
+    mods = [f"alpha@{PACK_83}", f"alpha@{PACK_85}", f"beta@{PACK_85}", "jarmod"]
+    return {
+        "identity": None,
+        "versions": ["1.21.1"],
+        "version": "1.21.1",
+        "mods": mods,
+        "mod": "__all__",
+        **extra,
+    }
+
+
+def test_translate_page_pack_limits_the_mod_list_and_scope():
+    module, panel = _translate_panel()
+    panel.apply_refresh_snapshot(_translate_snapshot())
+    assert [o.key for o in panel.pack_dd.options] == [
+        module.ALL_PACKS,
+        PACK_83,
+        PACK_85,
+    ]
+    assert not panel.pack_dd.disabled and panel.mod_ids() == ()
+
+    panel.pack_dd.value = PACK_85
+    panel._on_scope_changed(SimpleNamespace(control=panel.pack_dd))
+
+    # 畫面端立刻換算：模組選單只剩該模組包的模組，範圍是它的所有模組
+    assert [o.key for o in panel.mod_dd.options] == [
+        module.ALL_MODS,
+        f"alpha@{PACK_85}",
+        f"beta@{PACK_85}",
+    ]
+    assert panel.mod_ids() == (f"alpha@{PACK_85}", f"beta@{PACK_85}")
+
+    panel.mod_dd.value = f"beta@{PACK_85}"
+    assert panel.mod_ids() == (f"beta@{PACK_85}",)
+
+    panel.version_dd.value = "1.21.1"
+    panel._on_scope_changed(SimpleNamespace(control=panel.version_dd))
+    assert panel.pack_dd.value == module.ALL_PACKS and panel.mod_ids() == ()
+
+
+def test_translate_page_without_pack_content_keeps_all(db):
+    module, panel = _translate_panel()
+    panel.apply_refresh_snapshot(_translate_snapshot(mods=["jarmod"]))
+    assert panel.pack_dd.disabled
+    assert [o.key for o in panel.pack_dd.options] == [module.ALL_PACKS]
+
+
+def test_translate_snapshot_counts_only_the_selected_pack(db):
+    from app.views.moddb.panel_refresh import _load_translate_snapshot
+
+    snapshot = _load_translate_snapshot(
+        db, {"version": "1.21.1", "pack": PACK_85, "mod": "__all__"}, {}
+    )
+    assert snapshot["pack"] == PACK_85 and snapshot["missing"] == 3
+    everything = _load_translate_snapshot(
+        db, {"version": "1.21.1", "mod": "__all__"}, {}
+    )
+    assert everything["pack"] is None and everything["missing"] == 5
+    # 選的模組不屬於這個模組包：退回全部模組，範圍仍是該模組包
+    mismatch = _load_translate_snapshot(
+        db, {"version": "1.21.1", "pack": PACK_83, "mod": f"beta@{PACK_85}"}, {}
+    )
+    assert mismatch["mod"] == "__all__" and mismatch["missing"] == 1

@@ -61,7 +61,10 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
-from translation_tool.translation_db.content_identity import pack_label
+from translation_tool.translation_db.content_identity import (
+    pack_label,
+    pack_scope_of,
+)
 from translation_tool.translation_db.cross_version_review import (
     REFERENCE_LATEST,
     ApplyItem,
@@ -159,11 +162,13 @@ __all__ = [
     "load_db_settings",
     "lookup_species",
     "lookup_species_name",
+    "mods_in_pack",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
     "pack_label",
     "pack_scope_options",
+    "pack_scopes_of",
     "preview_new_source_names",
     "quick_date_bounds",
     "run_moddb_scan_service",
@@ -301,6 +306,18 @@ def pack_scope_options(scopes: Sequence[str]) -> list[tuple[str, str]]:
         suffix = f"（{scope.rpartition('@')[2][:6]}）" if duplicated else ""
         options.append((scope, f"{name}{suffix}"))
     return options
+
+
+def pack_scopes_of(mods: Sequence[str]) -> list[str]:
+    """模組清單中出現的模組包身分（排序、不重複）。"""
+    return sorted({scope for mod_id in mods if (scope := pack_scope_of(mod_id))})
+
+
+def mods_in_pack(mods: Sequence[str], scope: str | None) -> list[str]:
+    """模組清單中屬於指定模組包身分的模組；``scope`` 為空時回傳整份清單。"""
+    if not scope:
+        return list(mods)
+    return [mod_id for mod_id in mods if pack_scope_of(mod_id) == scope]
 
 
 def pack_format_hint(label: str) -> str:
