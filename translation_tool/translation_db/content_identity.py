@@ -131,6 +131,16 @@ def pack_label(kind: str, mod_id: str) -> str:
     return ""
 
 
+def pack_scope_of(mod_id: str) -> str:
+    """KubeJS／FTB 模組識別「命名空間@資料夾名稱@路徑雜湊」中的模組包身分「資料夾名稱@路徑雜湊」。
+
+    其他模組識別回傳空字串。名稱只是匯入時所選資料夾（或 ZIP）的名稱，不同位置的同名
+    資料夾要靠路徑雜湊區分，所以篩選用完整身分而不是只用名稱。
+    """
+    parts = mod_id.split("@")
+    return "@".join(parts[1:]) if len(parts) >= 3 else ""
+
+
 def content_mod_value(kind: str, mod_id: str) -> str:
     """Python 端的同一個定義（與 :func:`content_mod_expr` 的結果一致）。"""
     if kind in PACK_KINDS and "@" in mod_id:

@@ -55,7 +55,7 @@ def _scope(db, **request):
 
 
 def test_pack_options_follow_the_selected_version(db):
-    assert _scope(db, version="1.21.1")["packs"] == ["Pack 8.3", "Pack 8.5"]
+    assert _scope(db, version="1.21.1")["packs"] == [PACK_83, PACK_85]
     # 只有 jar 內容的版本沒有模組包版本可選：維持「全部」
     without_packs = _scope(db, version="1.20.1")
     assert without_packs["packs"] == [] and without_packs["pack"] is None
@@ -63,8 +63,8 @@ def test_pack_options_follow_the_selected_version(db):
 
 
 def test_pack_narrows_entries_counts_and_options(db):
-    scope = _scope(db, version="1.21.1", pack="Pack 8.5")
-    assert scope["pack"] == "Pack 8.5"
+    scope = _scope(db, version="1.21.1", pack=PACK_85)
+    assert scope["pack"] == PACK_85
     assert scope["mods"] == [f"alpha@{PACK_85}", f"beta@{PACK_85}"]
     assert scope["kinds"] == ["ftb_quest_lang", "kubejs_lang"]
 
@@ -80,17 +80,17 @@ def test_pack_narrows_entries_counts_and_options(db):
 
 def test_search_inside_a_pack_stays_inside_it(db):
     criteria = EntryFilter(version="1.21.1", query="text a")
-    scope = _scope(db, version="1.21.1", pack="Pack 8.3", criteria=criteria)
+    scope = _scope(db, version="1.21.1", pack=PACK_83, criteria=criteria)
     rows, total = db.list_entries(criteria=scope["criteria"], limit=50)
     assert total == 1 and rows[0].mod_id == f"alpha@{PACK_83}"
     assert scope["mods"] == [f"alpha@{PACK_83}"]
 
 
 def test_mod_from_another_pack_is_dropped_when_the_pack_changes(db):
-    scope = _scope(db, version="1.21.1", pack="Pack 8.3", mod_id=f"alpha@{PACK_85}")
+    scope = _scope(db, version="1.21.1", pack=PACK_83, mod_id=f"alpha@{PACK_85}")
     assert scope["mod_id"] is None
 
-    kept = _scope(db, version="1.21.1", pack="Pack 8.5", mod_id=f"beta@{PACK_85}")
+    kept = _scope(db, version="1.21.1", pack=PACK_85, mod_id=f"beta@{PACK_85}")
     assert kept["mod_id"] == f"beta@{PACK_85}"
     _rows, total = db.list_entries(criteria=kept["criteria"], limit=50)
     assert total == 1
@@ -99,3 +99,20 @@ def test_mod_from_another_pack_is_dropped_when_the_pack_changes(db):
 def test_unknown_pack_falls_back_to_all(db):
     scope = _scope(db, version="1.21.1", pack="Pack 9.9")
     assert scope["pack"] is None and scope["criteria"].pack_mod_ids is None
+
+
+def test_same_folder_name_in_two_places_stays_two_options(db):
+    """不同位置的同名資料夾是兩個選項，名稱後面加上路徑雜湊前六碼來區分。"""
+    from app.services_impl.moddb_service import pack_scope_options
+
+    other = "Pack 8.5@cccccccccccc"
+    db.ingest("1.21.1", [_pack_item("gamma", other, "z")])
+    scope = _scope(db, version="1.21.1")
+    assert scope["packs"] == [PACK_83, PACK_85, other]
+    assert pack_scope_options(scope["packs"]) == [
+        (PACK_83, "Pack 8.3"),
+        (PACK_85, "Pack 8.5（bbbbbb）"),
+        (other, "Pack 8.5（cccccc）"),
+    ]
+    picked = _scope(db, version="1.21.1", pack=other)
+    assert picked["mods"] == [f"gamma@{other}"]

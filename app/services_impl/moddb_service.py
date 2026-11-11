@@ -9,7 +9,7 @@ import json
 import logging
 import sqlite3
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -103,6 +103,8 @@ from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
+    "NO_PACK_SCOPE_HINT",
+    "PACK_SCOPE_HINT",
     "QUALITY_TOKEN_CATEGORIES",
     "REFERENCE_LATEST",
     "SOURCE_NAMES",
@@ -161,6 +163,7 @@ __all__ = [
     "open_database",
     "pack_format_hint",
     "pack_label",
+    "pack_scope_options",
     "preview_new_source_names",
     "quick_date_bounds",
     "run_moddb_scan_service",
@@ -277,6 +280,27 @@ def version_choices(db: TranslationDB | None = None) -> list[str]:
     except (OSError, ValueError) as exc:
         logger.debug("讀取版本清單失敗：%s", exc)
     return seen
+
+
+PACK_SCOPE_HINT = (
+    "匯入 KubeJS／FTB Quests 時所選資料夾（或 ZIP）的名稱；不一定是模組包，自建內容也會列在這裡。"
+    "模組 jar 的內容不分模組包版本。"
+)
+NO_PACK_SCOPE_HINT = "這個遊戲版本沒有匯入 KubeJS／FTB Quests 內容"
+
+
+def pack_scope_options(scopes: Sequence[str]) -> list[tuple[str, str]]:
+    """模組包版本選單的 ``(值, 顯示文字)``：值是模組包身分，文字是資料夾名稱。
+
+    不同位置的同名資料夾在名稱後面加上路徑雜湊的前六碼，否則選單上分不出來。
+    """
+    names = [scope.rpartition("@")[0] for scope in scopes]
+    options: list[tuple[str, str]] = []
+    for scope, name in zip(scopes, names, strict=True):
+        duplicated = names.count(name) > 1
+        suffix = f"（{scope.rpartition('@')[2][:6]}）" if duplicated else ""
+        options.append((scope, f"{name}{suffix}"))
+    return options
 
 
 def pack_format_hint(label: str) -> str:

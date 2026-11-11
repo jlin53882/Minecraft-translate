@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_service import EntryFilter
+from app.services_impl.moddb_service import (
+    NO_PACK_SCOPE_HINT,
+    PACK_SCOPE_HINT,
+    EntryFilter,
+    pack_scope_options,
+)
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -190,7 +195,7 @@ def _apply_pack_options(panel, snapshot: dict) -> bool:
     """模組包版本選項：選了遊戲版本才有清單；該版本沒有 KubeJS／FTB 內容時只有「全部」。"""
     packs = snapshot.get("packs", [])
     changed = kit.set_dropdown_options(
-        panel.pack_dd, [(ALL_PACKS, ALL_PACKS), *((p, p) for p in packs)]
+        panel.pack_dd, [(ALL_PACKS, ALL_PACKS), *pack_scope_options(packs)]
     )
     panel.pack = snapshot.get("pack")
     panel.pack_mod_ids = snapshot.get("pack_mod_ids")
@@ -198,6 +203,7 @@ def _apply_pack_options(panel, snapshot: dict) -> bool:
     disabled = not packs
     changed = changed or panel.pack_dd.disabled != disabled
     panel.pack_dd.disabled = disabled
+    panel.pack_dd.tooltip = NO_PACK_SCOPE_HINT if disabled else PACK_SCOPE_HINT
     return changed
 
 
@@ -238,6 +244,7 @@ def _build_controls(panel) -> None:
     kit.set_dropdown_options(panel.pack_dd, [(ALL_PACKS, ALL_PACKS)])
     panel.pack_dd.value = ALL_PACKS
     panel.pack_dd.disabled = True
+    panel.pack_dd.tooltip = NO_PACK_SCOPE_HINT
     panel.mod_dd = kit.searchable_dropdown(
         label="模組", dense=True, width=220, on_select=panel._on_mod
     )

@@ -32,6 +32,7 @@ from .content_identity import (
     loose_text,
     other_version_sql,
     pack_label,
+    pack_scope_of,
 )
 from .query_interrupt import QueryCancelled
 from .schema import KIND_KUBEJS_LANG, SRC_CROSS_VERSION, SRC_MANUAL
@@ -703,6 +704,24 @@ class CrossVersionReviewMixin:
             mod_id
             for mod_id in self.mods(version)  # type: ignore[attr-defined]
             if pack_label(KIND_KUBEJS_LANG, mod_id) == pack
+        ]
+
+    def pack_scopes(self, version: str) -> list[str]:
+        """某個遊戲版本中出現過的模組包身分（KubeJS／FTB；由模組清單推得，有快取）。"""
+        return sorted(
+            {
+                scope
+                for mod_id in self.mods(version)  # type: ignore[attr-defined]
+                if (scope := pack_scope_of(mod_id))
+            }
+        )
+
+    def pack_scope_mods(self, version: str, scope: str) -> list[str]:
+        """某個遊戲版本中屬於指定模組包身分的 KubeJS／FTB 模組識別。"""
+        return [
+            mod_id
+            for mod_id in self.mods(version)  # type: ignore[attr-defined]
+            if pack_scope_of(mod_id) == scope
         ]
 
     def apply_cross_version_references(

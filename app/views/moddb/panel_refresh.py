@@ -253,10 +253,10 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
 
     available_mods = db.mods(version) if db and version else []
     kinds = db.kinds(version) if db and version else []
-    packs = db.pack_versions(version) if db and version else []
+    packs = db.pack_scopes(version) if db and version else []
     pack = request.get("pack") if request.get("pack") in packs else None
     # 整合包版本解析成它的模組清單：清單、筆數與下拉選項都用同一個條件
-    pack_mod_ids = tuple(db.pack_mods(version, pack)) if pack else None
+    pack_mod_ids = tuple(db.pack_scope_mods(version, pack)) if pack else None
     allowed_mods = available_mods if pack_mod_ids is None else pack_mod_ids
     mod_id = request.get("mod_id") if request.get("mod_id") in allowed_mods else None
     kind = request.get("kind") if request.get("kind") in kinds else None
