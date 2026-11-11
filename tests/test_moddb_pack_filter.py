@@ -195,3 +195,72 @@ def test_translate_snapshot_counts_only_the_selected_pack(db):
         db, {"version": "1.21.1", "pack": PACK_83, "mod": f"beta@{PACK_85}"}, {}
     )
     assert mismatch["mod"] == "__all__" and mismatch["missing"] == 1
+
+
+# ------------------------------------------------------------------ 批量審核
+def _add_translations(db):
+    """每個模組包條目都補一筆未審核的譯文，才會成為批量審核的候選。"""
+    items = [
+        ScanItem(kind=kind, mod_id=mod_id, key=key, en_us="", zh_tw=f"譯 {key}")
+        for kind, mod_id, key in db._q(
+            "SELECT kind, mod_id, key FROM entry WHERE mc_version='1.21.1'"
+        )
+    ]
+    db.ingest("1.21.1", items)
+
+
+def test_bulk_review_scope_follows_the_pack(db):
+    _add_translations(db)
+    assert db.bulk_review_pack_options("1.21.1", quality_pass_only=False) == (
+        PACK_83,
+        PACK_85,
+    )
+    modules, _sources = db.bulk_review_scope_options(
+        "1.21.1", quality_pass_only=False, pack_scope=PACK_85
+    )
+    assert modules == (f"alpha@{PACK_85}", f"beta@{PACK_85}")
+    assert db.bulk_review_kind_options(
+        "1.21.1", quality_pass_only=False, pack_scope=PACK_83
+    ) == ("kubejs_lang",)
+
+    plan = db.preview_bulk_review(
+        "1.21.1", None, quality_pass_only=False, pack_scope=PACK_85
+    )
+    assert plan.pack_scope == PACK_85
+    assert {c.mod_id for c in plan.candidates} == {
+        f"alpha@{PACK_85}",
+        f"beta@{PACK_85}",
+    }
+    assert len(plan.candidates) == 3
+
+    # 執行前會用同一個模組包範圍重查；範圍一致才審核，別的模組包不受影響
+    result = db.execute_bulk_review(plan, actor="tester")
+    assert result.reviewed == 3
+    left = db.preview_bulk_review("1.21.1", None, quality_pass_only=False)
+    assert {c.mod_id for c in left.candidates} == {f"alpha@{PACK_83}", "jarmod"}
+
+
+def test_bulk_review_dialog_lists_packs_and_passes_the_scope(db):
+    from app.views.moddb.bulk_review_dialog import ALL_PACKS, BulkReviewDialog
+    from tests.conftest import mock_page
+    from tests.test_bulk_review import _drain
+
+    _add_translations(db)
+    page = mock_page()
+    page.run_thread = lambda target: target()
+    dialog = BulkReviewDialog(page, lambda: db, "1.21.1", None, pack_scope=PACK_85)
+    dialog.quality_check.value = False
+    dialog._start_scope_options_load()
+    _drain(page)
+
+    assert [o.key for o in dialog.pack_dd.options] == [ALL_PACKS, PACK_83, PACK_85]
+    assert dialog.pack_dd.value == PACK_85 and not dialog.pack_dd.disabled
+    assert [o.key for o in dialog.mod_dd.options][1:] == [
+        f"alpha@{PACK_85}",
+        f"beta@{PACK_85}",
+    ]
+
+    dialog._preview()
+    _drain(page)
+    assert dialog.plan is not None and dialog.plan.pack_scope == PACK_85
+    assert len(dialog.plan.candidates) == 3

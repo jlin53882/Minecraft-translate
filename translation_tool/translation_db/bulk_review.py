@@ -12,7 +12,10 @@ import sqlite3
 import uuid
 from collections.abc import Callable, Sequence
 
-from translation_tool.translation_db.content_identity import same_content_sql
+from translation_tool.translation_db.content_identity import (
+    pack_scope_of,
+    same_content_sql,
+)
 from translation_tool.translation_db.models import (
     BulkReviewCandidate,
     BulkReviewPlan,
@@ -35,14 +38,16 @@ class BulkReviewMixin:
         quality_pass_only: bool = True,
         kind: str | None = None,
         source: int | None = None,
+        pack_scope: str | None = None,
     ) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
         """取得目前版本中真正有未審核候選的模組與來源對照。
 
         ``kind`` 與 ``source`` 為目前的類型與來源選擇：類型會縮小模組與來源清單，
         來源只縮小模組清單（來源清單本身不受來源選擇限制）。回傳的 ``None`` 模組鍵代表全部模組；
         查詢沿用批量審核候選的條件，因此不會把只有已審核條目的模組或沒有目前譯文的來源顯示在選單中。
+        ``pack_scope`` 為模組包版本的選擇：模組與來源清單都只算該模組包的模組。
         """
-        triples = self._bulk_review_scope_triples(version, quality_pass_only)
+        triples = self._bulk_review_pack_triples(version, quality_pass_only, pack_scope)
         in_kind = [
             (mod_value, source_value)
             for mod_value, source_value, kind_value in triples
@@ -81,20 +86,46 @@ class BulkReviewMixin:
         quality_pass_only: bool = True,
         mod_id: str | None = None,
         source: int | None = None,
+        pack_scope: str | None = None,
     ) -> tuple[str, ...]:
-        """目前模組與來源選擇下，仍有未審核候選的類型（類型本身的選擇不限制）。"""
+        """目前模組包版本、模組與來源選擇下，仍有未審核候選的類型（類型本身的選擇不限制）。"""
         return tuple(
             sorted(
                 {
                     kind_value
-                    for mod_value, source_value, kind_value in self._bulk_review_scope_triples(
-                        version, quality_pass_only
+                    for mod_value, source_value, kind_value in self._bulk_review_pack_triples(
+                        version, quality_pass_only, pack_scope
                     )
                     if (mod_id is None or str(mod_value) == mod_id)
                     and (source is None or source_value == source)
                 }
             )
         )
+
+    def bulk_review_pack_options(
+        self, version: str, *, quality_pass_only: bool = True
+    ) -> tuple[str, ...]:
+        """有未審核候選的模組包身分（KubeJS／FTB）；模組包版本選單只列這些。"""
+        return tuple(
+            sorted(
+                {
+                    scope
+                    for mod_value, _source, _kind in self._bulk_review_scope_triples(
+                        version, quality_pass_only
+                    )
+                    if (scope := pack_scope_of(str(mod_value)))
+                }
+            )
+        )
+
+    def _bulk_review_pack_triples(
+        self, version: str, quality_pass_only: bool, pack_scope: str | None
+    ) -> list[tuple[str, int | None, str]]:
+        """範圍配對中屬於指定模組包身分的部分；沒有指定時為全部。"""
+        triples = self._bulk_review_scope_triples(version, quality_pass_only)
+        if not pack_scope:
+            return triples
+        return [row for row in triples if pack_scope_of(row[0]) == pack_scope]
 
     def _bulk_review_scope_triples(
         self,
@@ -154,15 +185,22 @@ class BulkReviewMixin:
         *,
         mod_id: str | None = None,
         kind: str | None = None,
+        pack_scope: str | None = None,
         conn: sqlite3.Connection | None = None,
     ) -> tuple[BulkReviewCandidate, ...]:
         """所選版本／模組／類型中、來源為 ``source`` 且尚未審核的條目（有譯文者）。
 
         ``source=None`` 代表不限目前生效來源；``kind=None`` 代表不限類型。
+        ``pack_scope`` 只列該模組包身分的模組（已選模組時以模組為準）。
         """
         criteria = EntryFilter(
             version=version,
             mod_id=mod_id or None,
+            pack_mod_ids=(
+                tuple(self.pack_scope_mods(version, pack_scope))  # type: ignore[attr-defined]
+                if pack_scope
+                else None
+            ),
             kind=kind or None,
             source=int(source) if source is not None else None,
             # 審核狀態與來源各自獨立：任何來源都只列尚未審核的條目
@@ -261,6 +299,7 @@ class BulkReviewMixin:
         kind: str | None = None,
         quality_pass_only: bool = True,
         propagate: bool = False,
+        pack_scope: str | None = None,
     ) -> BulkReviewPlan:
         """預覽批量審核範圍（不寫入）。"""
         source = int(source) if source is not None else None
@@ -268,8 +307,14 @@ class BulkReviewMixin:
         mod_id = mod_id or None
         kind = str(kind).strip() if kind is not None else None
         kind = kind or None
+        pack_scope = (pack_scope or "").strip() or None
         candidates = self._bulk_review_candidates(
-            version, source, quality_pass_only, mod_id=mod_id, kind=kind
+            version,
+            source,
+            quality_pass_only,
+            mod_id=mod_id,
+            kind=kind,
+            pack_scope=pack_scope,
         )
         sibling_info = (
             self._bulk_review_sibling_info(candidates, version) if propagate else ()
@@ -284,6 +329,7 @@ class BulkReviewMixin:
             candidates=candidates,
             sibling_info=sibling_info,
             kind=kind,
+            pack_scope=pack_scope,
         )
 
     def execute_bulk_review(
@@ -315,6 +361,7 @@ class BulkReviewMixin:
                 plan.quality_pass_only,
                 mod_id=plan.mod_id,
                 kind=plan.kind,
+                pack_scope=plan.pack_scope,
                 conn=conn,
             )
             if current != plan.candidates:

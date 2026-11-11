@@ -515,6 +515,7 @@ def open_bulk_review(panel, _e=None) -> None:
         mod_id=panel.mod_id,
         kind=panel.kind,
         effective_source=panel.source_filter.code,
+        pack_scope=panel.pack,
     ).open()
 
 
