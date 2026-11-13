@@ -26,6 +26,7 @@ from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
 from .content_identity import (
+    PACK_KINDS,
     content_key_sql,
     content_mod_sql,
     content_table_sql,
@@ -114,8 +115,12 @@ def similar_source(a: str, b: str) -> bool:
     left, right = loose_text(a)[:_SIMILARITY_CHARS], loose_text(b)[:_SIMILARITY_CHARS]
     if not left or not right:
         return False
+    matcher = SequenceMatcher(None, left, right, autojunk=False)
+    # ratio() 是 O(n²)；先用便宜的上界排除明顯不相似的（結果與直接算 ratio 相同）
     return (
-        SequenceMatcher(None, left, right, autojunk=False).ratio() >= SOURCE_SIMILARITY
+        matcher.real_quick_ratio() >= SOURCE_SIMILARITY
+        and matcher.quick_ratio() >= SOURCE_SIMILARITY
+        and matcher.ratio() >= SOURCE_SIMILARITY
     )
 
 
@@ -187,6 +192,26 @@ def _scope_sql(
     return "".join(f" AND {c}" for c in clauses), params
 
 
+def _pack_sql(
+    ref_pack: str, target_pack: str, *, target_alias: str = "e", ref_alias: str = "e2"
+) -> tuple[str, list[object]]:
+    """把整合包資料夾篩選提前到 SQL：只是必要條件（粗篩），精確比對仍由 ``pack_label`` 負責。
+
+    ``pack_label`` 只有 KubeJS／FTB 的識別 ``命名空間@資料夾@路徑雜湊`` 會非空，所以指定整合包時
+    其他類型的條目必然不符；先在 SQL 排除，目標版本的一般模組條目就不必逐筆去找參考。
+    """
+    kinds = ",".join(f"'{k}'" for k in PACK_KINDS)
+    clauses: list[str] = []
+    params: list[object] = []
+    for alias, pack in ((target_alias, target_pack), (ref_alias, ref_pack)):
+        if pack:
+            clauses.append(
+                f" AND {alias}.kind IN ({kinds}) AND instr({alias}.mod_id, ?) > 0"
+            )
+            params.append(f"@{pack}@")
+    return "".join(clauses), params
+
+
 def _fetch_rows(
     conn: sqlite3.Connection,
     version: str,
@@ -205,6 +230,7 @@ def _fetch_rows(
     （同一個遊戲版本有多個整合包版本時用來指定其中一個）。
     """
     scope, params = _scope_sql(entry_ids, mod_ids, kinds)
+    pack_scope, pack_params = _pack_sql(ref_pack, target_pack)
     ref_clause = " AND e2.mc_version = ?" if ref_version else ""
     sql = (
         "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
@@ -226,9 +252,14 @@ def _fetch_rows(
         "LEFT JOIN translation tr ON tr.entry_id = e2.id AND tr.source = fr.source "
         "LEFT JOIN history hh ON hh.id = (SELECT MAX(h.id) FROM history h "
         f"WHERE h.entry_id = e2.id AND h.action = '{_REVIEW_ACTION}') "
-        f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
+        f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}{pack_scope}"
     )
-    args: list[object] = [*([ref_version] if ref_version else []), version, *params]
+    args: list[object] = [
+        *([ref_version] if ref_version else []),
+        version,
+        *params,
+        *pack_params,
+    ]
     grouped: dict[int, list[VersionRef]] = {}
     heads: dict[int, tuple] = {}
     for row in conn.execute(sql, args):
@@ -285,13 +316,17 @@ def _fetch_rows(
 
 
 def _target_id_chunks(
-    db: TranslationDB, version: str, cancel: Callable[[], bool] | None
+    db: TranslationDB,
+    version: str,
+    cancel: Callable[[], bool] | None,
+    target_pack: str = "",
 ) -> Iterable[list[int]]:
     """依條目編號分段列出目標版本的條目；每段之間釋放資料庫鎖並檢查是否取消。
 
     ``idx_entry_version`` 以 ``(mc_version, rowid)`` 排序，所以 ``ORDER BY id`` 不需要臨時排序。
     """
     last = 0
+    pack_scope, pack_params = _pack_sql("", target_pack)
     while True:
         if cancel is not None and cancel():
             raise QueryCancelled
@@ -299,9 +334,9 @@ def _target_id_chunks(
             ids = [
                 int(row[0])
                 for row in db._conn.execute(
-                    "SELECT id FROM entry WHERE mc_version = ? AND id > ? "
-                    "AND en_us <> '' ORDER BY id LIMIT ?",
-                    (version, last, _ID_CHUNK),
+                    "SELECT e.id FROM entry e WHERE e.mc_version = ? AND e.id > ? "
+                    f"AND e.en_us <> ''{pack_scope} ORDER BY e.id LIMIT ?",
+                    (version, last, *pack_params, _ID_CHUNK),
                 )
             ]
         if not ids:
@@ -331,7 +366,7 @@ def list_differences(
     if not db.has_review_state:
         return []
     out: list[CrossVersionRow] = []
-    for ids in _target_id_chunks(db, version, cancel):
+    for ids in _target_id_chunks(db, version, cancel, target_pack):
         with db._lock:
             rows = _fetch_rows(
                 db._conn,
@@ -387,8 +422,9 @@ def explain_exclusions(
     summary = ExclusionSummary()
     if not db.has_review_state:
         return summary
-    for ids in _target_id_chunks(db, version, cancel):
+    for ids in _target_id_chunks(db, version, cancel, target_pack):
         scope, params = _scope_sql(ids, mod_ids, kinds)
+        pack_scope, pack_params = _pack_sql(ref_pack, target_pack)
         ref_clause = " AND e2.mc_version = ?" if ref_version else ""
         sql = (
             "SELECT e.id, e.key, ft.zh_tw, fr.zh_tw, "
@@ -401,9 +437,14 @@ def explain_exclusions(
             f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
             f"AND {other_version_sql('e', 'e2')}{ref_clause} "
             "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
-            f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}"
+            f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}{pack_scope}"
         )
-        args: list[object] = [*([ref_version] if ref_version else []), version, *params]
+        args: list[object] = [
+            *([ref_version] if ref_version else []),
+            version,
+            *params,
+            *pack_params,
+        ]
         with db._lock:
             rows = db._conn.execute(sql, args).fetchall()
         # 原文只差大小寫或空白視為相同；原文真的不同的參考由差異審核的「原文不同」頁籤列出

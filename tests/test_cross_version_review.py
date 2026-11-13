@@ -838,3 +838,30 @@ def test_unrelated_source_with_the_same_key_is_not_listed(db):
     )
     db.ingest("1.21.1", [_pack_item(PACK_B, "k", "This entry needs a key to open")])
     assert db.list_cross_version_differences("1.21.1") == []
+
+
+def test_similar_source_matches_plain_ratio_threshold():
+    """先用便宜的上界排除不相似原文，結果必須和直接算 ratio 相同。"""
+    from difflib import SequenceMatcher
+
+    from translation_tool.translation_db.content_identity import loose_text
+    from translation_tool.translation_db.cross_version_review import (
+        SOURCE_SIMILARITY,
+        similar_source,
+    )
+
+    pairs = [
+        ("Hello world", "hello  world!"),
+        ("Hello world", "Completely different text"),
+        ("Open the door", "Open the big door"),
+        ("abc", "xyz"),
+        ("", "abc"),
+        ("a" * 50, "a" * 10),
+    ]
+    for a, b in pairs:
+        left, right = loose_text(a), loose_text(b)
+        expected = bool(left and right) and (
+            SequenceMatcher(None, left, right, autojunk=False).ratio()
+            >= SOURCE_SIMILARITY
+        )
+        assert similar_source(a, b) is expected
