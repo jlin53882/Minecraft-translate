@@ -62,6 +62,9 @@ def texts_of(control) -> list[str]:
     value = getattr(control, "value", None)
     if isinstance(value, str) and type(control).__name__ == "Text":
         found.append(value)
+    spans = getattr(control, "spans", None)
+    if type(control).__name__ == "Text" and spans:
+        found.append("".join(span.text or "" for span in spans))
     for attr in ("controls", "content"):
         child = getattr(control, attr, None)
         if isinstance(child, list):

@@ -190,7 +190,7 @@ Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_ga
 
 ## 可比對譯文呈現
 
-`text_compare.py` 把譯文呈現成可比對的唯讀 `ft.Text`，供同文一致性審核與版本差異審核共用，只影響畫面：標記只存在於 `ft.TextSpan`，不修改也不回傳加了標記的字串，複製與寫入的譯文不變。`text_control(text, base, ...)` 以 `plan_segments` 切片：不可見字元（前後與連續空白、NBSP、全形空白、零寬字元、Tab、換行）顯示為標記符號（`marked_indexes`、`marker_glyph`），與 `base` 不同的字元加底色（`diff_ranges`：短譯文不套用相似度門檻，較長且整句不同時不標，任一邊超過 `MAX_DIFF_CHARS` 時不做字元級比對），格式碼與佔位符（`&a`、`§a`、`%s`）淡化為等寬字，提示列出差異與不可見字元的 Unicode 編號與名稱（`difference_tooltip`）；`highlight` 換差異底色，`code_dim`、`mark_invisible`、`show_diff`、`max_lines` 可個別關閉或限制。`compare_notes` 說明差在哪（多出／缺少的不可見字元、全形半形互換），`compare_chips` 組出標籤列與「差異：」一行，沒有可說的內容時回傳空清單。以上純邏輯函式不需要建立畫面即可測試。
+`text_compare.py` 把譯文呈現成可比對的唯讀 `ft.Text`，供同文一致性審核與版本差異審核共用，只影響畫面：標記只存在於 `ft.TextSpan`，不修改也不回傳加了標記的字串，複製與寫入的譯文不變。`text_control(text, base, ...)` 以 `plan_segments` 切片：不可見字元（前後與連續空白、NBSP、全形空白、零寬字元、Tab、換行）顯示為標記符號（`marked_indexes`、`marker_glyph`），與 `base` 不同的字元加底色（`diff_ranges`：短譯文不套用相似度門檻，較長且整句不同時不標，任一邊超過 `MAX_DIFF_CHARS` 時不做字元級比對），格式碼與佔位符（`&a`、`§a`、`%s`）淡化為等寬字，提示列出差異與不可見字元的 Unicode 編號與名稱（`difference_tooltip`）；`highlight` 換差異底色，`code_dim`、`mark_invisible`、`show_diff`、`max_lines` 可個別關閉或限制。`compare_notes` 說明差在哪（多出／缺少的不可見字元、全形半形互換），`compare_chips` 組出標籤列與「差異：」一行，沒有可說的內容時回傳空清單。以上純邏輯函式不需要建立畫面即可測試。條目校對的建議清單（`suggestions.py`）與異動歷史（`history_renderer.py`）也使用它：「同鍵值・其他版本」「相同原文」的候選譯文與目前譯文比對（`text_control(candidate, current)`，標籤與「差異：」說明由 `compare_chips(base_label="目前譯文")` 產生，原有來源標籤以 `lead` 帶入），原文行只標不可見字元；「套用」帶入的永遠是原字串。歷史的「原譯」「新譯」互相比對（前綴在文字片段之外），沒有舊譯時與各來源譯文列都只標不可見字元，不逐列計算差異。批次取代預覽卡片（`batch_replace_preview._diff_line`）的「舊／新」兩行互為 `base`，只標出這次取代改變的字元與前後空白；批量審核候選列（`BulkReviewDialog._text_line`）用 `show_diff=False` 只顯示不可見字元標記，先以 `formatting.clip_text` 截斷（不折疊空白）再呈現，結尾空白不會被吃掉。
 
 ## 版本差異審核
 

@@ -28,9 +28,10 @@ from app.ui.dialogs import (
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
-from app.views.moddb.formatting import format_count, kind_label, shorten
+from app.views.moddb.formatting import clip_text, format_count, kind_label, shorten
 from app.views.moddb.operation_summaries import bulk_review_result_text
 from app.views.moddb.pack_scope_dropdown import PackScopeDropdown
+from app.views.moddb.text_compare import text_control
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
@@ -645,10 +646,8 @@ class BulkReviewDialog:
                                 spacing=8,
                                 wrap=True,
                             ),
-                            self._text_line("原文", shorten(candidate.en_us, 80)),
-                            self._text_line(
-                                "譯文", shorten(candidate.zh_tw, 80), main=True
-                            ),
+                            self._text_line("原文", candidate.en_us),
+                            self._text_line("譯文", candidate.zh_tw, main=True),
                         ],
                         spacing=4,
                         tight=True,
@@ -662,18 +661,26 @@ class BulkReviewDialog:
     @staticmethod
     def _text_line(label: str, text: str, *, main: bool = False) -> ft.Control:
         """卡片內的「原文／譯文」一行：左側小標籤，右側內容（譯文用主色、較大字）。"""
+        body = (
+            text_control(
+                clip_text(text, 80),
+                size=13 if main else 12.5,
+                color=C.TEXT if main else C.MUTED,
+                show_diff=False,
+                max_lines=3,
+                selectable=False,
+            )
+            if text
+            else ft.Text("（無原文）", size=12.5, color=C.MUTED)
+        )
+        body.expand = True
         return ft.Row(
             [
                 ft.Container(
                     ft.Text(label, size=10.5, color=C.DIM),
                     width=30,
                 ),
-                ft.Text(
-                    text or "（無原文）",
-                    size=13 if main else 12.5,
-                    color=C.TEXT if main else C.MUTED,
-                    expand=True,
-                ),
+                body,
             ],
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.START,

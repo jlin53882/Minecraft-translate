@@ -8,7 +8,8 @@ from app.services_impl.moddb_service import content_mod_value, pack_label
 from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
-from app.views.moddb.formatting import shorten
+from app.views.moddb.formatting import clip_text, shorten
+from app.views.moddb.text_compare import compare_chips, text_control
 
 
 def build_suggestions(
@@ -45,6 +46,7 @@ def build_suggestions(
                     same=r.zh_tw == entry.zh_tw,
                     on_apply=on_apply,
                     original=_original_line(r),
+                    base=entry.zh_tw,
                 )
             )
         hint = "可按「套用」把該版本的譯文帶入輸入框（不會自動儲存）。原文相同的版本，手動儲存時會一併被取代；標示「原文不同」或「原文未知」者不會被動到（沒有原文就無法確認是同一句），套用前請先對照上方顯示的原文。"
@@ -65,6 +67,7 @@ def build_suggestions(
                     same=tw == entry.zh_tw,
                     count=len(items),
                     on_apply=on_apply,
+                    base=entry.zh_tw,
                 )
             )
         hint = f"原文「{shorten(entry.en_us, 24)}」在其他鍵值／模組的譯法，用來檢查用詞一致性；只供參考。"
@@ -109,7 +112,7 @@ def _source_tag(r) -> str:
 def _original_line(r) -> str:
     """其他版本條目的原文（讓使用者直接對照）；ZIP 匯入的條目沒有原文時標明未知。"""
     return (
-        f"原文：{shorten(r.en_us, 90)}"
+        f"原文：{clip_text(r.en_us, 90)}"
         if r.en_us
         else "原文：（未知，例如由翻譯 ZIP 匯入）"
     )
@@ -124,16 +127,19 @@ def _sug_item(
     on_apply,
     count: int = 0,
     original: str = "",
+    base: str | None = None,
 ) -> ft.Control:
-    title = text if text else "（未翻譯）"
-    head = ft.Text(
-        title + (f"  × {count}" if count else ""),
-        size=14,
-        color=C.MUTED if same or not text else C.TEXT,
-        selectable=True,
-        expand=True,
-    )
-    row: list[ft.Control] = [head]
+    """單筆建議：候選譯文與目前譯文 ``base`` 比對（不可見字元標記、字元差異），
+    只影響顯示；「套用」帶入的永遠是原字串 ``apply``。"""
+    color = C.MUTED if same or not text else C.TEXT
+    if text:
+        title = text_control(text, base, size=14, color=color)
+        title.expand = True
+    else:
+        title = ft.Text("（未翻譯）", size=14, color=color, expand=True)
+    row: list[ft.Control] = [title]
+    if count:
+        row.append(ft.Text(f"× {count}", size=14, color=color))
     if apply:
         row.append(
             kit.button(
@@ -143,6 +149,9 @@ def _sug_item(
                 on_click=lambda _e, t=apply: on_apply(t),
             )
         )
+    chips = [kit.chip(t, "neutral") for t in tags if t]
+    if same and text:
+        chips.append(kit.chip("與目前相同", "em"))
     return ft.Container(
         padding=ft.Padding.symmetric(vertical=8),
         border=ft.Border.only(bottom=ft.BorderSide(1, C.LINE)),
@@ -150,16 +159,19 @@ def _sug_item(
             [
                 ft.Row(row, vertical_alignment=ft.CrossAxisAlignment.START),
                 *(
-                    [ft.Text(original, size=12, color=C.DIM, selectable=True)]
+                    [
+                        text_control(
+                            original,
+                            size=12,
+                            color=C.DIM,
+                            show_diff=False,
+                            max_lines=3,
+                        )
+                    ]
                     if original
                     else []
                 ),
-                ft.Row(
-                    [kit.chip(t, "neutral") for t in tags if t]
-                    + ([kit.chip("與目前相同", "em")] if same and text else []),
-                    spacing=6,
-                    wrap=True,
-                ),
+                *compare_chips(text, base, base_label="目前譯文", lead=chips),
             ],
             spacing=4,
         ),

@@ -602,9 +602,20 @@ class SmartReviewBatchReviewer:
         details = ft.Column(
             [
                 header,
-                build_batch_text_line("原文", row.en_us),
-                build_batch_text_line("目前", row.current_zh_tw),
-                build_batch_text_line("建議", initial_draft_text(row), main=True),
+                build_batch_text_line("原文", row.en_us, compare=True),
+                build_batch_text_line(
+                    "目前",
+                    row.current_zh_tw,
+                    base=initial_draft_text(row),
+                    compare=True,
+                ),
+                build_batch_text_line(
+                    "建議",
+                    initial_draft_text(row),
+                    main=True,
+                    base=row.current_zh_tw,
+                    compare=True,
+                ),
                 build_batch_text_line("AI 理由", reason_text(row)),
                 build_batch_text_line("問題", issue_text(row)),
             ],
