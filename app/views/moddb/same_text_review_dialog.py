@@ -41,6 +41,15 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label, shorten
+from app.views.moddb.same_text_review_text import (
+    bucket_members,
+    default_selection,
+    difference_notes,
+    format_fullwidth_chars,
+    invisible_labels,
+    selection_state,
+    text_control,
+)
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 10  # 每頁顯示的群組數
@@ -159,7 +168,9 @@ class SameTextReviewDialog:
         self.view = VIEW_ALL
         self.category = CATEGORY_INCONSISTENT
         self.current_page = 1
-        self.selected: set[int] = set()
+        self.selected: set[int] = default_selection()  # 預設不勾選任何條目
+        self.expanded: set[str] = set()  # 已展開成員清單的群組（預設全部收合）
+        self._cards: dict[str, dict[str, ft.Control]] = {}  # 群組 → 標題列控制項
         self.choice: dict[str, str] = {}  # 群組 → 使用者選的統一譯文
         self.last_history_id: int | None = None
         self._confirm_overwrite = False
@@ -442,6 +453,7 @@ class SameTextReviewDialog:
     def _render(self) -> None:
         shown = self._shown()
         start = (self.current_page - 1) * PAGE_SIZE
+        self._cards = {}
         self.list_col.controls = [
             self._group_card(g) for g in shown[start : start + PAGE_SIZE]
         ] or [
@@ -548,7 +560,7 @@ class SameTextReviewDialog:
             ft.Text("統一譯文（只能選已審核的譯文）", size=11, color=C.DIM),
             ft.Row(
                 [
-                    self._candidate_chip(group, c, c.zh_tw == text)
+                    self._candidate_chip(group, c, c.zh_tw == text, text)
                     for c in group.candidates
                 ],
                 spacing=8,
@@ -556,7 +568,30 @@ class SameTextReviewDialog:
             ),
         ]
 
-    def _candidate_chip(self, group: SameTextGroup, candidate, active: bool):
+    def _candidate_chip(
+        self, group: SameTextGroup, candidate, active: bool, canonical: str | None
+    ):
+        """統一譯文候選：不可見字元顯示成標記，未選中的候選標出與選中譯文的差異。"""
+        base = None if active else canonical
+        notes = difference_notes(candidate.zh_tw, base)
+        labels = invisible_labels(candidate.zh_tw)
+        fullwidth = format_fullwidth_chars(candidate.zh_tw)
+        badges: list[ft.Control] = [
+            kit.chip(source_label(candidate.source, self._catalog, "reviewed"), "em"),
+            ft.Text(
+                f"{format_count(candidate.member_count)} 筆", size=11, color=C.MUTED
+            ),
+        ]
+        if labels:
+            badges.append(kit.chip("含不可見字元", "gold", tooltip="、".join(labels)))
+        if fullwidth:
+            badges.append(kit.chip(f"含全形 {''.join(fullwidth)}", "gold"))
+        body: list[ft.Control] = [
+            text_control(candidate.zh_tw, base, size=13.5),
+            ft.Row(badges, spacing=6, wrap=True),
+        ]
+        if notes:
+            body.append(ft.Text("差異：" + "、".join(notes), size=11, color=C.GOLD))
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=10, vertical=8),
             border_radius=8,
@@ -564,41 +599,75 @@ class SameTextReviewDialog:
             bgcolor=ft.Colors.with_opacity(0.10, C.EM) if active else None,
             ink=True,
             on_click=lambda _e, g=group, c=candidate: self._choose(g, c.zh_tw),
-            content=ft.Column(
-                [
-                    ft.Text(candidate.zh_tw, size=13.5),
-                    ft.Row(
-                        [
-                            kit.chip(
-                                source_label(
-                                    candidate.source, self._catalog, "reviewed"
-                                ),
-                                "em",
-                            ),
-                            ft.Text(
-                                f"{format_count(candidate.member_count)} 筆",
-                                size=11,
-                                color=C.MUTED,
-                            ),
-                        ],
-                        spacing=6,
-                    ),
-                ],
-                spacing=4,
-                tight=True,
-            ),
+            content=ft.Column(body, spacing=4, tight=True),
         )
 
     def _member_section(
         self, group: SameTextGroup, text: str | None
     ) -> list[ft.Control]:
-        targets = [m for m in group.members if m.zh_tw != text]
-        if text is None:
-            targets = list(group.members)
+        """成員區：標題列（群組三態勾選＋展開）永遠顯示，逐筆清單展開時才建立。"""
+        ids = selectable_ids(group, self.choice, self._include())
+        state, chosen = selection_state(ids, self.selected)
+        expanded = group.group_id in self.expanded
+        check = ft.Checkbox(
+            tristate=True,
+            value=state,
+            disabled=not ids,
+            tooltip=(
+                f"勾選此組可統一的 {format_count(len(ids))} 筆"
+                if ids
+                else "這一組目前沒有可統一的成員"
+            ),
+            on_change=lambda _e, g=group: self._toggle_group(g),
+        )
+        title = ft.Text(
+            self._members_title(group, len(ids), chosen),
+            size=12.5,
+            weight=ft.FontWeight.W_600,
+            expand=True,
+        )
+        arrow = ft.Icon(self._arrow(expanded), size=20, color=C.MUTED)
+        holder = ft.Container(
+            content=self._member_list(group, text) if expanded else None,
+            visible=expanded,
+        )
+        self._cards[group.group_id] = {
+            "check": check,
+            "title": title,
+            "arrow": arrow,
+            "holder": holder,
+        }
+        header = ft.Container(
+            ink=True,
+            border_radius=6,
+            on_click=lambda _e, g=group: self._toggle_expand(g),
+            content=ft.Row(
+                [check, title, arrow], vertical_alignment=ft.CrossAxisAlignment.CENTER
+            ),
+        )
+        return [header, holder]
+
+    @staticmethod
+    def _arrow(expanded: bool) -> str:
+        return (
+            ft.Icons.KEYBOARD_ARROW_DOWN if expanded else ft.Icons.KEYBOARD_ARROW_RIGHT
+        )
+
+    @staticmethod
+    def _members_title(group: SameTextGroup, can: int, chosen: int) -> str:
+        return (
+            f"成員 {format_count(len(group.members))} 筆"
+            f"（可統一 {format_count(can)}・已勾選 {format_count(chosen)}）"
+        )
+
+    def _member_list(self, group: SameTextGroup, text: str | None) -> ft.Control:
+        """展開後的成員清單：依目前譯文分組，每組標題顯示譯文（含不可見字元標記與差異）。"""
+        buckets, more = bucket_members(group.members, text, MEMBER_LIMIT)
         include = self._include()
-        ids = selectable_ids(group, self.choice, include)
-        rows = [self._member_row(m, text, include) for m in targets[:MEMBER_LIMIT]]
-        more = len(targets) - MEMBER_LIMIT
+        rows: list[ft.Control] = []
+        for bucket in buckets:
+            rows.append(self._bucket_header(bucket.text, bucket.total, text))
+            rows += [self._member_row(m, text, include) for m in bucket.members]
         if more > 0:
             rows.append(
                 ft.Text(
@@ -607,25 +676,24 @@ class SameTextReviewDialog:
                     color=C.DIM,
                 )
             )
-        actions = ft.Row(
-            [
-                kit.button(
-                    f"勾選此組可統一的 {format_count(len(ids))} 筆",
-                    "ghost",
-                    size="sm",
-                    on_click=lambda _e, g=group: self._select_group(g),
-                    disabled=not ids,
-                ),
-                kit.button(
-                    "取消此組",
-                    "ghost",
-                    size="sm",
-                    on_click=lambda _e, g=group: self._clear_group(g),
-                ),
-            ],
-            spacing=6,
+        return ft.Container(
+            padding=ft.Padding.only(left=8), content=ft.Column(rows, spacing=4)
         )
-        return [actions, *rows]
+
+    def _bucket_header(
+        self, zh_tw: str, total: int, canonical: str | None
+    ) -> ft.Control:
+        label = (
+            text_control(zh_tw, canonical, size=12.5)
+            if zh_tw
+            else ft.Text("（未翻譯）", size=12.5, color=C.DIM)
+        )
+        return ft.Row(
+            [label, ft.Text(f"×{format_count(total)}", size=11.5, color=C.MUTED)],
+            spacing=8,
+            wrap=True,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        )
 
     def _member_row(
         self, member: SameTextMember, text: str | None, include: bool
@@ -648,22 +716,11 @@ class SameTextReviewDialog:
                     ),
                     on_change=lambda e, m=member: self._toggle(m, e),
                 ),
-                ft.Column(
-                    [
-                        ft.Text(
-                            f"{member.mod_id} · {member.key}",
-                            size=12,
-                            color=C.MUTED,
-                            selectable=True,
-                        ),
-                        ft.Text(
-                            member.zh_tw or "（沒有譯文）",
-                            size=13,
-                            color=C.TEXT if member.zh_tw else C.DIM,
-                            selectable=True,
-                        ),
-                    ],
-                    spacing=1,
+                ft.Text(
+                    f"{member.mod_id} · {member.key}",
+                    size=12,
+                    color=C.MUTED,
+                    selectable=True,
                     expand=True,
                 ),
                 kit.chip(
@@ -671,8 +728,19 @@ class SameTextReviewDialog:
                     "gold" if member.reviewed else "neutral",
                 ),
             ],
-            vertical_alignment=ft.CrossAxisAlignment.START,
+            vertical_alignment=ft.CrossAxisAlignment.CENTER,
         )
+
+    def _refresh_group_header(self, group_id: str) -> None:
+        """只更新該組標題列的勾選狀態與筆數（逐筆勾選時不重建整個清單）。"""
+        refs = self._cards.get(group_id)
+        group = next((g for g in self.groups if g.group_id == group_id), None)
+        if refs is None or group is None:
+            return
+        ids = selectable_ids(group, self.choice, self._include())
+        state, chosen = selection_state(ids, self.selected)
+        refs["check"].value = state
+        refs["title"].value = self._members_title(group, len(ids), chosen)
 
     # ------------------------------------------------------------------ 動作
     def _choose(self, group: SameTextGroup, text: str) -> None:
@@ -688,8 +756,39 @@ class SameTextReviewDialog:
         else:
             self.selected.discard(member.entry_id)
         self._confirm_overwrite = False
+        for group in self.groups:
+            if any(m.entry_id == member.entry_id for m in group.members):
+                self._refresh_group_header(group.group_id)
+                break
         self._render_apply_button()
         self._safe_update()
+
+    def _toggle_expand(self, group: SameTextGroup) -> None:
+        """展開／收合該組成員清單；展開時才建立逐筆控制項。"""
+        refs = self._cards.get(group.group_id)
+        if refs is None:
+            return
+        expanded = group.group_id not in self.expanded
+        if expanded:
+            self.expanded.add(group.group_id)
+            refs["holder"].content = self._member_list(
+                group, chosen_text(group, self.choice)
+            )
+        else:
+            self.expanded.discard(group.group_id)
+            refs["holder"].content = None
+        refs["holder"].visible = expanded
+        refs["arrow"].icon = self._arrow(expanded)
+        self._safe_update()
+
+    def _toggle_group(self, group: SameTextGroup) -> None:
+        """群組勾選方塊：全部已勾就取消，否則勾選這一組可統一的成員。"""
+        ids = selectable_ids(group, self.choice, self._include())
+        state, _ = selection_state(ids, self.selected)
+        if state is True:
+            self._clear_group(group)
+        else:
+            self._select_group(group)
 
     def _select_group(self, group: SameTextGroup) -> None:
         self.selected |= selectable_ids(group, self.choice, self._include())
