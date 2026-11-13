@@ -12,6 +12,8 @@ from __future__ import annotations
 import flet as ft
 
 from app.services_impl.moddb_service import (
+    CATEGORY_FILL,
+    CATEGORY_INCONSISTENT,
     MAX_SOURCE_CHARS,
     QueryCancelled,
     SameTextApplyItem,
@@ -113,11 +115,19 @@ def kind_options(groups: list[SameTextGroup]) -> list[tuple[str, str]]:
     return [(ALL_KINDS, "全部類型"), *sorted(seen.items(), key=lambda kv: kv[1])]
 
 
+CATEGORY_LABELS = {CATEGORY_INCONSISTENT: "譯文不一致", CATEGORY_FILL: "補譯"}
+
+
 def filter_groups(
-    groups: list[SameTextGroup], kind_key: str, view: str
+    groups: list[SameTextGroup],
+    kind_key: str,
+    view: str,
+    category: str | None = None,
 ) -> list[SameTextGroup]:
-    """依類型群組與「可統一／無已審核譯文」篩選。"""
+    """依分類（譯文不一致／補譯）、類型群組與「可統一／無已審核譯文」篩選。"""
     out = groups
+    if category is not None:
+        out = [g for g in out if g.category == category]
     if kind_key != ALL_KINDS:
         out = [g for g in out if "|".join(g.kinds) == kind_key]
     if view == VIEW_APPLICABLE:
@@ -147,6 +157,7 @@ class SameTextReviewDialog:
         self.en_us = en_us
         self.groups: list[SameTextGroup] = []
         self.view = VIEW_ALL
+        self.category = CATEGORY_INCONSISTENT
         self.current_page = 1
         self.selected: set[int] = set()
         self.choice: dict[str, str] = {}  # 群組 → 使用者選的統一譯文
@@ -180,6 +191,11 @@ class SameTextReviewDialog:
         )
         kit.set_dropdown_options(self.kind_dd, [(ALL_KINDS, "全部類型")])
         self.kind_dd.value = ALL_KINDS
+        self.category_seg = kit.Segmented(
+            [(key, label) for key, label in CATEGORY_LABELS.items()],
+            CATEGORY_INCONSISTENT,
+            self._on_category,
+        )
         self.view_seg = kit.Segmented(
             [
                 (VIEW_ALL, "全部"),
@@ -207,7 +223,7 @@ class SameTextReviewDialog:
             on_change=self._on_include_reviewed,
         )
         self.select_all_btn = kit.button(
-            "全選可統一的條目", "ghost", size="sm", on_click=self._select_all
+            "全選目前分類可統一的條目", "ghost", size="sm", on_click=self._select_all
         )
         self.clear_btn = kit.button(
             "取消全選", "ghost", size="sm", on_click=self._clear_selection
@@ -256,6 +272,7 @@ class SameTextReviewDialog:
                             wrap=True,
                             vertical_alignment=ft.CrossAxisAlignment.CENTER,
                         ),
+                        self.category_seg,
                         self.view_seg,
                         self.summary,
                         self.selection_row,
@@ -394,13 +411,23 @@ class SameTextReviewDialog:
 
     # ------------------------------------------------------------------ 畫面
     def _shown(self) -> list[SameTextGroup]:
-        return filter_groups(self.groups, self.kind_dd.value or ALL_KINDS, self.view)
+        return filter_groups(
+            self.groups, self.kind_dd.value or ALL_KINDS, self.view, self.category
+        )
 
     def _include(self) -> bool:
         return bool(self.include_reviewed.value)
 
     def _on_kind(self, _e=None) -> None:
         self.current_page = 1
+        self._render()
+
+    def _on_category(self, key: str) -> None:
+        """切換分類：勾選只對目前分類有效，不帶到另一個分類。"""
+        self.category = key
+        self.current_page = 1
+        self.selected.clear()
+        self._confirm_overwrite = False
         self._render()
 
     def _on_view(self, key: str) -> None:
@@ -417,13 +444,22 @@ class SameTextReviewDialog:
         start = (self.current_page - 1) * PAGE_SIZE
         self.list_col.controls = [
             self._group_card(g) for g in shown[start : start + PAGE_SIZE]
-        ] or [kit.hint_text("沒有原文相同但譯文不一致的條目。")]
+        ] or [
+            kit.hint_text(
+                "沒有原文相同但譯文不一致的條目。"
+                if self.category == CATEGORY_INCONSISTENT
+                else "沒有只缺譯文的組別（其餘成員已有同一種譯文）。"
+            )
+        ]
         self.pager.visible = len(shown) > PAGE_SIZE
         self.pager.set_state(len(shown), self.current_page)
+        inconsistent = sum(
+            1 for g in self.groups if g.category == CATEGORY_INCONSISTENT
+        )
         blocked = sum(1 for g in self.groups if not g.applicable)
         self.summary.value = (
-            f"不一致 {format_count(len(self.groups))} 組"
-            f"・可統一 {format_count(len(self.groups) - blocked)} 組"
+            f"譯文不一致 {format_count(inconsistent)} 組"
+            f"・補譯 {format_count(len(self.groups) - inconsistent)} 組"
             f"・無已審核譯文 {format_count(blocked)} 組"
         )
         self.scope_note.value = self._scope_text()
@@ -534,7 +570,10 @@ class SameTextReviewDialog:
                     ft.Row(
                         [
                             kit.chip(
-                                "人工已審核" if candidate.manual else "已審核", "em"
+                                source_label(
+                                    candidate.source, self._catalog, "reviewed"
+                                ),
+                                "em",
                             ),
                             ft.Text(
                                 f"{format_count(candidate.member_count)} 筆",

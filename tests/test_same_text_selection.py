@@ -92,3 +92,28 @@ def test_filters_by_kind_group_and_applicability():
     assert filter_groups(groups, "guide", "all") == [guide]
     assert filter_groups(groups, ALL_KINDS, VIEW_APPLICABLE) == [lang]
     assert filter_groups(groups, ALL_KINDS, VIEW_BLOCKED) == [guide]
+
+
+def test_category_filter_separates_inconsistent_from_fill():
+    from app.views.moddb.same_text_review_dialog import (
+        CATEGORY_FILL,
+        CATEGORY_INCONSISTENT,
+    )
+
+    mixed = _group(
+        [_member(1, "關閉", reviewed=True), _member(2, "閉合")],
+        [_candidate("關閉", 1)],
+        gid="m",
+    )
+    fill = _group(
+        [_member(3, "開啟", reviewed=True), _member(4, "")],
+        [_candidate("開啟", 3)],
+        gid="f",
+    )
+    assert mixed.category == CATEGORY_INCONSISTENT and fill.category == CATEGORY_FILL
+    groups = [mixed, fill]
+    assert filter_groups(groups, ALL_KINDS, "all", CATEGORY_INCONSISTENT) == [mixed]
+    assert filter_groups(groups, ALL_KINDS, "all", CATEGORY_FILL) == [fill]
+    assert (
+        filter_groups(groups, ALL_KINDS, "all") == groups
+    )  # 不指定分類＝全部（相容舊用法）

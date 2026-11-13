@@ -273,17 +273,27 @@ def test_scope_option_and_cleanup_queries_avoid_temp_sort(db):
 
 
 def test_same_text_review_scan_avoids_temp_sort(db):
-    """同文一致性審核分段掃描：整個版本走 idx_entry_version、單一模組走 idx_entry_mod，
-    依條目編號走索引順序，不得出現臨時排序。"""
+    """同文一致性審核：整個版本走 idx_entry_version、單一模組走 idx_entry_mod（依條目編號走索引順序），
+    指定原文時改走 idx_entry_en 的點查，不掃整個版本；第二階段是主鍵查找。都不得出現臨時排序。"""
     calls = (
-        lambda: db.list_same_text_groups("1.20.1"),
-        lambda: db.list_same_text_groups("1.20.1", mod_ids=["alpha", "beta"]),
-        lambda: db.list_same_text_groups(
-            "1.20.1", kinds=["lang"], en_us="alpha lang 1"
+        (lambda: db.list_same_text_groups("1.20.1"), "idx_entry_version"),
+        (
+            lambda: db.list_same_text_groups("1.20.1", mod_ids=["alpha", "beta"]),
+            "idx_entry_mod",
+        ),
+        (
+            lambda: db.list_same_text_groups(
+                "1.20.1", kinds=["lang"], en_us="alpha lang 1"
+            ),
+            "idx_entry_en",
         ),
     )
-    for call in calls:
+    for call, index in calls:
+        db.__dict__.pop("_same_text_cache", None)  # 結果快取命中時不會執行查詢
         offenders = _temp_sort_plans(db, call)
         assert not offenders, offenders
+        db.__dict__.pop("_same_text_cache", None)
         plans = _all_plans(db, call)
-        assert any("idx_entry_version" in p or "idx_entry_mod" in p for p in plans)
+        assert any(index in p for p in plans), (index, plans)
+        if index == "idx_entry_en":
+            assert not any("idx_entry_version" in p for p in plans), plans

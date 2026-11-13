@@ -80,6 +80,8 @@ from translation_tool.translation_db.query_interrupt import (
     QueryInterrupt,
 )
 from translation_tool.translation_db.same_text_review import (
+    CATEGORY_FILL,
+    CATEGORY_INCONSISTENT,
     MAX_SOURCE_CHARS,
     CanonicalCandidate,
     SameTextApplyItem,
@@ -116,6 +118,8 @@ from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
+    "CATEGORY_FILL",
+    "CATEGORY_INCONSISTENT",
     "MAX_SOURCE_CHARS",
     "NO_PACK_SCOPE_HINT",
     "PACK_SCOPE_HINT",

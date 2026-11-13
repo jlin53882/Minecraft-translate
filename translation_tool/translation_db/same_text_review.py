@@ -25,7 +25,9 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -37,7 +39,7 @@ from .content_identity import (
     same_text_kinds,
 )
 from .query_interrupt import QueryCancelled
-from .schema import SRC_MANUAL
+from .schema import SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import effective_review_sql, reference_locale_sql
 
 if TYPE_CHECKING:
@@ -47,11 +49,13 @@ if TYPE_CHECKING:
 
 MAX_SOURCE_CHARS = 80  # 預設只看短句：長文的譯文本來就不該強求一致
 JAR_SOURCE_LOCALE = "en_us"
+CATEGORY_INCONSISTENT = "inconsistent"
+CATEGORY_FILL = "fill"
 SAME_TEXT_NOTE = "同文統一"
 _REVIEWED_STATES = ("reviewed", "legacy_unknown")
 _REVIEW_ACTION = "review"
 _ID_CHUNK = 500  # 一次處理的條目數：控制單次查詢大小，也是取消、回報進度與釋放鎖的間隔
-_MANUAL_CHECKER = "人工"
+SAME_TEXT_CHECKER = "同文統一"  # 寫入列的 checker：與真正的人工審核區分
 
 
 @dataclass(frozen=True)
@@ -83,6 +87,7 @@ class CanonicalCandidate:
     member_count: int  # 目前生效譯文就是這段文字的成員數（含尚未審核者）
     reviewed_count: int
     manual: bool  # 代表條目是人工來源
+    source: int | None = None  # 代表條目的生效來源（畫面標示用）
 
 
 @dataclass(frozen=True)
@@ -110,6 +115,13 @@ class SameTextGroup:
     @property
     def distinct_translations(self) -> int:
         return len({m.zh_tw for m in self.members if m.zh_tw})
+
+    @property
+    def category(self) -> str:
+        """``inconsistent``：>= 2 種不同的譯文；``fill``：一種譯文加上尚未翻譯的成員（補譯）。"""
+        return (
+            CATEGORY_INCONSISTENT if self.distinct_translations >= 2 else CATEGORY_FILL
+        )
 
     @property
     def untranslated(self) -> int:
@@ -171,6 +183,7 @@ class SameTextApplyResult:
     applied: int = 0
     skipped_reviewed: int = 0  # 目標已審核且項目不允許覆蓋
     unchanged: int = 0  # 目標譯文已經是統一譯文
+    duplicates: int = 0  # 同一批內重複的條目（只套用第一筆）
     stale: int = 0  # 套用時畫面資料已過期而略過
     history_id: int | None = None  # 任一筆歷史編號，可傳給 ``TranslationDB.revert``
     entry_ids: list[int] = field(default_factory=list)
@@ -180,7 +193,7 @@ class SameTextApplyResult:
 
 
 def _scan_sql(kinds: Sequence[str], by_mod: bool) -> str:
-    """分段讀取條目與生效譯文的查詢。
+    """第一階段：分段讀取條目與生效譯文（只取分群需要的欄位，不算來源語系）。
 
     指定索引讓 ``ORDER BY e.id`` 直接走索引順序：整個版本走 ``idx_entry_version``，
     單一模組走 ``idx_entry_mod``（兩者的 rowid 都是第二鍵），不會建立臨時排序。
@@ -188,13 +201,10 @@ def _scan_sql(kinds: Sequence[str], by_mod: bool) -> str:
     index = "idx_entry_mod" if by_mod else "idx_entry_version"
     mod_clause = " AND e.mod_id = ?" if by_mod else ""
     kind_clause = f"AND e.kind IN ({','.join('?' * len(kinds))}) " if kinds else ""
-    review = effective_review_sql("ft", True)
     return (
-        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, ft.zh_tw, ft.source, "
-        f"{review}, tt.revision, {reference_locale_sql('e')} "
+        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, ft.zh_tw "
         f"FROM entry e INDEXED BY {index} "
         "LEFT JOIN effective ft ON ft.entry_id = e.id "
-        "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
         f"WHERE e.mc_version = ?{mod_clause} AND e.id > ? "
         f"{kind_clause}"
         "AND e.en_us <> '' AND length(e.en_us) <= ? "
@@ -237,7 +247,7 @@ def _scan_chunks(
 
 
 def _candidates(members: Sequence[SameTextMember]) -> tuple[CanonicalCandidate, ...]:
-    """成員中已審核的譯文，依「成員數多、人工來源優先、已審核成員多」排序。"""
+    """成員中已審核的譯文，依「人工來源優先、成員數多、已審核成員多」排序。"""
     by_text: dict[str, list[SameTextMember]] = {}
     for member in members:
         if member.zh_tw:
@@ -257,24 +267,56 @@ def _candidates(members: Sequence[SameTextMember]) -> tuple[CanonicalCandidate, 
                 len(same),
                 len(reviewed),
                 rep.source == SRC_MANUAL,
+                rep.source,
             )
         )
-    out.sort(key=lambda c: (-c.member_count, not c.manual, -c.reviewed_count, c.zh_tw))
+    out.sort(key=lambda c: (not c.manual, -c.member_count, -c.reviewed_count, c.zh_tw))
     return tuple(out)
 
 
-def _is_inconsistent(members: Sequence[SameTextMember]) -> bool:
-    translations = {m.zh_tw for m in members if m.zh_tw}
+def _texts_inconsistent(texts: Sequence[str]) -> bool:
+    """>= 2 種不同的非空譯文，或一種譯文加上尚未翻譯的成員。"""
+    translations = {t for t in texts if t}
     return len(translations) >= 2 or (
-        len(translations) == 1 and any(not m.zh_tw for m in members)
+        len(translations) == 1 and any(not t for t in texts)
     )
 
 
-def _group_key(kind: str, locale: str, en_us: str) -> tuple[tuple[str, ...], str, str]:
-    return same_text_kinds(kind), locale, loose_text(en_us)
+def _fast_loose(text: str) -> str:
+    """:func:`loose_text` 的快速路徑：沒有 ``%``（格式控制碼）與換行時只需轉小寫並收合空白。"""
+    if "%" in text or "\n" in text or "\r" in text:
+        return loose_text(text)
+    return " ".join(text.casefold().split())
 
 
-def _member_from_row(row: tuple) -> SameTextMember:
+def _detail_sql(count: int) -> str:
+    return (
+        "SELECT e.id, ft.source, "
+        f"{effective_review_sql('ft', True)}, tt.revision, {reference_locale_sql('e')} "
+        "FROM entry e "
+        "LEFT JOIN effective ft ON ft.entry_id = e.id "
+        "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
+        f"WHERE e.id IN ({','.join('?' * count)})"
+    )
+
+
+def _fetch_details(
+    db: TranslationDB, ids: Sequence[int], cancel: Callable[[], bool] | None
+) -> dict[int, tuple]:
+    """第二階段：只替候選群組的成員讀來源、審核狀態、revision 與來源語系（主鍵查找）。"""
+    out: dict[int, tuple] = {}
+    for start in range(0, len(ids), _ID_CHUNK):
+        if cancel is not None and cancel():
+            raise QueryCancelled
+        chunk = ids[start : start + _ID_CHUNK]
+        with db._lock:
+            for row in db._conn.execute(_detail_sql(len(chunk)), chunk):
+                out[int(row[0])] = row[1:]
+    return out
+
+
+def _member(row: tuple, detail: tuple) -> SameTextMember:
+    source, status, revision, _locale = detail
     return SameTextMember(
         int(row[0]),
         row[1],
@@ -282,13 +324,137 @@ def _member_from_row(row: tuple) -> SameTextMember:
         row[3],
         row[4],
         row[5] or "",
-        None if row[6] is None else int(row[6]),
-        row[7] in _REVIEWED_STATES,
-        None if row[8] is None else int(row[8]),
+        None if source is None else int(source),
+        status in _REVIEWED_STATES,
+        None if revision is None else int(revision),
     )
 
 
-def list_inconsistent_groups(
+def _member_locale(kind: str, locale: str) -> str | None:
+    """成員併組用的來源語系；語系未知回傳 None（不併入任何群組）。"""
+    if locale.startswith("unknown:"):
+        return None
+    if not locale and kind not in PACK_KINDS:
+        return JAR_SOURCE_LOCALE  # 模組 jar 的 lang 不記錄來源紀錄，原文一定是 en_us
+    return locale
+
+
+def _regroup_with_locale(
+    candidates: Sequence[list[tuple]],
+    details: dict[int, tuple],
+    loose: dict[str, str],
+) -> list[SameTextGroup]:
+    """候選群組依來源語系再分組，並只保留不一致者（成員維持條目編號順序）。"""
+    groups: dict[tuple, list[SameTextMember]] = {}
+    sources: dict[tuple, str] = {}
+    for rows in candidates:
+        for row in rows:
+            detail = details.get(int(row[0]))
+            locale = None if detail is None else _member_locale(row[1], str(detail[3]))
+            if locale is None:
+                continue
+            key = (same_text_kinds(row[1]), locale, loose[row[4]])
+            groups.setdefault(key, []).append(_member(row, detail))
+            sources.setdefault(key, row[4])
+    return [
+        SameTextGroup(
+            "\x1f".join((",".join(key[0]), key[1], key[2])),
+            sources[key],
+            key[0],
+            key[1],
+            tuple(members),
+            _candidates(members),
+        )
+        for key, members in groups.items()
+        if len(members) >= 2 and _texts_inconsistent([m.zh_tw for m in members])
+    ]
+
+
+def _case_variants(text: str) -> list[str]:
+    """用 ``idx_entry_en`` 找寬鬆相同原文時要查的字串：原樣、收合空白與常見的大小寫寫法。
+
+    寬鬆比對（大小寫、空白）無法用 B-tree 索引表達，所以只查這些常見寫法：原樣、全小寫、
+    全大寫、每字首大寫、僅句首大寫，各搭配「原樣」與「去頭尾並收合空白」兩種空白。
+    其他混合大小寫（例如 ``AD Astra``）或帶多餘空白的變體不會被找到。
+    """
+    bases = [text, text.strip(), " ".join(text.split())]
+    out: list[str] = []
+    for base in bases:
+        for variant in (
+            base,
+            base.lower(),
+            base.upper(),
+            base.title(),
+            base.capitalize(),
+        ):
+            if variant and variant not in out:
+                out.append(variant)
+    return out
+
+
+def _rows_by_en_us(
+    db: TranslationDB,
+    version: str,
+    wanted_text: str,
+    mod_ids: Sequence[str] | None,
+    kinds: Sequence[str],
+    max_chars: int,
+) -> list[tuple]:
+    """以 ``idx_entry_en`` 依原文取候選條目（不掃整個版本），結果依條目編號排序。"""
+    variants = _case_variants(wanted_text)
+    sql = (
+        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, ft.zh_tw "
+        "FROM entry e INDEXED BY idx_entry_en "
+        "LEFT JOIN effective ft ON ft.entry_id = e.id "
+        f"WHERE e.en_us IN ({','.join('?' * len(variants))}) AND e.mc_version = ? "
+        "AND length(e.en_us) <= ?"
+    )
+    args: list[object] = [*variants, version, max_chars]
+    if mod_ids:
+        sql += f" AND e.mod_id IN ({','.join('?' * len(mod_ids))})"
+        args += list(mod_ids)
+    if kinds:
+        sql += f" AND e.kind IN ({','.join('?' * len(kinds))})"
+        args += list(kinds)
+    with db._lock:
+        rows = db._conn.execute(sql, args).fetchall()
+    return sorted(rows, key=lambda r: int(r[0]))
+
+
+_CACHE_SIZE = 4  # 每個資料庫實例最多保留幾組掃描結果
+
+
+def _cache_key(
+    db: TranslationDB, version: str, mod_ids, pack_scope, kinds, en_us, max_chars
+) -> tuple | None:
+    """掃描結果快取的鍵：資料世代加上全部查詢條件；取不到世代時不使用快取。
+
+    世代讀取用不等主連線鎖的版本（畫面執行緒也能安全呼叫）。
+    """
+    reader = getattr(db, "cache_generation_nowait", None) or getattr(
+        db, "_cache_generation", None
+    )
+    if reader is None:
+        return None
+    return (
+        reader(),
+        version,
+        tuple(mod_ids or ()),
+        pack_scope,
+        tuple(kinds or ()),
+        en_us,
+        max_chars,
+    )
+
+
+def _cache_of(db: TranslationDB) -> tuple[OrderedDict, threading.Lock]:
+    """資料庫實例上的結果快取（Python 物件，不經 ``READ_CACHE``）；以世代失效。"""
+    cache = db.__dict__.setdefault("_same_text_cache", OrderedDict())
+    lock = db.__dict__.setdefault("_same_text_cache_lock", threading.Lock())
+    return cache, lock
+
+
+def _scan_groups(
     db: TranslationDB,
     version: str,
     *,
@@ -303,78 +469,157 @@ def list_inconsistent_groups(
     """某個遊戲版本中，原文相同但譯文不一致的群組（成員數多的在前）。
 
     - ``mod_ids``：只掃這些模組的條目（群組只含這些模組的成員）；
-    - ``pack_scope``：KubeJS／FTB 條目只取該模組包身分（``資料夾@路徑雜湊``）的條目，
-      模組 jar 的 lang 不分模組包版本；
+    - ``pack_scope``：模組識別帶模組包身分（``命名空間@資料夾@路徑雜湊``，KubeJS／FTB 各類型）的
+      條目只取該模組包身分的條目，模組 jar 的 lang 不分模組包版本；
     - ``kinds``：只掃這些類型；預設掃全部類型（各類型只和 ``same_text_kinds`` 同群組的類型分組）；
-    - ``en_us``：只看與這段原文（寬鬆比對）相同的群組；
+    - ``en_us``：只看與這段原文（寬鬆比對）相同的群組。這條路徑不掃整個版本，改用
+      ``idx_entry_en`` 查原文的常見寫法（見 :func:`_case_variants`），其他混合大小寫或帶
+      多餘空白的寫法不會被找到；
     - ``max_chars``：原文超過這個長度的條目不納入；
     - ``cancel`` 回傳 True 時拋出 :class:`QueryCancelled`；``progress`` 以 0..1 回報進度。
 
-    分群在 Python 端以 ``(類型群組, 來源語系, 寬鬆原文)`` 為鍵：寬鬆比對（大小寫、空白）
-    無法用索引表達，所以掃描走編號順序而不是原文順序；沒有臨時排序，記憶體與範圍內
-    的條目數成正比（只存輕量成員，結果只保留不一致的群組）。
+    分兩個階段：第一階段只讀分群需要的欄位，以 ``(類型群組, 寬鬆原文)`` 分群並留下「不分語系
+    也不一致」的群組（語系只會把群組切小，所以這是不一致群組的超集）；第二階段只替這些候選
+    成員讀來源、審核狀態、revision 與來源語系（主鍵查找，來源語系的子查詢不必對整個版本執行），
+    再依來源語系分組並判斷。掃描走編號順序而不是原文順序（寬鬆比對無法用索引表達），沒有
+    臨時排序；結果只保留不一致的群組。
     """
     if not db.has_review_state:
         return []
     scan_kinds = tuple(kinds) if kinds else ()
-    wanted = None if en_us is None else loose_text(en_us)
-    scopes: list[str | None] = list(mod_ids) if mod_ids else [None]
-    low, high = _id_range(db, version) if scopes == [None] else (0, 0)
-    groups: dict[tuple, list[SameTextMember]] = {}
-    sources: dict[tuple, str] = {}
-    for index, mod in enumerate(scopes):
-        for rows in _scan_chunks(db, version, mod, scan_kinds, max_chars, cancel):
-            _collect(rows, groups, sources, wanted, pack_scope)
-            if progress is not None:
-                progress(_fraction(index, len(scopes), int(rows[-1][0]), low, high))
+    groups: dict[tuple, list[tuple]] = {}
+    loose: dict[str, str] = {}  # 原文 → 寬鬆形式（很多條目的原文完全相同，只算一次）
+    if en_us is not None:
+        rows = _rows_by_en_us(db, version, en_us, mod_ids, scan_kinds, max_chars)
+        _collect(rows, groups, _fast_loose(en_us), pack_scope, loose)
+    else:
+        _scan_into(
+            db,
+            version,
+            mod_ids,
+            scan_kinds,
+            max_chars,
+            pack_scope,
+            groups,
+            loose,
+            cancel,
+            progress,
+        )
+    candidates = [
+        rows
+        for rows in groups.values()
+        if len(rows) >= 2 and _texts_inconsistent([r[5] or "" for r in rows])
+    ]
+    ids = [int(r[0]) for rows in candidates for r in rows]
+    details = _fetch_details(db, ids, cancel)
+    out = _regroup_with_locale(candidates, details, loose)
     if progress is not None:
         progress(1.0)
-    out = [
-        SameTextGroup(
-            "\x1f".join((",".join(key[0]), key[1], key[2])),
-            sources[key],
-            key[0],
-            key[1],
-            tuple(members),
-            _candidates(members),
-        )
-        for key, members in groups.items()
-        if len(members) >= 2 and _is_inconsistent(members)
-    ]
     out.sort(key=lambda g: (-len(g.members), g.group_id))
     return out
 
 
+def list_inconsistent_groups(
+    db: TranslationDB,
+    version: str,
+    *,
+    mod_ids: Sequence[str] | None = None,
+    pack_scope: str = "",
+    kinds: Sequence[str] | None = None,
+    en_us: str | None = None,
+    max_chars: int = MAX_SOURCE_CHARS,
+    cancel: Callable[[], bool] | None = None,
+    progress: Callable[[float], None] | None = None,
+) -> list[SameTextGroup]:
+    """:func:`_scan_groups` 加上以資料世代為鍵的結果快取。
+
+    鍵含資料世代與全部查詢條件，資料一變（包含對話框自己的套用與復原）就自然失效並重掃；
+    沒有變動時重新開啟對話框直接取快取。結果是不可變物件，快取只留最近 ``_CACHE_SIZE`` 組。
+    世代在掃描前讀取：掃描途中資料有變，結果只會存在舊世代的鍵下，不會被新世代取用。
+    """
+    key = _cache_key(db, version, mod_ids, pack_scope, kinds, en_us, max_chars)
+    cache, lock = _cache_of(db)
+    if key is not None:
+        with lock:
+            hit = cache.get(key)
+            if hit is not None:
+                cache.move_to_end(key)
+        if hit is not None:
+            if progress is not None:
+                progress(1.0)
+            return list(hit)
+    groups = _scan_groups(
+        db,
+        version,
+        mod_ids=mod_ids,
+        pack_scope=pack_scope,
+        kinds=kinds,
+        en_us=en_us,
+        max_chars=max_chars,
+        cancel=cancel,
+        progress=progress,
+    )
+    if key is not None:
+        with lock:
+            cache[key] = tuple(groups)
+            while len(cache) > _CACHE_SIZE:
+                cache.popitem(last=False)
+    return groups
+
+
+def _scan_into(
+    db: TranslationDB,
+    version: str,
+    mod_ids: Sequence[str] | None,
+    kinds: tuple[str, ...],
+    max_chars: int,
+    pack_scope: str,
+    groups: dict[tuple, list[tuple]],
+    loose: dict[str, str],
+    cancel: Callable[[], bool] | None,
+    progress: Callable[[float], None] | None,
+) -> None:
+    """第一階段：分段掃描整個版本（或指定模組）並分群。"""
+    scopes: list[str | None] = list(mod_ids) if mod_ids else [None]
+    low, high = _id_range(db, version) if scopes == [None] else (0, 0)
+    for index, mod in enumerate(scopes):
+        for rows in _scan_chunks(db, version, mod, kinds, max_chars, cancel):
+            _collect(rows, groups, None, pack_scope, loose)
+            if progress is not None:
+                progress(_fraction(index, len(scopes), int(rows[-1][0]), low, high))
+
+
 def _fraction(index: int, total: int, last_id: int, low: int, high: int) -> float:
-    """掃描進度：整個版本依編號範圍估算；逐模組掃描依已完成的模組數。"""
+    """第一階段的進度（占整體 95%）：整個版本依編號範圍估算；逐模組掃描依已完成的模組數。"""
     if total > 1 or high <= low:
-        return min(0.99, index / total)
-    return min(0.99, (last_id - low) / (high - low + 1))
+        return min(0.95, index / total)
+    return min(0.95, (last_id - low) / (high - low + 1))
 
 
 def _collect(
     rows: Sequence[tuple],
-    groups: dict[tuple, list[SameTextMember]],
-    sources: dict[tuple, str],
+    groups: dict[tuple, list[tuple]],
     wanted: str | None,
     pack_scope: str,
+    loose: dict[str, str],
 ) -> None:
-    """把一段查詢結果放進群組；語系未知、非指定模組包、不是指定原文的條目略過。"""
+    """把一段查詢結果依（類型群組, 寬鬆原文）分群；非指定模組包、不是指定原文的條目略過。"""
+    kind_groups: dict[str, tuple[str, ...]] = {}
     for row in rows:
-        locale = str(row[9])
-        if locale.startswith("unknown:"):
-            continue  # 來源語系不明的條目不併入任何群組
-        if not locale and row[1] not in PACK_KINDS:
-            locale = (
-                JAR_SOURCE_LOCALE  # 模組 jar 的 lang 不記錄來源紀錄，原文一定是 en_us
-            )
-        if pack_scope and row[1] in PACK_KINDS and pack_scope_of(row[2]) != pack_scope:
+        kind, en = row[1], row[4]
+        if pack_scope:
+            owner = pack_scope_of(row[2])  # kubejs_script 等類型的識別也帶 @資料夾@雜湊
+            if owner and owner != pack_scope:
+                continue
+        key = loose.get(en)
+        if key is None:
+            key = loose[en] = _fast_loose(en)
+        if wanted is not None and key != wanted:
             continue
-        key = _group_key(row[1], locale, row[4])
-        if wanted is not None and key[2] != wanted:
-            continue
-        groups.setdefault(key, []).append(_member_from_row(row))
-        sources.setdefault(key, row[4])
+        kinds = kind_groups.get(kind)
+        if kinds is None:
+            kinds = kind_groups[kind] = same_text_kinds(kind)
+        groups.setdefault((kinds, key), []).append(row)
 
 
 # ------------------------------------------------------------------ 套用
@@ -396,8 +641,8 @@ def _current_canonical(
 ) -> tuple | None:
     return conn.execute(
         "SELECT ft.zh_tw, ft.checker, "
-        f"{effective_review_sql('ft', True)}, tt.revision "
-        "FROM effective ft "
+        f"{effective_review_sql('ft', True)}, tt.revision, e.en_us "
+        "FROM effective ft JOIN entry e ON e.id = ft.entry_id "
         "LEFT JOIN translation tt ON tt.entry_id = ft.entry_id AND tt.source = ft.source "
         "WHERE ft.entry_id = ?",
         (item.canonical_entry_id,),
@@ -417,18 +662,21 @@ def _target_unchanged(item: SameTextApplyItem, target: tuple) -> bool:
     )
 
 
-def _canonical_unchanged(item: SameTextApplyItem, canonical: tuple) -> bool:
-    """統一譯文的來源條目仍是同一段已審核譯文（revision 也沒變）。"""
+def _canonical_unchanged(
+    item: SameTextApplyItem, canonical: tuple, target_en_us: str
+) -> bool:
+    """統一譯文的來源條目仍是同一段已審核譯文（revision 也沒變），且原文與目標寬鬆相同。"""
     return (
-        canonical[0] == item.zh_tw
+        _fast_loose(canonical[4]) == _fast_loose(target_en_us)
+        and canonical[0] == item.zh_tw
         and canonical[2] in _REVIEWED_STATES
         and int(canonical[3] or 0) == item.expected_canonical_revision
     )
 
 
-def _check(conn: sqlite3.Connection, item: SameTextApplyItem) -> tuple[str, str]:
-    """重新確認一筆；回傳（結果, 統一譯文的 checker）。結果是 ``ok``、``stale``、
-    ``reviewed``（目標已審核且不允許覆蓋）或 ``unchanged``。"""
+def _check(conn: sqlite3.Connection, item: SameTextApplyItem) -> str:
+    """重新確認一筆；結果是 ``ok``、``stale``、``reviewed``（目標已審核且不允許覆蓋）
+    或 ``unchanged``。"""
     target = _current_target(conn, item)
     canonical = _current_canonical(conn, item)
     if (
@@ -436,20 +684,19 @@ def _check(conn: sqlite3.Connection, item: SameTextApplyItem) -> tuple[str, str]
         or canonical is None
         or item.entry_id == item.canonical_entry_id
         or not _target_unchanged(item, target)
-        or not _canonical_unchanged(item, canonical)
+        or not _canonical_unchanged(item, canonical, target[0])
     ):
-        return "stale", ""
+        return "stale"
     if (target[1] or "") == item.zh_tw:
-        return "unchanged", ""
+        return "unchanged"
     if item.expected_target_reviewed and not item.allow_overwrite_reviewed:
-        return "reviewed", ""
-    return "ok", canonical[1] or ""
+        return "reviewed"
+    return "ok"
 
 
 def _write_canonical(
     conn: sqlite3.Connection,
     item: SameTextApplyItem,
-    canonical_checker: str,
     batch: str,
     actor: str,
 ) -> int:
@@ -463,8 +710,10 @@ def _write_canonical(
         item.expected_target_reviewed and item.expected_target_source is not None
     )
     target_source = item.expected_target_source if overwrite else SRC_MANUAL
+    # 與 cross_version_review 的規則一致：人工列與跨版本列帶可辨識的 checker，
+    # 其他來源（模組自帶譯文等）的 checker 維持空字串
     checker = (
-        (canonical_checker or _MANUAL_CHECKER) if target_source == SRC_MANUAL else ""
+        SAME_TEXT_CHECKER if target_source in (SRC_MANUAL, SRC_CROSS_VERSION) else ""
     )
     prev = conn.execute(
         "SELECT zh_tw, checker, review_status, revision FROM translation "
@@ -522,8 +771,15 @@ def apply_canonical(
         return result
     batch = uuid.uuid4().hex
     with db._tx(bump_generation_on_noop=False, keep_review=True) as conn:
+        seen: set[int] = set()
         for item in items:
-            outcome, checker = _check(conn, item)
+            if item.entry_id in seen:
+                result.duplicates += (
+                    1  # 生效譯文到交易結束才重整，重複項目的 CAS 會讀到舊狀態
+                )
+                continue
+            seen.add(item.entry_id)
+            outcome = _check(conn, item)
             if outcome == "stale":
                 result.stale += 1
             elif outcome == "reviewed":
@@ -531,7 +787,7 @@ def apply_canonical(
             elif outcome == "unchanged":
                 result.unchanged += 1
             else:
-                hid = _write_canonical(conn, item, checker, batch, actor)
+                hid = _write_canonical(conn, item, batch, actor)
                 result.applied += 1
                 result.entry_ids.append(item.entry_id)
                 result.history_id = result.history_id or hid

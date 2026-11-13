@@ -44,13 +44,13 @@
     "app/views/moddb/entries_panel.py": 1187,
     "app/views/moddb/repair_reviewer.py": 821,
     "app/views/moddb/review_scope_dialog.py": 815,
-    "app/views/moddb/same_text_review_dialog.py": 838,
+    "app/views/moddb/same_text_review_dialog.py": 877,
     "app/views/moddb/smart_review_batch_reviewer.py": 1090,
     "app/views/moddb/smart_review_reviewer.py": 850,
     "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 950,
     "app/views/moddb/translate_panel.py": 1182,
-    "app/views/moddb/version_diff_dialog.py": 937,
+    "app/views/moddb/version_diff_dialog.py": 956,
     "app/views/moddb_view.py": 964
   }
 }

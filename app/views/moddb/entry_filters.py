@@ -422,7 +422,27 @@ def on_advanced_change(panel) -> None:
     refresh_entry_filter(panel, defer_options=True)
 
 
+def panel_ready(panel) -> bool:
+    """審核工具共用的開啟前檢查：資料載入中或清單有錯誤時不開啟（已打開的選單仍可點到項目）。
+
+    停用狀態只擋得住尚未打開的選單；選單打開後才進入載入或出錯時，項目仍然點得到，
+    所以每個處理函式開頭都要再檢查一次，並顯示同一則提示。
+    """
+    if getattr(panel, "_data_loading", False):
+        show_snack(panel._page, "條目資料仍在載入，請稍候再操作。", C.GOLD)
+        return False
+    error = getattr(panel, "_list_error", None)
+    if error:
+        show_snack(
+            panel._page, f"目前清單有錯誤（{error}），請先修正篩選條件。", C.GOLD
+        )
+        return False
+    return True
+
+
 def open_batch_replace(panel, _e=None) -> None:
+    if not panel_ready(panel):
+        return
     if panel.drafts:
         show_snack(
             panel._page,
@@ -448,6 +468,8 @@ def open_batch_replace(panel, _e=None) -> None:
 
 def open_bulk_review(panel, _e=None) -> None:
     """開啟批量審核，預填目前頁面支援的範圍但不自動產生預覽。"""
+    if not panel_ready(panel):
+        return
     if panel.drafts:
         show_snack(
             panel._page,
@@ -472,6 +494,8 @@ def open_bulk_review(panel, _e=None) -> None:
 
 def open_version_diff(panel, _e=None) -> None:
     """開啟版本差異審核，目標版本預設為目前檢視的版本。"""
+    if not panel_ready(panel):
+        return
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -482,6 +506,8 @@ def open_version_diff(panel, _e=None) -> None:
 
 def open_same_text_review(panel, _e=None, *, en_us: str | None = None) -> None:
     """開啟同文一致性審核，範圍預設為目前版本與模組包；``en_us`` 只看與這段原文相同的群組。"""
+    if not panel_ready(panel):
+        return
     if panel.drafts:
         show_snack(
             panel._page,
@@ -504,6 +530,8 @@ def open_same_text_review(panel, _e=None, *, en_us: str | None = None) -> None:
 
 def open_species_scan(panel, _e=None) -> None:
     """開啟學名候選掃描對話框，並預填目前版本、模組與來源範圍。"""
+    if not panel_ready(panel):
+        return
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -521,8 +549,7 @@ def open_species_scan(panel, _e=None) -> None:
 
 def open_smart_review(panel, _e=None) -> None:
     """開啟智慧校對對話框並傳入目前資料庫與篩選範圍。"""
-    if getattr(panel, "_data_loading", False):
-        show_snack(panel._page, "條目資料仍在載入，請稍候再操作。", C.GOLD)
+    if not panel_ready(panel):
         return
     if panel.drafts:
         show_snack(
