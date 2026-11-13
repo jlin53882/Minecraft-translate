@@ -349,15 +349,7 @@ class VersionDiffDialog:
         def work() -> None:
             rows = error = exclusions = None
             try:
-                rows = db.list_cross_version_differences(
-                    version,
-                    ref_version=ref,
-                    ref_pack=ref_pack,
-                    target_pack=target_pack,
-                    mod_ids=mods,
-                    cancel=lambda: self._closed or generation != self._generation,
-                )
-                exclusions = db.explain_cross_version_exclusions(
+                rows, exclusions = db.scan_cross_version_differences(
                     version,
                     ref_version=ref,
                     ref_pack=ref_pack,

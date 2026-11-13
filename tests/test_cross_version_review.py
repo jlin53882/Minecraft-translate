@@ -865,3 +865,34 @@ def test_similar_source_matches_plain_ratio_threshold():
             >= SOURCE_SIMILARITY
         )
         assert similar_source(a, b) is expected
+
+
+def test_scan_matches_fetch_rows_and_counts_exclusions(db):
+    """一次比對（scan_differences）的差異列與逐段 ``_fetch_rows`` 相同，並同時統計未列出原因。"""
+    from translation_tool.translation_db import cross_version_review as cv
+
+    _seed_reviewed(db, "1.20.1", key="a", text="亮色")
+    _seed_reviewed(db, "1.19.2", key="a", text="明亮")  # 與 1.20.1 衝突
+    db.ingest("1.18.2", [_item("b", "Bright", "亮")])  # 其他版本只有未審核的譯文
+    _import(
+        db,
+        "26.1",
+        [
+            _item("a", "Bright", "光亮"),
+            _item("b", "Bright", "暗"),
+            _item("c", "X", "y"),
+        ],
+    )
+
+    rows, summary = cv.scan_differences(db, "26.1")
+
+    ids = [r.id for r in db.list_entries("26.1", limit=None)[0]]
+    expected = [
+        r
+        for r in cv._fetch_rows(db._conn, "26.1", ref_version="", entry_ids=ids)
+        if r.differs
+    ]
+    assert rows and repr(rows) == repr(expected)
+    assert summary.ref_unreviewed == 1
+    assert db.list_cross_version_differences("26.1") == rows
+    assert db.explain_cross_version_exclusions("26.1") == summary

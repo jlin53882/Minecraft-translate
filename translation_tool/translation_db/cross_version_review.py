@@ -260,9 +260,27 @@ def _fetch_rows(
         *params,
         *pack_params,
     ]
+    return _build_rows(
+        conn.execute(sql, args),
+        ref_pack=ref_pack,
+        target_pack=target_pack,
+    )
+
+
+def _build_rows(
+    raw: Iterable[Sequence],
+    *,
+    ref_pack: str,
+    target_pack: str,
+) -> list[CrossVersionRow]:
+    """把「目標條目＋已審核、語系相容的參考」查詢結果整理成每個目標條目一列。
+
+    ``raw`` 的欄位順序：目標（編號、類型、模組、鍵值、原文、譯文、來源、審核狀態、revision）、
+    參考（編號、版本、譯文、來源、審核者、審核時間、revision、歷史編號、模組、原文）。
+    """
     grouped: dict[int, list[VersionRef]] = {}
     heads: dict[int, tuple] = {}
-    for row in conn.execute(sql, args):
+    for row in raw:
         if ref_pack and pack_label(row[1], row[17]) != ref_pack:
             continue
         if target_pack and pack_label(row[1], row[2]) != target_pack:
@@ -362,13 +380,43 @@ def list_differences(
     ``ref_pack`` 再指定其中的整合包資料夾（KubeJS／FTB）；``target_pack`` 非空時目標也只取該整合包資料夾的條目。
     分段讀取（每段 ``_ID_CHUNK`` 個目標條目），段與段之間釋放資料庫鎖；``cancel`` 回傳
     True 時拋出 :class:`QueryCancelled`。結果只保留有差異的列，記憶體與差異筆數成正比。
+    需要同時取得「為什麼沒列出」的說明時用 :func:`scan_differences`，只做一次比對。
     """
-    if not db.has_review_state:
-        return []
+    return scan_differences(
+        db,
+        version,
+        ref_version=ref_version,
+        mod_ids=mod_ids,
+        kinds=kinds,
+        cancel=cancel,
+        ref_pack=ref_pack,
+        target_pack=target_pack,
+    )[0]
+
+
+def scan_differences(
+    db: TranslationDB,
+    version: str,
+    *,
+    ref_version: str = REFERENCE_LATEST,
+    mod_ids: Sequence[str] | None = None,
+    kinds: Sequence[str] | None = None,
+    cancel: Callable[[], bool] | None = None,
+    ref_pack: str = "",
+    target_pack: str = "",
+) -> tuple[list[CrossVersionRow], ExclusionSummary]:
+    """一次比對同時得到差異列（:func:`list_differences`）與未列出原因（:func:`explain_exclusions`）。
+
+    目標條目分段與跨版本 JOIN 只做一次：每段讀出內容相同的全部參考（含尚未審核、語系不相容者），
+    差異只取「已審核且語系相容」的參考，未列出原因由同一批資料分類。
+    """
+    summary = ExclusionSummary()
     out: list[CrossVersionRow] = []
+    if not db.has_review_state:
+        return out, summary
     for ids in _target_id_chunks(db, version, cancel, target_pack):
         with db._lock:
-            rows = _fetch_rows(
+            raw = _fetch_candidates(
                 db._conn,
                 version,
                 ref_version=ref_version,
@@ -378,8 +426,77 @@ def list_differences(
                 ref_pack=ref_pack,
                 target_pack=target_pack,
             )
+            rows = _build_rows(
+                (r for r in raw if r[19] in _REVIEWED_STATES and r[20]),
+                ref_pack=ref_pack,
+                target_pack=target_pack,
+            )
+            # 原文只差大小寫或空白視為相同；原文真的不同的參考由「原文不同」頁籤列出
+            same = [
+                r
+                for r in raw
+                if loose_text(r[4]) == loose_text(r[18])
+                and _in_pack(r, ref_pack, target_pack)
+            ]
+            _classify_exclusions(same, summary, db._conn)
         out.extend(row for row in rows if row.differs)
-    return out
+    return out, summary
+
+
+def _in_pack(row: Sequence, ref_pack: str, target_pack: str) -> bool:
+    return (not ref_pack or pack_label(row[1], row[17]) == ref_pack) and (
+        not target_pack or pack_label(row[1], row[2]) == target_pack
+    )
+
+
+def _fetch_candidates(
+    conn: sqlite3.Connection,
+    version: str,
+    *,
+    ref_version: str,
+    entry_ids: Sequence[int],
+    mod_ids: Sequence[str] | None,
+    kinds: Sequence[str] | None,
+    ref_pack: str,
+    target_pack: str,
+) -> list[tuple]:
+    """目標條目與其他版本內容相同、有譯文的全部參考（不論審核狀態與來源語系）。
+
+    欄位前 19 欄與 :func:`_fetch_rows` 相同，之後是參考的審核狀態與「來源語系相容」旗標。
+    審核歷史只對已審核的參考查詢（其他參考不需要審核時間）。
+    """
+    scope, params = _scope_sql(entry_ids, mod_ids, kinds)
+    pack_scope, pack_params = _pack_sql(ref_pack, target_pack)
+    ref_clause = " AND e2.mc_version = ?" if ref_version else ""
+    review_fr = effective_review_sql("fr", True)
+    sql = (
+        "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
+        f"ft.zh_tw, ft.source, {effective_review_sql('ft', True)}, tt.revision, "
+        "e2.id, e2.mc_version, fr.zh_tw, fr.source, fr.checker, "
+        "COALESCE(hh.at, tr.updated_at, ''), COALESCE(tr.revision, 0), "
+        "COALESCE(hh.id, 0), e2.mod_id, e2.en_us, "
+        f"{review_fr}, {source_locale_match_sql('e', 'e2')} "
+        "FROM entry e "
+        "LEFT JOIN effective ft ON ft.entry_id = e.id "
+        "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
+        f"JOIN {content_table_sql(conn, 'e2')} ON e2.kind = e.kind "
+        f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
+        f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
+        f"AND {other_version_sql('e', 'e2')}{ref_clause} "
+        "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
+        "LEFT JOIN translation tr ON tr.entry_id = e2.id AND tr.source = fr.source "
+        f"LEFT JOIN history hh ON hh.id = CASE WHEN {review_fr} IN ('reviewed','legacy_unknown') "
+        "THEN (SELECT MAX(h.id) FROM history h "
+        f"WHERE h.entry_id = e2.id AND h.action = '{_REVIEW_ACTION}') END "
+        f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}{pack_scope}"
+    )
+    args: list[object] = [
+        *([ref_version] if ref_version else []),
+        version,
+        *params,
+        *pack_params,
+    ]
+    return conn.execute(sql, args).fetchall()
 
 
 @dataclass
@@ -419,75 +536,62 @@ def explain_exclusions(
     只診斷不寫入。已經有可列出的參考（已審核且語系相容）的條目不計；其餘依原因分類：
     參考已審核但來源語系不相容，或參考尚未審核。
     """
-    summary = ExclusionSummary()
-    if not db.has_review_state:
-        return summary
-    for ids in _target_id_chunks(db, version, cancel, target_pack):
-        scope, params = _scope_sql(ids, mod_ids, kinds)
-        pack_scope, pack_params = _pack_sql(ref_pack, target_pack)
-        ref_clause = " AND e2.mc_version = ?" if ref_version else ""
-        sql = (
-            "SELECT e.id, e.key, ft.zh_tw, fr.zh_tw, "
-            f"{effective_review_sql('fr', True)}, "
-            f"{source_locale_match_sql('e', 'e2')}, "
-            f"{source_locale_sql('e')}, {source_locale_sql('e2')}, e.kind, e2.mod_id, e.mod_id, e.en_us, e2.en_us "
-            "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
-            f"JOIN {content_table_sql(db._conn, 'e2')} ON e2.kind = e.kind "
-            f"AND {content_mod_sql('e2')} = {content_mod_sql('e')} "
-            f"AND {content_key_sql('e2')} = {content_key_sql('e')} "
-            f"AND {other_version_sql('e', 'e2')}{ref_clause} "
-            "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
-            f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}{pack_scope}"
-        )
-        args: list[object] = [
-            *([ref_version] if ref_version else []),
-            version,
-            *params,
-            *pack_params,
-        ]
-        with db._lock:
-            rows = db._conn.execute(sql, args).fetchall()
-        # 原文只差大小寫或空白視為相同；原文真的不同的參考由差異審核的「原文不同」頁籤列出
-        rows = [r for r in rows if loose_text(r[11]) == loose_text(r[12])]
-        if ref_pack:
-            rows = [r for r in rows if pack_label(r[8], r[9]) == ref_pack]
-        if target_pack:
-            rows = [r for r in rows if pack_label(r[8], r[10]) == target_pack]
-        _classify_exclusions(rows, summary)
-    return summary
+    return scan_differences(
+        db,
+        version,
+        ref_version=ref_version,
+        mod_ids=mod_ids,
+        kinds=kinds,
+        cancel=cancel,
+        ref_pack=ref_pack,
+        target_pack=target_pack,
+    )[1]
 
 
-def _classify_exclusions(rows: Sequence[tuple], summary: ExclusionSummary) -> None:
+def _classify_exclusions(
+    rows: Sequence[tuple], summary: ExclusionSummary, conn: sqlite3.Connection
+) -> None:
     """依每個目標的全部參考決定有沒有被擋住的差異；每個目標只計一個原因。
 
-    先逐一評估目標的每個參考（是否已審核、語系是否相容、譯文是否與目標不同），再決定：
+    ``rows`` 是 :func:`_fetch_candidates` 的列。先逐一評估目標的每個參考（是否已審核、語系是否
+    相容、譯文是否與目標不同），再決定：
 
     - 有「已審核、語系相容、譯文不同」的參考：差異會被列出，不計。
     - 否則，有「已審核、譯文不同，但語系不相容」的參考：計為語系不相容（優先）。
     - 否則，有「尚未審核、譯文不同」的參考：計為參考尚未審核。
 
     相容但譯文相同的參考不構成差異，也不會掩蓋其他參考被擋住的差異。
+    來源語系字串只有被擋住的目標才需要（計數與例子），所以到那時才查詢。
     """
     by_target: dict[int, list[tuple]] = {}
     for row in rows:
         by_target.setdefault(int(row[0]), []).append(row)
     for refs in by_target.values():
-        target_text = refs[0][2] or ""
-        differing = [r for r in refs if r[3] != target_text]
-        reviewed = [r for r in differing if r[4] in _REVIEWED_STATES]
-        if any(r[5] for r in reviewed):
+        target_text = refs[0][5] or ""
+        differing = [r for r in refs if r[11] != target_text]
+        reviewed = [r for r in differing if r[19] in _REVIEWED_STATES]
+        if any(r[20] for r in reviewed):
             continue  # 已經有可列出的差異
         if reviewed:
             summary.locale_incompatible += 1
-            if str(refs[0][6]).startswith("unknown:"):
+            target_loc = _source_locale(conn, refs[0][0], "e")
+            if target_loc.startswith("unknown:"):
                 summary.target_locale_unknown += 1
             if len(summary.samples) < _SAMPLE_LIMIT:
-                key, target_loc, ref_loc = refs[0][1], refs[0][6], reviewed[0][7]
+                ref_loc = _source_locale(conn, reviewed[0][9], "e2")
                 summary.samples.append(
-                    f"{key}（目標語系 {target_loc}、參考語系 {ref_loc}）"
+                    f"{refs[0][3]}（目標語系 {target_loc}、參考語系 {ref_loc}）"
                 )
         elif differing:
             summary.ref_unreviewed += 1
+
+
+def _source_locale(conn: sqlite3.Connection, entry_id: int, alias: str) -> str:
+    row = conn.execute(
+        f"SELECT {source_locale_sql(alias)} FROM entry {alias} WHERE {alias}.id = ?",
+        (entry_id,),
+    ).fetchone()
+    return str(row[0])
 
 
 def _write_reference(
@@ -697,6 +801,28 @@ class CrossVersionReviewMixin:
         target_pack: str = "",
     ) -> list[CrossVersionRow]:
         return list_differences(
+            self,  # type: ignore[arg-type]
+            version,
+            ref_version=ref_version,
+            mod_ids=mod_ids,
+            kinds=kinds,
+            cancel=cancel,
+            ref_pack=ref_pack,
+            target_pack=target_pack,
+        )
+
+    def scan_cross_version_differences(
+        self,
+        version: str,
+        *,
+        ref_version: str = REFERENCE_LATEST,
+        mod_ids: Sequence[str] | None = None,
+        kinds: Sequence[str] | None = None,
+        cancel: Callable[[], bool] | None = None,
+        ref_pack: str = "",
+        target_pack: str = "",
+    ) -> tuple[list[CrossVersionRow], ExclusionSummary]:
+        return scan_differences(
             self,  # type: ignore[arg-type]
             version,
             ref_version=ref_version,
