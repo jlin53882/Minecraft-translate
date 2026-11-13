@@ -55,6 +55,7 @@ from translation_tool.translation_db.content_identity import (
     loose_text,
     pack_label,
     same_content_sql,
+    same_text_kinds,
 )
 from translation_tool.translation_db.cross_version_review import (
     CrossVersionReviewMixin,
@@ -3917,18 +3918,27 @@ class TranslationDB(
                 ),
             )
         ]
+        text_kinds = same_text_kinds(entry.kind)
+        kind_marks = ",".join("?" * len(text_kinds))
         detail.same_text = (
             []
             if not entry.en_us
             else [
-                SameTextRow(eid, ver, mod, key, tw or "", src, review_status)
-                for eid, ver, mod, key, tw, src, review_status in self._q(
+                SameTextRow(eid, ver, mod, key, tw or "", src, review_status, kind)
+                for eid, ver, mod, key, tw, src, review_status, kind in self._q(
                     "SELECT e.id, e.mc_version, e.mod_id, e.key, f.zh_tw, f.source, "
-                    f"{self._effective_review_sql} "
+                    f"{self._effective_review_sql}, e.kind "
                     "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-                    "WHERE e.en_us=? AND e.kind=? AND NOT (e.mod_id=? AND e.key=?) "
+                    f"WHERE e.en_us=? AND e.kind IN ({kind_marks}) "
+                    "AND NOT (e.mod_id=? AND e.key=?) "
                     "ORDER BY (f.zh_tw IS NULL), e.mod_id, e.key LIMIT ?",
-                    (entry.en_us, entry.kind, entry.mod_id, entry.key, text_limit),
+                    (
+                        entry.en_us,
+                        *text_kinds,
+                        entry.mod_id,
+                        entry.key,
+                        text_limit,
+                    ),
                 )
             ]
         )

@@ -129,6 +129,7 @@ class SameTextRow:
     zh_tw: str
     source: int | None
     review_status: str | None = None
+    kind: str = ""
 
 
 @dataclass(frozen=True)

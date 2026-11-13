@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG
+from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG, KIND_LANG
 
 PACK_KINDS = (KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
 INDEX_NAME = "idx_entry_content_ns"
@@ -117,6 +117,21 @@ def other_version_sql(left: str, right: str) -> str:
         f"({right}.mc_version <> {left}.mc_version "
         f"OR ({left}.kind IN ({kinds}) AND {right}.mod_id <> {left}.mod_id))"
     )
+
+
+_TEXT_KIND_GROUPS = ((KIND_LANG, KIND_KUBEJS_LANG),)
+
+
+def same_text_kinds(kind: str) -> tuple[str, ...]:
+    """「相同原文」建議要一起比對的條目類型。
+
+    模組內建的 lang 與整合包 KubeJS 的 lang 是同一種語系文字（同一個模組在整合包裡常被
+    覆寫或補充），譯法可以互相參考，所以兩者互通；其他類型的文字格式不同，只比同類型。
+    """
+    for group in _TEXT_KIND_GROUPS:
+        if kind in group:
+            return group
+    return (kind,)
 
 
 def pack_label(kind: str, mod_id: str) -> str:

@@ -8,6 +8,10 @@ from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.formatting import shorten
+from translation_tool.translation_db.content_identity import (
+    content_mod_value,
+    pack_label,
+)
 
 
 def build_suggestions(
@@ -48,9 +52,7 @@ def build_suggestions(
             groups.setdefault(r.zh_tw, []).append(r)
         rows = detail.same_text
         for tw, items in groups.items():
-            tags = [
-                f"{x.mod_id}・{x.key.split('.')[-1]}・{x.mc_version}" for x in items[:6]
-            ]
+            tags = [_same_text_tag(x) for x in items[:6]]
             if len(items) > 6:
                 tags.append(f"…共 {len(items)} 筆")
             controls.append(
@@ -69,6 +71,15 @@ def build_suggestions(
     else:
         controls.append(kit.hint_text(hint))
     return controls
+
+
+def _same_text_tag(r) -> str:
+    """相同原文建議的來源標籤。整合包 KubeJS 的模組識別（命名空間@資料夾@雜湊）
+    只顯示命名空間與整合包資料夾名稱，不顯示路徑雜湊。"""
+    pack = pack_label(r.kind, r.mod_id)
+    mod = content_mod_value(r.kind, r.mod_id)
+    where = f"{mod}（{pack}）" if pack else mod
+    return f"{where}・{r.key.split('.')[-1]}・{r.mc_version}"
 
 
 def _source_tag(r) -> str:
