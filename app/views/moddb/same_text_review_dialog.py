@@ -44,12 +44,9 @@ from app.views.moddb.formatting import format_count, kind_label, shorten
 from app.views.moddb.same_text_review_text import (
     bucket_members,
     default_selection,
-    difference_notes,
-    format_fullwidth_chars,
-    invisible_labels,
     selection_state,
-    text_control,
 )
+from app.views.moddb.text_compare import compare_chips, text_control
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 10  # 每頁顯示的群組數
@@ -573,25 +570,16 @@ class SameTextReviewDialog:
     ):
         """統一譯文候選：不可見字元顯示成標記，未選中的候選標出與選中譯文的差異。"""
         base = None if active else canonical
-        notes = difference_notes(candidate.zh_tw, base)
-        labels = invisible_labels(candidate.zh_tw)
-        fullwidth = format_fullwidth_chars(candidate.zh_tw)
-        badges: list[ft.Control] = [
+        lead: list[ft.Control] = [
             kit.chip(source_label(candidate.source, self._catalog, "reviewed"), "em"),
             ft.Text(
                 f"{format_count(candidate.member_count)} 筆", size=11, color=C.MUTED
             ),
         ]
-        if labels:
-            badges.append(kit.chip("含不可見字元", "gold", tooltip="、".join(labels)))
-        if fullwidth:
-            badges.append(kit.chip(f"含全形 {''.join(fullwidth)}", "gold"))
         body: list[ft.Control] = [
             text_control(candidate.zh_tw, base, size=13.5),
-            ft.Row(badges, spacing=6, wrap=True),
+            *compare_chips(candidate.zh_tw, base, lead=lead),
         ]
-        if notes:
-            body.append(ft.Text("差異：" + "、".join(notes), size=11, color=C.GOLD))
         return ft.Container(
             padding=ft.Padding.symmetric(horizontal=10, vertical=8),
             border_radius=8,

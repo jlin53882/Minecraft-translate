@@ -40,7 +40,7 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label
-from app.views.moddb.version_diff_text import changed_ranges, text_spans
+from app.views.moddb.text_compare import compare_chips, text_control
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 20
@@ -601,20 +601,14 @@ class VersionDiffDialog:
             content=ft.Column(
                 [
                     ft.Text("原文", size=11, color=C.DIM),
-                    ft.Text(
-                        spans=text_spans(row.en_us, [], C.EM_BG),
-                        size=12,
-                        color=C.MUTED,
-                        selectable=True,
-                    ),
+                    text_control(row.en_us, size=12, color=C.MUTED, show_diff=False),
                 ],
                 spacing=2,
             ),
         )
 
     def _ref_block(self, row: CrossVersionRow, ref: VersionRef) -> ft.Container:
-        """參考譯文：綠底；與目標不同的片段加底色（差異太大時不標）。"""
-        marks, _ = changed_ranges(ref.zh_tw, row.target_zh_tw)
+        """參考譯文：綠底；與目標不同的字元加底色，不可見字元與全形差異另有標籤與說明。"""
         return ft.Container(
             padding=10,
             border_radius=8,
@@ -642,13 +636,13 @@ class VersionDiffDialog:
                         if ref.mod_id and ref.mod_id != row.mod_id
                         else []
                     ),
-                    ft.Text(
-                        spans=text_spans(
-                            ref.zh_tw, marks, ft.Colors.with_opacity(0.35, C.EM)
-                        ),
+                    text_control(
+                        ref.zh_tw,
+                        row.target_zh_tw,
                         size=13.5,
-                        selectable=True,
+                        highlight=ft.Colors.with_opacity(0.35, C.EM),
                     ),
+                    *compare_chips(ref.zh_tw, row.target_zh_tw, base_label="目標"),
                     kit.button(
                         self._apply_label(row, ref),
                         "secondary",
@@ -685,9 +679,7 @@ class VersionDiffDialog:
         )
         tone = C.GOLD if row.target_reviewed else C.MUTED
         # 與預設參考比對；衝突時各參考不同，這裡就不標，避免誤導
-        marks = (
-            [] if row.conflict else changed_ranges(refs[0].zh_tw, row.target_zh_tw)[1]
-        )
+        base = None if row.conflict else refs[0].zh_tw
         return ft.Container(
             expand=True,
             padding=10,
@@ -704,15 +696,7 @@ class VersionDiffDialog:
                         ],
                         spacing=8,
                     ),
-                    ft.Text(
-                        spans=text_spans(
-                            row.target_zh_tw or "（沒有譯文）",
-                            marks,
-                            ft.Colors.with_opacity(0.35, tone),
-                        ),
-                        size=13.5,
-                        selectable=True,
-                    ),
+                    *self._target_text(row, base, tone),
                     kit.button(
                         "保留目標譯文",
                         "ghost",
@@ -729,6 +713,21 @@ class VersionDiffDialog:
                 spacing=6,
             ),
         )
+
+    @staticmethod
+    def _target_text(row: CrossVersionRow, base: str | None, tone) -> list[ft.Control]:
+        """目標譯文與參考的差異；沒有譯文時只顯示提示。"""
+        if not row.target_zh_tw:
+            return [ft.Text("（沒有譯文）", size=13.5, selectable=True)]
+        return [
+            text_control(
+                row.target_zh_tw,
+                base,
+                size=13.5,
+                highlight=ft.Colors.with_opacity(0.35, tone),
+            ),
+            *compare_chips(row.target_zh_tw, base, base_label="參考"),
+        ]
 
     # ------------------------------------------------------------------ 動作
     @staticmethod
