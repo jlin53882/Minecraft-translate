@@ -109,8 +109,14 @@ class ReviewToolsMenu:
                 )
                 self.items[spec.key] = item
                 entries.append(item)
+        # 選單從按鈕下方展開（同版本等下拉選單），不蓋住按鈕本身
         self.control = ft.PopupMenuButton(
-            content=self._face, items=entries, tooltip="審核與批次處理工具"
+            content=self._face,
+            items=entries,
+            tooltip="審核與批次處理工具",
+            menu_position=ft.PopupMenuPosition.UNDER,
+            bgcolor=C.PANEL,
+            shape=ft.RoundedRectangleBorder(radius=design.RADIUS_CONTROL),
         )
 
     @staticmethod
