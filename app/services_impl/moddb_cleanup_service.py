@@ -9,7 +9,6 @@ from __future__ import annotations
 import time
 import uuid
 from collections import Counter
-from collections.abc import Callable
 from pathlib import Path
 
 from app.services_impl.pipelines.extract_service import open_output_folder
@@ -26,6 +25,10 @@ from translation_tool.translation_db import (
     RevertResult,
     TranslationDB,
 )
+from translation_tool.translation_db.operation_progress import (
+    PhaseProgress,
+    ProgressCallback,
+)
 
 __all__ = [
     "CLEANUP_CATEGORIES",
@@ -37,6 +40,8 @@ __all__ = [
     "DuplicateMergePlan",
     "DuplicatePlanChanged",
     "DuplicateRevertResult",
+    "PhaseProgress",
+    "ProgressCallback",
     "RevertResult",
     "apply_cleanup",
     "apply_duplicate_cleanup",
@@ -57,9 +62,8 @@ __all__ = [
 
 REPORT_DIR_NAME = "cleanup_reports"
 
-# 長時間操作的進度回報：``progress(已處理筆數, 總筆數)``，在背景執行緒呼叫，
-# 只能把結果排回畫面，不可直接動畫面。
-ProgressCallback = Callable[[int, int], None]
+# 長時間操作的進度回報：``progress(PhaseProgress)``（第幾／共幾階段、階段名稱、已處理、總數），
+# 在背景執行緒呼叫，只能把結果排回畫面，不可直接動畫面。
 
 
 def cleanup_report_dir(db: TranslationDB) -> Path:

@@ -26,6 +26,18 @@ from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
 _CHUNK = 500
 _MERGE_KINDS = frozenset({KIND_GUIDE, KIND_PATCHOULI})
 _BATCH_FORMAT = "mod-db-duplicate-merge-v1"
+# 各操作的階段名稱（階段數固定，畫面才能誠實顯示「第 n／N 階段」）
+_SCAN_PHASES = ("查詢候選條目",)
+_PREVIEW_PHASES = ("查詢候選條目", "計算條目狀態")
+_APPLY_PHASES = (
+    "重新查詢候選條目",
+    "計算條目狀態",
+    "查詢要備份的候選條目",
+    "備份快照",
+    "合併重複條目",
+    "計算合併後狀態",
+)
+_REVERT_PHASES = ("復原重複鍵合併",)
 
 
 class DuplicatePlanChanged(ValueError):
@@ -175,9 +187,9 @@ class DuplicateCleanupMixin:
     ) -> list[DuplicateGroup]:
         """列出指定範圍中可能是同一來源檔的重複條目。只讀、不合併。
 
-        ``progress(已處理, 總數)`` 以範圍內的條目數回報（譯文數、歷史數、譯文內容三輪查詢）。
+        ``progress(PhaseProgress)`` 回報單一階段：以範圍內的條目數計（譯文數、歷史數、譯文內容三輪查詢）。
         """
-        tracker = OperationProgress(progress)
+        tracker = OperationProgress(progress, _SCAN_PHASES)
         groups = self._scan_duplicate_candidates(version, mod_id, kind, tracker)
         tracker.finish()
         return groups
@@ -188,6 +200,7 @@ class DuplicateCleanupMixin:
         mod_id: str | None,
         kind: str | None,
         tracker: OperationProgress,
+        phase: int = 1,
     ) -> list[DuplicateGroup]:
         if kind is not None and kind not in _MERGE_KINDS:
             return []
@@ -209,10 +222,10 @@ class DuplicateCleanupMixin:
         if not rows:
             return []
         ids = [int(row[0]) for row in rows]
-        tracker.expect(3 * len(ids))
-        translation_counts = self._duplicate_counts("translation", ids, tracker)
-        history_counts = self._duplicate_counts("history", ids, tracker)
-        translations = self._duplicate_translations(ids, tracker)
+        with tracker.phase(phase, 3 * len(ids)):
+            translation_counts = self._duplicate_counts("translation", ids, tracker)
+            history_counts = self._duplicate_counts("history", ids, tracker)
+            translations = self._duplicate_translations(ids, tracker)
         grouped: dict[tuple[str, str, str], list[DuplicateEntry]] = defaultdict(list)
         for row in rows:
             entry = DuplicateEntry(
@@ -270,7 +283,7 @@ class DuplicateCleanupMixin:
         progress: ProgressCallback | None = None,
     ) -> DuplicateMergePlan:
         """掃描高信心別名並產生 token；不寫入資料庫。"""
-        tracker = OperationProgress(progress)
+        tracker = OperationProgress(progress, _PREVIEW_PHASES)
         with self._read_snapshot():
             plan = self._duplicate_plan(version, tracker, mod_id=mod_id, kind=kind)
         tracker.finish()
@@ -288,9 +301,10 @@ class DuplicateCleanupMixin:
         """在單一交易內合併高信心別名，並保存完整快照供復原。
 
         ``progress`` 在交易內由同一個執行緒呼叫（不拆交易），callback 必須只排程、不可動畫面；
-        各階段（重新掃描、快照、合併、合併後指紋）的筆數在開工時才確定並計入總數。
+        分六個階段（重新查詢、算指紋、查詢要備份的候選、備份快照、合併、合併後指紋），
+        各階段各自從 0 計到該階段的筆數。
         """
-        tracker = OperationProgress(progress)
+        tracker = OperationProgress(progress, _APPLY_PHASES)
         with self._tx(keep_review=True):
             plan = self._duplicate_plan(version, tracker, mod_id=mod_id, kind=kind)
             if not expected_token or plan.token != expected_token:
@@ -302,7 +316,7 @@ class DuplicateCleanupMixin:
                 entry.entry_id for group in plan.valid_groups for entry in group.entries
             ]
             snapshots = self._duplicate_snapshots(ids, tracker)
-            tracker.expect(plan.duplicate_count)
+            tracker.begin(5, plan.duplicate_count)
             batch_groups = []
             for group in plan.valid_groups:
                 survivor = _choose_survivor(group)
@@ -325,14 +339,15 @@ class DuplicateCleanupMixin:
                         ],
                     }
                 )
+            tracker.complete()
             self._refresh(
                 self._conn,
                 [item["survivor_id"] for item in batch_groups],
             )
-            tracker.expect(len(batch_groups))
-            after = self._duplicate_states(
-                [item["survivor_id"] for item in batch_groups], tracker
-            )
+            with tracker.phase(6, len(batch_groups)):
+                after = self._duplicate_states(
+                    [item["survivor_id"] for item in batch_groups], tracker
+                )
             for item in batch_groups:
                 item["after_state"] = after[item["survivor_id"]]
             plan.batch_id = uuid.uuid4().hex
@@ -373,7 +388,7 @@ class DuplicateCleanupMixin:
 
         ``progress`` 以批次內的組數為單位，在交易內呼叫（不拆交易），callback 必須只排程。
         """
-        tracker = OperationProgress(progress)
+        tracker = OperationProgress(progress, _REVERT_PHASES)
         with self._tx(keep_review=True):
             row = self._conn.execute(
                 "SELECT payload, reverted_at FROM duplicate_merge_batch WHERE id=?",
@@ -386,7 +401,7 @@ class DuplicateCleanupMixin:
             payload = json.loads(row[0])
             restored = set(payload.get("restored_groups", []))
             result = DuplicateRevertResult()
-            tracker.expect(len(payload["groups"]))
+            tracker.begin(1, len(payload["groups"]))
             for group in payload["groups"]:
                 tracker.tick()
                 if group["id"] in restored:
@@ -448,8 +463,8 @@ class DuplicateCleanupMixin:
         valid = [group for group in candidates if group.safe]
         skipped = Counter(group.reason for group in candidates if not group.safe)
         ids = [entry.entry_id for group in candidates for entry in group.entries]
-        tracker.expect(len(ids))
-        states = self._duplicate_states(ids, tracker)
+        with tracker.phase(2, len(ids)):
+            states = self._duplicate_states(ids, tracker)
         return DuplicateMergePlan(
             version,
             candidates,
@@ -502,13 +517,12 @@ class DuplicateCleanupMixin:
         self, ids: list[int], tracker: OperationProgress | None = None
     ) -> dict[str, Any]:
         snapshots: dict[str, Any] = {}
-        groups = self.duplicate_candidates_for_ids(ids, tracker=tracker)
-        if tracker is not None:
-            tracker.expect(sum(len(group.entries) for group in groups))
-        for group in groups:
-            group_ids = [entry.entry_id for entry in group.entries]
-            snapshots[group.group_id] = self._snapshot_entries(group_ids)
-            if tracker is not None:
+        tracker = tracker or OperationProgress(None)
+        groups = self.duplicate_candidates_for_ids(ids, tracker=tracker, phase=3)
+        with tracker.phase(4, sum(len(group.entries) for group in groups)):
+            for group in groups:
+                group_ids = [entry.entry_id for entry in group.entries]
+                snapshots[group.group_id] = self._snapshot_entries(group_ids)
                 tracker.tick(len(group_ids))
         return snapshots
 
@@ -540,10 +554,16 @@ class DuplicateCleanupMixin:
         return states
 
     def duplicate_candidates_for_ids(
-        self, ids: list[int], *, tracker: OperationProgress | None = None
+        self,
+        ids: list[int],
+        *,
+        tracker: OperationProgress | None = None,
+        phase: int = 1,
     ) -> list[DuplicateGroup]:
         wanted = set(ids)
-        groups = self.duplicate_candidates_for_version_ids(ids, tracker=tracker)
+        groups = self.duplicate_candidates_for_version_ids(
+            ids, tracker=tracker, phase=phase
+        )
         return [
             group
             for group in groups
@@ -551,7 +571,11 @@ class DuplicateCleanupMixin:
         ]
 
     def duplicate_candidates_for_version_ids(
-        self, ids: list[int], *, tracker: OperationProgress | None = None
+        self,
+        ids: list[int],
+        *,
+        tracker: OperationProgress | None = None,
+        phase: int = 1,
     ) -> list[DuplicateGroup]:
         if not ids:
             return []
@@ -563,7 +587,7 @@ class DuplicateCleanupMixin:
             group
             for (version,) in versions
             for group in self._scan_duplicate_candidates(
-                version, None, None, tracker or OperationProgress(None)
+                version, None, None, tracker or OperationProgress(None), phase
             )
         ]
 

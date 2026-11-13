@@ -336,7 +336,7 @@ class DuplicateCleanupDialog:
             ft.Text("正在建立唯讀預覽，資料庫尚未修改。", size=12, color=C.MUTED)
         ]
         self._set_busy(True, "掃描重複鍵並建立預覽…")
-        report_progress = self._progress_reporter("掃描重複鍵並建立預覽")
+        report_progress = self._progress_reporter()
         self._safe_update()
 
         def work() -> None:
@@ -436,7 +436,7 @@ class DuplicateCleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "合併重複鍵中…")
-        report_progress = self._progress_reporter("合併重複鍵中")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             result = error = None
@@ -516,7 +516,7 @@ class DuplicateCleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "復原重複鍵合併中…")
-        report_progress = self._progress_reporter("復原重複鍵合併中")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             result = error = None
@@ -674,21 +674,19 @@ class DuplicateCleanupDialog:
             on_failure=self._mark_post_failure,
         )
 
-    def _progress_reporter(self, label: str):
+    def _progress_reporter(self):
         """目前操作的節流進度回報（背景呼叫，只把更新排回畫面執行緒）。"""
         token = self._op_token
         return throttled_progress(
-            lambda done, total: self._post(
-                self._show_progress, token, label, done, total
-            )
+            lambda progress: self._post(self._show_progress, token, progress)
         )
 
-    def _show_progress(self, token: int, label: str, done: int, total: int) -> None:
-        """在畫面執行緒顯示確定進度；視窗已關閉、操作已結束或已被新操作取代時略過。"""
+    def _show_progress(self, token: int, progress) -> None:
+        """在畫面執行緒顯示目前階段的確定進度；視窗已關閉、操作已結束或已被新操作取代時略過。"""
         if self._closed or not self._busy or token != self._op_token:
             return
-        self.progress.value = progress_value(done, total)
-        self.status.value = progress_text(label, done, total)
+        self.progress.value = progress_value(progress)
+        self.status.value = progress_text(progress)
         self._safe_update()
 
     def _current(self, generation) -> bool:
