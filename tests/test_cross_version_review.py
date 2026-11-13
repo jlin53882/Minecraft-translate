@@ -896,3 +896,48 @@ def test_scan_matches_fetch_rows_and_counts_exclusions(db):
     assert summary.ref_unreviewed == 1
     assert db.list_cross_version_differences("26.1") == rows
     assert db.explain_cross_version_exclusions("26.1") == summary
+
+
+def test_scan_reports_progress_in_chunks(db, monkeypatch):
+    from translation_tool.translation_db import cross_version_review as cv
+
+    monkeypatch.setattr(cv, "_ID_CHUNK", 2)
+    _seed_reviewed(db, "1.20.1", key="a", text="甲")
+    _import(db, "26.1", [_item(f"k{i}", "Bright", "x") for i in range(5)])
+    seen: list[tuple[int, int]] = []
+
+    whole = cv.scan_differences(db, "26.1", progress=lambda d, t: seen.append((d, t)))
+    chunked = cv.scan_differences(db, "26.1")
+
+    assert seen[0] == (0, 5) and seen[-1] == (5, 5)
+    assert [d for d, _ in seen] == sorted(d for d, _ in seen)
+    assert len({t for _, t in seen}) == 1
+    assert repr(whole) == repr(chunked)
+
+
+def test_scan_cache_is_reused_until_data_changes(db, monkeypatch):
+    from translation_tool.translation_db import cross_version_review as cv
+
+    _seed_reviewed(db, "1.20.1", key="a", text="亮色")
+    _import(db, "26.1", [_item("a", "Bright", "光亮")])
+    calls = {"n": 0}
+    real = cv.scan_differences
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cv, "scan_differences", counting)
+
+    first, summary = db.scan_cross_version_differences("26.1")
+    again, again_summary = db.scan_cross_version_differences("26.1")
+    assert calls["n"] == 1
+    assert repr(first) == repr(again) and summary == again_summary
+    again.clear()  # 改了回傳的清單不影響快取
+    assert len(db.scan_cross_version_differences("26.1")[0]) == len(first)
+
+    db.apply_cross_version_references([_apply_item(first[0])])  # 寫入讓世代改變
+    after, _ = db.scan_cross_version_differences("26.1")
+    assert calls["n"] == 2 and after == []
+    db.scan_cross_version_differences("26.1", ref_version="1.20.1")
+    assert calls["n"] == 3  # 條件不同不共用

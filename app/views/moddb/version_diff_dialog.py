@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import time
+
 import flet as ft
 
 from app.services_impl.moddb_service import (
@@ -42,6 +44,7 @@ from app.views.moddb.version_diff_text import changed_ranges, text_spans
 from translation_tool.utils.log_unit import log_exception
 
 PAGE_SIZE = 20
+_PROGRESS_INTERVAL = 0.1  # 載入進度更新的最短間隔（秒），每秒最多重繪 10 次
 ACTOR = "使用者"
 ALL_MODS = "__all__"
 TAB_DIFF = "diff"
@@ -346,6 +349,17 @@ class VersionDiffDialog:
         generation = self._generation
         self._set_busy(True, "正在比較各版本已審核的譯文…")
 
+        last_report = 0.0
+
+        def report(done: int, total: int) -> None:
+            """背景比對的進度：最多每 ``_PROGRESS_INTERVAL`` 秒排一次回 UI 執行緒（首尾必報）。"""
+            nonlocal last_report
+            now = time.monotonic()
+            if 0 < done < total and now - last_report < _PROGRESS_INTERVAL:
+                return
+            last_report = now
+            self._post(self._show_progress, generation, done, total)
+
         def work() -> None:
             rows = error = exclusions = None
             try:
@@ -356,6 +370,7 @@ class VersionDiffDialog:
                     target_pack=target_pack,
                     mod_ids=mods,
                     cancel=lambda: self._closed or generation != self._generation,
+                    progress=report,
                 )
                 all_mods = (
                     db.pack_mods(version, target_pack)
@@ -376,6 +391,18 @@ class VersionDiffDialog:
             CommitPolicy.EPHEMERAL,
             presentation=OperationPresentation.MAINTENANCE,
         )
+
+    def _show_progress(self, generation: int, done: int, total: int) -> None:
+        """在 UI 執行緒顯示比對進度（已過期的載入不更新）。"""
+        if self._closed or generation != self._generation or not self._busy:
+            return
+        self.progress.value = done / total if total else None
+        self.status.value = (
+            f"正在比較各版本已審核的譯文…已比對 {format_count(done)} / {format_count(total)} 筆"
+            if total
+            else "正在比較各版本已審核的譯文…"
+        )
+        self._safe_update()
 
     def _loaded(self, generation: int, rows, all_mods, error, exclusions=None) -> None:
         if self._closed or generation != self._generation:

@@ -19,9 +19,10 @@
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
@@ -307,7 +308,7 @@ def _build_rows(
         refs = grouped[eid]
         # 原文相同（或只差大小寫、空白）的參考才算相同內容；一個都沒有時，列出原文不同的參考
         # 讓使用者逐筆判斷（原作者可能只是改了措辭，也可能改了意思）
-        same = [r for r in refs if loose_text(r.en_us) == loose_text(en_us)]
+        same = [r for r in refs if _same_source(r.en_us, en_us)]
         changed = not same
         if changed:
             refs = [r for r in refs if similar_source(r.en_us, en_us)]
@@ -333,34 +334,30 @@ def _build_rows(
     return out
 
 
-def _target_id_chunks(
+def _target_ids(
     db: TranslationDB,
     version: str,
-    cancel: Callable[[], bool] | None,
-    target_pack: str = "",
-) -> Iterable[list[int]]:
-    """依條目編號分段列出目標版本的條目；每段之間釋放資料庫鎖並檢查是否取消。
+    *,
+    mod_ids: Sequence[str] | None,
+    kinds: Sequence[str] | None,
+    target_pack: str,
+) -> list[int]:
+    """依條目編號列出要比對的目標條目（一次短查詢，只在這次查詢期間持有鎖）。
 
     ``idx_entry_version`` 以 ``(mc_version, rowid)`` 排序，所以 ``ORDER BY id`` 不需要臨時排序。
+    先取得全部編號才能回報「已比對 N / 總數」；之後每段之間釋放鎖並檢查是否取消。
     """
-    last = 0
+    scope, params = _scope_sql(None, mod_ids, kinds)
     pack_scope, pack_params = _pack_sql("", target_pack)
-    while True:
-        if cancel is not None and cancel():
-            raise QueryCancelled
-        with db._lock:
-            ids = [
-                int(row[0])
-                for row in db._conn.execute(
-                    "SELECT e.id FROM entry e WHERE e.mc_version = ? AND e.id > ? "
-                    f"AND e.en_us <> ''{pack_scope} ORDER BY e.id LIMIT ?",
-                    (version, last, *pack_params, _ID_CHUNK),
-                )
-            ]
-        if not ids:
-            return
-        yield ids
-        last = ids[-1]
+    with db._lock:
+        return [
+            int(row[0])
+            for row in db._conn.execute(
+                "SELECT e.id FROM entry e WHERE e.mc_version = ? "
+                f"AND e.en_us <> ''{scope}{pack_scope} ORDER BY e.id",
+                (version, *params, *pack_params),
+            )
+        ]
 
 
 def list_differences(
@@ -404,49 +401,79 @@ def scan_differences(
     cancel: Callable[[], bool] | None = None,
     ref_pack: str = "",
     target_pack: str = "",
+    progress: Callable[[int, int], None] | None = None,
 ) -> tuple[list[CrossVersionRow], ExclusionSummary]:
     """一次比對同時得到差異列（:func:`list_differences`）與未列出原因（:func:`explain_exclusions`）。
 
     目標條目分段與跨版本 JOIN 只做一次：每段讀出內容相同的全部參考（含尚未審核、語系不相容者），
-    差異只取「已審核且語系相容」的參考，未列出原因由同一批資料分類。
+    差異只取「已審核且語系相容」的參考，未列出原因由同一批資料分類。``progress(已處理, 總數)``
+    在每段之後呼叫（在背景執行緒；呼叫端自行節流並排回 UI 執行緒）。
     """
-    summary = ExclusionSummary()
-    out: list[CrossVersionRow] = []
     if not db.has_review_state:
-        return out, summary
-    for ids in _target_id_chunks(db, version, cancel, target_pack):
-        with db._lock:
-            raw = _fetch_candidates(
-                db._conn,
-                version,
-                ref_version=ref_version,
-                entry_ids=ids,
-                mod_ids=mod_ids,
-                kinds=kinds,
-                ref_pack=ref_pack,
-                target_pack=target_pack,
-            )
-            rows = _build_rows(
-                (r for r in raw if r[19] in _REVIEWED_STATES and r[20]),
-                ref_pack=ref_pack,
-                target_pack=target_pack,
-            )
-            # 原文只差大小寫或空白視為相同；原文真的不同的參考由「原文不同」頁籤列出
-            same = [
-                r
-                for r in raw
-                if loose_text(r[4]) == loose_text(r[18])
-                and _in_pack(r, ref_pack, target_pack)
-            ]
-            _classify_exclusions(same, summary, db._conn)
-        out.extend(row for row in rows if row.differs)
-    return out, summary
-
-
-def _in_pack(row: Sequence, ref_pack: str, target_pack: str) -> bool:
-    return (not ref_pack or pack_label(row[1], row[17]) == ref_pack) and (
-        not target_pack or pack_label(row[1], row[2]) == target_pack
+        return [], ExclusionSummary()
+    target_ids = _target_ids(
+        db, version, mod_ids=mod_ids, kinds=kinds, target_pack=target_pack
     )
+    total = len(target_ids)
+    done = 0
+    tick_lock = threading.Lock()
+
+    def tick(count: int) -> None:
+        nonlocal done
+        with tick_lock:
+            done += count
+            if progress is not None:
+                progress(done, total)
+
+    def scan_part(conn: sqlite3.Connection, lock, ids: list[int]):
+        rows: list[CrossVersionRow] = []
+        summary = ExclusionSummary()
+        for start in range(0, len(ids), _ID_CHUNK):
+            if cancel is not None and cancel():
+                raise QueryCancelled
+            part = ids[start : start + _ID_CHUNK]
+            with lock:
+                raw = _fetch_candidates(
+                    conn,
+                    version,
+                    ref_version=ref_version,
+                    entry_ids=part,
+                    ref_pack=ref_pack,
+                    target_pack=target_pack,
+                )
+                raw, locales = _prune_and_resolve(conn, raw)
+                built = _build_rows(
+                    (r for r in raw if r[19] in _REVIEWED_STATES and r[20]),
+                    ref_pack=ref_pack,
+                    target_pack=target_pack,
+                )
+                # 原文只差大小寫或空白視為相同；原文真的不同的參考由「原文不同」頁籤列出
+                same = [r for r in raw if _same_source(r[4], r[18])]
+                _classify_exclusions(same, summary, conn, locales)
+            rows.extend(row for row in built if row.differs)
+            tick(len(part))
+        return rows, summary
+
+    if progress is not None:
+        progress(0, total)
+    results = [scan_part(db._conn, db._lock, target_ids)]
+    if cancel is not None and cancel():
+        raise QueryCancelled  # 最後一段之後也確認一次，畫面已換條件就不回傳舊結果
+    out: list[CrossVersionRow] = []
+    merged = ExclusionSummary()
+    for rows, part_summary in results:
+        out.extend(rows)
+        merged.locale_incompatible += part_summary.locale_incompatible
+        merged.target_locale_unknown += part_summary.target_locale_unknown
+        merged.ref_unreviewed += part_summary.ref_unreviewed
+        merged.samples.extend(part_summary.samples)
+    del merged.samples[_SAMPLE_LIMIT:]
+    return out, merged
+
+
+def _same_source(a: str, b: str) -> bool:
+    """原文相同或只差大小寫、空白（逐字相同時不必正規化）。"""
+    return a == b or loose_text(a) == loose_text(b)
 
 
 def _fetch_candidates(
@@ -455,27 +482,25 @@ def _fetch_candidates(
     *,
     ref_version: str,
     entry_ids: Sequence[int],
-    mod_ids: Sequence[str] | None,
-    kinds: Sequence[str] | None,
     ref_pack: str,
     target_pack: str,
 ) -> list[tuple]:
     """目標條目與其他版本內容相同、有譯文的全部參考（不論審核狀態與來源語系）。
 
-    欄位前 19 欄與 :func:`_fetch_rows` 相同，之後是參考的審核狀態與「來源語系相容」旗標。
-    審核歷史只對已審核的參考查詢（其他參考不需要審核時間）。
+    欄位與 :func:`_fetch_rows` 的前 19 欄相同（審核時間先只填譯文列更新時間、歷史編號為 0），
+    之後是參考的審核狀態與「來源語系相容」旗標（先填 0）。後兩者與審核歷史由
+    :func:`_prune_and_resolve` 只對需要的列批次補上，不在 JOIN 內逐列做相關子查詢。
     """
-    scope, params = _scope_sql(entry_ids, mod_ids, kinds)
+    scope, params = _scope_sql(entry_ids, None, None)
     pack_scope, pack_params = _pack_sql(ref_pack, target_pack)
     ref_clause = " AND e2.mc_version = ?" if ref_version else ""
-    review_fr = effective_review_sql("fr", True)
     sql = (
         "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
         f"ft.zh_tw, ft.source, {effective_review_sql('ft', True)}, tt.revision, "
         "e2.id, e2.mc_version, fr.zh_tw, fr.source, fr.checker, "
-        "COALESCE(hh.at, tr.updated_at, ''), COALESCE(tr.revision, 0), "
-        "COALESCE(hh.id, 0), e2.mod_id, e2.en_us, "
-        f"{review_fr}, {source_locale_match_sql('e', 'e2')} "
+        "COALESCE(tr.updated_at, ''), COALESCE(tr.revision, 0), "
+        "0, e2.mod_id, e2.en_us, "
+        f"{effective_review_sql('fr', True)}, 0 "
         "FROM entry e "
         "LEFT JOIN effective ft ON ft.entry_id = e.id "
         "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
@@ -485,9 +510,6 @@ def _fetch_candidates(
         f"AND {other_version_sql('e', 'e2')}{ref_clause} "
         "JOIN effective fr ON fr.entry_id = e2.id AND fr.zh_tw <> '' "
         "LEFT JOIN translation tr ON tr.entry_id = e2.id AND tr.source = fr.source "
-        f"LEFT JOIN history hh ON hh.id = CASE WHEN {review_fr} IN ('reviewed','legacy_unknown') "
-        "THEN (SELECT MAX(h.id) FROM history h "
-        f"WHERE h.entry_id = e2.id AND h.action = '{_REVIEW_ACTION}') END "
         f"WHERE e.mc_version = ? AND e.en_us <> ''{scope}{pack_scope}"
     )
     args: list[object] = [
@@ -497,6 +519,101 @@ def _fetch_candidates(
         *pack_params,
     ]
     return conn.execute(sql, args).fetchall()
+
+
+_IN_BATCH = 500
+
+
+def _origin_locales(
+    conn: sqlite3.Connection, entry_ids: Iterable[int]
+) -> dict[int, str | None]:
+    """批次取得條目的來源語系摘要（與 ``source_locale_sql`` 同一個定義）。
+
+    回傳 ``{條目編號: 語系}``：沒有來源紀錄的條目不在結果內；語系不明（有 NULL 語系或混有多個
+    語系）的為 ``None``。
+    """
+    ids = sorted(set(entry_ids))
+    out: dict[int, str | None] = {}
+    for start in range(0, len(ids), _IN_BATCH):
+        part = ids[start : start + _IN_BATCH]
+        for eid, nulls, distinct, locale in conn.execute(
+            "SELECT entry_id, SUM(source_locale IS NULL), "
+            "COUNT(DISTINCT source_locale), MAX(source_locale) FROM entry_origin "
+            f"WHERE entry_id IN ({','.join('?' * len(part))}) GROUP BY entry_id",
+            part,
+        ):
+            out[int(eid)] = locale if not nulls and distinct == 1 else None
+    return out
+
+
+def _locales_match(target_id: int, ref_id: int, locales: dict[int, str | None]) -> bool:
+    """``source_locale_match_sql`` 的 Python 版：兩邊都沒有來源紀錄，或語系已知且相同。"""
+    if target_id not in locales and ref_id not in locales:
+        return True
+    target = locales.get(target_id)
+    return (
+        target is not None
+        and not target.startswith("unknown:")
+        and locales.get(ref_id) == target
+    )
+
+
+def _last_review_events(
+    conn: sqlite3.Connection, entry_ids: Iterable[int]
+) -> dict[int, tuple[int, str | None]]:
+    """每個條目最後一次審核事件的（歷史編號, 時間）。"""
+    ids = sorted(set(entry_ids))
+    out: dict[int, tuple[int, str | None]] = {}
+    for start in range(0, len(ids), _IN_BATCH):
+        part = ids[start : start + _IN_BATCH]
+        latest = {
+            int(eid): int(hid)
+            for eid, hid in conn.execute(
+                "SELECT entry_id, MAX(id) FROM history "
+                f"WHERE action = '{_REVIEW_ACTION}' "
+                f"AND entry_id IN ({','.join('?' * len(part))}) GROUP BY entry_id",
+                part,
+            )
+        }
+        if not latest:
+            continue
+        hids = list(latest.values())
+        when = {
+            int(hid): at
+            for hid, at in conn.execute(
+                f"SELECT id, at FROM history WHERE id IN ({','.join('?' * len(hids))})",
+                hids,
+            )
+        }
+        out.update({eid: (hid, when.get(hid)) for eid, hid in latest.items()})
+    return out
+
+
+def _prune_and_resolve(
+    conn: sqlite3.Connection, raw: list[tuple]
+) -> tuple[list[tuple], dict[int, str | None]]:
+    """丟掉不可能產生差異的目標，並只對已審核的參考補上語系相容旗標與審核時間。
+
+    參考譯文全都與目標相同的目標，既不會列為差異、也不會被計入未列出原因，先排除就不必做
+    任何語系與歷史查詢。審核時間（最後一次審核事件）只對已審核且語系相容的參考批次查詢；
+    沒有審核歷史時沿用譯文列的更新時間。
+    """
+    differing = {r[0] for r in raw if r[11] != (r[5] or "")}
+    kept = [r for r in raw if r[0] in differing]
+    reviewed = [r for r in kept if r[19] in _REVIEWED_STATES]
+    if not reviewed:
+        return kept, {}
+    locales = _origin_locales(conn, [i for r in reviewed for i in (r[0], r[9])])
+    matched = {(r[0], r[9]) for r in reviewed if _locales_match(r[0], r[9], locales)}
+    last = _last_review_events(conn, {ref_id for _, ref_id in matched})
+    out: list[tuple] = []
+    for r in kept:
+        if (r[0], r[9]) not in matched:
+            out.append(r)
+            continue
+        hid, at = last.get(r[9], (0, None))
+        out.append((*r[:14], at if at is not None else r[14], r[15], hid, *r[17:20], 1))
+    return out, locales
 
 
 @dataclass
@@ -549,7 +666,10 @@ def explain_exclusions(
 
 
 def _classify_exclusions(
-    rows: Sequence[tuple], summary: ExclusionSummary, conn: sqlite3.Connection
+    rows: Sequence[tuple],
+    summary: ExclusionSummary,
+    conn: sqlite3.Connection,
+    locales: dict[int, str | None],
 ) -> None:
     """依每個目標的全部參考決定有沒有被擋住的差異；每個目標只計一個原因。
 
@@ -561,7 +681,8 @@ def _classify_exclusions(
     - 否則，有「尚未審核、譯文不同」的參考：計為參考尚未審核。
 
     相容但譯文相同的參考不構成差異，也不會掩蓋其他參考被擋住的差異。
-    來源語系字串只有被擋住的目標才需要（計數與例子），所以到那時才查詢。
+    ``locales`` 是批次查好的來源語系（:func:`_origin_locales`），計數不再逐筆查詢；
+    只有最多 ``_SAMPLE_LIMIT`` 個例子才單筆取語系字串。
     """
     by_target: dict[int, list[tuple]] = {}
     for row in rows:
@@ -574,10 +695,11 @@ def _classify_exclusions(
             continue  # 已經有可列出的差異
         if reviewed:
             summary.locale_incompatible += 1
-            target_loc = _source_locale(conn, refs[0][0], "e")
-            if target_loc.startswith("unknown:"):
+            target_known = locales.get(refs[0][0])
+            if target_known is None or target_known.startswith("unknown:"):
                 summary.target_locale_unknown += 1
             if len(summary.samples) < _SAMPLE_LIMIT:
+                target_loc = _source_locale(conn, refs[0][0], "e")
                 ref_loc = _source_locale(conn, reviewed[0][9], "e2")
                 summary.samples.append(
                     f"{refs[0][3]}（目標語系 {target_loc}、參考語系 {ref_loc}）"
@@ -781,6 +903,18 @@ def _current_row(
     return None if ref is None else (row, ref)
 
 
+_SCAN_CACHE_SIZE = 4
+_SCAN_CACHE_LOCK = threading.Lock()
+
+
+def _copy_scan(
+    result: tuple[list[CrossVersionRow], ExclusionSummary],
+) -> tuple[list[CrossVersionRow], ExclusionSummary]:
+    """回傳快取內容的副本（列是不可變的；清單與統計物件各自複製，呼叫端改了不影響快取）。"""
+    rows, summary = result
+    return list(rows), replace(summary, samples=list(summary.samples))
+
+
 class CrossVersionReviewMixin:
     """``TranslationDB`` 的跨版本沿用／差異審核方法。"""
 
@@ -821,8 +955,33 @@ class CrossVersionReviewMixin:
         cancel: Callable[[], bool] | None = None,
         ref_pack: str = "",
         target_pack: str = "",
+        progress: Callable[[int, int], None] | None = None,
     ) -> tuple[list[CrossVersionRow], ExclusionSummary]:
-        return scan_differences(
+        """:func:`scan_differences` 加上程序內結果快取。
+
+        快取鍵含資料世代（``_cache_generation``：``data_gen`` 加外部寫入序號）與全部查詢條件，
+        資料沒變時重開對話框、換頁籤再換回來都直接回傳；任何寫入（套用、審核、匯入）都讓
+        世代改變而重新比對。只保留最近 ``_SCAN_CACHE_SIZE`` 組；被取消或比對期間世代又變了
+        的結果不存。
+        """
+        gen = self._cache_generation()  # type: ignore[attr-defined]
+        key = (
+            gen,
+            version,
+            ref_version,
+            ref_pack,
+            target_pack,
+            tuple(mod_ids or ()),
+            tuple(kinds or ()),
+        )
+        cache = self.__dict__.setdefault("_cross_version_scan_cache", {})
+        with _SCAN_CACHE_LOCK:
+            hit = cache.get(key)
+            if hit is not None:
+                cache[key] = cache.pop(key)  # 最近使用的排到最後
+        if hit is not None:
+            return _copy_scan(hit)
+        result = scan_differences(
             self,  # type: ignore[arg-type]
             version,
             ref_version=ref_version,
@@ -831,7 +990,14 @@ class CrossVersionReviewMixin:
             cancel=cancel,
             ref_pack=ref_pack,
             target_pack=target_pack,
+            progress=progress,
         )
+        if self._cache_generation() == gen:  # type: ignore[attr-defined]
+            with _SCAN_CACHE_LOCK:
+                cache[key] = result
+                while len(cache) > _SCAN_CACHE_SIZE:
+                    cache.pop(next(iter(cache)))
+        return _copy_scan(result)
 
     def explain_cross_version_exclusions(
         self,
