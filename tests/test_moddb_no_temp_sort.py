@@ -270,3 +270,20 @@ def test_scope_option_and_cleanup_queries_avoid_temp_sort(db):
     for call in calls:
         offenders = _temp_sort_plans(db, call)
         assert not offenders, offenders
+
+
+def test_same_text_review_scan_avoids_temp_sort(db):
+    """同文一致性審核分段掃描：整個版本走 idx_entry_version、單一模組走 idx_entry_mod，
+    依條目編號走索引順序，不得出現臨時排序。"""
+    calls = (
+        lambda: db.list_same_text_groups("1.20.1"),
+        lambda: db.list_same_text_groups("1.20.1", mod_ids=["alpha", "beta"]),
+        lambda: db.list_same_text_groups(
+            "1.20.1", kinds=["lang"], en_us="alpha lang 1"
+        ),
+    )
+    for call in calls:
+        offenders = _temp_sort_plans(db, call)
+        assert not offenders, offenders
+        plans = _all_plans(db, call)
+        assert any("idx_entry_version" in p or "idx_entry_mod" in p for p in plans)

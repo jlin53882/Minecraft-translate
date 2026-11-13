@@ -4,14 +4,11 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.services_impl.moddb_service import content_mod_value, pack_label
 from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.formatting import shorten
-from translation_tool.translation_db.content_identity import (
-    content_mod_value,
-    pack_label,
-)
 
 
 def build_suggestions(
@@ -20,8 +17,13 @@ def build_suggestions(
     on_apply,
     *,
     catalog=None,
+    on_review_same_text=None,
 ) -> list[ft.Control]:
-    """「同鍵值・其他版本／相同原文」建議清單；``on_apply(text)`` 在按「套用」時呼叫。"""
+    """「同鍵值・其他版本／相同原文」建議清單；``on_apply(text)`` 在按「套用」時呼叫。
+
+    ``on_review_same_text(en_us)`` 讓「相同原文」頁籤底部出現「檢視全部不一致的譯文…」，
+    開啟同文一致性審核並只看目前條目的原文。
+    """
     entry = detail.entry
     controls: list[ft.Control] = []
     if tab == "key":
@@ -70,6 +72,21 @@ def build_suggestions(
         controls.append(kit.hint_text("沒有符合的資料"))
     else:
         controls.append(kit.hint_text(hint))
+    if tab != "key" and on_review_same_text is not None and entry.en_us:
+        controls.append(
+            ft.Row(
+                [
+                    kit.button(
+                        "檢視全部不一致的譯文…",
+                        "ghost",
+                        icon=ft.Icons.RULE,
+                        size="sm",
+                        on_click=lambda _e, t=entry.en_us: on_review_same_text(t),
+                        tooltip="開啟同文一致性審核，只看這段原文在目前版本的所有譯法",
+                    )
+                ]
+            )
+        )
     return controls
 
 

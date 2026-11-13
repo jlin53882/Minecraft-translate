@@ -48,7 +48,7 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
 
 更新範圍的補充規則：
 
-- 對話框（`BulkReviewDialog`、`VersionDiffDialog`、`CleanupDialog`、`SpeciesCandidateDialog`、`SmartReviewDialog`、
+- 對話框（`BulkReviewDialog`、`VersionDiffDialog`、`SameTextReviewDialog`、`CleanupDialog`、`SpeciesCandidateDialog`、`SmartReviewDialog`、
   `RepairReviewer`）開啟前以 `isolate` 標成更新邊界，內容只由 `update_regions(self.dialog)`（智慧校對
   是 `SmartReviewContext.update`，其 `dialog` 由 `SmartReviewDialog` 設定）更新；對話框內不得呼叫
   `page.update()`，否則整頁走訪一次要數十到上百毫秒。`app/ui/dialogs.py` 的縮放處理也逐一更新視窗。
@@ -81,7 +81,7 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
 
 `SpeciesCandidateDialog` 開啟時先顯示呼叫端帶入的預填值，再以維護型背景作業建立模組、類型與目前生效來源選單（`species_scope_options` 與 `species_kind_options`）；任一選擇變更時在背景重算另外兩者，不重新掃描資料庫。切換範圍只清除舊掃描結果，不會自動重新掃描；關閉視窗會丟棄晚到的範圍結果。
 
-條目校對的 `species_scan_btn` 依目前 `version`、`mod_id` 與 `kind` 開啟 `SpeciesCandidateDialog`。對話框分成兩個階段：
+條目校對工具列的「審核工具」選單項目「掃描學名」依目前 `version`、`mod_id` 與 `kind` 開啟 `SpeciesCandidateDialog`。對話框分成兩個階段：
 
 1. `scan_species_candidates` 以 `QualityFilter` 的 `species_name`（預設）或 `species_format`（對話框的放寬選項）呼叫 `TranslationDB.list_entries`，由 SQL 預篩加 `is_species_candidate` 判斷取出候選，不逐筆載入整個版本；候選不設上限，對話框用 `kit.Pager` 每頁 `PAGE_SIZE` 筆顯示。`species_name` 要求值符合 `is_potential_species_name` 的格式，且 key 有 `has_species_key_hint` 的提示詞（`SPECIES_KEY_HINTS`）或值含雜交／亞種／變種記號。
 2. 使用者按單筆「查詢」或「查詢全部候選」後，背景作業才呼叫 `lookup_species`。批次查詢屬於頁面而不是對話框：`bulk_lookup_for(page)` 回傳頁面共用的 `SpeciesBulkLookup`，它以 `tag_session` 建立的 `TaskSession`（`view_key="moddb"`）和 `launch_page_operation` 執行，可由 `SpeciesBulkLookup.stop` 或頂列任務取消；對話框與 `SpeciesSuggestion` 透過 `add_listener` 以弱參照訂閱 `lookup`／`finished` 事件，「背景執行」（`_run_in_background`）、「開啟條目」與 Esc 關閉只退訂；「關閉」（`_close`）先呼叫 `SpeciesBulkLookup.stop` 再關閉。結果是 `SpeciesLookup`（`found`／`not_found`／`rate_limited`／`error`），回到 UI 執行緒顯示；不會寫入 `entry`、`translation` 或 `effective`。
@@ -178,6 +178,14 @@ Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_ga
 - `app/views/moddb/species_bulk_lookup.py` 負責批次查詢的背景工作、任務膠囊進度、停止條件與事件通知，不持有任何控制項。
 - 學名快取的網路請求與快取檔案格式由 `translation_tool/utils/species_cache.py` 管理（相同學名同時查詢只送一次請求，等待者共用同一次結果，包括查無與暫時失敗；暫時失敗不寫入快取，之後仍可重試。快取寫入有鎖）；Mod DB 功能不重複實作 API 或快取。
 
+## 審核工具選單
+
+條目校對工具列只有一顆「審核工具 ▾」選單按鈕（`ReviewToolsMenu`，`review_tools_menu.py`，外觀同 `kit.button` 的 secondary／sm）。選單分兩組、中間以分隔線隔開：批量審核、版本差異審核、同文一致性審核；智慧校對、掃描學名、批次取代。項目的處理函式由 `entry_filters._build_controls` 傳入（`TOOL_BULK_REVIEW` 等鍵值對應 `ReviewToolsMenu.items`）。資料載入中或清單有錯誤時 `EntriesPanel._update_data_actions` 呼叫 `ReviewToolsMenu.set_disabled`，整個選單與所有項目一起停用；狀態改變時直接重送選單控制項，篩選列的差異比對（`FilterFlush._state`）也以 `ReviewToolsMenu.disabled` 判斷。
+
+## 同文一致性審核
+
+`SameTextReviewDialog`（`same_text_review_dialog.py`）由「審核工具」選單開啟，或由條目編輯區「相同原文」建議底部的「檢視全部不一致的譯文…」開啟（`entry_filters.open_same_text_review`，`en_us` 預先限定為目前條目的原文）。範圍是單一遊戲版本，可再選模組與類型群組；模組包版本沿用條目校對目前選的模組包（`pack_scope`）。資料處理在 `translation_tool/translation_db/same_text_review.py`（`SameTextReviewMixin`）：`list_inconsistent_groups` 依條目編號分段掃描（每段 `_ID_CHUNK` 筆，走 `idx_entry_version`／`idx_entry_mod`，段間釋放資料庫鎖、回報進度、檢查取消），群組鍵是（`same_text_kinds` 類型群組、來源語系、`loose_text` 原文），原文超過 `MAX_SOURCE_CHARS` 的條目不納入。每組以 `CanonicalCandidate` 列出已審核的譯文當統一譯文（預設建議：成員最多、人工來源優先），沒有已審核候選的組別（`SameTextGroup.applicable` 為 False）只列出不能套用。`apply_canonical` 在同一個交易內以 `SameTextApplyItem` 的預期狀態做 CAS 後寫入，同一批歷史可由 `TranslationDB.revert` 復原。對話框只負責範圍選單、類型與「可統一／無已審核譯文」篩選（`filter_groups`、`kind_options`）、群組分頁（`PAGE_SIZE`）、統一譯文選擇（`chosen_text`）、勾選（`selectable`、`selected_items`）與按鈕；目標已審核的成員需先勾「包含已審核」，覆蓋已審核譯文時第一次按下只進入確認狀態（`overwrite_count`）。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證。
+
 ## 版本差異審核
 
-`entry_filters.py` 的 `版本差異審核` 按鈕只建立 `VersionDiffDialog`，傳入目前版本與外層資料變更回呼；匯入頁摘要的「檢視版本差異」另外傳入自動沿用的歷史編號。對話框的資料處理在 `translation_tool/translation_db/cross_version_review.py`（`CrossVersionReviewMixin`）：`list_differences` 分段讀取差異（可取消），`apply_references` 在同一個交易內以 `ApplyItem` 的預期狀態（譯文、生效來源、審核狀態、revision）做 CAS 後寫入，`reuse_reviewed` 供匯入後自動沿用，`explain_exclusions`（`ExclusionSummary`）說明內容相同卻沒被列出的條目與原因；UI 只負責分頁、勾選與按鈕，橘色說明列由 `VersionDiffDialog._render_exclusions` 顯示。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證，關閉視窗或換條件時載入查詢經 `QueryCancelled` 中止。譯文版面由 `version_diff_text.py` 產生（格式碼淡化、小幅差異標色）。目標與參考下拉選單的選項由 `target_options`、`reference_options` 產生（值為「遊戲版本	整合包資料夾」，`split_reference` 拆回兩段，`TranslationDB.pack_versions` 提供整合包資料夾），對應後端的 `target_pack`、`ref_pack`；頁籤分為差異、衝突與原文不同（`CrossVersionRow.source_changed`，`source_changed_rows` 取出），原文不同的條目可以批次勾選（`selectable` 只排除衝突與未納入的目標已審核），批次套用前由 `_source_changed_count` 要求再確認一次；勾選範圍是目前頁籤（`_batch_rows`），切換頁籤時清除。
+`entry_filters.py` 的 `版本差異審核` 按鈕只建立 `VersionDiffDialog`，傳入目前版本與外層資料變更回呼；匯入頁摘要的「檢視版本差異」另外傳入自動沿用的歷史編號。對話框的資料處理在 `translation_tool/translation_db/cross_version_review.py`（`CrossVersionReviewMixin`）：`scan_differences` 分段讀取差異並同時統計未列出原因（可取消，只做一次跨版本 JOIN；`list_differences` 與 `explain_exclusions` 是只取其中一半的包裝），`apply_references` 在同一個交易內以 `ApplyItem` 的預期狀態（譯文、生效來源、審核狀態、revision）做 CAS 後寫入，`reuse_reviewed` 供匯入後自動沿用，`explain_exclusions`（`ExclusionSummary`）說明內容相同卻沒被列出的條目與原因；UI 只負責分頁、勾選與按鈕，橘色說明列由 `VersionDiffDialog._render_exclusions` 顯示。載入與寫入都透過 `launch_page_operation` 在背景進行，結果以世代序號驗證，關閉視窗或換條件時載入查詢經 `QueryCancelled` 中止。譯文版面由 `version_diff_text.py` 產生（格式碼淡化、小幅差異標色）。目標與參考下拉選單的選項由 `target_options`、`reference_options` 產生（值為「遊戲版本	整合包資料夾」，`split_reference` 拆回兩段，`TranslationDB.pack_versions` 提供整合包資料夾），對應後端的 `target_pack`、`ref_pack`；頁籤分為差異、衝突與原文不同（`CrossVersionRow.source_changed`，`source_changed_rows` 取出），原文不同的條目可以批次勾選（`selectable` 只排除衝突與未納入的目標已審核），批次套用前由 `_source_changed_count` 要求再確認一次；勾選範圍是目前頁籤（`_batch_rows`），切換頁籤時清除。

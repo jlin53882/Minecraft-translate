@@ -158,7 +158,8 @@ def test_entries_panel_adds_species_scan_button(tmp_path):
     db = _seed(tmp_path / "mod.db")
     try:
         panel = EntriesPanel(mock_page(), lambda: db)
-        assert panel.species_scan_btn.content == "掃描學名"
+        item = panel.review_tools.items["species_scan"]
+        assert item.content.value == "掃描學名"
     finally:
         db.close()
 

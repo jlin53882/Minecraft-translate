@@ -6,7 +6,7 @@
 
 - `ModDbView`（`app/views/moddb_view.py`）持有唯一的資料庫連線 `_db`、四個頁籤的顯示切換，以及跨頁籤的快照失效與背景刷新。
 - 四個頁籤位於 `app/views/moddb/`：`OverviewPanel`（`overview_panel.py`）、`EntriesPanel`（`entries_panel.py`）、`ScanPanel`（`scan_panel.py`）、`TranslatePanel`（`translate_panel.py`）。
-- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）與批量審核對話框 `BulkReviewDialog`（`bulk_review_dialog.py`）、版本差異審核對話框 `VersionDiffDialog`（`version_diff_dialog.py`，另可由匯入摘要開啟）由條目校對頁開啟；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
+- 批次取代對話框 `BatchReplaceDialog`（`batch_replace_dialog.py`）與批量審核對話框 `BulkReviewDialog`（`bulk_review_dialog.py`）、版本差異審核對話框 `VersionDiffDialog`（`version_diff_dialog.py`，另可由匯入摘要開啟）、同文一致性審核對話框 `SameTextReviewDialog`（`same_text_review_dialog.py`）由條目校對頁開啟，這些與智慧校對、掃描學名、批次取代都收在工具列的「審核工具」選單（`ReviewToolsMenu`，`review_tools_menu.py`）；AI 修復逐筆審查 `RepairReviewer`（`repair_reviewer.py`）由批次機翻的結果檢視開啟。
 - 學名候選對話框 `SpeciesCandidateDialog`（`species_dialog.py`）由條目校對頁開啟；它只讀取目前範圍的 `entry.en_us`，逐筆查詢時才使用學名快取／Wikipedia API，不寫入翻譯資料表。
 - 實際寫入與掃描邏輯在 `app/services_impl/` 下的 moddb 系列模組（例如 `moddb_service.py`、`moddb_translate_service.py`、`moddb_retranslate_service.py`），資料庫方法在 `translation_tool/translation_db/repository.py`。
 
@@ -56,7 +56,9 @@ flowchart TD
 
 「已審核」沿用全庫共用的定義（`effective_review_sql`）：舊資料的人工譯文（`legacy_unknown`，畫面同樣顯示「人工已審核」）也算已審核，可當參考，也算已審核的目標。參考譯文一致且目標尚未審核才寫入；衝突與「目標已審核且不同」只計數。目標尚未審核時一律另寫獨立的 `SRC_CROSS_VERSION` 列（已審核列贏過未審核列），目標原本的譯文與來源保留在自己的列。摘要列（`ScanPanel._apply_reuse_summary`）顯示結果並提供「檢視版本差異」，摘要帶出歷史編號（`reuse_history_id`），對話框開啟時可直接「復原上一次沿用／套用」。
 
-`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `list_cross_version_differences` 在背景分段載入差異與衝突（每段 500 個目標條目，段與段之間釋放資料庫鎖並檢查是否取消；畫面換條件或關閉時以 `QueryCancelled` 中止），參考版本的「已審核時間」取最後一次審核事件（沒有審核歷史時退回譯文列更新時間），同一秒內以歷史編號分先後。`apply_cross_version_references` 套用：每筆在寫入交易內重新確認目標的譯文、生效來源、審核狀態與 revision，以及參考的條目編號、譯文與 revision，任何一項與畫面所見不同就略過並計入過期。目標已是已審核時改寫目標目前生效的那一列，不受來源優先序影響。批次套用以勾選決定範圍；目標已審核的條目需先勾「包含目標已審核」，並在第一次按下時要求再確認一次。`review_manual` 實作「保留目標譯文」，`revert` 復原套用。原文區直接顯示原字串，保留換行與空白。
+`SameTextReviewDialog`（`same_text_review_dialog.py`）由「審核工具」選單的「同文一致性審核」開啟，或由條目編輯區「相同原文」建議底部的「檢視全部不一致的譯文…」開啟（只看目前條目原文的群組）：以 `list_same_text_groups` 在背景分段掃描單一遊戲版本（每段 500 個條目，段間釋放資料庫鎖、更新進度條並檢查取消，換條件或關閉時以 `QueryCancelled` 中止）。「相同原文」指 `loose_text` 相同（不分大小寫與空白）、類型在同一個 `same_text_kinds` 群組（lang 與 KubeJS lang 互通，其他類型只和自己比）、來源語系相容（模組 jar 的 lang 沒有來源紀錄，視為 en_us；語系未知的條目不併入任何群組）、原文不超過 `MAX_SOURCE_CHARS` 字；不排除任何類型，類型下拉選單只是縮小已掃出的清單。群組至少有兩種不同的非空譯文，或一種譯文加上尚未翻譯的成員才列出。統一譯文只能選已審核的譯文，預設建議是成員最多（再人工來源優先）的那一種；沒有已審核譯文的組別照樣列出但不能套用。套用只寫入勾選的成員：尚未審核的目標另寫一列 `SRC_MANUAL` 已審核譯文（使用人工來源，因為這是使用者在同一個版本內的人工決定，不是「沿用其他版本」，也不會被之後的掃描匯入覆蓋；原本的譯文列保留），已審核的目標需先勾「包含已審核」並再確認一次，才改寫目前生效的那一列；每筆在交易內重新確認目標與統一譯文的譯文、來源、審核狀態、revision 與原文，不同就略過並計入過期。歷史是單一批次（備註「同文統一」），對話框的「復原上一次統一」呼叫 `TranslationDB.revert`。「保留不動」就是不勾選，不另存任何記錄。
+
+`VersionDiffDialog`（`version_diff_dialog.py`）由條目校對工具列的「版本差異審核」或匯入摘要開啟：以 `scan_cross_version_differences` 在背景分段載入差異與衝突，同一次比對一併統計「內容相同卻沒列出」的原因（每段 500 個目標條目，只做一次跨版本 JOIN；段與段之間釋放資料庫鎖並檢查是否取消；畫面換條件或關閉時以 `QueryCancelled` 中止；整合包篩選先在 SQL 粗篩），參考版本的「已審核時間」取最後一次審核事件（沒有審核歷史時退回譯文列更新時間），同一秒內以歷史編號分先後。`apply_cross_version_references` 套用：每筆在寫入交易內重新確認目標的譯文、生效來源、審核狀態與 revision，以及參考的條目編號、譯文與 revision，任何一項與畫面所見不同就略過並計入過期。目標已是已審核時改寫目標目前生效的那一列，不受來源優先序影響。批次套用以勾選決定範圍；目標已審核的條目需先勾「包含目標已審核」，並在第一次按下時要求再確認一次。`review_manual` 實作「保留目標譯文」，`revert` 復原套用。原文區直接顯示原字串，保留換行與空白。
 
 ### 掃描匯入
 

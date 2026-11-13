@@ -15,6 +15,16 @@ from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.editor_drafts import reset_editor_for_database_change
 from app.views.moddb.formatting import STATE_LABELS, kind_label
 from app.views.moddb.pack_scope_dropdown import PackScopeDropdown
+from app.views.moddb.review_tools_menu import (
+    TOOL_BATCH_REPLACE,
+    TOOL_BULK_REVIEW,
+    TOOL_SAME_TEXT,
+    TOOL_SMART_REVIEW,
+    TOOL_SPECIES_SCAN,
+    TOOL_VERSION_DIFF,
+    ReviewToolsMenu,
+)
+from app.views.moddb.same_text_review_dialog import SameTextReviewDialog
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
 from app.views.moddb.smart_review_marks import (
     ALL_SMART_REVIEW,
@@ -141,16 +151,7 @@ class FilterFlush:
             (
                 advanced.active_text.value,
                 advanced.clear_button.visible,
-                tuple(
-                    button.disabled
-                    for button in (
-                        panel.batch_replace_btn,
-                        panel.bulk_review_btn,
-                        panel.version_diff_btn,
-                        panel.smart_review_btn,
-                        panel.species_scan_btn,
-                    )
-                ),
+                panel.review_tools.disabled,
             ),
             (advanced.error_text.value, advanced.error_text.visible),
         )
@@ -266,43 +267,15 @@ def _build_controls(panel) -> None:
         panel._on_state,
     )
     panel.advanced_filters = AdvancedFilters(panel._on_advanced_change)
-    panel.batch_replace_btn = kit.button(
-        "批次取代",
-        "secondary",
-        icon=ft.Icons.FIND_REPLACE,
-        size="sm",
-        on_click=panel._open_batch_replace,
-    )
-    panel.bulk_review_btn = kit.button(
-        "批量審核",
-        "secondary",
-        icon=ft.Icons.VERIFIED_OUTLINED,
-        size="sm",
-        on_click=panel._open_bulk_review,
-    )
-    panel.version_diff_btn = kit.button(
-        "版本差異審核",
-        "secondary",
-        icon=ft.Icons.COMPARE_ARROWS,
-        size="sm",
-        on_click=panel._open_version_diff,
-        tooltip="比較其他版本已審核的相同內容，套用或保留目標譯文",
-    )
-    panel.smart_review_btn = kit.button(
-        "智慧校對",
-        "secondary",
-        icon=ft.Icons.AUTO_AWESOME,
-        size="sm",
-        on_click=lambda event: open_smart_review(panel, event),
-        tooltip="以本地 AI 產生未審核譯文的人工校對候選",
-    )
-    panel.species_scan_btn = kit.button(
-        "掃描學名",
-        "secondary",
-        icon=ft.Icons.SCIENCE_OUTLINED,
-        size="sm",
-        on_click=lambda event: open_species_scan(panel, event),
-        tooltip="掃描目前版本／模組／類型範圍中的英文原文，找出可能的學名",
+    panel.review_tools = ReviewToolsMenu(
+        {
+            TOOL_BULK_REVIEW: panel._open_bulk_review,
+            TOOL_VERSION_DIFF: panel._open_version_diff,
+            TOOL_SAME_TEXT: panel._open_same_text_review,
+            TOOL_SMART_REVIEW: lambda event: open_smart_review(panel, event),
+            TOOL_SPECIES_SCAN: lambda event: open_species_scan(panel, event),
+            TOOL_BATCH_REPLACE: panel._open_batch_replace,
+        }
     )
 
 
@@ -337,11 +310,7 @@ def _build_filter_card(panel) -> None:
             panel.advanced_filters.toggle_button,
             panel.advanced_filters.active_text,
             panel.advanced_filters.clear_button,
-            panel.batch_replace_btn,
-            panel.bulk_review_btn,
-            panel.version_diff_btn,
-            panel.smart_review_btn,
-            panel.species_scan_btn,
+            panel.review_tools.control,
         ],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -508,6 +477,28 @@ def open_version_diff(panel, _e=None) -> None:
         return
     VersionDiffDialog(
         panel._page, panel.db, panel.version, panel._after_batch_replace
+    ).open()
+
+
+def open_same_text_review(panel, _e=None, *, en_us: str | None = None) -> None:
+    """開啟同文一致性審核，範圍預設為目前版本與模組包；``en_us`` 只看與這段原文相同的群組。"""
+    if panel.drafts:
+        show_snack(
+            panel._page,
+            "目前清單含尚未寫入的機翻草稿；請先離開草稿檢視再執行同文一致性審核。",
+            C.GOLD,
+        )
+        return
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+    SameTextReviewDialog(
+        panel._page,
+        panel.db,
+        panel.version,
+        panel._after_batch_replace,
+        pack_scope=getattr(panel, "pack", None),
+        en_us=en_us,
     ).open()
 
 

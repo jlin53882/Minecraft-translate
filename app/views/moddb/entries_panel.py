@@ -46,6 +46,7 @@ from app.views.moddb.entry_filters import (
     on_advanced_change,
     open_batch_replace,
     open_bulk_review,
+    open_same_text_review,
     open_version_diff,
     prepare_entries_snapshot,
     refresh_entry_filter,
@@ -386,22 +387,11 @@ class EntriesPanel(ft.Column):
 
     def _update_data_actions(self) -> None:
         disabled = self._data_loading or bool(self._list_error)
-        changed = []
-        for name in (
-            "batch_replace_btn",
-            "bulk_review_btn",
-            "version_diff_btn",
-            "smart_review_btn",
-            "species_scan_btn",
-        ):
-            button = getattr(self, name, None)
-            if button is not None and button.disabled != disabled:
-                button.disabled = disabled
-                changed.append(button)
+        menu = getattr(self, "review_tools", None)
         # 篩選卡可能在載入中被別的事件（例如搜尋欄）整張送出，帶著停用狀態；
-        # 篩選列的差異比對不知道這件事，所以按鈕狀態一改變就直接送出這幾顆按鈕。
-        if changed:
-            update_regions(*changed)
+        # 篩選列的差異比對不知道這件事，所以選單狀態一改變就直接送出審核工具選單。
+        if menu is not None and menu.set_disabled(disabled):
+            update_regions(menu.control)
 
     @staticmethod
     def _database_identity(db):
@@ -430,6 +420,9 @@ class EntriesPanel(ft.Column):
 
     def _open_version_diff(self, _e=None) -> None:
         open_version_diff(self, _e)
+
+    def _open_same_text_review(self, _e=None, *, en_us: str | None = None) -> None:
+        open_same_text_review(self, _e, en_us=en_us)
 
     def _after_batch_replace(self, result) -> None:
         entry_writes.after_data_change(self)
@@ -810,6 +803,7 @@ class EntriesPanel(ft.Column):
             self.sug_tab,
             self._apply_suggestion,
             catalog=catalog or source_catalog_for(self.db()),
+            on_review_same_text=lambda en_us: self._open_same_text_review(en_us=en_us),
         )
 
     def _render_history(self, *, catalog=None) -> None:

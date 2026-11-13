@@ -106,6 +106,7 @@ from translation_tool.translation_db.quality import (
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
+from translation_tool.translation_db.same_text_review import SameTextReviewMixin
 from translation_tool.translation_db.scan_ingest import (
     DbIngestTarget,
     PreviewIngestTarget,
@@ -379,6 +380,7 @@ class TranslationDB(
     SmartReviewMixin,
     BulkReviewMixin,
     CrossVersionReviewMixin,
+    SameTextReviewMixin,
     CleanupMixin,
 ):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""

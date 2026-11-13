@@ -344,14 +344,14 @@ def test_database_tab_refreshes_and_entry_filters_run_in_worker(db_path, monkeyp
             assert view._panels[key].refresh_indicator.visible is True
             if key == "entries":
                 assert view.entries._data_loading is True
-                assert view.entries.smart_review_btn.disabled is True
+                assert view.entries.review_tools.disabled is True
             assert page.operation_registry.wait_for_idle(timeout=2)
             page._run_all_tasks()
             page._tasks.clear()
             assert view._panels[key].refresh_indicator.visible is False
             if key == "entries":
                 assert view.entries._data_loading is False
-                assert view.entries.smart_review_btn.disabled is False
+                assert view.entries.review_tools.disabled is False
         assert view.entries.total == 3
         assert view.scan._db_versions == {"1.21.1", "1.20.1"}
         assert "未翻譯" in view.translate.count_text.value
@@ -2605,7 +2605,7 @@ def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
 
     assert panel._list_error == "日期格式請使用 YYYY-MM-DD"
     assert panel.count_badge.value.startswith("日期條件錯誤：")
-    assert panel.batch_replace_btn.disabled is True
+    assert panel.review_tools.disabled is True
     assert "無法套用日期篩選" in texts_of(panel.list_view)
     with pytest.raises(ValueError, match="日期格式"):
         panel.advanced_filters.time_filter()
@@ -2615,7 +2615,7 @@ def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
     panel.advanced_filters.time_kind.value = "none"
     panel.advanced_filters._selection_changed()
     assert panel._list_error is not None
-    assert panel.batch_replace_btn.disabled is True
+    assert panel.review_tools.disabled is True
 
     panel.advanced_filters.start_date.value = "2026-03-01"
     panel.advanced_filters._custom_changed()

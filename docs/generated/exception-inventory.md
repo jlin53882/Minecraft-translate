@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **372** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **376** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 333 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 337 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 20 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -175,6 +175,10 @@
 | `app/views/moddb/retranslation_controller.py:apply_preview_result` | BLE001 | 已記錄／回報 | unavailable database means stale result |
 | `app/views/moddb/review_scope_dialog.py:ReviewScopeController.request_impact.load` | BLE001 | 已記錄／回報 | 影響預覽失敗不影響編輯 |
 | `app/views/moddb/review_scope_dialog.py:ReviewScopeController.request_impact` | BLE001 | 已記錄／回報 | 無法啟動時保留上一份預覽 |
+| `app/views/moddb/same_text_review_dialog.py:SameTextReviewDialog._reload.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/same_text_review_dialog.py:SameTextReviewDialog._apply.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/same_text_review_dialog.py:SameTextReviewDialog._revert.work` | BLE001 | 已記錄／回報 | worker boundary |
+| `app/views/moddb/same_text_review_dialog.py:SameTextReviewDialog._launch` | BLE001 | 已記錄／回報 | restore the dialog if the worker cannot launch |
 | `app/views/moddb/scan_panel.py:ScanPanel._poll` | BLE001 | 已記錄／回報 | 輪詢失敗不能讓畫面永遠卡在「執行中」 |
 | `app/views/moddb/smart_review_context.py:SmartReviewContext.run_background.target` | BLE001 | 已記錄／回報 | UI reports bounded failure |
 | `app/views/moddb/smart_review_context.py:SmartReviewContext.run_inline` | BLE001 | 已記錄／回報 | mirror the background boundary |

@@ -63,6 +63,7 @@ from translation_tool.translation_db import (
     open_db,
 )
 from translation_tool.translation_db.content_identity import (
+    content_mod_value,
     pack_label,
     pack_scope_of,
 )
@@ -77,6 +78,14 @@ from translation_tool.translation_db.quality import token_issues, whitespace_not
 from translation_tool.translation_db.query_interrupt import (
     QueryCancelled,
     QueryInterrupt,
+)
+from translation_tool.translation_db.same_text_review import (
+    MAX_SOURCE_CHARS,
+    CanonicalCandidate,
+    SameTextApplyItem,
+    SameTextApplyResult,
+    SameTextGroup,
+    SameTextMember,
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
@@ -107,6 +116,7 @@ from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
+    "MAX_SOURCE_CHARS",
     "NO_PACK_SCOPE_HINT",
     "PACK_SCOPE_HINT",
     "QUALITY_TOKEN_CATEGORIES",
@@ -130,6 +140,7 @@ __all__ = [
     "BulkReviewCandidate",
     "BulkReviewPlan",
     "BulkReviewResult",
+    "CanonicalCandidate",
     "CrossVersionRow",
     "DbSettings",
     "EntryDetail",
@@ -138,6 +149,10 @@ __all__ = [
     "QualityFilter",
     "QueryCancelled",
     "ReviewPreviewItem",
+    "SameTextApplyItem",
+    "SameTextApplyResult",
+    "SameTextGroup",
+    "SameTextMember",
     "ScanOptions",
     "SmartReviewCandidate",
     "SmartReviewRunResult",
@@ -150,6 +165,7 @@ __all__ = [
     "VersionRef",
     "VersionStat",
     "cached_species_lookup",
+    "content_mod_value",
     "current_settings",
     "custom_date_bounds",
     "custom_source_codes",
