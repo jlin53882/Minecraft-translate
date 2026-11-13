@@ -465,6 +465,8 @@ def test_prune_banner_button_cleans_priority_lines(tmp_path, monkeypatch):
         db_location, "current_settings", lambda: type("S", (), {"path": str(path)})()
     )
     banner = db_location.DbLocationBanner()
+    # 清除預設在背景執行；這裡走「沒有頁面」的同步路徑，背景行為見 test_blind_wait_progress。
+    banner._page_or_none = lambda: None
     field = ft.TextField(value="人工\n測試\nPack\ncustom:100")
     rechecked: list[int] = []
     db_location.attach_prune_cleanup(banner, field, lambda: rechecked.append(1))

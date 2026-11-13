@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 import flet as ft
 
@@ -37,6 +38,9 @@ ACTOR = "使用者"
 ALL_MODS = "__all__"
 ALL_KINDS = "__all__"
 ALL_SOURCES = "__all__"
+PREVIEW_FIND_TEXT = "正在找出符合條件的條目…"
+REVERT_BUSY_TEXT = "正在還原本次批量審核，請稍候…"
+_PROGRESS_INTERVAL = 0.1  # 預覽進度最多每秒回報 10 次
 PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認批量審核範圍後才能執行。"
 
 
@@ -501,7 +505,19 @@ class BulkReviewDialog:
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
         generation = self._generation
-        self._set_busy(True, "查詢符合條目…")
+        self._set_busy(True, PREVIEW_FIND_TEXT)
+        last_report = 0.0
+
+        def report(done: int, total: int) -> None:
+            """背景整理其他版本快照的進度：節流後排回 UI 執行緒（首尾必報）。"""
+            nonlocal last_report
+            now = time.monotonic()
+            if 0 < done < total and now - last_report < _PROGRESS_INTERVAL:
+                return
+            last_report = now
+            self._post(
+                self._show_preview_progress, generation, done, total, final=False
+            )
 
         def work() -> None:
             """執行背景查詢或寫入工作，完成後把結果排回 UI 執行緒。"""
@@ -515,6 +531,7 @@ class BulkReviewDialog:
                     quality_pass_only=quality,
                     propagate=propagate,
                     pack_scope=pack_scope,
+                    progress=report,
                 )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
@@ -526,6 +543,16 @@ class BulkReviewDialog:
             self._post(self._apply_preview, generation, plan, error)
 
         self._launch(work, "Mod 資料庫批量審核預覽", CommitPolicy.PARTIAL_ALLOWED)
+
+    def _show_preview_progress(self, generation: int, done: int, total: int) -> None:
+        """在 UI 執行緒顯示預覽整理進度（已過期、已關閉或已結束的預覽不更新）。"""
+        if self._closed or generation != self._generation or not self._busy:
+            return
+        if total <= 0:
+            return
+        self.progress.value = min(1.0, done / total)
+        self.status.value = f"正在整理 {format_count(done)} / {format_count(total)} 筆…"
+        self._safe_update()
 
     def _apply_preview(self, generation: int, plan, error) -> None:
         if self._closed:
@@ -775,7 +802,7 @@ class BulkReviewDialog:
         if db is None or result is None or self._busy:
             return
         generation = self._generation
-        self._set_busy(True, "還原中…")
+        self._set_busy(True, REVERT_BUSY_TEXT)
 
         def work() -> None:
             count = error = None

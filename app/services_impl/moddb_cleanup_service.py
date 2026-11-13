@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 
 from app.services_impl.pipelines.extract_service import open_output_folder
@@ -56,13 +57,21 @@ __all__ = [
 
 REPORT_DIR_NAME = "cleanup_reports"
 
+# 長時間操作的進度回報：``progress(已處理筆數, 總筆數)``，在背景執行緒呼叫，
+# 只能把結果排回畫面，不可直接動畫面。
+ProgressCallback = Callable[[int, int], None]
+
 
 def cleanup_report_dir(db: TranslationDB) -> Path:
     return db.path.parent / REPORT_DIR_NAME
 
 
 def export_cleanup(
-    db: TranslationDB, version: str, *, with_translation: bool = False
+    db: TranslationDB,
+    version: str,
+    *,
+    with_translation: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> CleanupReport:
     """把可清理的條目寫成檢查檔（只讀資料庫）。
 
@@ -76,8 +85,8 @@ def export_cleanup(
         cleanup_report_dir(db), f"cleanup-{safe_version}-{stamp}{suffix}"
     )
     if with_translation:
-        return db.export_protected_report(version, path)
-    return db.export_cleanup_report(version, path)
+        return db.export_protected_report(version, path, progress=progress)
+    return db.export_cleanup_report(version, path, progress=progress)
 
 
 def _unique_path(folder: Path, stem: str) -> Path:
@@ -96,13 +105,21 @@ def list_cleanup_reports(db: TranslationDB) -> list[Path]:
     return sorted(folder.glob("cleanup-*.json"), key=lambda p: p.name, reverse=True)
 
 
-def preview_cleanup(db: TranslationDB, path: Path) -> CleanupPlan:
-    return db.preview_cleanup(path)
+def preview_cleanup(
+    db: TranslationDB, path: Path, *, progress: ProgressCallback | None = None
+) -> CleanupPlan:
+    return db.preview_cleanup(path, progress=progress)
 
 
-def apply_cleanup(db: TranslationDB, path: Path, token: str) -> CleanupPlan:
+def apply_cleanup(
+    db: TranslationDB,
+    path: Path,
+    token: str,
+    *,
+    progress: ProgressCallback | None = None,
+) -> CleanupPlan:
     """刪除預覽過的範圍；``token`` 是 ``preview_cleanup`` 回傳計畫的 ``token``。"""
-    return db.apply_cleanup(path, token)
+    return db.apply_cleanup(path, token, progress=progress)
 
 
 def last_cleanup_batch(db: TranslationDB) -> CleanupBatchInfo | None:
@@ -114,8 +131,10 @@ def cleanup_batches(db: TranslationDB) -> list[CleanupBatchInfo]:
     return db.cleanup_batches()
 
 
-def revert_cleanup(db: TranslationDB, batch_id: str) -> RevertResult:
-    return db.revert_cleanup(batch_id)
+def revert_cleanup(
+    db: TranslationDB, batch_id: str, *, progress: ProgressCallback | None = None
+) -> RevertResult:
+    return db.revert_cleanup(batch_id, progress=progress)
 
 
 def open_report_folder(db: TranslationDB) -> bool:
@@ -156,8 +175,11 @@ def preview_duplicate_cleanup(
     *,
     mod_id: str | None = None,
     kind: str | None = None,
+    progress: ProgressCallback | None = None,
 ) -> DuplicateMergePlan:
-    return db.preview_duplicate_cleanup(version, mod_id=mod_id, kind=kind)
+    return db.preview_duplicate_cleanup(
+        version, mod_id=mod_id, kind=kind, progress=progress
+    )
 
 
 def apply_duplicate_cleanup(
@@ -167,12 +189,14 @@ def apply_duplicate_cleanup(
     *,
     mod_id: str | None = None,
     kind: str | None = None,
+    progress: ProgressCallback | None = None,
 ) -> DuplicateMergePlan:
     return db.apply_duplicate_cleanup(
         version,
         token,
         mod_id=mod_id,
         kind=kind,
+        progress=progress,
     )
 
 
@@ -180,5 +204,7 @@ def duplicate_cleanup_batches(db: TranslationDB) -> list[DuplicateMergeBatchInfo
     return db.duplicate_merge_batches()
 
 
-def revert_duplicate_cleanup(db: TranslationDB, batch_id: str) -> DuplicateRevertResult:
-    return db.revert_duplicate_cleanup(batch_id)
+def revert_duplicate_cleanup(
+    db: TranslationDB, batch_id: str, *, progress: ProgressCallback | None = None
+) -> DuplicateRevertResult:
+    return db.revert_duplicate_cleanup(batch_id, progress=progress)

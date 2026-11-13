@@ -378,7 +378,7 @@ class SmartReviewBatchReviewer:
         """Disable visible controls while a page request is in flight."""
         self._loading = True
         self._set_controls_enabled(False)
-        self.status_text.value = (
+        self._show_load_busy(
             f"正在切換第 {page} 頁…" if self.rows else "正在讀取候選分頁…"
         )
         self.ctx.update()
@@ -396,6 +396,7 @@ class SmartReviewBatchReviewer:
     ) -> None:
         """Apply one page result, retrying only when the requested page became stale."""
         self._loading = False
+        self._hide_load_busy()
         if error:
             self._set_controls_enabled(True)
             self._show_empty("候選載入失敗", error, keep_toolbar=True)
@@ -630,6 +631,7 @@ class SmartReviewBatchReviewer:
 
     def _show_loading(self, text: str) -> None:
         """顯示讀取中狀態並暫停批量動作。"""
+        self._show_load_busy(text)
         self.body.controls = [kit.loading_state(text)]
         self._set_controls_enabled(False)
         self.ctx.update()
@@ -638,6 +640,7 @@ class SmartReviewBatchReviewer:
         self, title: str, subtitle: str, *, keep_toolbar: bool = False
     ) -> None:
         """顯示空狀態；保留工具列讓使用者仍可切換篩選或重新整理。"""
+        self._hide_load_busy()
         self.body.controls = [
             kit.empty_state(title, subtitle, icon=ft.Icons.LAYERS_OUTLINED)
         ]
@@ -678,7 +681,7 @@ class SmartReviewBatchReviewer:
         token = self._request_seq = self._request_seq + 1
         self._loading = True
         self._set_controls_enabled(False)
-        self.status_text.value = "正在載入全部候選並篩選可套用項目…"
+        self._show_load_busy("正在載入全部候選並篩選可套用項目…")
         self.ctx.update()
 
         def work():
@@ -692,6 +695,7 @@ class SmartReviewBatchReviewer:
             if token != self._request_seq:
                 return
             self._loading = False
+            self._hide_load_busy()
             self._set_controls_enabled(True)
             if error:
                 show_snack(self.ctx.page, f"全批次載入失敗：{error}", C.RED)
@@ -735,7 +739,7 @@ class SmartReviewBatchReviewer:
         token = self._request_seq = self._request_seq + 1
         self._loading = True
         self._set_controls_enabled(False)
-        self.status_text.value = "正在載入全部已過期候選並篩選可覆蓋項目…"
+        self._show_load_busy("正在載入全部已過期候選並篩選可覆蓋項目…")
         self.ctx.update()
 
         def work():
@@ -752,6 +756,7 @@ class SmartReviewBatchReviewer:
             if token != self._request_seq:
                 return
             self._loading = False
+            self._hide_load_busy()
             self._set_controls_enabled(True)
             if error:
                 show_snack(self.ctx.page, f"過期候選載入失敗：{error}", C.RED)
@@ -1072,6 +1077,18 @@ class SmartReviewBatchReviewer:
         self.status_text.color = C.MUTED
 
     # ──────────────── 狀態 ────────────────
+
+    def _show_load_busy(self, text: str) -> None:
+        """唯讀載入（單次查詢、無法得知進度）：顯示文字與不確定進度條。"""
+        self.status_text.value = text
+        self.status_text.color = C.MUTED
+        self.progress_bar.value = None
+        self.progress_bar.visible = True
+
+    def _hide_load_busy(self) -> None:
+        """載入結束後收起不確定進度條；批量動作自己的進度條不在此收。"""
+        if not self._busy:
+            self.progress_bar.visible = False
 
     def _set_controls_enabled(self, enabled: bool) -> None:
         """在唯讀載入期間鎖定篩選與批量控制，但保留結果畫面。"""

@@ -73,9 +73,9 @@ flowchart TD
 | 分析 | 不呼叫 service，只讀 `_last_overview_data` 並寫入日誌與提示 | 無 |
 | 切換查詢 | 不呼叫 service，切到查詢分頁並設定 `dd_query_mode` 為 `KEY` | 無 |
 
-總覽頂端的「重新載入全部」走 `cache_reload_service`（`RELOADING`，顯示進度）。「刷新統計」也經 `run_cache_action`／`OperationRegistry` 在背景讀取總覽；按鈕會立即停用並顯示「刷新統計中」，完成或失敗後才回到 UI 更新統計。
+總覽頂端的「重新載入全部」走 `cache_reload_service(on_progress=...)`（`RELOADING`）：先逐個快取類型載入、再逐個類型重建搜尋索引，每完成一步回報一次進度，提示列的進度條與文字（例如「RELOADING 3/12：已載入 kubejs」）只反映真實完成量；進度回呼可能在持有 cache 鎖的執行緒上被呼叫，只轉送到 UI 執行緒。新分片、補滿舊檔、輪替與單類型重載都是單一批次的寫入或載入，沒有可分段的工作，只顯示忙碌狀態文字。「刷新統計」也經 `run_cache_action`／`OperationRegistry` 在背景讀取總覽；按鈕會立即停用並顯示「刷新統計中」，完成或失敗後才回到 UI 更新統計。
 
-「重建搜尋索引」`_on_rebuild_index` 也不經 `run_cache_action`，而是自行 `reserve_page_operation`，worker 呼叫 `cache_rebuild_index_service`，完成後把 `_set_state` 設回 `READY`。
+「重建搜尋索引」`_on_rebuild_index` 也不經 `run_cache_action`，而是自行 `reserve_page_operation`，worker 呼叫 `cache_rebuild_index_service(on_progress=...)`；每個快取類型索引完成後，把「正在重建搜尋索引 n/總數」轉送到 UI 執行緒更新狀態文字（`INDEXING`，狀態列顯示「重建索引中」），完成後把 `_set_state` 設回 `READY`。
 
 ### 查詢與搜尋
 

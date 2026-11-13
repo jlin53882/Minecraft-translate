@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **376** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **379** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 337 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 340 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 20 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -105,7 +105,9 @@
 | `app/views/config/config_actions.py:_write_config_with_feedback` | BLE001 | 已記錄／回報 | failure may occur before or after atomic replace |
 | `app/views/config/config_actions.py:_reload_after_confirmed_write` | BLE001 | 已記錄／回報 | reload is a UI boundary after confirmed persistence |
 | `app/views/config/config_actions.py:load_config_transactionally` | BLE001 | 已記錄／回報 | hint refresh must not mask the reload error |
-| `app/views/config/db_location.py:DbLocationBanner._on_prune` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響設定頁 |
+| `app/views/config/db_location.py:DbLocationBanner._prune_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
+| `app/views/config/db_location.py:DbLocationBanner._finish_prune` | BLE001 | 已記錄／回報 | 設定讀取失敗時仍要恢復按鈕 |
+| `app/views/config/db_location.py:DbLocationBanner._safe_update` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響設定頁 |
 | `app/views/config/db_location.py:DbLocationBanner.safe_refresh` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響設定頁 |
 | `app/views/config/db_location.py:attach_path_hooks.chain.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
 | `app/views/config/db_location.py:attach_priority_hooks.handler` | BLE001 | 已記錄／回報 | 尚未掛上頁面時不影響輸入 |
@@ -363,6 +365,7 @@
 | `translation_tool/translation_db/smart_review_repair.py:_ValidationRepair.parse` | BLE001 | 已記錄／回報 | strict parser |
 | `translation_tool/translation_db/smart_review_request.py:_BatchRequester._attempt` | BLE001 | 已記錄／回報 | credential-free class |
 | `translation_tool/translation_db/smart_review_run.py:_SmartReviewBatchRunner._parse_response` | BLE001 | 已記錄／回報 | response contract class |
+| `translation_tool/utils/cache_manager.py:_emit_progress` | BLE001 | 已記錄／回報 | 進度回呼不可影響快取載入 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_overview.py:build_cache_overview` | BLE001 | 已記錄／回報 | 讀取失敗不中斷總覽，但要留下紀錄 |
 | `translation_tool/utils/cache_search.py:CacheSearchEngine.index_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |

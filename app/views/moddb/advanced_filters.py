@@ -18,8 +18,10 @@ from app.services_impl.moddb_service import (
 )
 from app.ui import kit
 from app.ui.design import C
+from app.ui.page_post import has_background_scheduler
 from app.ui.snack import show_snack
 from app.ui.update_scope import update_regions
+from app.views.moddb.background_read import run_read
 
 QUALITY_TOKEN_CATEGORY_LABELS = {
     "all": "所有類別",
@@ -32,6 +34,9 @@ QUALITY_TOKEN_CATEGORY_LABELS = {
     "guide": "Guide 結構",
     "other": "其他格式",
 }
+
+
+NO_DATA_HINT_BUSY = "正在查詢資料實際落在哪段期間…"
 
 
 def picked_date(value: date | datetime) -> date:
@@ -52,6 +57,11 @@ class AdvancedFilters:
         self._time_bounds: tuple[str, str] | None = None
         self._sort_desc = False
         self._last_sort = "default"
+        self._hint_ticket = 0
+        self._hint_pending = None  # 背景查詢中的篩選條件
+        self._hint_ready: tuple | None = (
+            None  # (篩選條件, 提示)；只供緊接的重畫取用一次
+        )
         self._build_time_controls()
         self._build_quality_controls()
         self._build_sort_control()
@@ -407,6 +417,67 @@ class AdvancedFilters:
         if hint:
             show_snack(self.panel.page, hint, C.GOLD)
         return hint
+
+    def no_data_hint_text(
+        self, page, get_db, get_criteria, refresh: Callable[[], bool]
+    ) -> str | None:
+        """清單為空時要顯示的日期範圍說明；查詢資料範圍不在畫面執行緒執行。
+
+        沒有日期條件回傳 None；背景查詢中回傳等待提示；查完後呼叫 ``refresh()``
+        （回傳 True 表示空清單仍適用並已重畫，這時才彈出提醒）讓畫面再取一次結果。
+        背景結果回來時篩選條件已經改了就丟棄。沒有背景排程的頁面（單元測試）同步查詢。
+        """
+        if not has_background_scheduler(page):
+            return self.announce_no_data(get_db, get_criteria)
+        try:
+            criteria = get_criteria()
+        except ValueError:
+            return None
+        spec = criteria.time
+        if spec is None or (spec.start_utc is None and spec.end_utc is None):
+            return None
+        ready, self._hint_ready = self._hint_ready, None
+        if ready is not None and ready[0] == criteria:
+            return ready[1]
+        if self._hint_pending == criteria:
+            return NO_DATA_HINT_BUSY
+        db = get_db()
+        if db is None:
+            return None
+        self._hint_ticket += 1
+        ticket = self._hint_ticket
+
+        def apply(hint, error) -> None:
+            if ticket != self._hint_ticket:
+                return  # 又發出了新的查詢
+            self._hint_pending = None
+            if error is not None:
+                if isinstance(error, ValueError | sqlite3.Error):
+                    self._hint_ready = (criteria, None)
+                    refresh()  # 失敗：撤掉等待提示（不再重查）
+                    return
+                raise error
+            try:
+                current = get_criteria()
+            except ValueError:
+                return
+            if current != criteria:
+                return  # 查詢期間篩選條件已經改了
+            self._hint_ready = (criteria, hint)
+            if refresh() and hint:
+                show_snack(page, hint, C.GOLD)
+
+        self._hint_pending = criteria
+        if not run_read(
+            page,
+            lambda: self.no_data_hint(db, criteria),
+            apply,
+            name="Mod 資料庫日期範圍查詢",
+            owner="moddb-no-data-hint",
+        ):
+            self._hint_pending = None
+            return None
+        return NO_DATA_HINT_BUSY
 
     def no_data_hint(self, db, criteria) -> str | None:
         """日期範圍查無資料時，說明所選時間依據的資料實際落在哪段期間；沒有日期條件則不提示。"""

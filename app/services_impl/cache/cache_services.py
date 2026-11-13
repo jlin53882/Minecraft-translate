@@ -13,10 +13,14 @@ PR16 範圍：
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from translation_tool.utils import cache_manager
 from translation_tool.utils.log_unit import log_error, log_warning
+
+# (已完成步數, 總步數, 說明)；只代表真實完成量。
+ProgressCallback = Callable[[int, int, "str | None"], None]
 
 
 class CacheSaveError(RuntimeError):
@@ -35,11 +39,51 @@ def cache_get_overview_service() -> dict[str, Any]:
     return cache_manager.get_cache_overview()
 
 
-def cache_reload_service() -> dict[str, Any]:
-    """重新載入翻譯快取，並重建全域搜尋索引。"""
+class _MonotonicProgress:
+    """把多階段進度合併成單一 (current, total, message)，且 current 只增不減。
 
-    cache_manager.reload_translation_cache()
-    if not cache_manager.rebuild_search_index():
+    搜尋索引重建遇到檔案鎖會重試，階段內的 current 可能從頭開始；這裡忽略會讓進度倒退的回報。
+    回呼可能在持有 cache_lock 的執行緒上被呼叫，``on_progress`` 只能轉送到 UI，不可阻塞。
+    """
+
+    def __init__(self, on_progress: ProgressCallback | None, total: int):
+        self._on_progress = on_progress
+        self._total = max(1, total)
+        self._last = -1
+
+    def stage(self, offset: int, stage_total: int) -> ProgressCallback:
+        def report(current: int, _total: int, message: str | None = None) -> None:
+            self.report(offset + min(current, stage_total), message)
+
+        return report
+
+    def report(self, current: int, message: str | None = None) -> None:
+        if self._on_progress is None or current <= self._last:
+            return
+        self._last = current
+        self._on_progress(current, self._total, message)
+
+
+def cache_reload_service(on_progress: ProgressCallback | None = None) -> dict[str, Any]:
+    """重新載入翻譯快取，並重建全域搜尋索引。
+
+    ``on_progress(current, total, message)`` 回報真實進度：先逐個快取類型載入，
+    再逐個快取類型重建搜尋索引，共 ``2 * len(CACHE_TYPES)`` 步。
+    """
+
+    type_count = len(cache_manager.CACHE_TYPES)
+    progress = _MonotonicProgress(on_progress, type_count * 2)
+    if on_progress is None:
+        cache_manager.reload_translation_cache()
+        indexed = cache_manager.rebuild_search_index()
+    else:
+        cache_manager.reload_translation_cache(
+            on_progress=progress.stage(0, type_count)
+        )
+        indexed = cache_manager.rebuild_search_index(
+            on_progress=progress.stage(type_count, type_count)
+        )
+    if not indexed:
         raise RuntimeError("快取未成功初始化，搜尋索引未重建")
     return cache_manager.get_cache_overview()
 
@@ -56,8 +100,9 @@ def cache_reload_type_service(cache_type: str) -> dict[str, Any]:
 def cache_save_all_service(
     write_new_shard: bool = True,
     only_types: list[str] | None = None,
+    on_progress: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """將目前記憶體中的翻譯快取寫回磁碟。
+    """將目前記憶體中的翻譯快取寫回磁碟；每寫完一個類型回報 ``on_progress``。
 
     ``save_translation_cache`` uses an explicit boolean result to distinguish a
     durable write from a rejected/failed write.  Do not turn a false result
@@ -68,13 +113,15 @@ def cache_save_all_service(
     targets = only_types or list(cache_manager.CACHE_TYPES)
     failed_types: list[str] = []
 
-    for cache_type in targets:
+    for index, cache_type in enumerate(targets, start=1):
         saved = cache_manager.save_translation_cache(
             cache_type,
             write_new_shard=write_new_shard,
         )
         if saved is False:
             failed_types.append(str(cache_type))
+        if on_progress is not None:
+            on_progress(index, len(targets), f"已儲存 {cache_type}")
 
     if failed_types:
         try:
@@ -242,11 +289,20 @@ def cache_rotate_service(cache_type: str) -> bool:
     return cache_manager.force_rotate_shard(cache_type)
 
 
-def cache_rebuild_index_service() -> dict[str, Any]:
-    """重建快取搜尋索引（A3 改進功能）。"""
+def cache_rebuild_index_service(
+    on_progress: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    """重建快取搜尋索引（A3 改進功能）；逐個快取類型索引完成後回報 ``on_progress``。"""
 
     try:
-        if not cache_manager.rebuild_search_index():
+        progress = _MonotonicProgress(on_progress, len(cache_manager.CACHE_TYPES))
+        if on_progress is None:
+            rebuilt = cache_manager.rebuild_search_index()
+        else:
+            rebuilt = cache_manager.rebuild_search_index(
+                on_progress=progress.stage(0, len(cache_manager.CACHE_TYPES))
+            )
+        if not rebuilt:
             return {
                 "success": False,
                 "total_indexed": 0,

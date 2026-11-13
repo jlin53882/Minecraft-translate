@@ -29,7 +29,7 @@ from app.ui import design, kit
 from app.ui.design import C
 from app.ui.design import tone as get_tone
 from app.ui.snack import show_snack
-from app.views.cache_manager.cache_actions import run_cache_action
+from app.views.cache_manager.cache_actions import _run_on_ui, run_cache_action
 from app.views.cache_manager.cache_overview_panel import build_overview_page
 from app.views.cache_manager.cache_status_text import (
     active_shard_usage,
@@ -314,7 +314,8 @@ class CacheOverviewMixin:
         """觸發重新載入所有快取（長時間操作）"""
         self._run_action(
             "RELOADING",
-            lambda: cache_reload_service(),
+            # 參數名必須是 on_progress，run_cache_action 才會注入真實進度回呼。
+            lambda on_progress=None: cache_reload_service(on_progress=on_progress),
             "已重新載入全部快取",
             show_progress=True,
         )
@@ -335,9 +336,22 @@ class CacheOverviewMixin:
 
         self._set_state(True, "INDEXING", "trace: 正在重建搜尋索引...")
 
+        mount_generation = getattr(self, "_mount_generation", None)
+
+        def on_progress(current: int, total: int, msg: str | None = None):
+            # 回呼在背景執行緒；只轉送到 UI 執行緒更新狀態文字。
+            label = f"trace: 正在重建搜尋索引 {current}/{total}" + (
+                f"（{msg}）" if msg else ""
+            )
+            _run_on_ui(
+                self,
+                lambda: setattr(self.overview_trace, "value", label),
+                mount_generation,
+            )
+
         def work():
             try:
-                return cache_rebuild_index_service(), None
+                return cache_rebuild_index_service(on_progress=on_progress), None
             except Exception as ex:  # noqa: BLE001 - 錯誤顯示在 UI
                 return None, (ex, traceback.format_exc())
 

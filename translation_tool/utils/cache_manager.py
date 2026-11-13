@@ -216,8 +216,22 @@ def is_cache_initialized() -> bool:
     return bool(_state().initialized)
 
 
-def reload_translation_cache():
-    """重新載入翻譯快取。"""
+def _emit_progress(on_progress, current: int, total: int, message: str) -> None:
+    """通知進度；回呼只應轉送到 UI 執行緒。回呼出錯不可中斷快取作業。"""
+    if on_progress is None:
+        return
+    try:
+        on_progress(current, total, message)
+    except Exception as e:  # noqa: BLE001 - 進度回呼不可影響快取載入
+        log.debug(f"進度回呼失敗（已忽略）: {e!r}")
+
+
+def reload_translation_cache(on_progress=None):
+    """重新載入翻譯快取。
+
+    ``on_progress(current, total, message)`` 於每個快取類型載入完成後呼叫（持有 cache_lock
+    期間），因此回呼必須非阻塞，只能把進度轉送到 UI 執行緒。
+    """
     state = cache_store.get_runtime_state()
     with state.cache_lock:
         configured_root = _configured_cache_root()
@@ -228,7 +242,7 @@ def reload_translation_cache():
         # 重新載入所有快取型別
         cache_workers = resolve_worker_count("cache_load", load_config())
         try:
-            for cache_type in CACHE_TYPES:
+            for index, cache_type in enumerate(CACHE_TYPES, start=1):
                 load_cache_type(
                     cache_type,
                     translation_cache=state.translation_cache,
@@ -236,6 +250,9 @@ def reload_translation_cache():
                     cache_root=_get_cache_root(),
                     parallel_workers=cache_workers,
                     logger=log,
+                )
+                _emit_progress(
+                    on_progress, index, len(CACHE_TYPES), f"已載入 {cache_type}"
                 )
         except Exception:
             # 與 initialize_translation_cache 一致：失敗時不留半套 state，再把例外交給呼叫端。
@@ -675,8 +692,11 @@ def is_search_index_current() -> bool:
     return current
 
 
-def rebuild_search_index() -> bool:
+def rebuild_search_index(on_progress=None) -> bool:
     """重建所有快取類型的搜尋索引。
+
+    ``on_progress(current, total, message)`` 於每個快取類型索引完成後呼叫（在搜尋外觀的
+    重建流程中，不持有 cache_lock）；重試時 current 可能從頭開始，呼叫端需自行保持單調。
 
     Returns:
         False 代表快取初始化失敗而拒絕重建（不可用空 cache 覆蓋既有索引）；
@@ -688,9 +708,18 @@ def rebuild_search_index() -> bool:
         return False
     with state.cache_lock:
         start_generation = state.search_generation
-    result = _get_search_facade().rebuild_search_index(
-        CACHE_TYPES, state.translation_cache
-    )
+    if on_progress is None:
+        result = _get_search_facade().rebuild_search_index(
+            CACHE_TYPES, state.translation_cache
+        )
+    else:
+        result = _get_search_facade().rebuild_search_index(
+            CACHE_TYPES,
+            state.translation_cache,
+            on_progress=lambda cur, total, msg=None: _emit_progress(
+                on_progress, cur, total, msg or ""
+            ),
+        )
     # 舊版測試替身／外部 facade 可能沒有回傳值；只有明確 False 才算失敗。
     succeeded = result is not False
     with state.cache_lock:

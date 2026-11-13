@@ -238,8 +238,12 @@ class BulkReviewMixin:
         version: str,
         *,
         conn: sqlite3.Connection | None = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> tuple[tuple[int, int, int, str], ...]:
         """開啟同步時每個候選條目的其他版本快照（SQL 分批查詢，不逐筆預覽）。
+
+        ``progress(done, total)`` 在開始時以 ``(0, total)`` 呼叫一次，之後每處理完一批
+        回報一次（``done`` 單調遞增，最後等於 ``total``）；``None`` 不回報，結果相同。
 
         回傳 ``(候選 id, 會被寫入筆數, 其中譯文不同筆數, 狀態摘要)``；摘要涵蓋所有原文相同的
         其他版本的生效譯文、來源與人工審核狀態，確認時重算並逐筆比對。
@@ -262,6 +266,8 @@ class BulkReviewMixin:
         )
         stats: dict[int, list] = {}
         ids = [c.entry_id for c in candidates if c.en_us]
+        if progress is not None:
+            progress(0, len(ids))
         for start in range(0, len(ids), _ID_CHUNK):
             params = (version, json.dumps(ids[start : start + _ID_CHUNK]))
             rows = (
@@ -285,6 +291,8 @@ class BulkReviewMixin:
                     continue  # 另一來源已審核的不同譯文：實際審核會保護它，不會寫入
                 entry[0] += 1
                 entry[1] += 0 if theirs == mine else 1
+            if progress is not None:
+                progress(min(start + _ID_CHUNK, len(ids)), len(ids))
         return tuple(
             (eid, total, replaced, digest.hexdigest())
             for eid, (total, replaced, digest) in sorted(stats.items())
@@ -300,8 +308,13 @@ class BulkReviewMixin:
         quality_pass_only: bool = True,
         propagate: bool = False,
         pack_scope: str | None = None,
+        progress: Callable[[int, int], None] | None = None,
     ) -> BulkReviewPlan:
-        """預覽批量審核範圍（不寫入）。"""
+        """預覽批量審核範圍（不寫入）。
+
+        ``progress(done, total)`` 只在 ``propagate`` 的其他版本快照分批階段回報；
+        找出候選條目的單一 SQL 階段沒有可量測的進度。``None`` 不回報，結果相同。
+        """
         source = int(source) if source is not None else None
         mod_id = str(mod_id).strip() if mod_id is not None else None
         mod_id = mod_id or None
@@ -317,7 +330,9 @@ class BulkReviewMixin:
             pack_scope=pack_scope,
         )
         sibling_info = (
-            self._bulk_review_sibling_info(candidates, version) if propagate else ()
+            self._bulk_review_sibling_info(candidates, version, progress=progress)
+            if propagate
+            else ()
         )
         return BulkReviewPlan(
             version=version,

@@ -632,6 +632,14 @@ class EntriesPanel(ft.Column):
             # 可以套用相依下拉選項，因此由面板自行更新。
             self._refresh_filter_options()
 
+    def _on_no_data_hint(self) -> bool:
+        """背景查到日期範圍說明後重畫空清單；清單已有資料時回傳 False（結果不再適用）。"""
+        if self.rows:
+            return False
+        self._render_list(keep_scroll=True)
+        self._flush_list()
+        return True
+
     def _render_list(self, *, keep_scroll: bool = False) -> None:
         self.count_badge.value = (
             f"日期條件錯誤：{self._list_error}"
@@ -645,7 +653,9 @@ class EntriesPanel(ft.Column):
             time_hint = (
                 None
                 if self._list_error or not self.version
-                else self.advanced_filters.announce_no_data(self.db, self._entry_filter)
+                else self.advanced_filters.no_data_hint_text(
+                    self._page, self.db, self._entry_filter, self._on_no_data_hint
+                )
             )
             empty = kit.empty_state(
                 "無法套用日期篩選" if self._list_error else "沒有符合的條目",

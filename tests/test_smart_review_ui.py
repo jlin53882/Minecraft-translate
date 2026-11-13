@@ -3040,3 +3040,68 @@ def test_batch_result_summary_total_equals_processed(ctx):
         "略過 6" in text
     )  # not_ready/missing/manual_reviewed/missing_entry/stale/未知
     assert "失敗 1" in text
+
+
+def _hold_background(ctx):
+    """攔下背景工作，讓測試能在「載入中」檢查畫面，再手動交付結果。"""
+    pending = []
+    ctx.run_background = lambda work, done, **kwargs: pending.append((work, done))
+    return pending
+
+
+def test_batch_reviewer_select_all_shows_busy_indicator_then_restores(ctx, monkeypatch):
+    """選取全部載入時顯示不確定進度條並停用按鈕；完成後還原。"""
+    rows = [_candidate(index) for index in range(1, 4)]
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def candidate_page(self, _run_id, *, status, limit, offset, **_kwargs):
+            return len(rows), rows
+
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        lambda *_a, **_k: Session(),
+    )
+    pending = _hold_background(ctx)
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    reviewer.run_id = "run-1"
+    reviewer.total = 3
+
+    reviewer._select_all_safe()
+
+    assert reviewer.progress_bar.visible is True
+    assert reviewer.progress_bar.value is None  # 單次查詢：不確定進度
+    assert "正在載入全部候選" in reviewer.status_text.value
+    assert reviewer.select_all_btn.disabled is True
+    assert reviewer.apply_btn.disabled is True
+    (work, done) = pending[-1]
+
+    done(work(), None)
+
+    assert reviewer.progress_bar.visible is False
+    assert reviewer._loading is False
+    assert len(reviewer._selected) == 3
+
+
+def test_batch_reviewer_page_load_busy_indicator_cleared_on_error(ctx):
+    """載入候選失敗時也要收起進度條並恢復控制項。"""
+    pending = _hold_background(ctx)
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    reviewer.run_id = "run-1"
+
+    reviewer._load_page(include_run=True)
+
+    assert reviewer.progress_bar.visible is True
+    assert reviewer._loading is True
+    (_work, done) = pending[-1]
+
+    done(None, "boom")
+
+    assert reviewer.progress_bar.visible is False
+    assert reviewer._loading is False

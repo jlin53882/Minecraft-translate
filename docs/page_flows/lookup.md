@@ -51,7 +51,7 @@ flowchart TD
     G -- 是 --> H["結果文字改為該 log，停止迭代"]
     G -- 否 --> I{"update 含 result？"}
     I -- 是 --> J["暫存結果 JSON 字串"]
-    I -- 否 --> K["暫存 progress 數值"]
+    I -- 否 --> K["暫存 progress 數值，並至少相隔 0.1 秒才經 _run_on_ui 即時更新進度條與結果框文字"]
     H --> L["finally：_run_on_ui(apply)"]
     J --> L
     K --> L
@@ -64,7 +64,7 @@ flowchart TD
 
 - **背景任務**：單筆與批次查詢各自透過 `launch_page_operation` 啟動，owner 皆為 `lookup`，`CancellationPolicy.NON_CANCELLABLE`，`ShutdownPolicy.DRAIN_ONLY`。
 - **UI 套用**：背景執行緒不直接碰控制項。`_run_on_ui` 把套用函式包成協程交給 `page.run_task`，在 event loop 上執行。
-- **批次進度的實際行為**：`batch_lookup_worker` 只在迭代結束後（`finally`）呼叫一次 `apply`，因此進度條與結果框在查詢過程中不會逐步更新，只在完成時一次更新。查詢期間結果框固定顯示「批次查詢中，請稍候...」。
+- **批次進度的實際行為**：`batch_lookup_worker` 迭代中收到 `progress` 時，最多每 0.1 秒（每秒 10 次）經 `_push_batch_progress` 排到 UI 執行緒，進度條由不確定模式改為確定進度，結果框顯示該筆 `log`（例如「(3/10) 已查詢: …」）；查詢結束後（`finally`）一定再套用一次最終結果並還原控制項，結束後才到的進度更新會被略過。
 - **複製結果**：`copy_result_clicked` 以 `ft.Clipboard().set` 寫入剪貼簿，結果為空時不動作。
 - **無 debounce**：單筆與批次查詢都只在按下按鈕或 Enter 時觸發，沒有即時搜尋。
 

@@ -120,6 +120,8 @@ class ReviewScopeController:
         self.panel = panel
         self._impact_ticket = 0
         self._confirm_ticket = 0
+        self._previewing = False
+        self._confirm_label = ""
         self._executing = False
 
     def update_impact(self) -> None:
@@ -207,7 +209,7 @@ class ReviewScopeController:
             and entry.review_status not in ("reviewed", "legacy_unknown")
         )
         panel.confirm_btn.visible = ready
-        panel.confirm_btn.disabled = not ready
+        panel.confirm_btn.disabled = not ready or self._previewing
         self._update_clear_review_button(entry, changed)
 
     def update_actions_without_impact(self, entry: EntryRow) -> None:
@@ -259,11 +261,16 @@ class ReviewScopeController:
                 C.GOLD,
             )
             return
+        if self._previewing:
+            return  # 上一次審核範圍查詢還沒回來
         propagate = bool(panel.sync_row.value)
         self._confirm_ticket += 1
         ticket = self._confirm_ticket
+        self._set_previewing(True)
 
         def apply(preview, error) -> None:
+            if ticket == self._confirm_ticket:
+                self._set_previewing(False)  # 成功、被拒絕、失敗或已換條目都要恢復按鈕
             selected = panel.selected
             if (
                 ticket != self._confirm_ticket
@@ -286,7 +293,23 @@ class ReviewScopeController:
             owner="moddb-review-scope-preview",
         )
         if not launched:
+            self._set_previewing(False)
             show_snack(panel._page, "審核預覽無法啟動，或應用程式正在關閉。", C.GOLD)
+
+    def _set_previewing(self, previewing: bool) -> None:
+        """審核範圍查詢期間停用「審核」按鈕並顯示「查詢中…」，結束後恢復原標籤與狀態。"""
+        panel = self.panel
+        if previewing == self._previewing:
+            return
+        self._previewing = previewing
+        if previewing:
+            self._confirm_label = panel.confirm_btn.content
+            panel.confirm_btn.content = "查詢中…"
+            panel.confirm_btn.disabled = True
+        else:
+            panel.confirm_btn.content = self._confirm_label or panel.confirm_btn.content
+            self.update_buttons()
+        update_regions(panel.confirm_btn)
 
     @staticmethod
     def _preview_review(
