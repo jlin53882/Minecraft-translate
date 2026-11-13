@@ -288,3 +288,18 @@ def test_progress_text_and_value_formatting():
     empty = PhaseProgress(2, 2, "檢查", 0, 0)
     assert progress_text(empty) == "第 2／2 階段：檢查 0 / 0 筆"
     assert progress_value(empty) == 1.0  # 沒有筆數要處理的階段視為已完成
+
+
+def test_raising_progress_callback_does_not_break_operation(tmp_path):
+    """進度回呼出錯只是看不到進度，不可讓寫入交易回滾。"""
+
+    def boom(_progress: PhaseProgress) -> None:
+        raise RuntimeError("ui gone")
+
+    db = _duplicate_db(tmp_path / "boom.db", pairs=3)
+    try:
+        plan = db.preview_duplicate_cleanup(VERSION, progress=None)
+        applied = db.apply_duplicate_cleanup(VERSION, plan.token, progress=boom)
+        assert db.revert_duplicate_cleanup(applied.batch_id, progress=boom).complete
+    finally:
+        db.close()

@@ -288,3 +288,20 @@ def test_refresh_keeps_button_disabled_while_pruning(monkeypatch):
 
     assert banner.prune_btn.disabled is True
     assert isinstance(banner.prune_btn, ft.Button)
+
+
+def test_save_service_keeps_saving_when_progress_callback_raises(monkeypatch):
+    saved: list[str] = []
+    monkeypatch.setattr(
+        cache_manager,
+        "save_translation_cache",
+        lambda cache_type, **_k: saved.append(cache_type) or True,
+    )
+    monkeypatch.setattr(cache_manager, "get_cache_overview", dict)
+
+    def boom(*_a):
+        raise RuntimeError("ui gone")
+
+    cache_services.cache_save_all_service(only_types=["lang", "md"], on_progress=boom)
+
+    assert saved == ["lang", "md"]

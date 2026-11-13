@@ -179,3 +179,40 @@ def test_batch_lookup_worker_throttles_progress_but_keeps_final(monkeypatch):
     assert view.batch_result_textfield.value == "R"
     assert view.batch_progress_bar.visible is False
     assert view.batch_button.disabled is False
+
+
+def test_batch_lookup_survives_progress_post_failure(monkeypatch):
+    """進度排程失敗（頁面忙碌或已卸載）只略過該次更新，不可中斷整批查詢。"""
+    import asyncio
+
+    page = mock_page()
+    view = LookupView(page)
+    monkeypatch.setattr(
+        "app.views.lookup_view.run_batch_lookup_service",
+        lambda text: iter(
+            [
+                {"progress": 0.5, "log": "half"},
+                {"progress": 1.0, "result": '{"ok": true}'},
+            ]
+        ),
+    )
+    original = page.run_task
+    calls = {"n": 0}
+
+    def flaky(handler, *args):
+        calls["n"] += 1
+        if calls["n"] == 1:  # 第一次是進度更新
+            raise RuntimeError("page busy")
+        return original(handler, *args)
+
+    page.run_task = flaky
+    view.batch_button.disabled = True
+    view.batch_progress_bar.visible = True
+    view.batch_lookup_worker("[]")
+    for handler, args in page._tasks:
+        asyncio.run(handler(*args))
+
+    assert (
+        view.batch_result_textfield.value == '{"ok": true}'
+    )  # 結果照常顯示，不是失敗訊息
+    assert view.batch_button.disabled is False

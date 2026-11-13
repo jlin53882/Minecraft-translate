@@ -27,6 +27,7 @@ from app.ui import kit
 from app.ui.page_post import has_background_scheduler
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.entries_panel import EntriesPanel
+from app.views.moddb.entry_filters import load_filter_options_sync
 from app.views.moddb.filter_options_loader import FilterOptionsLoader
 from app.views.moddb.overview_panel import OverviewPanel
 from app.views.moddb.panel_refresh import (
@@ -858,7 +859,7 @@ class ModDbView(ft.Column):
             return
         if not page_only and (full_refresh or page == 1):
             # 同步篩選也要更新模組／來源／類型選單（背景路徑由快照的 apply_filter_options 完成）。
-            entries._refresh_filter_options()
+            load_filter_options_sync(entries)
         entries._load_list(
             page=page, keep_selection=keep_selection, keep_scroll=keep_scroll
         )

@@ -424,6 +424,14 @@ def _rows_by_en_us(
 _CACHE_SIZE = 4  # 每個資料庫實例最多保留幾組掃描結果
 
 
+def _read_generation(db: TranslationDB):
+    """目前的資料世代；取不到時回傳 None（不使用快取）。"""
+    reader = getattr(db, "cache_generation_nowait", None) or getattr(
+        db, "_cache_generation", None
+    )
+    return None if reader is None else reader()
+
+
 def _cache_key(
     db: TranslationDB, version: str, mod_ids, pack_scope, kinds, en_us, max_chars
 ) -> tuple | None:
@@ -431,13 +439,11 @@ def _cache_key(
 
     世代讀取用不等主連線鎖的版本（畫面執行緒也能安全呼叫）。
     """
-    reader = getattr(db, "cache_generation_nowait", None) or getattr(
-        db, "_cache_generation", None
-    )
-    if reader is None:
+    generation = _read_generation(db)
+    if generation is None:
         return None
     return (
-        reader(),
+        generation,
         version,
         tuple(mod_ids or ()),
         pack_scope,
@@ -535,7 +541,7 @@ def list_inconsistent_groups(
 
     鍵含資料世代與全部查詢條件，資料一變（包含對話框自己的套用與復原）就自然失效並重掃；
     沒有變動時重新開啟對話框直接取快取。結果是不可變物件，快取只留最近 ``_CACHE_SIZE`` 組。
-    世代在掃描前讀取：掃描途中資料有變，結果只會存在舊世代的鍵下，不會被新世代取用。
+    世代在掃描前讀取；掃描途中資料有變（世代已前進）的結果不存入快取。
     """
     key = _cache_key(db, version, mod_ids, pack_scope, kinds, en_us, max_chars)
     cache, lock = _cache_of(db)
@@ -559,7 +565,7 @@ def list_inconsistent_groups(
         cancel=cancel,
         progress=progress,
     )
-    if key is not None:
+    if key is not None and _read_generation(db) == key[0]:
         with lock:
             cache[key] = tuple(groups)
             while len(cache) > _CACHE_SIZE:

@@ -43,6 +43,8 @@ from app.views.moddb.entry_filters import (
     build_filter_controls,
     database_identity,
     entry_filter,
+    load_filter_options_sync,
+    load_mod_and_kind_options_sync,
     on_advanced_change,
     open_batch_replace,
     open_bulk_review,
@@ -58,7 +60,6 @@ from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
     format_count,
-    kind_label,
     whitespace_note,
 )
 from app.views.moddb.history_renderer import render_history
@@ -449,7 +450,7 @@ class EntriesPanel(ft.Column):
         identity = self._database_identity(db)
         self._render_source_catalog = source_catalog_for(db)
         self._sync_database_identity(identity)
-        self._refresh_filter_options()
+        load_filter_options_sync(self)
         self._load_list(keep_selection=keep_selection, keep_scroll=keep_scroll)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
@@ -499,78 +500,6 @@ class EntriesPanel(ft.Column):
         if self._post_refresh_message and self.selected is not None:
             self.saved_text.value = self._post_refresh_message
         self._post_refresh_message = None
-
-    def _load_mods(self) -> None:
-        db = self.db()
-        mods = db.mods(self.version) if (db and self.version) else []
-        kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
-        )
-        if self.mod_id not in mods:
-            self.mod_id = None
-        self.mod_dd.value = self.mod_id or ALL_MODS
-        self._load_kinds()
-
-    def _refresh_filter_options(self) -> None:
-        """使用與條目清單相同的 scope 重新載入 module/source 選項。"""
-        db = self.db()
-        if db is None:
-            self.version_dd.options = []
-            self._load_mods()
-            return
-
-        # 讓同步 fallback 與 standalone panel 測試使用和 ModDbView worker snapshot 相同的選項語意。
-        # 這裡刻意採用區域 import，因為 panel_refresh 會從本模組匯入 PAGE_SIZE。
-        from app.views.moddb.panel_refresh import _resolve_entries_scope
-
-        try:
-            criteria = self._entry_filter()
-        except ValueError:
-            # 顯示給使用者的驗證錯誤由 _load_list 負責。
-            # 回報錯誤時保留上一次有效的相依選項，避免在此處再次拋出例外。
-            return
-        scope = _resolve_entries_scope(
-            db,
-            {
-                "criteria": criteria,
-                "version": self.version,
-                "mod_id": self.mod_id,
-                "pack": self.pack,
-                "kind": self.kind,
-            },
-            current_settings(),
-        )
-        apply_filter_options(
-            self,
-            {
-                "identity": self._database_identity(db),
-                "source_catalog": self._render_source_catalog,
-                "effective_source_codes": scope["source_codes"],
-                "filter_options_are_filtered": scope["options_are_filtered"],
-                "versions": scope["versions"],
-                "version": scope["version"],
-                "mods": scope["mods"],
-                "packs": scope["packs"],
-                "pack": scope["pack"],
-                "pack_mod_ids": scope["pack_mod_ids"],
-                "kinds": scope["kinds"],
-                "source": scope["source"],
-                "mod_id": scope["mod_id"],
-                "kind": scope["kind"],
-            },
-        )
-
-    def _load_kinds(self) -> None:
-        """類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。"""
-        db = self.db()
-        kinds = db.kinds(self.version) if (db and self.version) else []
-        kit.set_dropdown_options(
-            self.kind_dd,
-            [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
-        )
-        if self.kind not in kinds:
-            self.kind = None
-        self.kind_dd.value = self.kind or ALL_KINDS
 
     def _load_list(
         self,
@@ -630,7 +559,7 @@ class EntriesPanel(ft.Column):
         if self._on_filter_changed is None:
             # standalone panel 與同步 fallback 頁面沒有父層 snapshot worker
             # 可以套用相依下拉選項，因此由面板自行更新。
-            self._refresh_filter_options()
+            load_filter_options_sync(self)
 
     def _on_no_data_hint(self) -> bool:
         """背景查到日期範圍說明後重畫空清單；清單已有資料時回傳 False（結果不再適用）。"""
@@ -825,7 +754,7 @@ class EntriesPanel(ft.Column):
         self._clear_pack()
         self.mod_id = None
         if self._on_filter_changed is None:
-            self._load_mods()
+            load_mod_and_kind_options_sync(self)
         refresh_entry_filter(self, full_refresh=True)
 
     def _clear_pack(self) -> None:

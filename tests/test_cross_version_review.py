@@ -941,3 +941,17 @@ def test_scan_cache_is_reused_until_data_changes(db, monkeypatch):
     assert calls["n"] == 2 and after == []
     db.scan_cross_version_differences("26.1", ref_version="1.20.1")
     assert calls["n"] == 3  # 條件不同不共用
+
+
+def test_exclusion_stats_use_exact_pack_match_not_sql_coarse_filter(db):
+    """資料夾名稱含 ``@`` 的整合包（X@A）不可被誤算進整合包 A 的未列出統計。"""
+    pack_xa = "actuallyadditions@X@A@aaaaaaaaaaaa"
+    pack_a = "actuallyadditions@A@bbbbbbbbbbbb"
+    db.ingest("1.21.1", [_pack_item(pack_xa, "unrev", "Dois", "二")])  # 參考未審核
+    db.ingest("1.21.1", [_pack_item(pack_a, "unrev2", "Quatro", "四")])
+    db.ingest("26.1", [_pack_item(PACK_B, "unrev", "Dois", "")])
+    db.ingest("26.1", [_pack_item(PACK_B, "unrev2", "Quatro", "")])
+
+    summary = db.explain_cross_version_exclusions("26.1", ref_pack="A")
+
+    assert summary.ref_unreviewed == 1  # 只有真正屬於整合包 A 的那一筆

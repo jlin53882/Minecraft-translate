@@ -14,6 +14,7 @@ callback 只能排程回 UI，不可在裡面直接動畫面：寫入交易持�
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ class PhaseProgress:
     done: int
     total: int
 
+
+log = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[PhaseProgress], None]
 
@@ -93,9 +96,13 @@ class OperationProgress:
         label = (
             self._labels[self.index - 1] if 0 < self.index <= len(self._labels) else ""
         )
-        if self._callback is not None:
+        if self._callback is None:
+            return
+        try:
             self._callback(
                 PhaseProgress(
                     self.index, len(self._labels), label, self.done, self.total
                 )
             )
+        except Exception as e:  # noqa: BLE001 - 進度回呼出錯不可讓寫入交易回滾
+            log.debug(f"進度回呼失敗（已忽略）: {e!r}")

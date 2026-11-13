@@ -690,8 +690,17 @@ class CleanupDialog:
     def _progress_reporter(self):
         """目前操作的節流進度回報（背景呼叫，只把更新排回畫面執行緒）。"""
         token = self._op_token
-        return throttled_progress(
-            lambda progress: self._post(self._show_progress, token, progress)
+        return throttled_progress(lambda progress: self._post_progress(token, progress))
+
+    def _post_progress(self, token: int, progress) -> None:
+        """進度更新排回畫面；失敗時靜默略過（寫入交易仍在執行，不可回收忙碌狀態）。"""
+        post_to_ui(
+            self.page,
+            self._show_progress,
+            token,
+            progress,
+            label="Mod 資料庫清理進度",
+            quiet=True,
         )
 
     def _show_progress(self, token: int, progress) -> None:

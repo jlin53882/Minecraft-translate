@@ -17,7 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 from translation_tool.utils import cache_manager
-from translation_tool.utils.log_unit import log_error, log_warning
+from translation_tool.utils.log_unit import log_debug, log_error, log_warning
 
 # (已完成步數, 總步數, 說明)；只代表真實完成量。
 ProgressCallback = Callable[[int, int, "str | None"], None]
@@ -121,7 +121,10 @@ def cache_save_all_service(
         if saved is False:
             failed_types.append(str(cache_type))
         if on_progress is not None:
-            on_progress(index, len(targets), f"已儲存 {cache_type}")
+            try:
+                on_progress(index, len(targets), f"已儲存 {cache_type}")
+            except Exception as e:  # noqa: BLE001 - 進度回呼出錯不可中斷後續類型的儲存
+                log_debug(f"進度回呼失敗（已忽略）: {e!r}")
 
     if failed_types:
         try:

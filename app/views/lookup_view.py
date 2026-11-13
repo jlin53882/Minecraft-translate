@@ -22,7 +22,7 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.log_unit import log_debug, log_error
 
 _PROGRESS_MIN_INTERVAL = 0.1  # 批次查詢進度最多每秒更新 10 次
 RECENT_LIMIT = 6  # 「最近查詢」最多顯示幾筆（只存在這次開啟的程式內）
@@ -293,7 +293,10 @@ class LookupView(ft.Column):
                 self.batch_result_textfield.value = log_text
             self.page.update()
 
-        self._run_on_ui(apply)
+        try:
+            self._run_on_ui(apply)
+        except Exception as e:  # noqa: BLE001 - 進度更新失敗不可中斷批次查詢
+            log_debug(f"[Lookup] 進度更新排程失敗（已忽略）: {e!r}")
 
     def batch_lookup_worker(self, json_text):
         """執行批次查詢翻譯服務（背景執行緒）；結果交給 event loop 套用。"""

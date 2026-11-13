@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_service import EntryFilter
+from app.services_impl.moddb_service import EntryFilter, current_settings
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -185,6 +185,81 @@ def refresh_after_database_change(panel) -> None:
         keep_selection=False,
         full_refresh=True,
     )
+
+
+def load_filter_options_sync(panel) -> None:
+    """在呼叫端執行緒用與條目清單相同的 scope 重新載入 module/source 選項。
+
+    standalone panel 與同步 fallback 頁面沒有父層 snapshot worker，由面板自行更新；
+    使用與 ``ModDbView`` worker 快照相同的選項語意（``apply_filter_options``）。
+    """
+    db = panel.db()
+    if db is None:
+        panel.version_dd.options = []
+        load_mod_and_kind_options_sync(panel)
+        return
+
+    # 區域 import：panel_refresh 會從 entries_panel 匯入 PAGE_SIZE，頂層 import 會形成循環。
+    from app.views.moddb.panel_refresh import _resolve_entries_scope
+
+    try:
+        criteria = panel._entry_filter()
+    except ValueError:
+        # 顯示給使用者的驗證錯誤由 _load_list 負責。
+        # 回報錯誤時保留上一次有效的相依選項，避免在此處再次拋出例外。
+        return
+    scope = _resolve_entries_scope(
+        db,
+        {
+            "criteria": criteria,
+            "version": panel.version,
+            "mod_id": panel.mod_id,
+            "pack": panel.pack,
+            "kind": panel.kind,
+        },
+        current_settings(),
+    )
+    apply_filter_options(
+        panel,
+        {
+            "identity": panel._database_identity(db),
+            "source_catalog": panel._render_source_catalog,
+            "effective_source_codes": scope["source_codes"],
+            "filter_options_are_filtered": scope["options_are_filtered"],
+            "versions": scope["versions"],
+            "version": scope["version"],
+            "mods": scope["mods"],
+            "packs": scope["packs"],
+            "pack": scope["pack"],
+            "pack_mod_ids": scope["pack_mod_ids"],
+            "kinds": scope["kinds"],
+            "source": scope["source"],
+            "mod_id": scope["mod_id"],
+            "kind": scope["kind"],
+        },
+    )
+
+
+def load_mod_and_kind_options_sync(panel) -> None:
+    """換遊戲版本時，同步依該版本重新載入模組與類型下拉選項（選值不在新清單就清掉）。"""
+    db = panel.db()
+    version = panel.version
+    mods = db.mods(version) if (db and version) else []
+    kit.set_dropdown_options(
+        panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
+    )
+    if panel.mod_id not in mods:
+        panel.mod_id = None
+    panel.mod_dd.value = panel.mod_id or ALL_MODS
+    # 類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。
+    kinds = db.kinds(version) if (db and version) else []
+    kit.set_dropdown_options(
+        panel.kind_dd,
+        [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
+    )
+    if panel.kind not in kinds:
+        panel.kind = None
+    panel.kind_dd.value = panel.kind or ALL_KINDS
 
 
 def _apply_pack_options(panel, snapshot: dict) -> bool:

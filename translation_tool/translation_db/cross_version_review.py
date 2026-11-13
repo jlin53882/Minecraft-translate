@@ -268,6 +268,13 @@ def _fetch_rows(
     )
 
 
+def _matches_packs(row: Sequence, ref_pack: str, target_pack: str) -> bool:
+    """精確的整合包資料夾比對（SQL 的 ``instr`` 只是粗篩，資料夾名稱含 ``@`` 時會多放行）。"""
+    if ref_pack and pack_label(row[1], row[17]) != ref_pack:
+        return False
+    return not (target_pack and pack_label(row[1], row[2]) != target_pack)
+
+
 def _build_rows(
     raw: Iterable[Sequence],
     *,
@@ -282,9 +289,7 @@ def _build_rows(
     grouped: dict[int, list[VersionRef]] = {}
     heads: dict[int, tuple] = {}
     for row in raw:
-        if ref_pack and pack_label(row[1], row[17]) != ref_pack:
-            continue
-        if target_pack and pack_label(row[1], row[2]) != target_pack:
+        if not _matches_packs(row, ref_pack, target_pack):
             continue
         eid = int(row[0])
         heads.setdefault(eid, (row[1:5], row[5], row[6], row[7], row[8]))
@@ -448,7 +453,12 @@ def scan_differences(
                     target_pack=target_pack,
                 )
                 # 原文只差大小寫或空白視為相同；原文真的不同的參考由「原文不同」頁籤列出
-                same = [r for r in raw if _same_source(r[4], r[18])]
+                same = [
+                    r
+                    for r in raw
+                    if _same_source(r[4], r[18])
+                    and _matches_packs(r, ref_pack, target_pack)
+                ]
                 _classify_exclusions(same, summary, conn, locales)
             rows.extend(row for row in built if row.differs)
             tick(len(part))

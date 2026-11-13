@@ -561,3 +561,20 @@ def test_result_cache_follows_the_data_generation(db, monkeypatch):
         _groups(db, max_chars=width)
     cache, _ = module._cache_of(db)
     assert len(cache) <= module._CACHE_SIZE
+
+
+def test_result_is_not_cached_when_data_changes_during_the_scan(db, monkeypatch):
+    from translation_tool.translation_db import same_text_review as module
+
+    db.ingest(VERSION, [_item("a", "Close", "關閉"), _item("b", "Close", "閉合")])
+    real = module._scan_groups
+
+    def scan_then_write(*args, **kwargs):
+        groups = real(*args, **kwargs)
+        _review(db, "a", "關閉")  # 掃描途中資料變動：世代前進
+        return groups
+
+    monkeypatch.setattr(module, "_scan_groups", scan_then_write)
+    _groups(db)
+    cache, _ = module._cache_of(db)
+    assert len(cache) == 0  # 舊世代的結果不留在快取裡
