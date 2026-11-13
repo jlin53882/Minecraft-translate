@@ -686,8 +686,6 @@ def _scan_kubejs_event(
     lang_locale = _kubejs_lang_locale(event_name, args, rel, result)
     if event_name == "ClientEvents.lang" and lang_locale is None:
         return lang_occurrence
-    if result.skip_zh_cn and lang_locale == "zh_cn":
-        return lang_occurrence
     args_code = _mask_js_non_code(args)
     for match in _EVENT_ADD.finditer(args_code):
         call_args = _extract_js_call_args(args, match.end())
@@ -698,6 +696,8 @@ def _scan_kubejs_event(
             continue
         if event_name == "ClientEvents.lang":
             lang_occurrence += 1
+            if result.skip_zh_cn and lang_locale == "zh_cn":
+                continue
             _append_kubejs_lang_item(
                 parts,
                 lang_locale or "en_us",

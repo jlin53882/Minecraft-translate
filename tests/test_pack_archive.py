@@ -13,7 +13,11 @@ from translation_tool.translation_db.pack_archive import (
     zip_pack_scope,
 )
 from translation_tool.translation_db.repository import TranslationDB
-from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
+from translation_tool.translation_db.scanner import (
+    ScanOptions,
+    scan_folder_generator,
+    scan_jar,
+)
 
 SNBT = '{\n\ttitle: "Hello"\n\tquests: [{\n\t\tid: "AAAA"\n\t}]\n}\n'
 LANG = '{\n\tchapter.AAAA.title: "歡迎"\n\tquest.BBBB.title: "任務"\n}\n'
@@ -334,6 +338,31 @@ def test_kubejs_lang_translation_only_zip_fills_zh_tw_into_existing_entries(tmp_
     )
 
 
+def test_kubejs_lang_archive_members_are_not_scanned_as_regular_lang(tmp_path):
+    """KubeJS 語系只由模組包掃描，不能冒充一般 lang（即使兩者 namespace 相同）。"""
+    zpath = _make_zip(
+        tmp_path / "mixed.zip",
+        {
+            "overrides/kubejs/assets/demo/lang/zh_tw.json": json.dumps(
+                {"item.demo.widget": "KubeJS 翻譯"}, ensure_ascii=False
+            ),
+            "assets/demo/lang/zh_tw.json": json.dumps(
+                {"item.demo.widget": "一般語系翻譯"}, ensure_ascii=False
+            ),
+        },
+    )
+
+    result = scan_jar(
+        zpath,
+        ScanOptions("1.21.1", translated=True, include_pack_content=False),
+        (),
+    )
+
+    assert [(item.kind, item.zh_tw) for item in result.items] == [
+        ("lang", "一般語系翻譯")
+    ]
+
+
 def test_extract_reports_file_directory_collision(tmp_path):
     zpath = _make_zip(
         tmp_path / "clash.zip",
@@ -522,6 +551,31 @@ def test_same_folder_translated_in_place_fills_zh_tw(tmp_path):
         "select source_path, selector, source_hash from entry_origin order by 1,2"
     ).fetchall()
     assert after == origins
+
+
+def test_same_folder_translated_in_place_only_updates_that_pack(tmp_path):
+    """同一模組包就地翻譯重掃時，不應把譯文同步到其他版本。"""
+    db = TranslationDB(tmp_path / "t.db")
+    _import_pack_versions(
+        db,
+        tmp_path,
+        {
+            "pack82": [("Q1", "First Quest"), ("Q2", "Second Quest")],
+            "pack85": [("Q1", "First Quest"), ("Q2", "Second Quest")],
+        },
+    )
+
+    _write_files(
+        tmp_path / "pack82",
+        _quest_file([("Q1", "第一個任務"), ("Q2", "第二個任務")]),
+    )
+    report = _scan(db, tmp_path / "pack82")
+
+    assert report.stats.new_entries == 0 and report.stats.en_changed == 0
+    assert _translations_by_pack(tmp_path / "t.db") == {
+        "pack82": {"First Quest": "第一個任務", "Second Quest": "第二個任務"},
+        "pack85": {"First Quest": None, "Second Quest": None},
+    }
 
 
 def test_same_zip_reimport_without_translations_stays_a_normal_import(tmp_path):
@@ -722,3 +776,93 @@ def test_unknown_original_is_only_filled_in_the_best_pack():
     assert filled("b@2") == (["ftbquests@b@2"], 1)
     assert filled("a@1") == (["ftbquests@a@1", "ftbquests@b@2"], 0)
     assert filled(None) == (["ftbquests@b@2"], 1)
+
+
+def test_unsupported_kubejs_lang_members_remain_general_lang(tmp_path):
+    """未被模組包抽取器支援的舊式／深層成員不可因排除規則而消失。"""
+    zpath = _make_zip(
+        tmp_path / "legacy.zip",
+        {
+            "overrides/kubejs/assets/legacy/lang/zh_tw.lang": "item.legacy=舊式翻譯\n",
+            "a/b/c/d/e/kubejs/assets/deep/lang/zh_tw.json": json.dumps(
+                {"item.deep": "深層翻譯"}, ensure_ascii=False
+            ),
+        },
+    )
+
+    result = scan_jar(
+        zpath,
+        ScanOptions("1.21.1", translated=True, include_pack_content=False),
+        (),
+    )
+
+    assert {(item.mod_id, item.key, item.zh_tw) for item in result.items} == {
+        ("legacy", "item.legacy", "舊式翻譯"),
+        ("deep", "item.deep", "深層翻譯"),
+    }
+
+
+def test_translated_folder_does_not_pair_regular_english_with_kubejs_translation(
+    tmp_path,
+):
+    folder = tmp_path / "translations"
+    folder.mkdir()
+    _make_zip(
+        folder / "mixed.zip",
+        {
+            "assets/demo/lang/en_us.json": json.dumps({"item.same": "Regular English"}),
+            "kubejs/assets/demo/lang/zh_tw.json": json.dumps(
+                {"item.same": "KubeJS 翻譯"}, ensure_ascii=False
+            ),
+        },
+    )
+    db = TranslationDB(tmp_path / "t.db")
+
+    for _ in scan_folder_generator(
+        db,
+        folder,
+        ScanOptions("1.21.1", translated=True, include_pack_content=True),
+        workers=1,
+    ):
+        pass
+
+    rows = (
+        sqlite3.connect(tmp_path / "t.db")
+        .execute(
+            "select e.en_us, coalesce(t.zh_tw, '') from entry e "
+            "left join translation t on t.entry_id=e.id "
+            "where e.kind='lang' and e.key='item.same'"
+        )
+        .fetchall()
+    )
+    assert rows == [("Regular English", "")]
+
+
+def test_single_zip_without_pack_scanner_reads_kubejs_lang_as_regular_lang(tmp_path):
+    zpath = _make_zip(
+        tmp_path / "translations.zip",
+        {
+            "kubejs/assets/demo/lang/zh_tw.json": json.dumps(
+                {"item.only": "只有翻譯"}, ensure_ascii=False
+            )
+        },
+    )
+    db = TranslationDB(tmp_path / "t.db")
+
+    for _ in scan_folder_generator(
+        db,
+        zpath,
+        ScanOptions("1.21.1", translated=True, include_pack_content=False),
+        workers=1,
+    ):
+        pass
+
+    row = (
+        sqlite3.connect(tmp_path / "t.db")
+        .execute(
+            "select e.kind, e.en_us, t.zh_tw from entry e "
+            "join translation t on t.entry_id=e.id where e.key='item.only'"
+        )
+        .fetchone()
+    )
+    assert row == ("lang", "", "只有翻譯")

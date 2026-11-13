@@ -375,6 +375,27 @@ def test_kubejs_lang_skips_blank_values_but_keeps_occurrence_alignment(tmp_path)
     assert result.stale_origins[0].selector.endswith("event.add[1]|item.demo.empty")
 
 
+def test_skipping_zh_cn_keeps_later_kubejs_selector_occurrence(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n"
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1", read_zh_cn=False)
+
+    items = [item for item in result.items if item.kind == "kubejs_lang"]
+    assert len(items) == 1
+    assert items[0].source_locale == "en_us"
+    assert "ClientEvents.lang[en_us][demo].event.add[2]" in items[0].source_selector
+
+
 def test_moddb_rescan_removes_legacy_blank_kubejs_origin(tmp_path):
     script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
     script.parent.mkdir(parents=True)

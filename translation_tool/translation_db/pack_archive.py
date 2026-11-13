@@ -47,6 +47,12 @@ def _is_pack_source_member(parts: tuple[str, ...]) -> bool:
     return False
 
 
+def is_pack_source_member(name: str) -> bool:
+    """回傳 archive 成員是否在本模組包抽取器支援的來源範圍內。"""
+    parts = _safe_parts(name)
+    return parts is not None and _is_pack_source_member(parts)
+
+
 def _safe_parts(name: str) -> tuple[str, ...] | None:
     """回傳可安全接在目的目錄下的路徑片段；絕對路徑、``..``、磁碟機代號回 ``None``。"""
     path = PurePosixPath(name.replace("\\", "/"))

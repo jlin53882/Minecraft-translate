@@ -61,6 +61,7 @@ from translation_tool.translation_db.identity import (
 from translation_tool.translation_db.models import IngestStats, ScanItem
 from translation_tool.translation_db.pack_archive import (
     extract_pack_members,
+    is_pack_source_member,
     zip_pack_scope,
 )
 from translation_tool.translation_db.pack_scope_match import (
@@ -69,6 +70,7 @@ from translation_tool.translation_db.pack_scope_match import (
     keep_existing_originals,
     locale_only_items,
     match_existing_scope,
+    restrict_to_scope,
 )
 from translation_tool.translation_db.pack_sources import (
     PackScanResult,
@@ -133,6 +135,8 @@ class ScanOptions:
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
     include_pack_content: bool = True  # instance 根目錄下的 KubeJS／FTB Quests
+    # 單一翻譯 ZIP 由模組包掃描器抽出 KubeJS 語系時，一般 ZIP 掃描略過同一批成員
+    exclude_kubejs_pack_lang: bool = False
     reuse_reviewed: bool = True  # 匯入後沿用其他版本已審核的相同譯文
 
 
@@ -382,10 +386,17 @@ def _lang_rank(member: str) -> int:
 def _group_members(
     names: Sequence[str], options: ScanOptions, dir_names: Sequence[str]
 ) -> dict[tuple[str, str, str], dict[str, str]]:
-    """把成員依 ``(類型, 模組, 檔案鍵)`` 分組：``{lang: 成員路徑}``。"""
-    groups: dict[tuple[str, str, str], dict[str, str]] = {}
+    """把成員依 ``(類型, 模組, 檔案鍵)`` 分組：``{lang: 成員路徑}``。
+
+    一般語系與 KubeJS 語系分開收集，同一身分有一般語系時只用一般語系，避免一般 en_us
+    和 KubeJS zh_tw 跨來源配對；沒有一般語系時才讀 KubeJS 語系。
+    """
+    families: dict[tuple[str, str, str], dict[bool, dict[str, str]]] = {}
     for name in names:
         if name.endswith("/"):
+            continue
+        if options.exclude_kubejs_pack_lang and _is_pack_extracted_kubejs_lang(name):
+            # 這批成員由模組包掃描器處理；一般 ZIP 掃描再讀會變成重複的 KIND_LANG。
             continue
         ident: FileIdentity | None = classify_member(name, dir_names)
         if ident is None:
@@ -395,11 +406,51 @@ def _group_members(
             and not options.include_patchouli
         ):
             continue
-        members = groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})
+        ident_key = (ident.kind, ident.mod_id, ident.file_key)
+        family = families.setdefault(ident_key, {})
+        members = family.setdefault(_is_kubejs_lang_member(name), {})
         previous = members.get(ident.lang)
         if previous is None or _lang_rank(name) < _lang_rank(previous):
             members[ident.lang] = name
-    return groups
+    return {
+        ident_key: family.get(False) or family.get(True, {})
+        for ident_key, family in families.items()
+    }
+
+
+def _kubejs_lang_tail(member: str) -> tuple[str, ...] | None:
+    """``kubejs/`` 之後的路徑片段；成員不在 ``kubejs/assets/<namespace>/lang/`` 下時回 ``None``。"""
+    parts = tuple(part for part in member.replace("\\", "/").split("/") if part)
+    for index, part in enumerate(parts):
+        if part.casefold() != "kubejs":
+            continue
+        tail = parts[index + 1 :]
+        if (
+            len(tail) == 4
+            and tail[0].casefold() == "assets"
+            and tail[2].casefold() == "lang"
+        ):
+            return tail
+    return None
+
+
+def _is_kubejs_lang_member(member: str) -> bool:
+    """成員是否為 KubeJS 的 ``assets/<namespace>/lang`` 語系檔。"""
+    return _kubejs_lang_tail(member) is not None
+
+
+def _is_pack_extracted_kubejs_lang(member: str) -> bool:
+    """成員是否會被單一 ZIP 的模組包抽取器取出（KubeJS JSON 語系、在 wrapper 深度內）。
+
+    抽取器不支援的成員（舊式 ``.lang``、超過 wrapper 深度）仍由一般 ZIP 掃描讀取，
+    避免兩邊都略過而遺失。
+    """
+    tail = _kubejs_lang_tail(member)
+    return (
+        tail is not None
+        and tail[3].casefold().endswith(".json")
+        and is_pack_source_member(member)
+    )
 
 
 def _read_json_member(
@@ -1488,6 +1539,10 @@ def _match_existing_pack(
         return pack_result
     # 同一個身分但內容已是中文（原資料夾就地翻譯後再匯入）一樣只補譯文：照一般匯入
     # 會把中文當成新原文，全部記成原文已變動而補不進譯文。
+    if pack_result.pack_scope in match.scopes:
+        # 同一個模組包就地翻譯後重新匯入時，翻譯只屬於這個精確身分；
+        # 不可因其他版本共用 key 而把內容同步到那些模組包。
+        match = restrict_to_scope(match, pack_result.pack_scope)
     adopted = keep_existing_originals(pack_result.items, match)
     pack_result.adopted_existing = True
     # 譯文輸入不是原模組包的檔案：不清理原包的來源紀錄
@@ -1596,6 +1651,9 @@ def scan_folder_generator(
     jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
     options = replace(options, rules=load_rules() if options.apply_rules else [])
+    if options.include_pack_content and _pack_source_from_zip(Path(folder), options):
+        # 單一 ZIP 的 KubeJS 語系由模組包掃描器抽出處理，一般 ZIP 掃描不再重複讀。
+        options = replace(options, exclude_kubejs_pack_lang=True)
     convert = make_converter(options.rules) if options.convert_cn else None
     preview = (
         (

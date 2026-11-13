@@ -120,6 +120,24 @@ def match_existing_scope(
     return ScopeMatch(scopes, best, originals_by_ident, top, total)
 
 
+def restrict_to_scope(match: ScopeMatch, scope: str) -> ScopeMatch:
+    """把既有模組包比對限制在指定的單一身分。"""
+    if scope not in match.scopes:
+        return match
+    originals = {
+        ident: {scope: holders[scope]}
+        for ident, holders in match.originals.items()
+        if scope in holders
+    }
+    return replace(
+        match,
+        scopes=(scope,),
+        best=scope,
+        originals=originals,
+        overlap=len(originals),
+    )
+
+
 def carries_translation(items: list[ScanItem], match: ScopeMatch) -> bool:
     """對到的既有條目中，這份輸入是否帶了中文譯文。
 
