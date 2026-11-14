@@ -1126,3 +1126,90 @@ def test_translated_zip_reads_zh_cn_only_when_enabled(tmp_path):
     assert [i.zh_cn for i in on.values()] == ["钢制外壳"]
     assert [i.zh_tw for i in off.values()] == ["鋼製外殼"]
     assert [i.zh_cn for i in off.values()] == [""]
+
+
+def test_kubejs_moved_script_occurrence_retires_old_origin(tmp_path):
+    """完整重掃描後，前置事件造成的 selector 位移不可留下舊 origin。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "moved-kubejs-origin.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        script.write_text(
+            "ClientEvents.lang('en_us', event => {\n"
+            "  event.add('demo', 'item.demo.before', 'Before');\n"
+            "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+            "});\n",
+            encoding="utf-8",
+        )
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        selectors = db._q(
+            "SELECT eo.selector FROM entry_origin eo "
+            "JOIN entry e ON e.id=eo.entry_id "
+            "WHERE e.kind='kubejs_lang' AND e.key=? "
+            "ORDER BY eo.selector",
+            ("item.demo.machine",),
+        )
+        assert selectors == [
+            ("ClientEvents.lang[en_us][demo].event.add[2]|item.demo.machine",)
+        ]
+    finally:
+        db.close()
+
+
+def test_kubejs_duplicate_key_in_same_scan_keeps_both_origins(tmp_path):
+    """同一區塊重複 add 同一個 key 時，兩個 selector 都是這次掃描寫入的，不可互相清掉。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "  event.add('demo', 'item.demo.other', 'Other');\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "duplicate-kubejs-origin.db")
+    try:
+        for _ in range(2):
+            list(
+                scan_folder_generator(
+                    db,
+                    tmp_path,
+                    ScanOptions("1.21.1", include_pack_content=True),
+                    workers=1,
+                )
+            )
+        selectors = db._q(
+            "SELECT eo.selector FROM entry_origin eo "
+            "JOIN entry e ON e.id=eo.entry_id "
+            "WHERE e.kind='kubejs_lang' AND e.key=? "
+            "ORDER BY eo.selector",
+            ("item.demo.machine",),
+        )
+        assert selectors == [
+            ("ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine",),
+            ("ClientEvents.lang[en_us][demo].event.add[3]|item.demo.machine",),
+        ]
+    finally:
+        db.close()

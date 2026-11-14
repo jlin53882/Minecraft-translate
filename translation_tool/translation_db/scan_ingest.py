@@ -318,6 +318,8 @@ class DbIngestTarget:
         self, conn: sqlite3.Connection, version: str, touched: list[int]
     ) -> None:
         self.conn, self.version, self.touched = conn, version, touched
+        # 這次匯入寫入的來源：同一條目的其他來源是否為搬走後留下的舊 selector
+        self._recorded: set[tuple[int, str, str, str, str]] = set()
 
     def existing(self, kind: str, mod_id: str) -> tuple[Known, Have]:
         return _read_existing(self.conn.execute, self.version, kind, mod_id)
@@ -385,6 +387,49 @@ class DbIngestTarget:
                 source_locale,
             ),
         )
+        self._recorded.add(
+            (
+                entry_id,
+                item.pack_scope,
+                item.kind,
+                item.source_path,
+                item.source_selector,
+            )
+        )
+        self._retire_moved_kubejs_lang_origins(item, entry_id)
+
+    def _retire_moved_kubejs_lang_origins(self, item: ScanItem, entry_id: int) -> None:
+        """KubeJS ``ClientEvents.lang`` 的 selector 含 occurrence 序號，前面插入或刪除
+        ``event.add`` 時同一個 key 的序號會位移，舊 selector 會留下指向別的 key 的來源。
+
+        只清同一條目、同一個腳本檔、同一個語系與 namespace 區塊、同一個 key、只差序號，
+        而且不是這次匯入寫入的來源；同一區塊重複 add 同一個 key 時兩個都在這次寫入，不會被清。
+        """
+        prefix, key = _kubejs_lang_selector_parts(item.source_selector)
+        if prefix is None:
+            return
+        rows = self.conn.execute(
+            "SELECT selector FROM entry_origin "
+            "WHERE entry_id=? AND pack_scope=? AND source_kind=? AND source_path=?",
+            (entry_id, item.pack_scope, item.kind, item.source_path),
+        ).fetchall()
+        stale = [
+            (selector,)
+            for (selector,) in rows
+            if selector != item.source_selector
+            and _kubejs_lang_selector_parts(selector) == (prefix, key)
+            and (entry_id, item.pack_scope, item.kind, item.source_path, selector)
+            not in self._recorded
+        ]
+        self.conn.executemany(
+            "DELETE FROM entry_origin "
+            "WHERE entry_id=? AND pack_scope=? AND source_kind=? AND source_path=? "
+            "AND selector=?",
+            [
+                (entry_id, item.pack_scope, item.kind, item.source_path, selector)
+                for (selector,) in stale
+            ],
+        )
 
     def remove_origins(self, origins: Iterable[EntryOrigin]) -> None:
         """批次清除本次完整重掃描確認已失效的精確來源。
@@ -437,6 +482,20 @@ class DbIngestTarget:
             (self.version,),
         )
         self.conn.execute("DELETE FROM temp._moddb_stale_origins")
+
+
+def _kubejs_lang_selector_parts(selector: str) -> tuple[str | None, str]:
+    """``ClientEvents.lang[<locale>][<ns>].event.add[<n>]|<key>`` 拆成 ``(區塊前綴, key)``。
+
+    不是這種 selector 時前綴回 ``None``。
+    """
+    if not selector.startswith("ClientEvents.lang["):
+        return None, ""
+    head, separator, key = selector.partition("|")
+    prefix, marker, occurrence = head.partition(".event.add[")
+    if not separator or not marker or not occurrence.endswith("]"):
+        return None, ""
+    return prefix, key
 
 
 class PreviewIngestTarget:
