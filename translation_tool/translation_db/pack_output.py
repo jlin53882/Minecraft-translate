@@ -564,6 +564,10 @@ def _verify_stage_with_rescan(
         report.entries_reparsed = len(result.items)
         for issue in result.issues:
             reason = issue.get("reason", "unknown")
+            if reason == "snbt_trailing_braces_ignored":
+                # 掃描器已明確容錯來源結尾多餘的括號，輸出的檔案仍會經過嚴格驗證；
+                # 這是來源的警告，不是覆蓋層套用失敗。
+                continue
             source = issue.get("source_path") or issue.get("source_archive") or "來源"
             report.unapplied.append(f"重掃描問題：{source} ({reason})")
         _check_rescan_identity(plans, result, report)
