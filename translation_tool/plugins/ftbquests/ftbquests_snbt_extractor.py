@@ -96,13 +96,57 @@ def is_tag_condition_text(s: str) -> bool:
 
 
 def walk_snbt_file(path: str) -> Compound | None:
-    """讀取 SNBT 檔案"""
+    """讀取 SNBT 檔案（嚴格解析；失敗回傳 None）。"""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return snbt.load(f)
     except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
         log_error(f"❌ SNBT 解析失敗: {path} -> {e!r}")
         return None
+
+
+MAX_TRAILING_BRACES_DROPPED = 3
+
+
+def _loads_or_none(text: str) -> Compound | None:
+    try:
+        return snbt.loads(text)
+    except Exception:  # noqa: BLE001 - 容錯嘗試：解析失敗代表這個候選不成立
+        return None
+
+
+def walk_snbt_file_tolerant(path: str) -> tuple[Compound | None, int]:
+    """讀取 SNBT；只在「結尾多餘的 ``}``」時於記憶體容錯，回傳 ``(資料, 去掉的 } 數)``。
+
+    先嚴格解析；失敗時逐一去掉結尾的 ``}``（最多 ``MAX_TRAILING_BRACES_DROPPED`` 個），
+    只接受去掉後確實能解析的結果，不猜測其他損壞。檔案本身不會被修改。
+    都失敗時與 :func:`walk_snbt_file` 一樣記錄錯誤並回傳 ``(None, 0)``。
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            text = f.read()
+        first_error: Exception | None = None
+        try:
+            return snbt.loads(text), 0
+        except Exception as e:  # noqa: BLE001 - 先嚴格解析，失敗才嘗試容錯
+            first_error = e
+        stripped = text.rstrip()
+        for dropped in range(1, MAX_TRAILING_BRACES_DROPPED + 1):
+            if not stripped.endswith("}"):
+                break
+            stripped = stripped[:-1].rstrip()
+            data = _loads_or_none(stripped)
+            if data is None:
+                continue
+            log_warning(
+                f"⚠️ SNBT 結尾多了 {dropped} 個 }}，已自動容錯，不影響匯入；"
+                f"輸出時會產生括號平衡的檔案（原檔未修改）: {path}"
+            )
+            return data, dropped
+        raise first_error
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
+        log_error(f"❌ SNBT 解析失敗: {path} -> {e!r}")
+        return None, 0
 
 
 # =========================

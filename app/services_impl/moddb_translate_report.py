@@ -33,7 +33,7 @@ FIELD_NOTES = {
     "mod_id": "模組代號",
     "key": "條目的鍵（語言檔 key 或手冊路徑）",
     "issues": "品質檢查發現的問題（例如少了或多了某個格式符號、佔位符）",
-    "source_text": "英文原文",
+    "source_text": "原文（依條目的來源語系，多數是英文）",
     "translated_text": "AI 回傳但被拒絕的譯文（未寫入資料庫與快取）",
     "status": f"{QUALITY_STATUS} = 品質檢查未通過，不是回填原文",
     "count": "同一項目（相同原文、譯文與問題）在本次任務中出現的次數",

@@ -30,7 +30,7 @@ from translation_tool.plugins.ftbquests.ftbquests_snbt_extractor import (
     is_lang_key_ref,
     is_lang_key_ref_like,
     is_tag_condition_text,
-    walk_snbt_file,
+    walk_snbt_file_tolerant,
 )
 from translation_tool.plugins.kubejs.kubejs_lang_selection import (
     count_language_values,
@@ -179,6 +179,10 @@ class PackScanResult:
     """一個模組包的掃描結果；不包含任何資料庫寫入副作用。"""
 
     pack_scope: str = ""
+    # 只有譯文的內容對到資料庫既有模組包：引用索引屬於原模組包，不能用這次的結果取代
+    adopted_existing: bool = False
+    # 使用者關閉「讀取 zh_cn」：發現與讀取語系時就排除 zh_cn，不解析、不回報其問題
+    skip_zh_cn: bool = False
     items: list[ScanItem] = field(default_factory=list)
     # 目前掃描確認為空白的 KubeJS lang 事件；若舊版掃描曾建立 origin，
     # 匯入時只移除該精確來源，不刪除條目或其他來源。
@@ -358,11 +362,19 @@ def scan_pack_sources(
     *,
     include_kubejs: bool = True,
     include_ftb: bool = True,
+    scope: str | None = None,
+    read_zh_cn: bool = True,
 ) -> PackScanResult:
-    """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。"""
+    """掃描選定的 KubeJS／FTB Quests 來源，保守地只輸出可定位文字。
+
+    ``scope`` 預設由根目錄路徑決定；來源是從 ZIP 抽到暫存目錄時，呼叫端要傳入由 ZIP
+    決定的穩定身分（見 :func:`pack_archive.zip_pack_scope`），否則每次暫存路徑不同。
+    """
     scan_started = time.perf_counter()
     root = Path(pack_root).expanduser().resolve()
-    result = PackScanResult(pack_scope=_pack_scope(root))
+    result = PackScanResult(
+        pack_scope=scope or _pack_scope(root), skip_zh_cn=not read_zh_cn
+    )
     if not root.is_dir():
         result.issues.append(_issue(root, "source_missing", "source_not_directory"))
         return result
@@ -684,6 +696,8 @@ def _scan_kubejs_event(
             continue
         if event_name == "ClientEvents.lang":
             lang_occurrence += 1
+            if result.skip_zh_cn and lang_locale == "zh_cn":
+                continue
             _append_kubejs_lang_item(
                 parts,
                 lang_locale or "en_us",
@@ -932,7 +946,10 @@ def _collect_kubejs_lang_paths(
         if len(parts) < 4 or parts[-2] != "lang":
             continue
         namespace = parts[1] if len(parts) > 1 else "kubejs"
-        files_by_namespace[namespace][normalize_locale(path.stem)].append(path)
+        locale = normalize_locale(path.stem)
+        if result.skip_zh_cn and locale == "zh_cn":
+            continue
+        files_by_namespace[namespace][locale].append(path)
     return files_by_namespace
 
 
@@ -1076,6 +1093,19 @@ def _scan_kubejs_lang(
         )
 
 
+def _note_dropped_braces(path: Path, dropped: int, result: PackScanResult) -> None:
+    """結尾多餘的 ``}`` 只在記憶體忽略；留下問題紀錄（原檔不改，輸出時重寫為平衡括號）。"""
+    if dropped:
+        result.issues.append(
+            _issue(
+                path,
+                "snbt_trailing_braces_ignored",
+                f"檔案結尾多了 {dropped} 個 }}，已自動容錯，不影響匯入；"
+                "輸出時會產生括號平衡的檔案（原檔未修改）",
+            )
+        )
+
+
 def _read_ftb_lang_file(
     path: Path,
     lang_root: Path,
@@ -1084,6 +1114,8 @@ def _read_ftb_lang_file(
     result: PackScanResult,
     locale_values: dict[tuple[str, str], dict[str, tuple[str, str, str]]],
 ) -> None:
+    if result.skip_zh_cn and _locale_for_lang_file(path, lang_root) == "zh_cn":
+        return
     result.mark_file("ftb_quests")
     loaded = _read_text(path, result)
     if loaded is None:
@@ -1092,7 +1124,7 @@ def _read_ftb_lang_file(
     _, digest = loaded
     parse_started = time.perf_counter()
     try:
-        data = walk_snbt_file(str(path))
+        data, dropped = walk_snbt_file_tolerant(str(path))
     finally:
         _log_slow_source_operation(
             "FTB 語系檔解析", path, time.perf_counter() - parse_started
@@ -1107,6 +1139,7 @@ def _read_ftb_lang_file(
             )
         )
         return
+    _note_dropped_braces(path, dropped, result)
     locale = _locale_for_lang_file(path, lang_root)
     if not locale:
         result.issues.append(
@@ -1263,7 +1296,7 @@ def _scan_ftb_quest_data_files(
         _, digest = loaded
         parse_started = time.perf_counter()
         try:
-            data = walk_snbt_file(str(path))
+            data, dropped = walk_snbt_file_tolerant(str(path))
         finally:
             _log_slow_source_operation(
                 "FTB 任務資料解析", path, time.perf_counter() - parse_started
@@ -1278,6 +1311,7 @@ def _scan_ftb_quest_data_files(
                 )
             )
             continue
+        _note_dropped_braces(path, dropped, result)
         rel = path.relative_to(root).as_posix()
         _scan_quest_value(data, rel, version, scope, digest, result, "root")
         result.mark_source("ftb_quests", rel)

@@ -704,3 +704,26 @@ def test_reload_failure_keeps_the_review_and_reenables_controls(tmp_path, monkey
     assert reviewer.applying is False
     assert reviewer.draft.read_only is False
     assert store.load_item(path, "run-reload-fail", index)["review_status"] == "stale"
+
+
+def test_repair_card_diffs_old_and_ai_text_without_changing_height():
+    """舊譯文與 AI 結果互相比對差異；固定高度與原字串維持不變。"""
+    reviewer = RepairReviewer(mock_page(), "unused.db", "run-1")
+    old, new = "使用 %s ", "使用 %s"
+
+    card = reviewer._card(
+        "保留中的舊譯文", old, tone="gold", height=120, base=new, base_label="AI 結果"
+    )
+    _title, text, *notes = card.content.controls
+
+    assert text.height == 120
+    assert any(span.style and span.style.bgcolor for span in text.spans)
+    assert "·" in "".join(span.text for span in text.spans)
+    assert any("差異：多出空白" in getattr(n, "value", "") for n in notes)
+    assert old == "使用 %s "
+
+    plain = reviewer._card("原文", "Use %s")
+    assert len(plain.content.controls) == 2
+
+    empty = reviewer._card("未寫入的 AI 結果", "", base=old, base_label="舊譯文")
+    assert empty.content.controls[1].value == "（無內容）"

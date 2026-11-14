@@ -905,37 +905,153 @@ def test_filter_options_wait_for_the_conditions_to_settle(monkeypatch):
     assert applied == ["b"]
 
 
-def test_data_action_buttons_are_resent_when_loading_finishes(view, monkeypatch):
-    """搜尋觸發載入時，若篩選卡在載入中被整張送出（按鈕停用），載入完成後按鈕必須再送出一次。
+def test_data_action_menu_is_resent_when_loading_finishes(view, monkeypatch):
+    """搜尋觸發載入時，若篩選卡在載入中被整張送出（選單停用），載入完成後選單必須再送出一次。
 
-    篩選列的差異比對只記得自己送出的狀態；按鈕狀態改變時直接更新那幾顆按鈕，
+    篩選列的差異比對只記得自己送出的狀態；選單狀態改變時直接更新審核工具選單，
     畫面才不會一直停在停用（點不了）。
     """
     entries = view.entries
-    buttons = (
-        entries.batch_replace_btn,
-        entries.bulk_review_btn,
-        entries.smart_review_btn,
-        entries.species_scan_btn,
+    menu = entries.review_tools
+    sent: list[bool] = []
+    monkeypatch.setattr(
+        menu.control, "update", lambda: sent.append(menu.control.disabled)
     )
-    sent: list[tuple[str, bool]] = []
-    for button in buttons:
-        monkeypatch.setattr(
-            button,
-            "update",
-            lambda b=button: sent.append((b.content, b.disabled)),
-        )
 
     entries.set_data_loading(True)
-    assert all(b.disabled for b in buttons)
-    assert {disabled for _name, disabled in sent} == {True}
+    assert menu.disabled and all(i.disabled for i in menu.items.values())
+    assert sent == [True]
     sent.clear()
 
     entries.set_data_loading(False)
-    assert not any(b.disabled for b in buttons)
-    assert len(sent) == len(buttons)
-    assert {disabled for _name, disabled in sent} == {False}
+    assert not menu.disabled and not any(i.disabled for i in menu.items.values())
+    assert sent == [False]
 
     sent.clear()
     entries.set_data_loading(False)  # 狀態沒變就不重送
     assert sent == []
+
+
+# ------------------------------------------------------------------ 無等待空白
+def test_review_scope_button_shows_busy_text_until_the_preview_returns(view):
+    entries = _select_first_reviewable(view)
+    page = view._page
+    label = entries.confirm_btn.content
+
+    entries._confirm()
+
+    assert entries.confirm_btn.content == "查詢中…"
+    assert entries.confirm_btn.disabled is True
+    entries._confirm()  # 查詢中再按不會重複送出
+    _settle(page)
+    assert entries.confirm_btn.content == label
+    assert entries.confirm_btn.disabled is False
+    assert page.overlay[-1].title.value == "確認條目審核"
+
+
+def test_review_scope_button_is_restored_when_the_preview_is_rejected(
+    view, monkeypatch
+):
+    entries = _select_first_reviewable(view)
+    page = view._page
+    label = entries.confirm_btn.content
+
+    def reject(*_args, **_kwargs):
+        raise ValueError("範圍已過期")
+
+    monkeypatch.setattr(TranslationDB, "preview_manual_review", reject)
+    entries._confirm()
+    assert entries.confirm_btn.content == "查詢中…"
+    _settle(page)
+
+    assert entries.confirm_btn.content == label
+    assert entries.confirm_btn.disabled is False
+
+
+def _empty_by_date(view):
+    entries = view.entries
+    filters = entries.advanced_filters
+    _set_dates(filters, "2099-01-01")
+    return entries, filters
+
+
+def _set_dates(filters, start: str) -> None:
+    filters.start_date.value = start
+    filters.end_date.value = start[:4] + "-12-31"
+    filters._custom_changed()
+
+
+def test_time_data_range_lookup_runs_in_a_worker_and_shows_a_busy_hint(
+    view, monkeypatch
+):
+    threads = _record_threads(monkeypatch, "time_data_range")
+
+    entries, _filters = _empty_by_date(view)
+    page = view._page
+    _settle(page)
+
+    assert threads and MAIN not in threads  # 畫面執行緒不查資料範圍
+    assert not entries.rows
+    texts = [
+        getattr(c, "value", "")
+        for c in _walk_controls(entries.list_view)
+        if type(c).__name__ == "Text"
+    ]
+    assert any("所選日期範圍內沒有資料" in t or "沒有任何時間資料" in t for t in texts)
+
+
+def test_time_data_range_result_is_ignored_when_the_filter_changed(view, monkeypatch):
+    _entries, filters = _empty_by_date(view)
+    page = view._page
+    _settle(page)
+    from app.views.moddb import advanced_filters as module
+
+    captured: list = []
+    monkeypatch.setattr(
+        module,
+        "run_read",
+        lambda _page, work, apply, **kw: captured.append(apply) or True,
+    )
+    snacks: list[str] = []
+    monkeypatch.setattr(
+        module, "show_snack", lambda _p, text, *a, **k: snacks.append(text)
+    )
+    _set_dates(filters, "2098-01-01")
+    _settle(page)  # 新條件仍無資料：清單載入後發出新的背景查詢
+    assert len(captured) == 1
+    stale_apply = captured[0]
+    assert filters._hint_pending is not None
+
+    _set_dates(filters, "2097-01-01")  # 查詢期間條件又改了
+    _settle(view._page)
+    assert len(captured) == 2
+    stale_apply("過期的說明", None)  # 舊查詢晚到
+    assert snacks == [] and filters._hint_ready is None
+
+    captured[1]("新的說明", None)  # 最新的查詢
+    assert snacks == ["新的說明"]
+
+
+def test_time_data_range_result_is_dropped_when_rows_appear(view, monkeypatch):
+    entries, filters = _empty_by_date(view)
+    _settle(view._page)
+    from app.views.moddb import advanced_filters as module
+
+    captured: list = []
+    monkeypatch.setattr(
+        module,
+        "run_read",
+        lambda _page, work, apply, **kw: captured.append(apply) or True,
+    )
+    snacks: list[str] = []
+    monkeypatch.setattr(
+        module, "show_snack", lambda _p, text, *a, **k: snacks.append(text)
+    )
+    _set_dates(filters, "2098-01-01")
+    _settle(view._page)  # 清單在背景重新載入，載入完才會發出日期範圍查詢
+    assert len(captured) == 1
+
+    entries.rows = [_row(1)]  # 清單已有資料
+    captured[0]("說明", None)
+
+    assert snacks == []

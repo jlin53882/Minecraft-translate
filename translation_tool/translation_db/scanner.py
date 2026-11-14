@@ -16,6 +16,7 @@ import json
 import logging
 import re
 import sqlite3
+import tempfile
 import time
 import zipfile
 from collections import Counter
@@ -58,6 +59,19 @@ from translation_tool.translation_db.identity import (
     patchouli_dir_names,
 )
 from translation_tool.translation_db.models import IngestStats, ScanItem
+from translation_tool.translation_db.pack_archive import (
+    extract_pack_members,
+    is_pack_source_member,
+    zip_pack_scope,
+)
+from translation_tool.translation_db.pack_scope_match import (
+    AdoptedItems,
+    carries_translation,
+    keep_existing_originals,
+    locale_only_items,
+    match_existing_scope,
+    restrict_to_scope,
+)
 from translation_tool.translation_db.pack_sources import (
     PackScanResult,
     discover_pack_roots,
@@ -121,6 +135,8 @@ class ScanOptions:
     translated: bool = False  # 來源是已翻譯的內容（翻譯 ZIP）：zh_tw 不判讀、直接匯入
     translation_source: int = SRC_CUSTOM  # translated 時，zh_tw 的來源代碼
     include_pack_content: bool = True  # instance 根目錄下的 KubeJS／FTB Quests
+    # 單一翻譯 ZIP 由模組包掃描器抽出 KubeJS 語系時，一般 ZIP 掃描略過同一批成員
+    exclude_kubejs_pack_lang: bool = False
     reuse_reviewed: bool = True  # 匯入後沿用其他版本已審核的相同譯文
 
 
@@ -370,10 +386,17 @@ def _lang_rank(member: str) -> int:
 def _group_members(
     names: Sequence[str], options: ScanOptions, dir_names: Sequence[str]
 ) -> dict[tuple[str, str, str], dict[str, str]]:
-    """把成員依 ``(類型, 模組, 檔案鍵)`` 分組：``{lang: 成員路徑}``。"""
-    groups: dict[tuple[str, str, str], dict[str, str]] = {}
+    """把成員依 ``(類型, 模組, 檔案鍵)`` 分組：``{lang: 成員路徑}``。
+
+    一般語系與 KubeJS 語系分開收集，同一身分有一般語系時只用一般語系，避免一般 en_us
+    和 KubeJS zh_tw 跨來源配對；沒有一般語系時才讀 KubeJS 語系。
+    """
+    families: dict[tuple[str, str, str], dict[bool, dict[str, str]]] = {}
     for name in names:
         if name.endswith("/"):
+            continue
+        if options.exclude_kubejs_pack_lang and _is_pack_extracted_kubejs_lang(name):
+            # 這批成員由模組包掃描器處理；一般 ZIP 掃描再讀會變成重複的 KIND_LANG。
             continue
         ident: FileIdentity | None = classify_member(name, dir_names)
         if ident is None:
@@ -383,11 +406,51 @@ def _group_members(
             and not options.include_patchouli
         ):
             continue
-        members = groups.setdefault((ident.kind, ident.mod_id, ident.file_key), {})
+        ident_key = (ident.kind, ident.mod_id, ident.file_key)
+        family = families.setdefault(ident_key, {})
+        members = family.setdefault(_is_kubejs_lang_member(name), {})
         previous = members.get(ident.lang)
         if previous is None or _lang_rank(name) < _lang_rank(previous):
             members[ident.lang] = name
-    return groups
+    return {
+        ident_key: family.get(False) or family.get(True, {})
+        for ident_key, family in families.items()
+    }
+
+
+def _kubejs_lang_tail(member: str) -> tuple[str, ...] | None:
+    """``kubejs/`` 之後的路徑片段；成員不在 ``kubejs/assets/<namespace>/lang/`` 下時回 ``None``。"""
+    parts = tuple(part for part in member.replace("\\", "/").split("/") if part)
+    for index, part in enumerate(parts):
+        if part.casefold() != "kubejs":
+            continue
+        tail = parts[index + 1 :]
+        if (
+            len(tail) == 4
+            and tail[0].casefold() == "assets"
+            and tail[2].casefold() == "lang"
+        ):
+            return tail
+    return None
+
+
+def _is_kubejs_lang_member(member: str) -> bool:
+    """成員是否為 KubeJS 的 ``assets/<namespace>/lang`` 語系檔。"""
+    return _kubejs_lang_tail(member) is not None
+
+
+def _is_pack_extracted_kubejs_lang(member: str) -> bool:
+    """成員是否會被單一 ZIP 的模組包抽取器取出（KubeJS JSON 語系、在 wrapper 深度內）。
+
+    抽取器不支援的成員（舊式 ``.lang``、超過 wrapper 深度）仍由一般 ZIP 掃描讀取，
+    避免兩邊都略過而遺失。
+    """
+    tail = _kubejs_lang_tail(member)
+    return (
+        tail is not None
+        and tail[3].casefold().endswith(".json")
+        and is_pack_source_member(member)
+    )
 
 
 def _read_json_member(
@@ -568,10 +631,12 @@ def _guide_items(
     if en is None and not options.translated:
         return []  # 掃描 jar 以原文為準；沒有原文就沒有可匯入的條目
     tw = cn = None
+    # 翻譯 ZIP 固定讀 zh_tw；zh_cn 只在使用者開啟「讀取自帶 zh_cn」時讀取。
     if options.read_jar_translations or options.translated:
         tw = _aligned_blocks(
             en, _read_blocks(zf, budget, members.get("zh_tw")), members.get("zh_tw")
         )
+    if options.read_jar_translations:
         cn = _aligned_blocks(
             en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
         )
@@ -809,12 +874,13 @@ def _items_for_group(
     tw_obj = cn_obj = None
     if options.read_jar_translations or options.translated:
         tw_obj = _read_json_member(zf, budget, members.get("zh_tw"))
+    if options.read_jar_translations:
         cn_obj = _read_json_member(zf, budget, members.get("zh_cn"))
-        if kind == "patchouli" and en is not None:
-            # 手冊譯文以 JSON 路徑和原文對應；格式和 en_us 不同（頁數、欄位、舊版物品 NBT）
-            # 時路徑會對到別頁，匯入只會把錯位的譯文寫進資料庫，所以不採用。
-            tw_obj = _drop_stale_book(tw_obj, en, members.get("zh_tw"))
-            cn_obj = _drop_stale_book(cn_obj, en, members.get("zh_cn"))
+    if kind == "patchouli" and en is not None:
+        # 手冊譯文以 JSON 路徑和原文對應；格式和 en_us 不同（頁數、欄位、舊版物品 NBT）
+        # 時路徑會對到別頁，匯入只會把錯位的譯文寫進資料庫，所以不採用。
+        tw_obj = _drop_stale_book(tw_obj, en, members.get("zh_tw"))
+        cn_obj = _drop_stale_book(cn_obj, en, members.get("zh_cn"))
 
     paths = list(en_items)
     tw_all: dict[str, str] = {}
@@ -1221,11 +1287,13 @@ def _ingest_pack_result(
         stats.en_changed,
     )
     references_started = time.perf_counter()
-    db.record_source_references(
-        version,
-        result.references,
-        pack_scope=result.pack_scope,
-    )
+    # 譯文補進既有模組包時，引用索引是原模組包的完整快照，不能被這次的內容取代
+    if not result.adopted_existing:
+        db.record_source_references(
+            version,
+            result.references,
+            pack_scope=result.pack_scope,
+        )
     _LOG.info(
         "[模組包來源] 跨格式引用寫入完成：耗時 %.3f 秒，引用 %d",
         time.perf_counter() - references_started,
@@ -1316,6 +1384,268 @@ def _pack_source_updates(
     }
 
 
+def _pack_source_from_zip(folder: Path, options: ScanOptions) -> bool:
+    """翻譯 ZIP 模式選的是單一 ZIP 檔：模組包來源要從 ZIP 內抽出才能掃。"""
+    return options.translated and folder.is_file() and folder.suffix.lower() == ".zip"
+
+
+def _scan_pack_content(
+    db: TranslationDB | None,
+    preview: Any,
+    folder: str | Path,
+    options: ScanOptions,
+    convert: Callable[[str], str] | None,
+    report: ScanReport,
+    has_jars: bool,
+    should_cancel: Callable[[], bool] | None = None,
+) -> Generator[dict[str, Any], None, tuple[PackScanResult, IngestStats | None, bool]]:
+    """分析並匯入 KubeJS／FTB Quests 模組包來源；回傳 ``(結果, 匯入統計, 找不到根目錄)``。
+
+    選資料夾時直接掃該資料夾；選單一 ZIP 檔時先把 ``kubejs``、``config/ftbquests/quests``
+    抽到暫存目錄再掃，模組包身分由 ZIP 決定（見 ``zip_pack_scope``），暫存目錄用完即刪。
+    """
+    empty = PackScanResult()
+    path = Path(folder)
+    from_zip = _pack_source_from_zip(path, options)
+    if not options.include_pack_content or (
+        options.translated and not path.is_dir() and not from_zip
+    ):
+        return empty, None, False
+    with tempfile.TemporaryDirectory(prefix="moddb_pack_") as tmp:
+        search: str | Path = folder
+        extract_issues: list[dict[str, str]] = []
+        if from_zip:
+            search = Path(tmp).resolve()
+            extract_issues = extract_pack_members(
+                path, search, should_cancel=should_cancel
+            )
+
+        def shown(root: Path) -> str:
+            """畫面與報告顯示：ZIP 來源用 ``ZIP路徑!/內部路徑``，不洩漏暫存目錄。"""
+            if not from_zip:
+                return str(root)
+            inner = root.relative_to(search).as_posix()
+            return str(folder) if inner == "." else f"{folder}!/{inner}"
+
+        pack_roots = discover_pack_roots(search)
+        if from_zip:
+            pack_roots = [
+                root for root in pack_roots if search in (root, *root.parents)
+            ]
+        report.pack_root_candidates = [shown(root) for root in pack_roots]
+        if len(pack_roots) != 1:
+            for issue in extract_issues:
+                report.add_issue(issue)
+            missing = yield from _report_pack_root_problem(
+                folder, report, pack_roots, has_jars
+            )
+            return empty, None, missing
+        pack_root = pack_roots[0]
+        report.pack_root = shown(pack_root)
+        yield {
+            "progress": 0.0,
+            "log": f"📦 模組包來源：開始分析 {report.pack_root}",
+            "level": "info",
+        }
+        scope = zip_pack_scope(path) if from_zip else None
+        pack_result = _scan_pack_for_options(pack_root, options, scope)
+        if options.translated:
+            pack_result = yield from _adopt_translated_pack(
+                db, pack_root, options, pack_result
+            )
+        if from_zip:
+            # 問題清單會寫進資料庫與報告：不留暫存目錄路徑，改成 ZIP!/內部路徑。
+            for issue in pack_result.issues:
+                for key, value in issue.items():
+                    issue[key] = str(value).replace(str(search), f"{folder}!")
+        pack_result.issues.extend(extract_issues)
+        if should_cancel is not None and should_cancel():
+            # 分析與配對可能耗時數秒；使用者在這段期間取消時，寫入前停止。
+            report.cancelled = True
+            yield {
+                "progress": 1.0,
+                "log": "⚠️ 模組包來源掃描已取消，未寫入資料庫",
+                "level": "warning",
+                "report": report,
+            }
+            return empty, None, False
+        _record_pack_scan(report, pack_result)
+        stats = _ingest_pack_result(
+            db,
+            preview,
+            pack_result,
+            options.version,
+            convert,
+            report.touched_entry_ids,
+        )
+        report.stats.add(stats)
+        yield from _pack_source_updates(pack_result, stats, dry_run=options.dry_run)
+        return pack_result, stats, False
+
+
+def _scan_pack_for_options(
+    pack_root: Path, options: ScanOptions, scope: str | None
+) -> PackScanResult:
+    """掃描模組包；翻譯來源關閉「讀取模組自帶 zh_cn」時，掃描器不讀 zh_cn 語系。"""
+    return scan_pack_sources(
+        pack_root,
+        options.version,
+        scope=scope,
+        read_zh_cn=options.read_jar_translations or not options.translated,
+    )
+
+
+def _record_pack_scan(report: ScanReport, pack_result: PackScanResult) -> None:
+    """把模組包掃描結果的統計與問題寫進掃描報告。"""
+    report.pack_items_found = len(pack_result.items)
+    report.pack_files_seen = pack_result.files_seen
+    report.pack_sources = len(pack_result.sources_found)
+    report.pack_references = len(pack_result.references)
+    report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
+    report.pack_source_breakdown = pack_result.source_breakdown()
+    for issue in pack_result.issues:
+        report.add_issue(issue)
+
+
+def _adopt_translated_pack(
+    db: TranslationDB | None,
+    pack_root: Path,
+    options: ScanOptions,
+    pack_result: PackScanResult,
+) -> Generator[dict[str, Any], None, PackScanResult]:
+    """翻譯來源的模組包內容：歸在所選譯文來源；只有譯文時對到既有模組包就只補譯文、保留原本英文。"""
+    pack_result = yield from _match_existing_pack(db, pack_root, options, pack_result)
+    # 與翻譯 ZIP 內的 lang 一致：譯文歸在使用者選的來源標記。
+    pack_result.items = [
+        replace(item, source=options.translation_source) for item in pack_result.items
+    ]
+    return pack_result
+
+
+def _match_existing_pack(
+    db: TranslationDB | None,
+    pack_root: Path,
+    options: ScanOptions,
+    pack_result: PackScanResult,
+) -> Generator[dict[str, Any], None, PackScanResult]:
+    match = (
+        match_existing_scope(db, options.version, pack_result.items)
+        if db is not None
+        else None
+    )
+    if match is None:
+        if locale_only_items(pack_result.items):
+            yield {
+                "progress": 0.0,
+                "log": (
+                    "📦 模組包來源只有譯文，資料庫中找不到唯一對得上的既有模組包，"
+                    "將以新的模組包身分新增"
+                ),
+                "level": "info",
+            }
+        return pack_result
+    if pack_result.pack_scope in match.scopes and not carries_translation(
+        pack_result.items, match
+    ):
+        # 對到這份輸入自己的身分，內容也不是譯文（同一個 ZIP 再匯入）：它就是原始來源，
+        # 照一般匯入更新來源雜湊、引用與過期來源。
+        return pack_result
+    # 同一個身分但內容已是中文（原資料夾就地翻譯後再匯入）一樣只補譯文：照一般匯入
+    # 會把中文當成新原文，全部記成原文已變動而補不進譯文。
+    if pack_result.pack_scope in match.scopes:
+        # 同一個模組包就地翻譯後重新匯入時，翻譯只屬於這個精確身分；
+        # 不可因其他版本共用 key 而把內容同步到那些模組包。
+        match = restrict_to_scope(match, pack_result.pack_scope)
+    adopted = keep_existing_originals(pack_result.items, match)
+    pack_result.adopted_existing = True
+    # 譯文輸入不是原模組包的檔案：不清理原包的來源紀錄
+    pack_result.stale_origins = []
+    pack_result.items = adopted.items
+    for reason, detail in _adoption_problems(adopted):
+        pack_result.issues.append(
+            {
+                "source_archive": str(pack_root),
+                "source_member": "",
+                "kind": "pack_source",
+                "status": "pending",
+                "reason": reason,
+                "detail": detail,
+            }
+        )
+        yield {"progress": 0.0, "log": f"📦 {detail}", "level": "warning"}
+    names = "、".join(match.scopes)
+    yield {
+        "progress": 0.0,
+        "log": (
+            f"📦 對到既有模組包 {names}：最多 {match.overlap}/{match.total} 筆 key 相符，"
+            "相符的條目只補譯文、保留原本的英文"
+        ),
+        "level": "info",
+    }
+    return pack_result
+
+
+def _adoption_problems(adopted: AdoptedItems) -> list[tuple[str, str]]:
+    """譯文補進既有模組包時沒匯入的項目：``[(問題代碼, 說明)]``。"""
+    cases = (
+        (
+            "translation_without_original",
+            adopted.without_original,
+            "筆譯文在對到的既有模組包中沒有對應的 key，沒有英文原文可對照，未匯入",
+        ),
+        (
+            "translation_original_differs",
+            adopted.original_differs,
+            "筆譯文對應的原文對不上：各模組包原文不同或未知時只補進 key 相符最多的"
+            + "模組包（沒有唯一最多者時未匯入）；輸入自帶的原文與既有原文不同時未匯入",
+        ),
+        (
+            "translation_pack_ambiguous",
+            adopted.no_single_pack,
+            "筆帶英文的項目沒有唯一對得上的模組包，未匯入",
+        ),
+    )
+    return [(reason, f"{len(items)} {text}") for reason, items, text in cases if items]
+
+
+def _report_pack_root_problem(
+    folder: str | Path,
+    report: ScanReport,
+    pack_roots: list[Path],
+    has_jars: bool,
+) -> Generator[dict[str, Any], None, bool]:
+    """找不到或有多個模組包根目錄：回報原因，不自動合併；回傳是否為「找不到」。"""
+    if not pack_roots:
+        if has_jars:
+            yield {
+                "progress": 0.0,
+                "log": (
+                    "📦 模組包來源：未找到 kubejs 或 "
+                    "config/ftbquests/quests，略過 KubeJS／FTB Quests 分析"
+                ),
+                "level": "info",
+            }
+        return True
+    report.pack_root_ambiguous = True
+    choices = "、".join(report.pack_root_candidates[:8])
+    yield {
+        "progress": 0.0,
+        "log": f"📦 模組包來源有多個候選，未自動合併：{choices}；請明確選擇根目錄",
+        "level": "warning",
+    }
+    report.add_issue(
+        {
+            "source_archive": str(folder),
+            "source_member": "",
+            "kind": "pack_source",
+            "status": "pending",
+            "reason": "pack_root_ambiguous",
+            "detail": "multiple pack roots require explicit selection",
+        }
+    )
+    return False
+
+
 def scan_folder_generator(
     db: TranslationDB | None,
     folder: str | Path,
@@ -1334,6 +1664,9 @@ def scan_folder_generator(
     jars = find_jars(folder, translated=options.translated)
     report.jars_total = len(jars)
     options = replace(options, rules=load_rules() if options.apply_rules else [])
+    if options.include_pack_content and _pack_source_from_zip(Path(folder), options):
+        # 單一 ZIP 的 KubeJS 語系由模組包掃描器抽出處理，一般 ZIP 掃描不再重複讀。
+        options = replace(options, exclude_kubejs_pack_lang=True)
     convert = make_converter(options.rules) if options.convert_cn else None
     preview = (
         (
@@ -1344,72 +1677,11 @@ def scan_folder_generator(
         if options.dry_run
         else None
     )
-    pack_result = PackScanResult()
-    pack_ingest_stats: IngestStats | None = None
-    pack_root_missing = False
-    if options.include_pack_content and not options.translated:
-        pack_roots = discover_pack_roots(folder)
-        report.pack_root_candidates = [str(root) for root in pack_roots]
-        if not pack_roots:
-            pack_root_missing = True
-            if jars:
-                yield {
-                    "progress": 0.0,
-                    "log": (
-                        "📦 模組包來源：未找到 kubejs 或 "
-                        "config/ftbquests/quests，略過 KubeJS／FTB Quests 分析"
-                    ),
-                    "level": "info",
-                }
-        elif len(pack_roots) > 1:
-            report.pack_root_ambiguous = True
-            choices = "、".join(report.pack_root_candidates[:8])
-            yield {
-                "progress": 0.0,
-                "log": (
-                    f"📦 模組包來源有多個候選，未自動合併：{choices}；請明確選擇根目錄"
-                ),
-                "level": "warning",
-            }
-            pack_result.issues.append(
-                {
-                    "source_archive": str(folder),
-                    "source_member": "",
-                    "kind": "pack_source",
-                    "status": "pending",
-                    "reason": "pack_root_ambiguous",
-                    "detail": "multiple pack roots require explicit selection",
-                }
-            )
-        else:
-            pack_root = pack_roots[0]
-            report.pack_root = str(pack_root)
-            yield {
-                "progress": 0.0,
-                "log": f"📦 模組包來源：開始分析 {pack_root}",
-                "level": "info",
-            }
-            pack_result = scan_pack_sources(pack_root, options.version)
-            report.pack_items_found = len(pack_result.items)
-            report.pack_files_seen = pack_result.files_seen
-            report.pack_sources = len(pack_result.sources_found)
-            report.pack_references = len(pack_result.references)
-            report.pack_locale_fallbacks = dict(pack_result.locale_fallbacks)
-            report.pack_source_breakdown = pack_result.source_breakdown()
-            for issue in pack_result.issues:
-                report.add_issue(issue)
-            pack_ingest_stats = _ingest_pack_result(
-                db,
-                preview,
-                pack_result,
-                options.version,
-                convert,
-                report.touched_entry_ids,
-            )
-            report.stats.add(pack_ingest_stats)
-            yield from _pack_source_updates(
-                pack_result, pack_ingest_stats, dry_run=options.dry_run
-            )
+    pack_result, _pack_ingest_stats, pack_root_missing = yield from _scan_pack_content(
+        db, preview, folder, options, convert, report, bool(jars), should_cancel
+    )
+    if report.cancelled:
+        return
     has_pack_content = bool(
         pack_result.sources_found
         or pack_result.items

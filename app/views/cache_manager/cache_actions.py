@@ -52,10 +52,11 @@ def run_cache_action(
     view._append_log(f"[ACTION#{action_id}] start {reason}")
     if show_progress and hasattr(view, "page"):
         progress_bar = ft.ProgressBar(value=0, width=300)
+        progress_text = ft.Text(f"{reason} 處理中...")
         snack_bar = ft.SnackBar(
             content=ft.Row(
                 [
-                    ft.Text(f"{reason} 處理中..."),
+                    progress_text,
                     progress_bar,
                 ],
                 spacing=10,
@@ -67,12 +68,15 @@ def run_cache_action(
         view.page.update()
 
         def progress_callback(current: int, total: int, msg: str | None = None):
-            value = current / total if total > 0 else 0
-            _run_on_ui(
-                view,
-                lambda: setattr(progress_bar, "value", value),
-                mount_generation,
-            )
+            # 只轉送到 UI 執行緒（呼叫端可能持有快取鎖），不在此直接碰控制項。
+            value = min(1.0, max(0.0, current / total)) if total > 0 else 0
+            label = f"{reason} {current}/{total}" + (f"：{msg}" if msg else "")
+
+            def apply():
+                progress_bar.value = value
+                progress_text.value = label
+
+            _run_on_ui(view, apply, mount_generation)
     else:
         progress_callback = None
 

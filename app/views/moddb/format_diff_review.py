@@ -25,6 +25,7 @@ from app.views.moddb.format_issue_rendering import (
     diagnostic_spans,
     diagnostic_tone,
 )
+from app.views.moddb.source_text_label import ENGLISH_SOURCE_LABEL
 
 
 def _table_cell(text: str, *, width: float | None = None, expand=None, **style):
@@ -101,7 +102,7 @@ class FormatDiffReview:
         self,
         *,
         context_label: str,
-        source_label: str = "英文原文・en_us",
+        source_label: str = ENGLISH_SOURCE_LABEL,
         target_label: str = "目前譯文・zh_tw",
         editable_control: ft.Control | None = None,
         edit_notice: ft.Control | None = None,
@@ -162,7 +163,10 @@ class FormatDiffReview:
         *,
         metadata: Sequence[ft.Control] = (),
         kind: str | None = None,
+        source_label: str | None = None,
     ) -> FormatDiagnosticsResult:
+        if source_label is not None:
+            self.source_label = source_label
         source_text = source_text or ""
         target_text = target_text or ""
         kind = kind or "lang"

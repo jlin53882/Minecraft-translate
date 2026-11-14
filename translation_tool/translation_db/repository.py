@@ -30,6 +30,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.source_locale import reviewed_locale_compatible
 from translation_tool.translation_db import (
     change_tracker,
@@ -54,6 +55,7 @@ from translation_tool.translation_db.content_identity import (
     loose_text,
     pack_label,
     same_content_sql,
+    same_text_kinds,
 )
 from translation_tool.translation_db.cross_version_review import (
     CrossVersionReviewMixin,
@@ -104,6 +106,7 @@ from translation_tool.translation_db.quality import (
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
+from translation_tool.translation_db.same_text_review import SameTextReviewMixin
 from translation_tool.translation_db.scan_ingest import (
     DbIngestTarget,
     PreviewIngestTarget,
@@ -377,6 +380,7 @@ class TranslationDB(
     SmartReviewMixin,
     BulkReviewMixin,
     CrossVersionReviewMixin,
+    SameTextReviewMixin,
     CleanupMixin,
 ):
     """資料庫存取物件（執行緒安全：單一連線 + 可重入鎖）。"""
@@ -1814,6 +1818,9 @@ class TranslationDB(
         if criteria.mod_id:
             where.append("e.mod_id = ?")
             params.append(criteria.mod_id)
+        elif criteria.pack_mod_ids is not None:
+            where.append("e.mod_id IN (SELECT value FROM json_each(?))")
+            params.append(json.dumps(criteria.pack_mod_ids))
         if criteria.kind:
             where.append("e.kind = ?")
             params.append(criteria.kind)
@@ -3661,6 +3668,26 @@ class TranslationDB(
             for row in rows
         ]
 
+    @staticmethod
+    def _scope_entry_index(
+        conn: sqlite3.Connection, version: str, pack_scope: str
+    ) -> dict[tuple[str, str], dict[int, str]]:
+        """該模組包有來源紀錄的條目：``{(kind, key): {entry_id: mod_id}}``。
+
+        引用解析要對每個引用找「同一模組包的語言定義」。逐個引用查詢只能用到
+        ``kind`` 前綴，每次掃過整個 kind；一次載入該 scope 的條目再於記憶體比對，
+        成本與引用數無關。
+        """
+        index: dict[tuple[str, str], dict[int, str]] = {}
+        for entry_id, kind, key, mod_id in conn.execute(
+            "SELECT e.id, e.kind, e.key, e.mod_id FROM entry_origin eo "
+            "JOIN entry e ON e.id = eo.entry_id "
+            "WHERE eo.pack_scope=? AND e.mc_version=?",
+            (pack_scope, version),
+        ):
+            index.setdefault((kind, key), {})[int(entry_id)] = mod_id
+        return index
+
     def record_source_references(
         self,
         version: str,
@@ -3687,25 +3714,22 @@ class TranslationDB(
                     (version, scope),
                 )
             rows: list[tuple[Any, ...]] = []
+            scope_entries: dict[str, dict[tuple[str, str], dict[int, str]]] = {}
             for reference in references:
-                where = "e.mc_version=? AND e.kind=? AND e.key=? AND eo.pack_scope=?"
-                params: list[Any] = [
-                    version,
-                    reference.target_kind,
-                    reference.target_key,
-                    reference.pack_scope,
+                if reference.pack_scope not in scope_entries:
+                    scope_entries[reference.pack_scope] = self._scope_entry_index(
+                        conn, version, reference.pack_scope
+                    )
+                by_id = scope_entries[reference.pack_scope].get(
+                    (reference.target_kind, reference.target_key), {}
+                )
+                candidates = [
+                    entry_id
+                    for entry_id, mod_id in by_id.items()
+                    if not reference.target_mod_id or mod_id == reference.target_mod_id
                 ]
-                if reference.target_mod_id:
-                    where += " AND e.mod_id=?"
-                    params.append(reference.target_mod_id)
-                candidates = conn.execute(
-                    "SELECT DISTINCT e.id FROM entry e "
-                    "JOIN entry_origin eo ON eo.entry_id=e.id "
-                    f"WHERE {where}",
-                    params,
-                ).fetchall()
                 if len(candidates) == 1:
-                    status, detail, target_id = "resolved", "", int(candidates[0][0])
+                    status, detail, target_id = "resolved", "", candidates[0]
                 elif not candidates:
                     status, detail, target_id = (
                         "missing",
@@ -3785,6 +3809,24 @@ class TranslationDB(
             )
         ]
 
+    def pack_entry_keys(
+        self, version: str, kind: str, mod_prefix: str
+    ) -> dict[str, dict[str, str]]:
+        """``{模組包身分: {key: 原文}}``：該類型下 ``mod_id`` 為 ``<mod_prefix>@<身分>`` 的條目。
+
+        只收原文不是中文的條目：先前從只有譯文的來源匯入、把中文存成原文的條目，
+        不能當作「同一個模組包」的對照目標。
+        """
+        out: dict[str, dict[str, str]] = {}
+        for mod_id, key, en_us in self._q(
+            "SELECT mod_id, key, en_us FROM entry "
+            "WHERE kind=? AND mod_id>=? AND mod_id<? AND mc_version=?",
+            (kind, f"{mod_prefix}@", f"{mod_prefix}A", version),
+        ):
+            if not contains_cjk(en_us):
+                out.setdefault(mod_id.partition("@")[2], {})[key] = en_us
+        return out
+
     def entry_references(self, entry_id: int) -> list[SourceReference]:
         """回傳指向指定語言定義的來源引用。"""
         return [
@@ -3820,6 +3862,7 @@ class TranslationDB(
             return None
         detail = EntryDetail(entry=entry)
         detail.origins = self.entry_origins(entry_id)
+        detail.source_locale = self.source_locales_for_entries([entry_id]).get(entry_id)
         detail.references = self.entry_references(entry_id)
         translation_review = translation_review_sql(
             "translation", self.has_review_state
@@ -3877,18 +3920,27 @@ class TranslationDB(
                 ),
             )
         ]
+        text_kinds = same_text_kinds(entry.kind)
+        kind_marks = ",".join("?" * len(text_kinds))
         detail.same_text = (
             []
             if not entry.en_us
             else [
-                SameTextRow(eid, ver, mod, key, tw or "", src, review_status)
-                for eid, ver, mod, key, tw, src, review_status in self._q(
+                SameTextRow(eid, ver, mod, key, tw or "", src, review_status, kind)
+                for eid, ver, mod, key, tw, src, review_status, kind in self._q(
                     "SELECT e.id, e.mc_version, e.mod_id, e.key, f.zh_tw, f.source, "
-                    f"{self._effective_review_sql} "
+                    f"{self._effective_review_sql}, e.kind "
                     "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
-                    "WHERE e.en_us=? AND e.kind=? AND NOT (e.mod_id=? AND e.key=?) "
+                    f"WHERE e.en_us=? AND e.kind IN ({kind_marks}) "
+                    "AND NOT (e.mod_id=? AND e.key=?) "
                     "ORDER BY (f.zh_tw IS NULL), e.mod_id, e.key LIMIT ?",
-                    (entry.en_us, entry.kind, entry.mod_id, entry.key, text_limit),
+                    (
+                        entry.en_us,
+                        *text_kinds,
+                        entry.mod_id,
+                        entry.key,
+                        text_limit,
+                    ),
                 )
             ]
         )

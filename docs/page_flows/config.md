@@ -107,7 +107,7 @@ flowchart TD
 - 復原旗標：`_reload_recovery_required`（寫入成功但畫面重載失敗）、`_reload_before_next_entry`（先前確認過的過期畫面需在進入前重載）、`_reload_exit_acknowledged`（單次允許離開）。
 - 對話框狀態：`_unsaved_dialog_open`、`_unsaved_dialog_resolved`、`_unsaved_dialog_continue`。
 - 控制項映射：`controls_map` 以設定路徑（例如 `translation_db.path`）為鍵。金鑰與模型列不在此映射中，另有 `key_fields` 與 `models_column`。
-- 資料庫位置列 `DbLocationBanner`（`app/views/config/db_location.py`）顯示實際路徑與檔案狀態，路徑與優先序欄位變更時重新檢查。
+- 資料庫位置列 `DbLocationBanner`（`app/views/config/db_location.py`）顯示實際路徑與檔案狀態，路徑與優先序欄位變更時重新檢查。「清除未使用的自訂來源」（`DbLocationBanner._on_prune`）掃描資料庫引用較耗時，經 `launch_page_operation` 在背景執行（`prune_unused_custom_sources_report`），執行期間按鈕停用並顯示忙碌文字；完成後在事件迴圈顯示結果並依路徑是否已儲存還原按鈕，失敗時寫後台日誌並顯示失敗原因。
 
 ## 錯誤處理
 

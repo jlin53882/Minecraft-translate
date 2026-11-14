@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 
-from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG
+from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG, KIND_LANG
 
 PACK_KINDS = (KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
 INDEX_NAME = "idx_entry_content_ns"
@@ -119,6 +119,21 @@ def other_version_sql(left: str, right: str) -> str:
     )
 
 
+_TEXT_KIND_GROUPS = ((KIND_LANG, KIND_KUBEJS_LANG),)
+
+
+def same_text_kinds(kind: str) -> tuple[str, ...]:
+    """「相同原文」建議要一起比對的條目類型。
+
+    模組內建的 lang 與整合包 KubeJS 的 lang 是同一種語系文字（同一個模組在整合包裡常被
+    覆寫或補充），譯法可以互相參考，所以兩者互通；其他類型的文字格式不同，只比同類型。
+    """
+    for group in _TEXT_KIND_GROUPS:
+        if kind in group:
+            return group
+    return (kind,)
+
+
 def pack_label(kind: str, mod_id: str) -> str:
     """KubeJS／FTB 模組識別「命名空間@整合包資料夾名稱@路徑雜湊」中的整合包資料夾名稱。
 
@@ -129,6 +144,16 @@ def pack_label(kind: str, mod_id: str) -> str:
         if len(parts) >= 3:
             return "@".join(parts[1:-1])
     return ""
+
+
+def pack_scope_of(mod_id: str) -> str:
+    """KubeJS／FTB 模組識別「命名空間@資料夾名稱@路徑雜湊」中的模組包身分「資料夾名稱@路徑雜湊」。
+
+    其他模組識別回傳空字串。名稱只是匯入時所選資料夾（或 ZIP）的名稱，不同位置的同名
+    資料夾要靠路徑雜湊區分，所以篩選用完整身分而不是只用名稱。
+    """
+    parts = mod_id.split("@")
+    return "@".join(parts[1:]) if len(parts) >= 3 else ""
 
 
 def content_mod_value(kind: str, mod_id: str) -> str:

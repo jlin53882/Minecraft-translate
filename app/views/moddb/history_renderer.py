@@ -13,6 +13,7 @@ from app.services_impl.moddb_source_service import (
 )
 from app.ui import kit
 from app.ui.design import C
+from app.views.moddb.text_compare import text_control
 
 
 def render_history(panel, *, catalog=None) -> None:
@@ -71,37 +72,32 @@ def _history_event(panel, event, catalog) -> ft.Control:
             wrap=True,
         ),
     ]
-    if event.old_zh_tw:
+    old, new = event.old_zh_tw or "", event.new_zh_tw or ""
+    if old:
         controls.extend(
             [
-                ft.Text(
-                    f"原譯：{event.old_zh_tw}",
-                    size=12.5,
-                    color=C.MUTED,
-                    selectable=True,
-                ),
-                ft.Text(
-                    f"新譯：{event.new_zh_tw or ''}",
-                    size=12.5,
-                    color=C.TEXT,
-                    selectable=True,
-                ),
+                _labeled_text("原譯：", old, new, size=12.5, color=C.MUTED),
+                _labeled_text("新譯：", new, old, size=12.5, color=C.TEXT),
             ]
         )
     else:
-        controls.append(
-            ft.Text(
-                f"譯文：{event.new_zh_tw or ''}",
-                size=12.5,
-                color=C.TEXT,
-                selectable=True,
-            )
-        )
+        controls.append(_labeled_text("譯文：", new, None, size=12.5, color=C.TEXT))
     _append_history_details(controls, panel, event)
     return ft.Column(
         controls,
         spacing=3,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+    )
+
+
+def _labeled_text(label, text, base, *, size, color) -> ft.Control:
+    """前綴放在文字片段之外的一行譯文；有 ``base`` 時標出字元差異，沒有時只標不可見字元。"""
+    body = text_control(text, base, size=size, color=color)
+    body.expand = True
+    return ft.Row(
+        [ft.Text(label, size=size, color=color), body],
+        spacing=0,
+        vertical_alignment=ft.CrossAxisAlignment.START,
     )
 
 
@@ -192,12 +188,7 @@ def _translation_row(row, catalog, history) -> ft.Control:
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 wrap=True,
             ),
-            ft.Text(
-                row.zh_tw or "",
-                size=12,
-                color=C.TEXT,
-                selectable=True,
-            ),
+            text_control(row.zh_tw or "", size=12, show_diff=False),
         ],
         spacing=4,
         horizontal_alignment=ft.CrossAxisAlignment.STRETCH,

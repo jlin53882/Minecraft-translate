@@ -27,6 +27,7 @@ from app.ui import kit
 from app.ui.page_post import has_background_scheduler
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.entries_panel import EntriesPanel
+from app.views.moddb.entry_filters import load_filter_options_sync
 from app.views.moddb.filter_options_loader import FilterOptionsLoader
 from app.views.moddb.overview_panel import OverviewPanel
 from app.views.moddb.panel_refresh import (
@@ -754,6 +755,7 @@ class ModDbView(ft.Column):
                 "criteria": self.entries._entry_filter(),
                 "version": self.entries.version,
                 "mod_id": self.entries.mod_id,
+                "pack": self.entries.pack,
                 "kind": self.entries.kind,
                 "page": self.entries.pager.current_page,
                 "filter_only": self.entries._filter_only_refresh,
@@ -776,6 +778,7 @@ class ModDbView(ft.Column):
         if key == "translate":
             return {
                 "version": self.translate.version_dd.value,
+                "pack": self.translate.pack_filter.scope,
                 "mod": self.translate.mod_dd.value,
                 "limit": self.translate.limit(),
                 "reuse": bool(self.translate.reuse_row.value),
@@ -856,7 +859,7 @@ class ModDbView(ft.Column):
             return
         if not page_only and (full_refresh or page == 1):
             # 同步篩選也要更新模組／來源／類型選單（背景路徑由快照的 apply_filter_options 完成）。
-            entries._refresh_filter_options()
+            load_filter_options_sync(entries)
         entries._load_list(
             page=page, keep_selection=keep_selection, keep_scroll=keep_scroll
         )

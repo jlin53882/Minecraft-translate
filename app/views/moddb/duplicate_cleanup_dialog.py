@@ -27,6 +27,11 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label, shorten
+from app.views.moddb.progress_reporter import (
+    progress_text,
+    progress_value,
+    throttled_progress,
+)
 from translation_tool.utils.log_unit import log_exception
 
 ALL_MODULES = "__all__"
@@ -48,6 +53,7 @@ class DuplicateCleanupDialog:
         self._busy = False
         self._closed = False
         self._generation = 0
+        self._op_token = 0  # 每次進入忙碌狀態加一；過期操作的進度回報據此忽略
         self._scope_seq = 0
         self._plan = None
         self._batches = []
@@ -330,6 +336,7 @@ class DuplicateCleanupDialog:
             ft.Text("正在建立唯讀預覽，資料庫尚未修改。", size=12, color=C.MUTED)
         ]
         self._set_busy(True, "掃描重複鍵並建立預覽…")
+        report_progress = self._progress_reporter()
         self._safe_update()
 
         def work() -> None:
@@ -340,6 +347,7 @@ class DuplicateCleanupDialog:
                     version,
                     mod_id=mod_id,
                     kind=kind,
+                    progress=report_progress,
                 )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
@@ -428,6 +436,7 @@ class DuplicateCleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "合併重複鍵中…")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             result = error = None
@@ -438,6 +447,7 @@ class DuplicateCleanupDialog:
                     plan.token,
                     mod_id=plan.mod_id,
                     kind=plan.kind,
+                    progress=report_progress,
                 )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
@@ -506,11 +516,14 @@ class DuplicateCleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "復原重複鍵合併中…")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             result = error = None
             try:
-                result = svc.revert_duplicate_cleanup(db, self.batch_dd.value)
+                result = svc.revert_duplicate_cleanup(
+                    db, self.batch_dd.value, progress=report_progress
+                )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports UI error
@@ -661,6 +674,30 @@ class DuplicateCleanupDialog:
             on_failure=self._mark_post_failure,
         )
 
+    def _progress_reporter(self):
+        """目前操作的節流進度回報（背景呼叫，只把更新排回畫面執行緒）。"""
+        token = self._op_token
+        return throttled_progress(lambda progress: self._post_progress(token, progress))
+
+    def _post_progress(self, token: int, progress) -> None:
+        """進度更新排回畫面；失敗時靜默略過（寫入交易仍在執行，不可回收忙碌狀態）。"""
+        post_to_ui(
+            self.page,
+            self._show_progress,
+            token,
+            progress,
+            label="Mod 資料庫重複鍵清理進度",
+            quiet=True,
+        )
+
+    def _show_progress(self, token: int, progress) -> None:
+        """在畫面執行緒顯示目前階段的確定進度；視窗已關閉、操作已結束或已被新操作取代時略過。"""
+        if self._closed or not self._busy or token != self._op_token:
+            return
+        self.progress.value = progress_value(progress)
+        self.status.value = progress_text(progress)
+        self._safe_update()
+
     def _current(self, generation) -> bool:
         return not self._closed and generation == self._generation
 
@@ -669,6 +706,8 @@ class DuplicateCleanupDialog:
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
+        if busy:
+            self._op_token += 1
         self.preview_btn.disabled = busy
         self.version_dd.disabled = busy
         self.mod_dd.disabled = busy

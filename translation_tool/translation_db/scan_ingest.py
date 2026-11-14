@@ -106,6 +106,22 @@ def group_scan_items(
     return groups
 
 
+def _prioritize_direct_zh_tw(group: list[ScanItem]) -> list[ScanItem]:
+    """同一條目的候選中，把直接繁中排在只有簡中（之後簡轉繁）的候選前面。
+
+    同一個 key 同時有 zh_tw 與 zh_cn 語系檔時，先寫入的候選會占用譯文；只在同一條目內
+    調整順序，不同條目維持原順序，新增條目的 ID 順序不變。
+    """
+    by_key: dict[str, list[ScanItem]] = {}
+    for item in group:
+        by_key.setdefault(canonical_entry_key(item.kind, item.key), []).append(item)
+    prioritized: list[ScanItem] = []
+    for candidates in by_key.values():
+        prioritized.extend(item for item in candidates if item.zh_tw.strip())
+        prioritized.extend(item for item in candidates if not item.zh_tw.strip())
+    return prioritized
+
+
 def scan_translations(
     item: ScanItem, convert: Callable[[str], str] | None
 ) -> list[tuple[int, str, str]]:
@@ -134,8 +150,10 @@ def ingest_groups(
     completed_items = 0
     groups_started = time.perf_counter()
     for (kind, mod_id), group in groups.items():
+        group = _prioritize_direct_zh_tw(group)
         group_started = time.perf_counter()
         known, have = target.existing(kind, mod_id)
+        changed_keys = _changed_source_keys(known, kind, group)
         for item_index, item in enumerate(group, 1):
             if len(group) >= 1000 and item_index % 1000 == 0:
                 _LOG.info(
@@ -148,24 +166,25 @@ def ingest_groups(
                 )
             cur = _find_existing(known, kind, item)
             is_new = cur is None
+            if (
+                cur is not None
+                and not item.en_us
+                and canonical_entry_key(kind, item.key) in changed_keys
+            ):
+                # 伴隨的譯文是照這次掃描的新原文翻的，不掛到資料庫裡的舊原文上
+                continue
             if cur is None:
                 eid = target.add_entry(kind, mod_id, item.key, item.en_us)
                 known[item.key] = (eid, item.en_us)
                 stats.new_entries += 1
-            elif (
-                cur[1] != item.en_us
-                and item.en_us
-                and cur[1]
-                and loose_text(cur[1]) != loose_text(item.en_us)
-            ):
-                # 只差大小寫或空白不算原文已變動：沿用既有原文，照常補譯文
+            elif _source_changed(cur[1], item.en_us):
                 target.record_src_change(kind, mod_id, item.key, cur[1], item.en_us)
                 stats.en_changed += 1
                 continue
             else:
                 eid = cur[0]
-                if not cur[1] and item.en_us:
-                    # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
+                if not cur[1].strip() and item.en_us:
+                    # 原文原本未知或空白（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
                     target.adopt_en(eid, item.en_us)
                     known[item.key] = (eid, item.en_us)
                     stats.adopted += 1
@@ -208,6 +227,35 @@ def ingest_groups(
                 time.perf_counter() - groups_started,
             )
     return stats
+
+
+def _source_changed(existing: str, incoming: str) -> bool:
+    """原文是否已變動：兩邊都有原文且不同；只差大小寫或空白不算（沿用既有原文，照常補譯文）。"""
+    return (
+        existing != incoming
+        and bool(incoming)
+        and bool(existing.strip())
+        and loose_text(existing) != loose_text(incoming)
+    )
+
+
+def _changed_source_keys(known: Known, kind: str, group: list[ScanItem]) -> set[str]:
+    """這次掃描中原文已變動的條目（canonical key）。
+
+    KubeJS／FTB 語系的 zh_tw 是與原文分開的伴隨項目；原文已變動時只記錄變動、不更新原文，
+    伴隨的譯文也不能補進去。先整組找出來，不受項目順序影響。
+    """
+    changed: set[str] = set()
+    if all(item.en_us for item in group):
+        # 沒有伴隨的譯文項目（例如 jar 的原文與譯文在同一筆）：不必先查一輪
+        return changed
+    for item in group:
+        if not item.en_us:
+            continue
+        cur = _find_existing(known, kind, item)
+        if cur is not None and _source_changed(cur[1], item.en_us):
+            changed.add(canonical_entry_key(kind, item.key))
+    return changed
 
 
 def _find_existing(known: Known, kind: str, item: ScanItem) -> tuple[int, str] | None:
@@ -270,6 +318,8 @@ class DbIngestTarget:
         self, conn: sqlite3.Connection, version: str, touched: list[int]
     ) -> None:
         self.conn, self.version, self.touched = conn, version, touched
+        # 這次匯入寫入的來源：同一條目的其他來源是否為搬走後留下的舊 selector
+        self._recorded: set[tuple[int, str, str, str, str]] = set()
 
     def existing(self, kind: str, mod_id: str) -> tuple[Known, Have]:
         return _read_existing(self.conn.execute, self.version, kind, mod_id)
@@ -337,6 +387,49 @@ class DbIngestTarget:
                 source_locale,
             ),
         )
+        self._recorded.add(
+            (
+                entry_id,
+                item.pack_scope,
+                item.kind,
+                item.source_path,
+                item.source_selector,
+            )
+        )
+        self._retire_moved_kubejs_lang_origins(item, entry_id)
+
+    def _retire_moved_kubejs_lang_origins(self, item: ScanItem, entry_id: int) -> None:
+        """KubeJS ``ClientEvents.lang`` 的 selector 含 occurrence 序號，前面插入或刪除
+        ``event.add`` 時同一個 key 的序號會位移，舊 selector 會留下指向別的 key 的來源。
+
+        只清同一條目、同一個腳本檔、同一個語系與 namespace 區塊、同一個 key、只差序號，
+        而且不是這次匯入寫入的來源；同一區塊重複 add 同一個 key 時兩個都在這次寫入，不會被清。
+        """
+        prefix, key = _kubejs_lang_selector_parts(item.source_selector)
+        if prefix is None:
+            return
+        rows = self.conn.execute(
+            "SELECT selector FROM entry_origin "
+            "WHERE entry_id=? AND pack_scope=? AND source_kind=? AND source_path=?",
+            (entry_id, item.pack_scope, item.kind, item.source_path),
+        ).fetchall()
+        stale = [
+            (selector,)
+            for (selector,) in rows
+            if selector != item.source_selector
+            and _kubejs_lang_selector_parts(selector) == (prefix, key)
+            and (entry_id, item.pack_scope, item.kind, item.source_path, selector)
+            not in self._recorded
+        ]
+        self.conn.executemany(
+            "DELETE FROM entry_origin "
+            "WHERE entry_id=? AND pack_scope=? AND source_kind=? AND source_path=? "
+            "AND selector=?",
+            [
+                (entry_id, item.pack_scope, item.kind, item.source_path, selector)
+                for (selector,) in stale
+            ],
+        )
 
     def remove_origins(self, origins: Iterable[EntryOrigin]) -> None:
         """批次清除本次完整重掃描確認已失效的精確來源。
@@ -389,6 +482,20 @@ class DbIngestTarget:
             (self.version,),
         )
         self.conn.execute("DELETE FROM temp._moddb_stale_origins")
+
+
+def _kubejs_lang_selector_parts(selector: str) -> tuple[str | None, str]:
+    """``ClientEvents.lang[<locale>][<ns>].event.add[<n>]|<key>`` 拆成 ``(區塊前綴, key)``。
+
+    不是這種 selector 時前綴回 ``None``。
+    """
+    if not selector.startswith("ClientEvents.lang["):
+        return None, ""
+    head, separator, key = selector.partition("|")
+    prefix, marker, occurrence = head.partition(".event.add[")
+    if not separator or not marker or not occurrence.endswith("]"):
+        return None, ""
+    return prefix, key
 
 
 class PreviewIngestTarget:

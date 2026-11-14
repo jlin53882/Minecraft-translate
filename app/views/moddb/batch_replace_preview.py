@@ -17,6 +17,7 @@ from app.services_impl.moddb_source_service import (
 )
 from app.ui import design, kit
 from app.ui.design import C
+from app.views.moddb.text_compare import text_control
 
 _QUALITY_LABELS = {
     "worsened": "品質變差",
@@ -149,7 +150,8 @@ def _skipped_card(row) -> ft.Control:
     )
 
 
-def _diff_line(label: str, text: str, tone_name: str) -> ft.Control:
+def _diff_line(label: str, text: str, base: str, tone_name: str) -> ft.Control:
+    """「舊／新」一行：與另一邊不同的字元加底色，前後空白等不可見字元用標記顯示。"""
     tone = design.tone(tone_name)
     return ft.Row(
         [
@@ -161,7 +163,15 @@ def _diff_line(label: str, text: str, tone_name: str) -> ft.Control:
                 bgcolor=tone.bg,
                 border_radius=6,
             ),
-            ft.Text(text, size=12.5, color=C.TEXT, selectable=True, expand=True),
+            ft.Container(
+                text_control(
+                    text,
+                    base,
+                    size=12.5,
+                    highlight=ft.Colors.with_opacity(0.4, tone.fg),
+                ),
+                expand=True,
+            ),
         ],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.START,
@@ -199,8 +209,8 @@ def _change_card(
             ft.Container(
                 ft.Column(
                     [
-                        _diff_line("舊", row.old_zh_tw, "red"),
-                        _diff_line("新", row.new_zh_tw, "em"),
+                        _diff_line("舊", row.old_zh_tw, row.new_zh_tw, "red"),
+                        _diff_line("新", row.new_zh_tw, row.old_zh_tw, "em"),
                     ],
                     spacing=6,
                 ),

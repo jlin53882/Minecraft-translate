@@ -6,6 +6,8 @@
 
 # /minecraft_translator_flet/app/views/lookup_view.py (加入「查詢中...」功能的修正版)
 
+import time
+
 import flet as ft
 
 from app.services_impl.pipelines.lookup_service import (
@@ -20,8 +22,9 @@ from app.tasks.operation_registry import (
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
-from translation_tool.utils.log_unit import log_error
+from translation_tool.utils.log_unit import log_debug, log_error
 
+_PROGRESS_MIN_INTERVAL = 0.1  # 批次查詢進度最多每秒更新 10 次
 RECENT_LIMIT = 6  # 「最近查詢」最多顯示幾筆（只存在這次開啟的程式內）
 
 
@@ -279,9 +282,26 @@ class LookupView(ft.Column):
             show_snack(self.page, "應用程式正在關閉，無法啟動新任務", C.GOLD)
             self.page.update()
 
+    def _push_batch_progress(self, fraction, log_text) -> None:
+        """把批次查詢的即時進度排到 UI 執行緒顯示（已被最終狀態覆蓋者不再更新）。"""
+
+        def apply():
+            if not self.batch_progress_bar.visible:
+                return  # 查詢已結束並還原畫面，晚到的進度不再套用
+            self.batch_progress_bar.value = fraction
+            if log_text:
+                self.batch_result_textfield.value = log_text
+            self.page.update()
+
+        try:
+            self._run_on_ui(apply)
+        except Exception as e:  # noqa: BLE001 - 進度更新失敗不可中斷批次查詢
+            log_debug(f"[Lookup] 進度更新排程失敗（已忽略）: {e!r}")
+
     def batch_lookup_worker(self, json_text):
         """執行批次查詢翻譯服務（背景執行緒）；結果交給 event loop 套用。"""
         state = {"text": None, "progress": None}
+        last_push = 0.0
         try:
             for update in run_batch_lookup_service(json_text):
                 if update.get("error"):
@@ -289,8 +309,15 @@ class LookupView(ft.Column):
                     break
                 if update.get("result"):
                     state["text"] = update.get("result")
+                    continue
                 if update.get("progress"):
                     state["progress"] = update.get("progress")
+                    now = time.monotonic()
+                    if now - last_push >= _PROGRESS_MIN_INTERVAL:
+                        last_push = now
+                        self._push_batch_progress(
+                            update.get("progress"), update.get("log")
+                        )
         except Exception as ex:  # noqa: BLE001 - 失敗也要恢復按鈕並顯示原因
             log_error(f"[Lookup] 批次查詢失敗：{ex!r}", exc_info=True)
             state["text"] = f"批次查詢失敗：{ex}"

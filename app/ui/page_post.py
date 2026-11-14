@@ -31,11 +31,13 @@ def post_to_ui(
     *args: Any,
     label: str,
     on_failure: Callable[[], None] | None = None,
+    quiet: bool = False,
 ) -> bool:
     """把 ``callback(*args)`` 排回畫面執行緒；成功排程回傳 True。
 
     沒有 ``run_task`` 的頁面（測試用）直接同步呼叫。排程失敗時記錄警告並在 worker
     thread 呼叫 ``on_failure``（所以它只能回收非 UI 狀態），回傳 False。
+    ``quiet=True`` 用於高頻、失敗無關緊要的通知（例如進度更新）：失敗時不記錄警告。
     """
     run_task = getattr(page, "run_task", None)
     try:
@@ -48,7 +50,8 @@ def post_to_ui(
         else:
             callback(*args)
     except Exception as exc:  # noqa: BLE001 - a disposed page may reject the callback
-        log_warning(f"{label}無法排回畫面：{exc!r}")
+        if not quiet:
+            log_warning(f"{label}無法排回畫面：{exc!r}")
         if on_failure is not None:
             try:
                 on_failure()

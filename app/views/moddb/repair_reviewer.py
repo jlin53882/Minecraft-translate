@@ -31,6 +31,8 @@ from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import format_count
+from app.views.moddb.source_text_label import source_text_label, source_text_name
+from app.views.moddb.text_compare import compare_chips, text_control
 
 # 套用被拒絕時的原因說明（``stale:<原因>`` 的原因部分）；空字串是沒有可歸類的原因。
 _STALE_MESSAGES = {
@@ -205,26 +207,30 @@ class RepairReviewer:
         *,
         tone: str = "neutral",
         height: int | None = None,
+        base: str | None = None,
+        base_label: str = "",
     ) -> ft.Container:
+        """唯讀文字卡：不可見字元以標記顯示；給 ``base_label`` 時與 ``base`` 比對差異。
+
+        只影響顯示，``value`` 不變；``height`` 固定時文字仍可在卡片內捲動。
+        """
         tone_colors = {
             "neutral": (C.MUTED, C.PANEL, C.LINE),
             "gold": (C.GOLD, C.GOLD_BG, C.GOLD),
             "dia": (C.DIA, C.DIA_BG, C.DIA),
         }
         color, bgcolor, line = tone_colors.get(tone, tone_colors["neutral"])
-        text = ft.Text(
-            value or "（無內容）",
-            size=13,
-            color=C.TEXT,
-            selectable=True,
-            height=height,
-        )
+        if value:
+            text = text_control(value, base)
+            text.height = height
+        else:
+            text = ft.Text(
+                "（無內容）", size=13, color=C.TEXT, selectable=True, height=height
+            )
+        notes = compare_chips(value, base, base_label=base_label) if base_label else []
         return ft.Container(
             content=ft.Column(
-                [
-                    ft.Text(title, size=11.5, color=color),
-                    text,
-                ],
+                [ft.Text(title, size=11.5, color=color), text, *notes],
                 spacing=8,
                 tight=True,
             ),
@@ -281,15 +287,23 @@ class RepairReviewer:
         column_width = max(300, (available - 16) / 2)
         left = ft.Column(
             [
-                self._card("英文原文", str(item.get("en_us") or ""), tone="dia"),
+                self._card(
+                    source_text_name(item.get("kind"), item.get("source_locale")),
+                    str(item.get("en_us") or ""),
+                    tone="dia",
+                ),
                 self._card(
                     "保留中的舊譯文",
                     str(item.get("old_translation") or ""),
                     tone="gold",
+                    base=str(item.get("ai_translation") or ""),
+                    base_label="AI 結果",
                 ),
                 self._card(
                     "未寫入的 AI 結果",
                     str(item.get("ai_translation") or ""),
+                    base=str(item.get("old_translation") or ""),
+                    base_label="舊譯文",
                 ),
             ],
             spacing=10,
@@ -438,7 +452,15 @@ class RepairReviewer:
             self.format_status.value = "格式檢查通過。"
             self.format_status.color = C.EM
         self.format_diff_viewer.render(source, draft, diff_result, kind=kind)
-        self.format_review.render(source, draft, diff_result, kind=kind)
+        self.format_review.render(
+            source,
+            draft,
+            diff_result,
+            kind=kind,
+            source_label=source_text_label(
+                kind, (self.item or {}).get("source_locale")
+            ),
+        )
 
     def _is_finished(self) -> bool:
         return (

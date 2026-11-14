@@ -1773,14 +1773,6 @@
    "top_level_defs": 9,
    "annotation_coverage": 0.808
   },
-  "app.views.moddb.version_diff_text": {
-   "max_complexity": 9,
-   "public_api": 2,
-   "class_methods": 0,
-   "import_depth": 1,
-   "top_level_defs": 3,
-   "annotation_coverage": 1.0
-  },
   "app.views.moddb.version_picker": {
    "max_complexity": 9,
    "public_api": 8,

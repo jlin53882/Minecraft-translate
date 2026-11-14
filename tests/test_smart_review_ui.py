@@ -2715,6 +2715,7 @@ def test_bulk_review_prefills_entry_scope_without_running_preview(monkeypatch):
         "mod_id": "accessories",
         "kind": "lang",
         "effective_source": 7,
+        "pack_scope": None,  # 條目頁沒有選模組包版本
         "opened": True,
     }
 
@@ -3039,3 +3040,143 @@ def test_batch_result_summary_total_equals_processed(ctx):
         "略過 6" in text
     )  # not_ready/missing/manual_reviewed/missing_entry/stale/未知
     assert "失敗 1" in text
+
+
+def _hold_background(ctx):
+    """攔下背景工作，讓測試能在「載入中」檢查畫面，再手動交付結果。"""
+    pending = []
+    ctx.run_background = lambda work, done, **kwargs: pending.append((work, done))
+    return pending
+
+
+def test_batch_reviewer_select_all_shows_busy_indicator_then_restores(ctx, monkeypatch):
+    """選取全部載入時顯示不確定進度條並停用按鈕；完成後還原。"""
+    rows = [_candidate(index) for index in range(1, 4)]
+
+    class Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def candidate_page(self, _run_id, *, status, limit, offset, **_kwargs):
+            return len(rows), rows
+
+    monkeypatch.setattr(
+        batch_reviewer_module,
+        "moddb_smart_review_read_session",
+        lambda *_a, **_k: Session(),
+    )
+    pending = _hold_background(ctx)
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    reviewer.run_id = "run-1"
+    reviewer.total = 3
+
+    reviewer._select_all_safe()
+
+    assert reviewer.progress_bar.visible is True
+    assert reviewer.progress_bar.value is None  # 單次查詢：不確定進度
+    assert "正在載入全部候選" in reviewer.status_text.value
+    assert reviewer.select_all_btn.disabled is True
+    assert reviewer.apply_btn.disabled is True
+    (work, done) = pending[-1]
+
+    done(work(), None)
+
+    assert reviewer.progress_bar.visible is False
+    assert reviewer._loading is False
+    assert len(reviewer._selected) == 3
+
+
+def test_batch_reviewer_page_load_busy_indicator_cleared_on_error(ctx):
+    """載入候選失敗時也要收起進度條並恢復控制項。"""
+    pending = _hold_background(ctx)
+    reviewer = SmartReviewBatchReviewer(ctx, on_changed=lambda: None)
+    reviewer.run_id = "run-1"
+
+    reviewer._load_page(include_run=True)
+
+    assert reviewer.progress_bar.visible is True
+    assert reviewer._loading is True
+    (_work, done) = pending[-1]
+
+    done(None, "boom")
+
+    assert reviewer.progress_bar.visible is False
+    assert reviewer._loading is False
+
+
+def _span_text(control: ft.Text) -> str:
+    return "".join(span.text for span in control.spans)
+
+
+def _has_diff_span(control: ft.Text) -> bool:
+    """有紅底差異片段（標記符號是等寬字，不算）。"""
+    return any(
+        span.style and span.style.bgcolor and span.style.font_family != "monospace"
+        for span in control.spans
+    )
+
+
+def test_text_card_marks_invisible_chars_and_diffs_against_base():
+    """AI 建議卡與目前譯文卡互相比對差異並顯示標記，卡片不改動傳入的字串。"""
+    current = "使用 %s 開啟 "
+    suggested = "使用 %s 打開"
+    card = SmartReviewReviewer._text_card(
+        "目前譯文", current, "gold", base=suggested, base_label="AI 建議"
+    )
+    title, body, *notes = card.content.controls
+
+    assert title.value == "目前譯文"
+    assert "·" in _span_text(body)  # 結尾空白以標記顯示
+    assert _has_diff_span(body)
+    assert any("差異：多出空白" in getattr(n, "value", "") for n in notes)
+    assert current == "使用 %s 開啟 "  # 原字串沒有被加上標記
+
+
+def test_text_card_source_card_has_markers_only():
+    """來源卡不帶比對基準：沒有差異底色與說明列。"""
+    card = SmartReviewReviewer._text_card("原文", "A  B", "dia")
+    _title, body = card.content.controls
+
+    assert "·" in _span_text(body)
+    assert not _has_diff_span(body)
+
+
+def test_text_card_empty_value_keeps_placeholder():
+    card = SmartReviewReviewer._text_card("AI 建議譯文", "", "em", base="你好")
+
+    assert card.content.controls[1].value == "（無內容）"
+    assert len(card.content.controls) == 2
+
+
+def test_single_reviewer_columns_keep_draft_field_and_raw_values(ctx):
+    """逐筆檢視的卡片比對差異，但可編輯草稿與套用用的值維持原字串。"""
+    reviewer = SmartReviewReviewer(ctx, on_changed=lambda: None)
+    row = _candidate(current_zh_tw="你好 ", suggested_zh_tw="你好")
+
+    columns = reviewer._columns(row)
+    left = columns.controls[1].controls[0].content
+    texts = [c.content.controls[1] for c in left.controls]
+
+    assert _has_diff_span(texts[1]) or "·" in _span_text(texts[1])
+    assert row.current_zh_tw == "你好 " and row.suggested_zh_tw == "你好"
+    right = columns.controls[1].controls[1].content
+    assert reviewer.draft in right.controls
+
+
+def test_batch_text_lines_diff_with_ellipsis_and_plain_reason():
+    """批量卡片的目前／建議列比對差異並維持 3 行省略；理由列仍是純文字。"""
+    from app.views.moddb.smart_review_reason import build_batch_text_line
+
+    line = build_batch_text_line("目前", "你好 ", base="你好", compare=True)
+    text = line.controls[1]
+    assert text.max_lines == 3 and text.overflow == ft.TextOverflow.ELLIPSIS
+    assert "·" in _span_text(text)
+
+    reason = build_batch_text_line("AI 理由", "含 空白  的理由")
+    assert reason.controls[1].value == "含 空白  的理由"
+
+    empty = build_batch_text_line("目前", "", base="你好", compare=True)
+    assert empty.controls[1].value == "（無內容）"

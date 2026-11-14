@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 
 import pytest
 
@@ -372,6 +373,27 @@ def test_kubejs_lang_skips_blank_values_but_keeps_occurrence_alignment(tmp_path)
     assert "event.add[2]|item.demo.machine" in items[0].source_selector
     assert len(result.stale_origins) == 1
     assert result.stale_origins[0].selector.endswith("event.add[1]|item.demo.empty")
+
+
+def test_skipping_zh_cn_keeps_later_kubejs_selector_occurrence(tmp_path):
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('zh_cn', event => {\n"
+        "  event.add('demo', 'item.demo.machine', '机器');\n"
+        "});\n"
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1", read_zh_cn=False)
+
+    items = [item for item in result.items if item.kind == "kubejs_lang"]
+    assert len(items) == 1
+    assert items[0].source_locale == "en_us"
+    assert "ClientEvents.lang[en_us][demo].event.add[2]" in items[0].source_selector
 
 
 def test_moddb_rescan_removes_legacy_blank_kubejs_origin(tmp_path):
@@ -1048,5 +1070,146 @@ def test_moddb_ingest_keeps_chinese_fallback_as_original_text(tmp_path):
             "SELECT en_us FROM entry WHERE kind='kubejs_lang' AND key='item.demo'"
         )
         assert row == ("繁中來源",)
+    finally:
+        db.close()
+
+
+def test_trailing_extra_brace_is_ignored_in_memory_and_reported(tmp_path):
+    lang = tmp_path / "config/ftbquests/quests/lang"
+    for locale, text in (("en_us", "Hello"), ("zh_tw", "你好")):
+        (lang / locale).mkdir(parents=True)
+        # zh_tw 結尾多一個 }
+        extra = "}\n" if locale == "zh_tw" else ""
+        (lang / locale / "chapter.snbt").write_text(
+            f'{{\n\tchapter.AAAA.title: "{text}"\n}}\n{extra}', encoding="utf-8"
+        )
+    broken = lang / "zh_tw" / "chapter.snbt"
+    before = broken.read_bytes()
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    assert [(i.en_us, i.zh_tw) for i in result.items] == [("Hello", "你好")]
+    reasons = [issue["reason"] for issue in result.issues]
+    assert reasons == ["snbt_trailing_braces_ignored"]
+    assert broken.read_bytes() == before  # 原檔不被修改
+
+
+def test_unrepairable_snbt_is_still_reported_as_parse_failed(tmp_path):
+    lang = tmp_path / "config/ftbquests/quests/lang/en_us"
+    lang.mkdir(parents=True)
+    (lang / "chapter.snbt").write_text("{ chapter.AAAA.title: ", encoding="utf-8")
+    result = scan_pack_sources(tmp_path, "1.21.1")
+    assert [issue["reason"] for issue in result.issues] == ["snbt_parse_failed"]
+
+
+def test_translated_zip_reads_zh_cn_only_when_enabled(tmp_path):
+    from translation_tool.translation_db.scanner import ScanOptions, scan_jar
+
+    zpath = tmp_path / "pack.zip"
+    with zipfile.ZipFile(zpath, "w") as zf:
+        zf.writestr(
+            "assets/foo/lang/en_us.json", json.dumps({"item.foo.a": "Steel Case"})
+        )
+        zf.writestr(
+            "assets/foo/lang/zh_tw.json", json.dumps({"item.foo.a": "鋼製外殼"})
+        )
+        zf.writestr(
+            "assets/foo/lang/zh_cn.json", json.dumps({"item.foo.a": "钢制外壳"})
+        )
+
+    def run(read_cn: bool):
+        opts = ScanOptions("1.21.1", translated=True, read_jar_translations=read_cn)
+        return {i.key: i for i in scan_jar(zpath, opts, ()).items}
+
+    on, off = run(True), run(False)
+    assert [i.zh_tw for i in on.values()] == ["鋼製外殼"]
+    assert [i.zh_cn for i in on.values()] == ["钢制外壳"]
+    assert [i.zh_tw for i in off.values()] == ["鋼製外殼"]
+    assert [i.zh_cn for i in off.values()] == [""]
+
+
+def test_kubejs_moved_script_occurrence_retires_old_origin(tmp_path):
+    """完整重掃描後，前置事件造成的 selector 位移不可留下舊 origin。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "moved-kubejs-origin.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        script.write_text(
+            "ClientEvents.lang('en_us', event => {\n"
+            "  event.add('demo', 'item.demo.before', 'Before');\n"
+            "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+            "});\n",
+            encoding="utf-8",
+        )
+        list(
+            scan_folder_generator(
+                db,
+                tmp_path,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        selectors = db._q(
+            "SELECT eo.selector FROM entry_origin eo "
+            "JOIN entry e ON e.id=eo.entry_id "
+            "WHERE e.kind='kubejs_lang' AND e.key=? "
+            "ORDER BY eo.selector",
+            ("item.demo.machine",),
+        )
+        assert selectors == [
+            ("ClientEvents.lang[en_us][demo].event.add[2]|item.demo.machine",)
+        ]
+    finally:
+        db.close()
+
+
+def test_kubejs_duplicate_key_in_same_scan_keeps_both_origins(tmp_path):
+    """同一區塊重複 add 同一個 key 時，兩個 selector 都是這次掃描寫入的，不可互相清掉。"""
+    script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
+    script.parent.mkdir(parents=True)
+    script.write_text(
+        "ClientEvents.lang('en_us', event => {\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "  event.add('demo', 'item.demo.other', 'Other');\n"
+        "  event.add('demo', 'item.demo.machine', 'Machine');\n"
+        "});\n",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "duplicate-kubejs-origin.db")
+    try:
+        for _ in range(2):
+            list(
+                scan_folder_generator(
+                    db,
+                    tmp_path,
+                    ScanOptions("1.21.1", include_pack_content=True),
+                    workers=1,
+                )
+            )
+        selectors = db._q(
+            "SELECT eo.selector FROM entry_origin eo "
+            "JOIN entry e ON e.id=eo.entry_id "
+            "WHERE e.kind='kubejs_lang' AND e.key=? "
+            "ORDER BY eo.selector",
+            ("item.demo.machine",),
+        )
+        assert selectors == [
+            ("ClientEvents.lang[en_us][demo].event.add[1]|item.demo.machine",),
+            ("ClientEvents.lang[en_us][demo].event.add[3]|item.demo.machine",),
+        ]
     finally:
         db.close()

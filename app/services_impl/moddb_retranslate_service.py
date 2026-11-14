@@ -9,7 +9,7 @@ import traceback
 import uuid
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from pathlib import Path
 from time import monotonic
@@ -726,7 +726,9 @@ def preview_same_source_ai_retranslation(
     preview_entries = []
     for entry in entries:
         _raise_preview_timeout(deadline)
-        preview_entries.append(entry)
+        preview_entries.append(
+            replace(entry, source_locale=source_locales.get(entry.entry_id))
+        )
     return SameSourceAIRepairPreview(
         total,
         tuple(preview_entries),
@@ -1252,6 +1254,7 @@ def _mark_flagged(db, session, report, target, translated_text, issues):
             "source_id": target["_source_id"],
             "key": target["path"],
             "en_us": target["source_text"],
+            "source_locale": target.get("source_locale"),
             "old_translation": target["_expected_old_zh_tw"],
             "ai_translation": translated_text,
             "issues": tuple(issues),

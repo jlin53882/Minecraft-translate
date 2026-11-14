@@ -838,3 +838,120 @@ def test_unrelated_source_with_the_same_key_is_not_listed(db):
     )
     db.ingest("1.21.1", [_pack_item(PACK_B, "k", "This entry needs a key to open")])
     assert db.list_cross_version_differences("1.21.1") == []
+
+
+def test_similar_source_matches_plain_ratio_threshold():
+    """先用便宜的上界排除不相似原文，結果必須和直接算 ratio 相同。"""
+    from difflib import SequenceMatcher
+
+    from translation_tool.translation_db.content_identity import loose_text
+    from translation_tool.translation_db.cross_version_review import (
+        SOURCE_SIMILARITY,
+        similar_source,
+    )
+
+    pairs = [
+        ("Hello world", "hello  world!"),
+        ("Hello world", "Completely different text"),
+        ("Open the door", "Open the big door"),
+        ("abc", "xyz"),
+        ("", "abc"),
+        ("a" * 50, "a" * 10),
+    ]
+    for a, b in pairs:
+        left, right = loose_text(a), loose_text(b)
+        expected = bool(left and right) and (
+            SequenceMatcher(None, left, right, autojunk=False).ratio()
+            >= SOURCE_SIMILARITY
+        )
+        assert similar_source(a, b) is expected
+
+
+def test_scan_matches_fetch_rows_and_counts_exclusions(db):
+    """一次比對（scan_differences）的差異列與逐段 ``_fetch_rows`` 相同，並同時統計未列出原因。"""
+    from translation_tool.translation_db import cross_version_review as cv
+
+    _seed_reviewed(db, "1.20.1", key="a", text="亮色")
+    _seed_reviewed(db, "1.19.2", key="a", text="明亮")  # 與 1.20.1 衝突
+    db.ingest("1.18.2", [_item("b", "Bright", "亮")])  # 其他版本只有未審核的譯文
+    _import(
+        db,
+        "26.1",
+        [
+            _item("a", "Bright", "光亮"),
+            _item("b", "Bright", "暗"),
+            _item("c", "X", "y"),
+        ],
+    )
+
+    rows, summary = cv.scan_differences(db, "26.1")
+
+    ids = [r.id for r in db.list_entries("26.1", limit=None)[0]]
+    expected = [
+        r
+        for r in cv._fetch_rows(db._conn, "26.1", ref_version="", entry_ids=ids)
+        if r.differs
+    ]
+    assert rows and repr(rows) == repr(expected)
+    assert summary.ref_unreviewed == 1
+    assert db.list_cross_version_differences("26.1") == rows
+    assert db.explain_cross_version_exclusions("26.1") == summary
+
+
+def test_scan_reports_progress_in_chunks(db, monkeypatch):
+    from translation_tool.translation_db import cross_version_review as cv
+
+    monkeypatch.setattr(cv, "_ID_CHUNK", 2)
+    _seed_reviewed(db, "1.20.1", key="a", text="甲")
+    _import(db, "26.1", [_item(f"k{i}", "Bright", "x") for i in range(5)])
+    seen: list[tuple[int, int]] = []
+
+    whole = cv.scan_differences(db, "26.1", progress=lambda d, t: seen.append((d, t)))
+    chunked = cv.scan_differences(db, "26.1")
+
+    assert seen[0] == (0, 5) and seen[-1] == (5, 5)
+    assert [d for d, _ in seen] == sorted(d for d, _ in seen)
+    assert len({t for _, t in seen}) == 1
+    assert repr(whole) == repr(chunked)
+
+
+def test_scan_cache_is_reused_until_data_changes(db, monkeypatch):
+    from translation_tool.translation_db import cross_version_review as cv
+
+    _seed_reviewed(db, "1.20.1", key="a", text="亮色")
+    _import(db, "26.1", [_item("a", "Bright", "光亮")])
+    calls = {"n": 0}
+    real = cv.scan_differences
+
+    def counting(*args, **kwargs):
+        calls["n"] += 1
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cv, "scan_differences", counting)
+
+    first, summary = db.scan_cross_version_differences("26.1")
+    again, again_summary = db.scan_cross_version_differences("26.1")
+    assert calls["n"] == 1
+    assert repr(first) == repr(again) and summary == again_summary
+    again.clear()  # 改了回傳的清單不影響快取
+    assert len(db.scan_cross_version_differences("26.1")[0]) == len(first)
+
+    db.apply_cross_version_references([_apply_item(first[0])])  # 寫入讓世代改變
+    after, _ = db.scan_cross_version_differences("26.1")
+    assert calls["n"] == 2 and after == []
+    db.scan_cross_version_differences("26.1", ref_version="1.20.1")
+    assert calls["n"] == 3  # 條件不同不共用
+
+
+def test_exclusion_stats_use_exact_pack_match_not_sql_coarse_filter(db):
+    """資料夾名稱含 ``@`` 的整合包（X@A）不可被誤算進整合包 A 的未列出統計。"""
+    pack_xa = "actuallyadditions@X@A@aaaaaaaaaaaa"
+    pack_a = "actuallyadditions@A@bbbbbbbbbbbb"
+    db.ingest("1.21.1", [_pack_item(pack_xa, "unrev", "Dois", "二")])  # 參考未審核
+    db.ingest("1.21.1", [_pack_item(pack_a, "unrev2", "Quatro", "四")])
+    db.ingest("26.1", [_pack_item(PACK_B, "unrev", "Dois", "")])
+    db.ingest("26.1", [_pack_item(PACK_B, "unrev2", "Quatro", "")])
+
+    summary = db.explain_cross_version_exclusions("26.1", ref_pack="A")
+
+    assert summary.ref_unreviewed == 1  # 只有真正屬於整合包 A 的那一筆

@@ -59,14 +59,23 @@ class CacheSearchFacade:
             return False
 
     def rebuild_search_index(
-        self, cache_types: list[str], translation_cache: dict[str, dict[str, Any]]
+        self,
+        cache_types: list[str],
+        translation_cache: dict[str, dict[str, Any]],
+        on_progress=None,
     ) -> bool:
-        """重建搜尋索引。"""
+        """重建搜尋索引；``on_progress(current, total, message)`` 為每個類型完成後的進度回報。"""
         try:
             self._logger.info("🔄 開始重建搜尋索引...")
-            total_indexed = self._get_orchestrator().rebuild_search_index(
-                cache_types, translation_cache
-            )
+            orchestrator = self._get_orchestrator()
+            if on_progress is None:
+                total_indexed = orchestrator.rebuild_search_index(
+                    cache_types, translation_cache
+                )
+            else:
+                total_indexed = orchestrator.rebuild_search_index(
+                    cache_types, translation_cache, on_progress=on_progress
+                )
             self._logger.info(f"✅ 搜尋索引重建完成，共索引 {total_indexed} 條翻譯")
             return True
         except Exception as e:
