@@ -153,6 +153,7 @@ def ingest_groups(
         group = _prioritize_direct_zh_tw(group)
         group_started = time.perf_counter()
         known, have = target.existing(kind, mod_id)
+        changed_keys = _changed_source_keys(known, kind, group)
         for item_index, item in enumerate(group, 1):
             if len(group) >= 1000 and item_index % 1000 == 0:
                 _LOG.info(
@@ -165,24 +166,25 @@ def ingest_groups(
                 )
             cur = _find_existing(known, kind, item)
             is_new = cur is None
+            if (
+                cur is not None
+                and not item.en_us
+                and canonical_entry_key(kind, item.key) in changed_keys
+            ):
+                # 伴隨的譯文是照這次掃描的新原文翻的，不掛到資料庫裡的舊原文上
+                continue
             if cur is None:
                 eid = target.add_entry(kind, mod_id, item.key, item.en_us)
                 known[item.key] = (eid, item.en_us)
                 stats.new_entries += 1
-            elif (
-                cur[1] != item.en_us
-                and item.en_us
-                and cur[1]
-                and loose_text(cur[1]) != loose_text(item.en_us)
-            ):
-                # 只差大小寫或空白不算原文已變動：沿用既有原文，照常補譯文
+            elif _source_changed(cur[1], item.en_us):
                 target.record_src_change(kind, mod_id, item.key, cur[1], item.en_us)
                 stats.en_changed += 1
                 continue
             else:
                 eid = cur[0]
-                if not cur[1] and item.en_us:
-                    # 原文原本未知（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
+                if not cur[1].strip() and item.en_us:
+                    # 原文原本未知或空白（例如先匯入了只有 zh_tw 的翻譯 ZIP）：補上
                     target.adopt_en(eid, item.en_us)
                     known[item.key] = (eid, item.en_us)
                     stats.adopted += 1
@@ -225,6 +227,35 @@ def ingest_groups(
                 time.perf_counter() - groups_started,
             )
     return stats
+
+
+def _source_changed(existing: str, incoming: str) -> bool:
+    """原文是否已變動：兩邊都有原文且不同；只差大小寫或空白不算（沿用既有原文，照常補譯文）。"""
+    return (
+        existing != incoming
+        and bool(incoming)
+        and bool(existing.strip())
+        and loose_text(existing) != loose_text(incoming)
+    )
+
+
+def _changed_source_keys(known: Known, kind: str, group: list[ScanItem]) -> set[str]:
+    """這次掃描中原文已變動的條目（canonical key）。
+
+    KubeJS／FTB 語系的 zh_tw 是與原文分開的伴隨項目；原文已變動時只記錄變動、不更新原文，
+    伴隨的譯文也不能補進去。先整組找出來，不受項目順序影響。
+    """
+    changed: set[str] = set()
+    if all(item.en_us for item in group):
+        # 沒有伴隨的譯文項目（例如 jar 的原文與譯文在同一筆）：不必先查一輪
+        return changed
+    for item in group:
+        if not item.en_us:
+            continue
+        cur = _find_existing(known, kind, item)
+        if cur is not None and _source_changed(cur[1], item.en_us):
+            changed.add(canonical_entry_key(kind, item.key))
+    return changed
 
 
 def _find_existing(known: Known, kind: str, item: ScanItem) -> tuple[int, str] | None:

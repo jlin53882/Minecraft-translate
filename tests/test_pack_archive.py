@@ -1000,3 +1000,74 @@ def test_mixed_pack_items_skip_translation_when_existing_original_differs(tmp_pa
     assert len(adopted.items) == 1
     assert adopted.items[0].kind == KIND_FTB_QUEST_LANG
     assert [item.kind for item in adopted.original_differs] == [KIND_KUBEJS_LANG]
+
+
+def test_same_scope_rejects_translation_for_old_or_whitespace_original(tmp_path):
+    """原文已變動時不補伴隨的譯文；空白原文視為未知，補上原文與譯文。"""
+    from translation_tool.translation_db.models import ScanItem
+    from translation_tool.translation_db.pack_sources import pack_scope_for_root
+    from translation_tool.translation_db.schema import KIND_KUBEJS_LANG
+
+    pack = tmp_path / "pack"
+    scope = pack_scope_for_root(pack)
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                f"demo@{scope}",
+                "item.demo.existing",
+                "Existing English",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                f"demo@{scope}",
+                "item.demo.old",
+                "舊中文原文",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                f"demo@{scope}",
+                "item.demo.blank",
+                "   ",
+            ),
+        ],
+    )
+    _write_files(
+        pack,
+        {
+            "kubejs/assets/demo/lang/en_us.json": json.dumps(
+                {
+                    "item.demo.existing": "Existing English",
+                    "item.demo.old": "New English",
+                    "item.demo.blank": "Filled English",
+                }
+            ),
+            "kubejs/assets/demo/lang/zh_tw.json": json.dumps(
+                {
+                    "item.demo.old": "不應附著",
+                    "item.demo.blank": "填入翻譯",
+                }
+            ),
+        },
+    )
+
+    list(
+        scan_folder_generator(
+            db,
+            pack,
+            ScanOptions("1.21.1", translated=True, include_pack_content=True),
+        )
+    )
+    conn = sqlite3.connect(tmp_path / "t.db")
+    assert conn.execute(
+        "select e.en_us, t.zh_tw from entry e "
+        "left join translation t on t.entry_id=e.id "
+        "where e.key='item.demo.old'"
+    ).fetchall() == [("舊中文原文", None)]
+    assert conn.execute(
+        "select e.en_us, t.zh_tw from entry e "
+        "left join translation t on t.entry_id=e.id "
+        "where e.key='item.demo.blank'"
+    ).fetchall() == [("Filled English", "填入翻譯")]
