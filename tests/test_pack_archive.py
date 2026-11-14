@@ -866,3 +866,58 @@ def test_single_zip_without_pack_scanner_reads_kubejs_lang_as_regular_lang(tmp_p
         .fetchone()
     )
     assert row == ("lang", "", "只有翻譯")
+
+
+def test_extract_stops_once_pack_budget_is_exhausted(tmp_path, monkeypatch):
+    from translation_tool.translation_db import pack_archive
+    from translation_tool.utils.zip_safety import ZipReadBudget
+
+    zpath = _make_zip(
+        tmp_path / "budget.zip",
+        {
+            "kubejs/a.js": "1234",
+            "kubejs/b.js": "5678",
+            "kubejs/c.js": "90ab",
+        },
+    )
+
+    class SmallBudget:
+        @classmethod
+        def for_pack(cls, label):
+            return ZipReadBudget(max_bytes=6, max_members=50, label=label)
+
+    monkeypatch.setattr(pack_archive, "ZipReadBudget", SmallBudget)
+    dest = tmp_path / "out"
+    dest.mkdir()
+
+    issues = pack_archive.extract_pack_members(zpath, dest)
+
+    assert [issue["reason"] for issue in issues] == ["archive_budget"]
+    assert {p.name for p in dest.rglob("*") if p.is_file()} == {"a.js"}
+
+
+def test_pack_scan_cancelled_after_analysis_does_not_write(tmp_path):
+    db = TranslationDB(tmp_path / "t.db")
+    _write_files(
+        tmp_path,
+        _kubejs_files("Tooltip text", "First Quest", "Do the thing"),
+    )
+    state = {"cancel": False}
+
+    def should_cancel():
+        return state["cancel"]
+
+    updates = []
+    for update in scan_folder_generator(
+        db,
+        tmp_path,
+        ScanOptions("1.21.1", include_pack_content=True),
+        should_cancel=should_cancel,
+    ):
+        updates.append(update)
+        if "模組包來源：開始分析" in update.get("log", ""):
+            state["cancel"] = True
+
+    assert updates[-1]["report"].cancelled is True
+    assert db.count_entries() == 0
+    assert db.last_scans() == []

@@ -1397,6 +1397,7 @@ def _scan_pack_content(
     convert: Callable[[str], str] | None,
     report: ScanReport,
     has_jars: bool,
+    should_cancel: Callable[[], bool] | None = None,
 ) -> Generator[dict[str, Any], None, tuple[PackScanResult, IngestStats | None, bool]]:
     """分析並匯入 KubeJS／FTB Quests 模組包來源；回傳 ``(結果, 匯入統計, 找不到根目錄)``。
 
@@ -1415,7 +1416,9 @@ def _scan_pack_content(
         extract_issues: list[dict[str, str]] = []
         if from_zip:
             search = Path(tmp).resolve()
-            extract_issues = extract_pack_members(path, search)
+            extract_issues = extract_pack_members(
+                path, search, should_cancel=should_cancel
+            )
 
         def shown(root: Path) -> str:
             """畫面與報告顯示：ZIP 來源用 ``ZIP路徑!/內部路徑``，不洩漏暫存目錄。"""
@@ -1456,6 +1459,16 @@ def _scan_pack_content(
                 for key, value in issue.items():
                     issue[key] = str(value).replace(str(search), f"{folder}!")
         pack_result.issues.extend(extract_issues)
+        if should_cancel is not None and should_cancel():
+            # 分析與配對可能耗時數秒；使用者在這段期間取消時，寫入前停止。
+            report.cancelled = True
+            yield {
+                "progress": 1.0,
+                "log": "⚠️ 模組包來源掃描已取消，未寫入資料庫",
+                "level": "warning",
+                "report": report,
+            }
+            return empty, None, False
         _record_pack_scan(report, pack_result)
         stats = _ingest_pack_result(
             db,
@@ -1665,8 +1678,10 @@ def scan_folder_generator(
         else None
     )
     pack_result, _pack_ingest_stats, pack_root_missing = yield from _scan_pack_content(
-        db, preview, folder, options, convert, report, bool(jars)
+        db, preview, folder, options, convert, report, bool(jars), should_cancel
     )
+    if report.cancelled:
+        return
     has_pack_content = bool(
         pack_result.sources_found
         or pack_result.items

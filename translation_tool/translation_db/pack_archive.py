@@ -132,16 +132,18 @@ def extract_pack_members(
                 continue
             try:
                 data = read_limited(zf, info, MAX_TEXT_BYTES, budget)
+            except ArchiveBudgetError as exc:
+                # ArchiveBudgetError 是 ZipSizeError 的子類別，必須先接：整體上限用完就停止，
+                # 不能被當成單檔過大而繼續解壓後面的成員。
+                issues.append(
+                    _issue(archive, info.filename, "archive_budget", str(exc))
+                )
+                break
             except ZipSizeError as exc:
                 issues.append(
                     _issue(archive, info.filename, "source_too_large", str(exc))
                 )
                 continue
-            except ArchiveBudgetError as exc:
-                issues.append(
-                    _issue(archive, info.filename, "archive_budget", str(exc))
-                )
-                break
             except (OSError, zipfile.BadZipFile, RuntimeError) as exc:
                 issues.append(
                     _issue(archive, info.filename, "archive_read_failed", str(exc))
