@@ -106,6 +106,22 @@ def group_scan_items(
     return groups
 
 
+def _prioritize_direct_zh_tw(group: list[ScanItem]) -> list[ScanItem]:
+    """同一條目的候選中，把直接繁中排在只有簡中（之後簡轉繁）的候選前面。
+
+    同一個 key 同時有 zh_tw 與 zh_cn 語系檔時，先寫入的候選會占用譯文；只在同一條目內
+    調整順序，不同條目維持原順序，新增條目的 ID 順序不變。
+    """
+    by_key: dict[str, list[ScanItem]] = {}
+    for item in group:
+        by_key.setdefault(canonical_entry_key(item.kind, item.key), []).append(item)
+    prioritized: list[ScanItem] = []
+    for candidates in by_key.values():
+        prioritized.extend(item for item in candidates if item.zh_tw.strip())
+        prioritized.extend(item for item in candidates if not item.zh_tw.strip())
+    return prioritized
+
+
 def scan_translations(
     item: ScanItem, convert: Callable[[str], str] | None
 ) -> list[tuple[int, str, str]]:
@@ -134,6 +150,7 @@ def ingest_groups(
     completed_items = 0
     groups_started = time.perf_counter()
     for (kind, mod_id), group in groups.items():
+        group = _prioritize_direct_zh_tw(group)
         group_started = time.perf_counter()
         known, have = target.existing(kind, mod_id)
         for item_index, item in enumerate(group, 1):

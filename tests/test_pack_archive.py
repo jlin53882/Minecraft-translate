@@ -921,3 +921,26 @@ def test_pack_scan_cancelled_after_analysis_does_not_write(tmp_path):
     assert updates[-1]["report"].cancelled is True
     assert db.count_entries() == 0
     assert db.last_scans() == []
+
+
+def test_translated_kubejs_pack_prefers_direct_zh_tw_over_converted_zh_cn(tmp_path):
+    db = TranslationDB(tmp_path / "t.db")
+    zpath = _make_zip(
+        tmp_path / "both-kubejs.zip",
+        {
+            "Pack/kubejs/assets/demo/lang/zh_cn.json": json.dumps(
+                {"item.demo.widget": "简体"}, ensure_ascii=False
+            ),
+            "Pack/kubejs/assets/demo/lang/zh_tw.json": json.dumps(
+                {"item.demo.widget": "繁體"}, ensure_ascii=False
+            ),
+        },
+    )
+
+    _scan(db, zpath)
+
+    conn = sqlite3.connect(tmp_path / "t.db")
+    assert conn.execute(
+        "select t.zh_tw from entry e join translation t on t.entry_id=e.id "
+        "where e.kind='kubejs_lang' and e.key='item.demo.widget'"
+    ).fetchall() == [("繁體",)]
