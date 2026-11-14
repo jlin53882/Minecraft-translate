@@ -45,7 +45,8 @@ _Ident = tuple[str, str, str]
 class ScopeMatch:
     scopes: tuple[str, ...]  # 重疊度達門檻的既有模組包，由高到低
     best: str | None  # 重疊度唯一最高的模組包；最高分平手時為 ``None``
-    # 各模組包中該條目的英文原文：``{識別: {模組包身分: 英文}}``
+    # 各模組包中該條目的英文原文：``{識別: {模組包身分: 英文}}``；也含輸入中帶原文的項目，
+    # 供比對輸入原文與既有原文（重疊度只計只有譯文的項目）
     originals: Mapping[_Ident, Mapping[str, str]]
     overlap: int  # 最高的重疊筆數
     total: int
@@ -97,13 +98,22 @@ def match_existing_scope(
     for item in locale_only_items(items):
         kind, prefix, key = _ident(item)
         wanted[(kind, prefix)].add(key)
+    if not wanted:
+        # 沒有只有譯文的項目就不會配對：不必為帶原文的項目查既有條目
+        return None
     total = sum(len(keys) for keys in wanted.values())
+    lookup: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for item in items:
+        kind, prefix, key = _ident(item)
+        lookup[(kind, prefix)].add(key)
     overlap: dict[str, int] = defaultdict(int)
     found: dict[_Ident, dict[str, str]] = defaultdict(dict)
-    for (kind, prefix), keys in wanted.items():
+    for (kind, prefix), keys in lookup.items():
+        counted = wanted.get((kind, prefix), set())
         for scope, originals in db.pack_entry_keys(version, kind, prefix).items():
             for key in keys & originals.keys():
-                overlap[scope] += 1
+                if key in counted:
+                    overlap[scope] += 1
                 found[(kind, prefix, key)][scope] = originals[key]
     ranked = sorted(overlap.items(), key=lambda pair: (-pair[1], pair[0]))
     scopes = tuple(scope for scope, hits in ranked if hits / total >= min_ratio)
@@ -145,7 +155,8 @@ def carries_translation(items: list[ScanItem], match: ScopeMatch) -> bool:
     一定是譯文而不是同一份原文。
     """
     return any(
-        _ident(item) in match.originals
+        _is_locale_only(item)
+        and _ident(item) in match.originals
         and contains_cjk(item.zh_tw or item.zh_cn or item.en_us)
         for item in items
     )
@@ -186,6 +197,14 @@ def _fill_targets(holders: Mapping[str, str], best: str | None) -> tuple[str, ..
     return tuple(scope for scope in holders if scope in known or scope == best)
 
 
+def _differs_from_existing(item: ScanItem, match: ScopeMatch) -> bool:
+    """輸入帶的原文與重疊度最高的既有模組包原文是否不同（任一邊空白視為無從比對）。"""
+    if match.best is None or not item.en_us.strip():
+        return False
+    existing = match.originals.get(_ident(item), {}).get(match.best, "")
+    return bool(existing.strip()) and loose_text(existing) != loose_text(item.en_us)
+
+
 def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> AdoptedItems:
     """把譯文輸入改寫成「只補譯文、保留既有英文」的匯入項目，並列出沒匯入的項目。"""
     result = AdoptedItems()
@@ -194,6 +213,10 @@ def keep_existing_originals(items: list[ScanItem], match: ScopeMatch) -> Adopted
             # 混合輸入裡帶英文的項目：只歸在唯一最高的模組包，不猜它屬於哪一份
             if match.best is None:
                 result.no_single_pack.append(item)
+            elif _differs_from_existing(item, match):
+                # 輸入帶的原文與既有原文不同：它的譯文是照另一份原文翻的，改歸到既有模組包
+                # 會把譯文掛到不相符的原文上，也不能用譯文輸入改寫原模組包的原文
+                result.original_differs.append(item)
             else:
                 result.items.append(_rescope(item, match.best))
             continue

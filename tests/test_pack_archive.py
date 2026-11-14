@@ -944,3 +944,59 @@ def test_translated_kubejs_pack_prefers_direct_zh_tw_over_converted_zh_cn(tmp_pa
         "select t.zh_tw from entry e join translation t on t.entry_id=e.id "
         "where e.kind='kubejs_lang' and e.key='item.demo.widget'"
     ).fetchall() == [("繁體",)]
+
+
+def test_mixed_pack_items_skip_translation_when_existing_original_differs(tmp_path):
+    """譯文輸入自帶的原文與既有原文不同時，不把它的譯文掛到既有原文上。"""
+    from translation_tool.translation_db.models import ScanItem
+    from translation_tool.translation_db.pack_scope_match import (
+        keep_existing_originals,
+        match_existing_scope,
+    )
+    from translation_tool.translation_db.schema import (
+        KIND_FTB_QUEST_LANG,
+        KIND_KUBEJS_LANG,
+    )
+
+    db = TranslationDB(tmp_path / "mixed-pack.db")
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_FTB_QUEST_LANG,
+                "ftbquests@existing",
+                "chapter.snbt|lang:chapter.title",
+                "FTB English",
+            ),
+            ScanItem(
+                KIND_KUBEJS_LANG,
+                "demo@existing",
+                "item.demo.title",
+                "Different English",
+            ),
+        ],
+    )
+    items = [
+        ScanItem(
+            KIND_FTB_QUEST_LANG,
+            "ftbquests@incoming",
+            "chapter.snbt|lang:chapter.title",
+            "FTB English",
+            source_locale="zh_tw",
+        ),
+        ScanItem(
+            KIND_KUBEJS_LANG,
+            "demo@incoming",
+            "item.demo.title",
+            "Input English",
+            zh_tw="輸入翻譯",
+            source_locale="en_us",
+        ),
+    ]
+
+    match = match_existing_scope(db, "1.21.1", items)
+    assert match is not None and match.best == "existing"
+    adopted = keep_existing_originals(items, match)
+    assert len(adopted.items) == 1
+    assert adopted.items[0].kind == KIND_FTB_QUEST_LANG
+    assert [item.kind for item in adopted.original_differs] == [KIND_KUBEJS_LANG]
