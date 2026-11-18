@@ -171,3 +171,40 @@ def test_loading_a_version_without_the_selected_mod_requeries_all_mods():
     assert reloads == [vdd.ALL_MODS]
     assert dialog.current_page == 1
     assert dialog.rows == ["stale"]
+
+
+def test_version_diff_mod_options_list_only_mods_with_differences(monkeypatch):
+    from app.views.moddb import version_diff_dialog as vdd
+    from app.views.moddb.result_mod_options import ResultModOptions
+
+    dialog = object.__new__(VersionDiffDialog)
+    dialog._closed = False
+    dialog._generation = 1
+    dialog._set_busy = lambda *a, **k: None
+    dialog.status = SimpleNamespace(value="")
+    dialog.mod_dd = SimpleNamespace(value=vdd.ALL_MODS)
+    dialog._render = lambda: None
+    dialog.selected = set()
+    dialog._confirm_overwrite = False
+    dialog._confirm_row = None
+    dialog._mod_options = ResultModOptions()
+    shown = []
+    monkeypatch.setattr(
+        vdd.kit,
+        "set_dropdown_options",
+        lambda _dd, pairs: shown.append([key for key, _ in pairs]),
+    )
+    key = ("1.21.1", "", "latest", "")
+    rows = [SimpleNamespace(entry_id=1, mod_id="beta")]
+
+    # 版本內有 alpha、beta、gamma，但只有 beta 有差異
+    dialog._loaded(
+        1, rows, ["alpha", "beta", "gamma"], None, None, (key, None, {"beta"})
+    )
+    assert shown[-1] == [vdd.ALL_MODS, "beta"]
+
+    # 選 beta、套用後已無差異：仍選著所以保留，換回全部模組後就不再列出
+    dialog.mod_dd.value = "beta"
+    dialog._loaded(1, [], ["alpha", "beta", "gamma"], None, None, (key, "beta", None))
+    assert shown[-1] == [vdd.ALL_MODS, "beta"]
+    assert dialog._mod_options.options(None) == []

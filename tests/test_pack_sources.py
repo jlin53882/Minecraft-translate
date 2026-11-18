@@ -197,6 +197,80 @@ def test_moddb_pack_scan_logs_parse_failure_source_and_reason(tmp_path):
     assert report.as_dict()["issue_counts"] == {"parse_failed": 1}
 
 
+def _scan_logs_and_report(folder):
+    updates = list(
+        scan_folder_generator(
+            None,
+            folder,
+            ScanOptions("1.21.1", include_pack_content=True, dry_run=True),
+            workers=1,
+        )
+    )
+    logs = [update["log"] for update in updates if update.get("log")]
+    return logs, updates[-1]["report"]
+
+
+def test_moddb_pack_scan_never_reads_parent_of_selected_folder(tmp_path):
+    """所選資料夾本身沒有 kubejs／config 時，不會往上把上層的模組包當成來源。"""
+    _write_fixture(tmp_path)
+    for name in ("1.21.1", "mods"):
+        selected = tmp_path / name
+        selected.mkdir()
+
+        logs, report = _scan_logs_and_report(selected)
+
+        assert report.pack_root == ""
+        assert report.pack_root_candidates == []
+        assert report.pack_items_found == 0
+        assert not any("開始分析" in log for log in logs)
+
+
+def test_moddb_pack_scan_ignores_root_inferred_above_selected_config(tmp_path):
+    """選 <模組包>/config（或更深）時，往下找到 quests 反推出的 <模組包> 也不能採用。"""
+    _write_fixture(tmp_path)
+    for selected in (tmp_path / "config", tmp_path / "config" / "ftbquests"):
+        logs, report = _scan_logs_and_report(selected)
+
+        assert report.pack_root == ""
+        assert report.pack_root_candidates == []
+        assert report.pack_items_found == 0
+        assert not any("開始分析" in log for log in logs)
+
+
+def test_moddb_pack_scan_finds_single_root_below_selected_folder(tmp_path):
+    wrapper = tmp_path / "overrides"
+    _write_fixture(wrapper)
+
+    logs, report = _scan_logs_and_report(tmp_path)
+
+    assert report.pack_root == str(wrapper.resolve())
+    assert report.pack_items_found > 0
+    assert any(f"開始分析 {wrapper.resolve()}" in log for log in logs)
+
+
+def test_moddb_pack_scan_lists_candidates_when_multiple_roots_below(tmp_path):
+    _write_fixture(tmp_path / "a")
+    _write_fixture(tmp_path / "b")
+
+    logs, report = _scan_logs_and_report(tmp_path)
+
+    assert report.pack_root == "" and report.pack_root_ambiguous is True
+    assert report.pack_items_found == 0
+    assert any("多個候選" in log for log in logs)
+
+
+def test_discover_pack_roots_keeps_parent_lookup_by_default(tmp_path):
+    """KubeJS／FTB 流水線選 mods 資料夾時仍會找到同一模組包的根目錄。"""
+    from translation_tool.translation_db.pack_sources import discover_pack_roots
+
+    _write_fixture(tmp_path)
+    mods = tmp_path / "mods"
+    mods.mkdir()
+
+    assert discover_pack_roots(mods) == [tmp_path.resolve()]
+    assert discover_pack_roots(mods, include_parents=False) == []
+
+
 def test_moddb_can_disable_pack_sources_without_fake_entries(tmp_path):
     _write_fixture(tmp_path)
     db = TranslationDB(tmp_path / "translation.db")

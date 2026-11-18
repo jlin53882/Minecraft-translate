@@ -1427,7 +1427,8 @@ def _scan_pack_content(
             inner = root.relative_to(search).as_posix()
             return str(folder) if inner == "." else f"{folder}!/{inner}"
 
-        pack_roots = discover_pack_roots(search)
+        # 只看所選路徑本身與底下，不往上層找，避免匯入所選資料夾以外的內容
+        pack_roots = discover_pack_roots(search, include_parents=False)
         if from_zip:
             pack_roots = [
                 root for root in pack_roots if search in (root, *root.parents)

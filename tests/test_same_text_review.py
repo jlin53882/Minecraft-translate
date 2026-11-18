@@ -578,3 +578,29 @@ def test_result_is_not_cached_when_data_changes_during_the_scan(db, monkeypatch)
     _groups(db)
     cache, _ = module._cache_of(db)
     assert len(cache) == 0  # 舊世代的結果不留在快取裡
+
+
+def test_mods_with_groups_matches_scanning_each_mod_alone(db):
+    """模組選單的「有群組的模組」與逐一以單一模組掃描的結果一致。"""
+    from translation_tool.translation_db.same_text_review import mods_with_groups
+
+    db.ingest(
+        VERSION,
+        [
+            _item("a", "Close", "關閉", mod="alpha"),
+            _item("b", "Close", "閉合", mod="alpha"),  # alpha 自己就不一致
+            _item("c", "Close", "關上", mod="beta"),  # beta 只有一筆：單獨掃描沒有群組
+            _item("d", "Open", "開啟", mod="gamma"),
+            _item("e", "Open", "打開", mod="delta"),  # 只有跨模組才不一致
+            _item("f", "Stop", "停止", mod="eps"),
+            _item("g", "Stop", "", mod="eps"),  # 一種譯文加未翻譯
+            _item("h", "Same", "相同", mod="zeta"),
+            _item("i", "Same", "相同", mod="zeta"),  # 一致：不列
+        ],
+    )
+    expected = sorted(
+        mod
+        for mod in ("alpha", "beta", "gamma", "delta", "eps", "zeta")
+        if _groups(db, mod_ids=[mod])
+    )
+    assert mods_with_groups(_groups(db)) == expected == ["alpha", "eps"]
