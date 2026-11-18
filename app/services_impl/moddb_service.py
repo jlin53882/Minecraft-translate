@@ -430,6 +430,7 @@ def _reuse_reviewed_after_scan(session, db, options, report) -> None:
     report.reuse_conflicts = result.conflicts
     report.reuse_skipped_reviewed = result.skipped_reviewed
     report.reuse_source_changed = result.source_changed
+    report.reuse_jar_english = result.jar_english
     report.reuse_history_id = result.history_id
     session.set_summary(report.as_dict())
     if (
@@ -440,7 +441,13 @@ def _reuse_reviewed_after_scan(session, db, options, report) -> None:
     ):
         _log_both(
             session,
-            f"♻️ 沿用其他版本已審核譯文：沿用 {result.applied:,} 筆、"
+            f"♻️ 沿用其他版本已審核譯文：沿用 {result.applied:,} 筆"
+            + (
+                f"（其中原文不同但 jar 英文相同 {result.jar_english:,} 筆）"
+                if result.jar_english
+                else ""
+            )
+            + "、"
             f"衝突未處理 {result.conflicts:,} 筆、目標已審核保留 "
             f"{result.skipped_reviewed:,} 筆、原文不同待判斷 {result.source_changed:,} 筆"
             "（可到「版本差異審核」檢視與復原）",
