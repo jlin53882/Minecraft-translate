@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from app.views.moddb.same_text_review_text import (
     bucket_members,
     default_selection,
@@ -100,6 +102,43 @@ def _bare_dialog():
     return dialog, group
 
 
+def test_select_page_only_selects_groups_on_current_page():
+    from app.views.moddb.same_text_review_dialog import PAGE_SIZE
+    from translation_tool.translation_db.same_text_review import (
+        CanonicalCandidate,
+        SameTextGroup,
+    )
+
+    dialog, _ = _bare_dialog()
+    groups = [
+        SameTextGroup(
+            f"g{i}",
+            "Close",
+            ("lang",),
+            "en_us",
+            (_member(i * 10 + 1, "關閉"), _member(i * 10 + 2, "閉合")),
+            (CanonicalCandidate("關閉", 1, 1, 1, 1, True),),
+        )
+        for i in range(PAGE_SIZE + 2)
+    ]
+    dialog.groups = groups
+    dialog._shown = lambda: groups
+    dialog.current_page = 2
+    dialog.selected = {12}  # 第一頁已勾的保留
+
+    dialog._select_page()
+
+    # 第二頁只有最後兩組；每組只有不等於統一譯文的成員可勾
+    assert dialog.selected == {12, PAGE_SIZE * 10 + 2, (PAGE_SIZE + 1) * 10 + 2}
+
+    dialog.current_page = 1
+    dialog.selected = set()
+    dialog._select_page()
+    assert dialog.selected == {i * 10 + 2 for i in range(PAGE_SIZE)}
+    dialog._select_all()
+    assert dialog.selected == {i * 10 + 2 for i in range(PAGE_SIZE + 2)}
+
+
 def test_member_list_is_built_only_when_expanded_and_header_follows_selection():
     dialog, group = _bare_dialog()
     dialog._group_card(group)
@@ -124,3 +163,76 @@ def test_member_list_is_built_only_when_expanded_and_header_follows_selection():
     assert dialog.selected == {2, 3, 4}
     dialog._toggle_group(group)  # 全部已勾時再按取消
     assert dialog.selected == set()
+
+
+def _two_candidate_group():
+    from translation_tool.translation_db.same_text_review import (
+        CanonicalCandidate,
+        SameTextGroup,
+    )
+
+    members = (_member(1, "飛向星辰"), _member(2, "飛向星辰"), _member(3, "Ad Astra"))
+    return SameTextGroup(
+        "g2",
+        "Ad Astra",
+        ("lang",),
+        "en_us",
+        members,
+        (
+            CanonicalCandidate("飛向星辰", 1, 2, 2, 2, True),
+            CanonicalCandidate("Ad Astra", 3, 1, 1, 1, True),
+        ),
+    )
+
+
+def test_changing_canonical_keeps_a_fully_selected_group_fully_selected():
+    dialog, _ = _bare_dialog()
+    group = _two_candidate_group()
+    dialog.groups = [group]
+    dialog._select_group(group)
+    assert dialog.selected == {3}
+
+    dialog._choose(group, "Ad Astra")  # 原本整組已勾：改勾新譯文下可統一的成員
+    assert dialog.selected == {1, 2}
+    dialog._choose(group, "飛向星辰")
+    assert dialog.selected == {3}
+
+
+def test_changing_canonical_does_not_select_an_unselected_group():
+    dialog, _ = _bare_dialog()
+    group = _two_candidate_group()
+    dialog.groups = [group]
+    dialog._choose(group, "Ad Astra")
+    assert dialog.selected == set()
+
+    dialog.selected = {1}  # 部分勾選：只移除已等於新譯文的成員，不自動補勾
+    dialog._choose(group, "飛向星辰")
+    assert dialog.selected == set()
+
+
+def test_same_text_mod_options_drop_mods_without_groups(monkeypatch):
+    from app.views.moddb import same_text_review_dialog as stdlg
+    from app.views.moddb.result_mod_options import ResultModOptions
+
+    dialog, group = _bare_dialog()
+    dialog._closed = False
+    dialog._generation = 1
+    dialog._set_busy = lambda *a, **k: None
+    dialog._mod_options = ResultModOptions()
+    dialog.kind_dd = SimpleNamespace(value=stdlg.ALL_KINDS)
+    shown = {}
+    monkeypatch.setattr(
+        stdlg.kit,
+        "set_dropdown_options",
+        lambda dd, pairs: shown.__setitem__(id(dd), [k for k, _ in pairs]),
+    )
+    dialog.mod_dd = SimpleNamespace(value=stdlg.ALL_MODS)
+    key = ("1.21.1", "", None)
+
+    dialog._loaded(1, [group], (key, None, ["foo"]), None)
+    assert shown[id(dialog.mod_dd)] == [stdlg.ALL_MODS, "foo"]
+
+    dialog.mod_dd.value = "foo"
+    dialog._loaded(1, [], (key, "foo", None), None)  # 統一後這個模組已沒有群組
+    assert shown[id(dialog.mod_dd)] == [stdlg.ALL_MODS, "foo"]  # 選著時保留
+    assert dialog._mod_options.options(None) == []

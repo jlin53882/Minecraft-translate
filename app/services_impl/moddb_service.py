@@ -88,6 +88,7 @@ from translation_tool.translation_db.same_text_review import (
     SameTextApplyResult,
     SameTextGroup,
     SameTextMember,
+    mods_with_groups,
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
@@ -184,6 +185,7 @@ __all__ = [
     "lookup_species",
     "lookup_species_name",
     "mods_in_pack",
+    "mods_with_groups",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",

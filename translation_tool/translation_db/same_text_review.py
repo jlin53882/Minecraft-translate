@@ -282,6 +282,26 @@ def _texts_inconsistent(texts: Sequence[str]) -> bool:
     )
 
 
+def mods_with_groups(groups: Sequence[SameTextGroup]) -> list[str]:
+    """只掃單一模組（``mod_ids=[模組]``）時仍會有群組的模組（排序）。
+
+    ``groups`` 必須是不限模組的掃描結果。分群鍵不含模組，所以某個模組單獨掃描的群組，
+    就是不限模組群組中屬於它的成員；這些成員至少兩筆且譯文不一致才算一組。不一致具單調性
+    （成員變多只會更不一致），單獨不一致的成員集合一定出現在不限模組的結果中，不會漏掉。
+    """
+    mods: set[str] = set()
+    for group in groups:
+        by_mod: dict[str, list[str]] = {}
+        for member in group.members:
+            by_mod.setdefault(member.mod_id, []).append(member.zh_tw)
+        mods.update(
+            mod
+            for mod, texts in by_mod.items()
+            if len(texts) >= 2 and _texts_inconsistent(texts)
+        )
+    return sorted(mods)
+
+
 def _fast_loose(text: str) -> str:
     """:func:`loose_text` 的快速路徑：沒有 ``%``（格式控制碼）與換行時只需轉小寫並收合空白。"""
     if "%" in text or "\n" in text or "\r" in text:

@@ -40,6 +40,7 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label
+from app.views.moddb.result_mod_options import ResultModOptions
 from app.views.moddb.text_compare import compare_chips, text_control
 from translation_tool.utils.log_unit import log_exception
 
@@ -163,6 +164,7 @@ class VersionDiffDialog:
         self._busy = False
         self._closed = False
         self._generation = 0
+        self._mod_options = ResultModOptions()  # 模組選單只列有差異的模組
         self._catalog = source_catalog_for(self.get_db())
         self._build_controls(version)
         self._build_dialog()
@@ -360,8 +362,13 @@ class VersionDiffDialog:
             last_report = now
             self._post(self._show_progress, generation, done, total)
 
+        selected_mod = mods[0] if mods else None
+        options_key = (version, target_pack, ref, ref_pack)
+        full_scan = self._mod_options.needs_full_scan(options_key, selected_mod)
+        cancel = lambda: self._closed or generation != self._generation
+
         def work() -> None:
-            rows = error = exclusions = None
+            rows = error = exclusions = full_mods = None
             try:
                 rows, exclusions = db.scan_cross_version_differences(
                     version,
@@ -369,7 +376,7 @@ class VersionDiffDialog:
                     ref_pack=ref_pack,
                     target_pack=target_pack,
                     mod_ids=mods,
-                    cancel=lambda: self._closed or generation != self._generation,
+                    cancel=cancel,
                     progress=report,
                 )
                 all_mods = (
@@ -377,13 +384,33 @@ class VersionDiffDialog:
                     if target_pack
                     else list(db.mods(version))
                 )
+                if not mods:
+                    full_mods = {row.mod_id for row in rows}
+                elif full_scan:
+                    # 模組選單只列有差異的模組，需要不限模組的比對結果
+                    full_rows, _ = db.scan_cross_version_differences(
+                        version,
+                        ref_version=ref,
+                        ref_pack=ref_pack,
+                        target_pack=target_pack,
+                        cancel=cancel,
+                    )
+                    full_mods = {row.mod_id for row in full_rows}
             except QueryCancelled:
                 return  # 畫面已換條件或已關閉：不需要這次的結果
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 all_mods = []
                 log_exception("版本差異審核載入失敗")
-            self._post(self._loaded, generation, rows, all_mods, error, exclusions)
+            self._post(
+                self._loaded,
+                generation,
+                rows,
+                all_mods,
+                error,
+                exclusions,
+                (options_key, selected_mod, full_mods),
+            )
 
         self._launch(
             work,
@@ -404,7 +431,9 @@ class VersionDiffDialog:
         )
         self._safe_update()
 
-    def _loaded(self, generation: int, rows, all_mods, error, exclusions=None) -> None:
+    def _loaded(
+        self, generation: int, rows, all_mods, error, exclusions=None, mod_scope=None
+    ) -> None:
         if self._closed or generation != self._generation:
             return
         self._set_busy(False)
@@ -413,8 +442,19 @@ class VersionDiffDialog:
             self._safe_update()
             return
         current = self.mod_dd.value
+        if mod_scope is not None:
+            options_key, selected_mod, full_mods = mod_scope
+            self._mod_options.update(
+                options_key, selected_mod, has_results=bool(rows), full_mods=full_mods
+            )
+            all_mods_with_rows = self._mod_options.options(
+                selected_mod if selected_mod in all_mods else None
+            )
+        else:
+            all_mods_with_rows = list(all_mods)
         kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, "全部模組")] + [(m, m) for m in all_mods]
+            self.mod_dd,
+            [(ALL_MODS, "全部模組")] + [(m, m) for m in all_mods_with_rows],
         )
         if current != ALL_MODS and current not in all_mods:
             # 選的模組不在這個版本：改回「全部模組」並照新條件重新查詢，

@@ -19,6 +19,7 @@ from app.services_impl.moddb_service import (
     SameTextApplyItem,
     SameTextGroup,
     SameTextMember,
+    mods_with_groups,
 )
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.tasks.operation_registry import (
@@ -41,6 +42,7 @@ from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb.formatting import format_count, kind_label, shorten
+from app.views.moddb.result_mod_options import ResultModOptions
 from app.views.moddb.same_text_review_text import (
     bucket_members,
     default_selection,
@@ -175,6 +177,7 @@ class SameTextReviewDialog:
         self._closed = False
         self._generation = 0
         self._last_progress = 0.0
+        self._mod_options = ResultModOptions()  # 模組選單只列有群組的模組
         self._catalog = source_catalog_for(self.get_db())
         self._build_controls(version)
         self._build_dialog()
@@ -230,14 +233,22 @@ class SameTextReviewDialog:
             value=False,
             on_change=self._on_include_reviewed,
         )
+        self.select_page_btn = kit.button(
+            "全選本頁可統一的條目", "ghost", size="sm", on_click=self._select_page
+        )
         self.select_all_btn = kit.button(
-            "全選目前分類可統一的條目", "ghost", size="sm", on_click=self._select_all
+            "全選所有頁可統一的條目", "ghost", size="sm", on_click=self._select_all
         )
         self.clear_btn = kit.button(
             "取消全選", "ghost", size="sm", on_click=self._clear_selection
         )
         self.selection_row = ft.Row(
-            [self.include_reviewed, self.select_all_btn, self.clear_btn],
+            [
+                self.include_reviewed,
+                self.select_page_btn,
+                self.select_all_btn,
+                self.clear_btn,
+            ],
             spacing=10,
             wrap=True,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -355,25 +366,46 @@ class SameTextReviewDialog:
                 self._last_progress = fraction
                 self._post(self._on_progress, generation, fraction)
 
+        mods = self._mods()
+        selected_mod = mods[0] if mods else None
+        options_key = (str(version), self.pack_scope, self.en_us)
+        full_scan = self._mod_options.needs_full_scan(options_key, selected_mod)
+
         def work() -> None:
-            groups = error = None
-            all_mods: list[str] = []
+            groups = error = full_mods = None
             try:
                 groups = db.list_same_text_groups(
                     str(version),
-                    mod_ids=self._mods(),
+                    mod_ids=mods,
                     pack_scope=self.pack_scope,
                     en_us=self.en_us,
                     cancel=cancel,
                     progress=on_progress,
                 )
-                all_mods = list(db.mods(str(version)))
+                if mods is None:
+                    full_mods = mods_with_groups(groups)
+                elif full_scan:
+                    # 模組選單要列「單獨掃描仍有群組」的模組，需要不限模組的結果
+                    full_mods = mods_with_groups(
+                        db.list_same_text_groups(
+                            str(version),
+                            pack_scope=self.pack_scope,
+                            en_us=self.en_us,
+                            cancel=cancel,
+                        )
+                    )
             except QueryCancelled:
                 return  # 畫面已換條件或已關閉：不需要這次的結果
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("同文一致性審核載入失敗")
-            self._post(self._loaded, generation, groups, all_mods, error)
+            self._post(
+                self._loaded,
+                generation,
+                groups,
+                (options_key, selected_mod, full_mods),
+                error,
+            )
 
         self._launch(
             work,
@@ -389,7 +421,7 @@ class SameTextReviewDialog:
         self.status.value = f"正在掃描原文相同的條目…{int(fraction * 100)}%"
         self._safe_update()
 
-    def _loaded(self, generation: int, groups, all_mods, error) -> None:
+    def _loaded(self, generation: int, groups, mod_scope, error) -> None:
         if self._closed or generation != self._generation:
             return
         self._set_busy(False)
@@ -398,11 +430,15 @@ class SameTextReviewDialog:
             self.status.visible = True
             self._safe_update()
             return
-        current = self.mod_dd.value
-        kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, "全部模組")] + [(m, m) for m in all_mods]
+        options_key, selected_mod, full_mods = mod_scope
+        self._mod_options.update(
+            options_key, selected_mod, has_results=bool(groups), full_mods=full_mods
         )
-        self.mod_dd.value = current if current in all_mods else ALL_MODS
+        kit.set_dropdown_options(
+            self.mod_dd,
+            [(ALL_MODS, "全部模組")]
+            + [(m, m) for m in self._mod_options.options(selected_mod)],
+        )
         self.groups = groups
         options = kind_options(groups)
         kit.set_dropdown_options(self.kind_dd, options)
@@ -447,13 +483,15 @@ class SameTextReviewDialog:
         self.current_page = page
         self._render()
 
+    def _page_groups(self) -> list[SameTextGroup]:
+        """目前分類與篩選下，這一頁顯示的群組。"""
+        start = (self.current_page - 1) * PAGE_SIZE
+        return self._shown()[start : start + PAGE_SIZE]
+
     def _render(self) -> None:
         shown = self._shown()
-        start = (self.current_page - 1) * PAGE_SIZE
         self._cards = {}
-        self.list_col.controls = [
-            self._group_card(g) for g in shown[start : start + PAGE_SIZE]
-        ] or [
+        self.list_col.controls = [self._group_card(g) for g in self._page_groups()] or [
             kit.hint_text(
                 "沒有原文相同但譯文不一致的條目。"
                 if self.category == CATEGORY_INCONSISTENT
@@ -732,9 +770,14 @@ class SameTextReviewDialog:
 
     # ------------------------------------------------------------------ 動作
     def _choose(self, group: SameTextGroup, text: str) -> None:
+        before = selectable_ids(group, self.choice, self._include())
+        was_full = bool(before) and before <= self.selected
         self.choice[group.group_id] = text
         # 已等於新統一譯文的成員不需要（也不能）再統一
         self.selected -= {m.entry_id for m in group.members if m.zh_tw == text}
+        if was_full:
+            # 原本整組可統一的都已勾選：換統一譯文後，改勾新譯文下可統一的成員
+            self.selected |= selectable_ids(group, self.choice, self._include())
         self._confirm_overwrite = False
         self._render()
 
@@ -785,6 +828,13 @@ class SameTextReviewDialog:
 
     def _clear_group(self, group: SameTextGroup) -> None:
         self.selected -= {m.entry_id for m in group.members}
+        self._confirm_overwrite = False
+        self._render()
+
+    def _select_page(self, _e=None) -> None:
+        """只勾選這一頁顯示的群組中可統一的條目；其他頁已勾的保留。"""
+        for group in self._page_groups():
+            self.selected |= selectable_ids(group, self.choice, self._include())
         self._confirm_overwrite = False
         self._render()
 
