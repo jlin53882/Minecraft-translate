@@ -119,10 +119,14 @@ def test_reference_options_list_game_versions_and_pack_versions():
     assert split_reference("__latest__") == ("", "")
     assert dict(options)["1.21.1\tATM 8.5"] == "固定 1.21.1 · ATM 8.5"
 
-    # 目標與參考同一個遊戲版本：可指定整個版本（同版本其他整合包）或其中的整合包版本
-    same = reference_options(["1.21.1"], {"1.21.1": ["ATM 8.2"]}, "1.21.1")
-    assert [v for v, _ in same] == ["__latest__", "1.21.1", "1.21.1\tATM 8.2"]
-    assert dict(same)["1.21.1"] == "固定 1.21.1（同版本其他整合包）"
+    # 與目標完全相同的選項不列：目標是整個 1.21.1 時沒有「固定 1.21.1」，整合包版本照列
+    packs = {"1.21.1": ["ATM 8.2", "ATM 8.6"]}
+    whole = reference_options(["1.21.1"], packs, "1.21.1")
+    assert [v for v, _ in whole] == ["__latest__", "1.21.1\tATM 8.2", "1.21.1\tATM 8.6"]
+    # 目標是 1.21.1 · ATM 8.6：可指定整個 1.21.1（同版本其他整合包）與其他整合包版本
+    pinned = reference_options(["1.21.1"], packs, "1.21.1\tATM 8.6")
+    assert [v for v, _ in pinned] == ["__latest__", "1.21.1", "1.21.1\tATM 8.2"]
+    assert dict(pinned)["1.21.1"] == "固定 1.21.1（同版本其他整合包）"
     # 沒有整合包的遊戲版本：同版本不會有參考，不列
     assert [v for v, _ in reference_options(["1.21.1"], {}, "1.21.1")] == ["__latest__"]
 

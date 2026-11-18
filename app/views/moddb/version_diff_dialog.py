@@ -117,13 +117,14 @@ def reference_options(
 ) -> list[tuple[str, str]]:
     """參考下拉選單：各條目最近審核者、固定遊戲版本、固定遊戲版本中的某個整合包版本。
 
-    同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），所以整合包版本
-    另列，包含目標所在的遊戲版本（參考同遊戲版本的其他整合包版本）。目標所在的遊戲版本
-    有整合包時也列出整個版本：參考為同版本的其他整合包（一般模組條目同版本沒有參考）。
+    target 是目標下拉選單的值。同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是
+    1.21.1），所以整合包版本另列；目標所在的遊戲版本有整合包時也列出整個版本，參考為同版本
+    的其他整合包（一般模組條目同版本沒有參考）。與目標完全相同的選項不列。
     """
+    target_version, _ = split_reference(target)
     options = [(LATEST_KEY, LATEST_LABEL)]
     for version in versions:
-        if version != target:
+        if version != target_version:
             options.append((version, f"固定 {version}"))
         elif packs.get(version):
             options.append((version, f"固定 {version}（同版本其他整合包）"))
@@ -131,7 +132,7 @@ def reference_options(
             (f"{version}{PACK_SEP}{pack}", f"固定 {version} · {pack}")
             for pack in packs.get(version, [])
         ]
-    return options
+    return [option for option in options if option[0] != target]
 
 
 def _ref_name(kind: str, ref: VersionRef) -> str:
@@ -257,8 +258,7 @@ class VersionDiffDialog:
     def _set_ref_options(self, versions: list[str]) -> None:
         db = self.get_db()
         packs = {v: db.pack_versions(v) for v in versions} if db is not None else {}
-        target_version, _ = split_reference(self.version_dd.value)
-        options = reference_options(versions, packs, target_version)
+        options = reference_options(versions, packs, self.version_dd.value)
         kit.set_dropdown_options(self.ref_dd, options)
         if self.ref_dd.value not in {key for key, _ in options}:
             self.ref_dd.value = LATEST_KEY
