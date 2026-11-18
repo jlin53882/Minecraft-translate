@@ -1497,7 +1497,7 @@ def test_scan_requires_version_and_folder(db_path):
     assert panel.status_chip.label.value == "請先選擇或輸入遊戲版本"
     panel.version_field.value = "1.21.1"
     panel.start_clicked()
-    assert panel.status_chip.label.value == "請先選擇 mods 資料夾或模組包根目錄"
+    assert panel.status_chip.label.value == "請先選擇 mods 資料夾"
 
 
 def test_scan_runs_and_reports_counts(db_path, tmp_path, monkeypatch):
@@ -1872,6 +1872,43 @@ def test_scan_panel_restores_user_choices_after_zip_mode_roundtrip(db_path):
     panel._on_mode("zip")
     panel._on_mode("jar")
     assert panel.rules_row.value is False and panel.jar_tr_row.value is False
+
+
+def test_scan_panel_jar_mode_never_reads_pack_content(db_path):
+    """mods 資料夾只掃 jar：KubeJS／FTB 開關隱藏，即使開關值為開也不讀。"""
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    assert panel.mode == "jar" and panel.pack_row.visible is False
+    assert panel.pack_row.value is True
+    assert panel.build_options().include_pack_content is False
+    assert panel.path_label.value == "mods 資料夾"
+
+
+def test_scan_panel_pack_mode_scans_jars_and_pack_content(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel._on_mode("pack")
+    assert panel.pack_row.visible is True
+    assert panel.pack_row._sub_text.value == scan_panel.PACK_ROW_SUB_PACK_MODE
+    assert panel.path_label.value == "模組包根目錄"
+    assert panel.zip_pick_btn.visible is False and panel.source_dd.visible is False
+    assert panel.start_btn.content == "開始掃描 1.21.1"
+    opts = panel.build_options()
+    assert opts.translated is False and opts.include_pack_content is True
+    panel.pack_row.value = False
+    assert panel.build_options().include_pack_content is False
+
+    panel._on_mode("jar")
+    assert panel.pack_row.visible is False
+
+
+def test_scan_panel_pack_mode_requires_pack_root_path(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel._on_mode("pack")
+    panel.path_field.value = ""
+    panel.start_clicked()
+    assert panel.status_chip.label.value == "請先選擇模組包根目錄"
 
 
 def test_scan_panel_zip_mode_passes_pack_option_through(db_path):

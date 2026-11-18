@@ -1,4 +1,7 @@
-"""app/views/moddb/scan_panel.py：掃描匯入（選版本 → 選 mods 資料夾 → 掃描 → 結果）。
+"""app/views/moddb/scan_panel.py：掃描匯入（選版本 → 選匯入來源與路徑 → 掃描 → 結果）。
+
+匯入來源：mods 資料夾只掃 jar；模組包資料夾另外讀 KubeJS／FTB Quests，模組包版本
+取自實際找到的根目錄；翻譯 ZIP 匯入已翻譯的 zh_tw。都不會讀所選路徑以外的內容。
 
 掃描在背景執行緒進行（``run_moddb_scan_service``），畫面以輪詢同步進度與日誌，
 流程與機器翻譯頁相同。已存在的條目一律跳過（只新增、不覆蓋）。
@@ -53,10 +56,33 @@ ZIP_CONVERT_NEEDS_CN_SUB = "需先開啟「讀取模組自帶 zh_cn」才有簡�
 CONVERT_CN_SUB = "只在沒有繁中時補上，標記為「簡中轉繁」"
 JAR_CONVERT_NEEDS_CN_SUB = "需先開啟「讀取模組自帶 zh_tw／zh_cn」才有簡中可轉繁"
 JAR_TR_LABEL = "讀取模組自帶 zh_tw／zh_cn"
-PACK_ROW_SUB_JAR_MODE = (
-    "從模組包根目錄掃描 kubejs 與 config/ftbquests/quests；"
-    "只收靜態可定位文字，不執行 JS，也不把任務檔直接當成 Resource Pack"
+PACK_ROW_SUB_PACK_MODE = (
+    "從所選資料夾（或其下的 overrides 等子資料夾）掃描 kubejs 與 config/ftbquests/quests，"
+    "不讀所選資料夾以外的內容；只收靜態可定位文字，不執行 JS，也不把任務檔直接當成 Resource Pack"
 )
+SCAN_MODES = [
+    ("jar", "mods 資料夾（jar）"),
+    ("pack", "模組包資料夾"),
+    ("zip", "翻譯 ZIP（已翻譯）"),
+]
+# 各匯入來源的路徑標題、輸入框提示與未選路徑時的狀態文字
+MODE_PATH_TEXT = {
+    "jar": (
+        "mods 資料夾",
+        "只掃這個資料夾內的 jar，不讀 KubeJS／FTB Quests",
+        "請先選擇 mods 資料夾",
+    ),
+    "pack": (
+        "模組包根目錄",
+        "讀取其中的 mods jar、kubejs 與 config/ftbquests；不會讀這個資料夾以外的內容",
+        "請先選擇模組包根目錄",
+    ),
+    "zip": (
+        "翻譯 ZIP（檔案或資料夾）",
+        "請選擇 ZIP 檔，或放有 ZIP 的資料夾",
+        "請先選擇 ZIP 檔或資料夾",
+    ),
+}
 PACK_ROW_SUB_ZIP_MODE = (
     "選擇資料夾時，一併匯入其中 kubejs 與 config/ftbquests/quests 的譯文"
     "（zh_tw 以所選「譯文來源標記」匯入）；單一 ZIP 檔也會讀取其中的這兩個目錄"
@@ -153,13 +179,13 @@ class ScanPanel(ft.Column):
 
     def _build_options_card(self) -> None:
         self.mode_seg = kit.Segmented(
-            [("jar", "mods 資料夾（jar）"), ("zip", "翻譯 ZIP（已翻譯）")],
+            SCAN_MODES,
             "jar",
             self._on_mode,
         )
-        self.path_label = kit.section_label("mods 資料夾或模組包根目錄")
+        self.path_label = kit.section_label(MODE_PATH_TEXT["jar"][0])
         self.path_field = kit.text_field(
-            hint="可選 mods 資料夾或整個模組包根目錄",
+            hint=MODE_PATH_TEXT["jar"][1],
             icon=ft.Icons.FOLDER_OUTLINED,
             mono=True,
             expand=True,
@@ -217,8 +243,10 @@ class ScanPanel(ft.Column):
             divider=False,
         )
         self.pack_row = kit.SwitchRow(
-            "包含 KubeJS／FTB Quests", PACK_ROW_SUB_JAR_MODE, True, divider=False
+            "包含 KubeJS／FTB Quests", PACK_ROW_SUB_PACK_MODE, True, divider=False
         )
+        # mods 資料夾只掃 jar，KubeJS／FTB 改由模組包資料夾或翻譯 ZIP 匯入
+        self.pack_row.visible = False
         self.options_card = kit.section_card(
             "2　選擇匯入來源與選項",
             ft.Column(
@@ -481,23 +509,20 @@ class ScanPanel(ft.Column):
             self._safe_update()
 
     def _on_mode(self, key: str) -> None:
-        """切換匯入來源：mods 資料夾（jar）或翻譯 ZIP（已翻譯，zh_tw 直接匯入）。"""
+        """切換匯入來源：mods 資料夾（只掃 jar）、模組包資料夾（jar 加 KubeJS／FTB）
+        或翻譯 ZIP（已翻譯，zh_tw 直接匯入）。"""
         self.mode = key
         zip_mode = key == "zip"
-        self.path_label.value = (
-            "翻譯 ZIP（檔案或資料夾）" if zip_mode else "mods 資料夾或模組包根目錄"
-        )
-        self.path_field.hint_text = (
-            "請選擇 ZIP 檔，或放有 ZIP 的資料夾"
-            if zip_mode
-            else "可選 mods 資料夾或整個模組包根目錄"
-        )
+        label, hint, _missing = MODE_PATH_TEXT[key]
+        self.path_label.value = label
+        self.path_field.hint_text = hint
         self.zip_pick_btn.visible = zip_mode
         self.source_dd.visible = zip_mode
         self.mode_note.visible = zip_mode
         self._apply_mode_locked_rows(zip_mode)
+        self.pack_row.visible = key != "jar"
         self.pack_row.set_sub(
-            PACK_ROW_SUB_ZIP_MODE if zip_mode else PACK_ROW_SUB_JAR_MODE
+            PACK_ROW_SUB_ZIP_MODE if zip_mode else PACK_ROW_SUB_PACK_MODE
         )
         self.start_btn.content = self._start_label()
         self._safe_update()
@@ -586,7 +611,7 @@ class ScanPanel(ft.Column):
             clean_english=self.clean_row.value,
             translated=translated,
             translation_source=int(self.source_dd.value or SRC_CUSTOM),
-            include_pack_content=self.pack_row.value,
+            include_pack_content=self.mode != "jar" and self.pack_row.value,
             reuse_reviewed=bool(self.reuse_row.value),
         )
 
@@ -602,12 +627,7 @@ class ScanPanel(ft.Column):
             return
         if not folder:
             log_warning("Mod 資料庫掃描未開始：尚未選擇來源路徑")
-            self._set_status(
-                "請先選擇 ZIP 檔或資料夾"
-                if self.mode == "zip"
-                else "請先選擇 mods 資料夾或模組包根目錄",
-                "red",
-            )
+            self._set_status(MODE_PATH_TEXT[self.mode][2], "red")
             self._safe_update()
             return
         self.session = tag_session(

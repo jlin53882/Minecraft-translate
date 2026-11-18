@@ -234,23 +234,31 @@ class PackScanResult:
 
 
 def discover_pack_roots(
-    folder: str | Path, *, max_depth: int = 4, max_candidates: int = 32
+    folder: str | Path,
+    *,
+    max_depth: int = 4,
+    max_candidates: int = 32,
+    include_parents: bool = True,
 ) -> list[Path]:
     """找出指定路徑下可用的模組包根目錄。
 
     ``kubejs``、``config/ftbquests/quests`` 可能位於解壓包的 wrapper、
     ``overrides`` 或直接根目錄。這裡只做有限深度、拒絕 reparse point 的
     結構探索；多個結果不會自動合併，呼叫端必須讓使用者明確選擇。
+
+    ``include_parents`` 為 False 時只看指定路徑本身與底下，不把上層目錄當候選；
+    Mod 資料庫掃描用這個模式，避免讀到所選資料夾以外的內容。
     """
     current = _discovery_start(folder)
     if current is None:
         return []
     roots: dict[Path, int] = {}
     _add_discovery_root(roots, current, 0)
-    if current.name.lower() in {"mods", "kubejs", "config", "quests"}:
-        _add_discovery_root(roots, current.parent, 0)
-    for parent in current.parents[:4]:
-        _add_discovery_root(roots, parent, 1)
+    if include_parents:
+        if current.name.lower() in {"mods", "kubejs", "config", "quests"}:
+            _add_discovery_root(roots, current.parent, 0)
+        for parent in current.parents[:4]:
+            _add_discovery_root(roots, parent, 1)
     _walk_discovery_tree(current, max_depth, roots)
     return _rank_discovery_roots(roots, max_candidates)
 
