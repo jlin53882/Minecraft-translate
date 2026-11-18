@@ -117,18 +117,22 @@ def reference_options(
 ) -> list[tuple[str, str]]:
     """參考下拉選單：各條目最近審核者、固定遊戲版本、固定遊戲版本中的某個整合包版本。
 
-    同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），所以整合包版本
-    另列，包含目標所在的遊戲版本（參考同遊戲版本的其他整合包版本）。
+    target 是目標下拉選單的值。同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是
+    1.21.1），所以整合包版本另列；目標所在的遊戲版本有整合包時也列出整個版本，參考為同版本
+    的其他整合包（一般模組條目同版本沒有參考）。與目標完全相同的選項不列。
     """
+    target_version, _ = split_reference(target)
     options = [(LATEST_KEY, LATEST_LABEL)]
     for version in versions:
-        if version != target:
+        if version != target_version:
             options.append((version, f"固定 {version}"))
+        elif packs.get(version):
+            options.append((version, f"固定 {version}（同版本其他整合包）"))
         options += [
             (f"{version}{PACK_SEP}{pack}", f"固定 {version} · {pack}")
             for pack in packs.get(version, [])
         ]
-    return options
+    return [option for option in options if option[0] != target]
 
 
 def _ref_name(kind: str, ref: VersionRef) -> str:
@@ -217,11 +221,23 @@ class VersionDiffDialog:
         self.select_all_btn = kit.button(
             "全選", "ghost", size="sm", on_click=self._select_all
         )
+        # 原文不同頁籤：只勾 jar 英文相同（整合包只改了非英文原文的用字）的條目
+        self.select_jar_btn = kit.button(
+            "全選 jar 英文相同的條目",
+            "ghost",
+            size="sm",
+            on_click=self._select_jar_english,
+        )
         self.clear_btn = kit.button(
             "取消全選", "ghost", size="sm", on_click=self._clear_selection
         )
         self.selection_row = ft.Row(
-            [self.include_reviewed, self.select_all_btn, self.clear_btn],
+            [
+                self.include_reviewed,
+                self.select_all_btn,
+                self.select_jar_btn,
+                self.clear_btn,
+            ],
             spacing=10,
             wrap=True,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -242,8 +258,7 @@ class VersionDiffDialog:
     def _set_ref_options(self, versions: list[str]) -> None:
         db = self.get_db()
         packs = {v: db.pack_versions(v) for v in versions} if db is not None else {}
-        target_version, _ = split_reference(self.version_dd.value)
-        options = reference_options(versions, packs, target_version)
+        options = reference_options(versions, packs, self.version_dd.value)
         kit.set_dropdown_options(self.ref_dd, options)
         if self.ref_dd.value not in {key for key, _ in options}:
             self.ref_dd.value = LATEST_KEY
@@ -501,9 +516,15 @@ class VersionDiffDialog:
         self.pager.visible = len(shown) > PAGE_SIZE
         self.pager.set_state(len(shown), self.current_page)
         reviewed_total = sum(1 for r in diffs if r.target_reviewed)
+        jar_total = sum(1 for r in changed if r.jar_english_same)
         self.summary.value = (
             f"差異 {format_count(len(diffs))} 筆・衝突 {format_count(len(conflicts))} 筆"
             f"・原文不同 {format_count(len(changed))} 筆"
+            + (
+                f"（其中 jar 英文相同 {format_count(jar_total)} 筆）"
+                if jar_total
+                else ""
+            )
             + (
                 f"・其中目標已審核 {format_count(reviewed_total)} 筆"
                 "（預設不能批次套用，勾選下方「包含目標已審核」才可勾選）"
@@ -514,6 +535,7 @@ class VersionDiffDialog:
         self._render_exclusions()
         batch = self._batch_rows()
         self.selection_row.visible = bool(batch)
+        self.select_jar_btn.visible = self.tab == TAB_SOURCE and bool(jar_total)
         self._render_apply_button(batch)
         self._safe_update()
 
@@ -628,6 +650,7 @@ class VersionDiffDialog:
                     selectable=True,
                     expand=True,
                 ),
+                *([kit.chip("jar 英文相同", "em")] if row.jar_english_same else []),
                 kit.chip(kind_label(row.kind), "neutral"),
             ]
         )
@@ -799,6 +822,17 @@ class VersionDiffDialog:
         include = bool(self.include_reviewed.value)
         self.selected |= {
             row.entry_id for row in self._batch_rows() if selectable(row, include)
+        }
+        self._confirm_overwrite = False
+        self._render()
+
+    def _select_jar_english(self, _e=None) -> None:
+        """勾選原文不同、但 jar 英文相同的條目（含其他頁；是否含目標已審核看上方勾選）。"""
+        include = bool(self.include_reviewed.value)
+        self.selected |= {
+            row.entry_id
+            for row in self._batch_rows()
+            if row.jar_english_same and selectable(row, include)
         }
         self._confirm_overwrite = False
         self._render()

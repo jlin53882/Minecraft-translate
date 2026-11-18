@@ -15,6 +15,11 @@
 （使用者明確選擇覆蓋）。寫入沿用審核流程的歷史格式（``action='review'``），因此
 ``TranslationDB.revert`` 可以整批還原。這裡不新增資料表或欄位，查詢沿用
 ``idx_entry_content``。
+
+KubeJS 語系條目的原文常是整合包自帶的非英文翻譯（見 :mod:`.jar_english`）。沒有原文相同的參考、
+但同一個命名空間與鍵值在 jar 的英文原文兩邊相同時，參考只留這些版本並標為 ``jar_english_same``
+（這時不要求來源語系相容與原文相似）：匯入後照「原文相同」的規則自動沿用，版本差異審核也標示出來
+供整批套用。
 """
 
 from __future__ import annotations
@@ -30,12 +35,14 @@ from .content_identity import (
     PACK_KINDS,
     content_key_sql,
     content_mod_sql,
+    content_mod_value,
     content_table_sql,
     loose_text,
     other_version_sql,
     pack_label,
     pack_scope_of,
 )
+from .jar_english import jar_english, same_jar_english
 from .query_interrupt import QueryCancelled
 from .schema import KIND_KUBEJS_LANG, SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import (
@@ -55,6 +62,7 @@ _REVIEWED_STATES = ("reviewed", "legacy_unknown")
 REFERENCE_LATEST = ""  # 參考版本＝該條目最近一次被審核的版本
 _REVIEW_ACTION = "review"
 _NOTE_PREFIX = "跨版本沿用自 "
+_JAR_NOTE_PREFIX = "依 jar 英文相同，跨版本沿用自 "
 _ID_CHUNK = 500  # 一次處理的目標條目數：控制單次查詢大小，也是取消與釋放鎖的間隔
 
 
@@ -89,6 +97,8 @@ class CrossVersionRow:
     refs: tuple[VersionRef, ...]
     target_revision: int | None = None
     source_changed: bool = False  # 參考的原文與目標不同（不只差大小寫或空白）：不自動沿用，由人工確認後套用
+    # 原文不同，但 jar 英文原文相同（只有 KubeJS 語系）：``refs`` 只留這些參考，可自動沿用
+    jar_english_same: bool = False
 
     @property
     def conflict(self) -> bool:
@@ -169,6 +179,7 @@ class ReuseResult:
     source_changed: int = (
         0  # 其他版本的原文不同（不只差大小寫或空白），只列出不自動沿用
     )
+    jar_english: int = 0  # ``applied`` 之中，原文不同但 jar 英文相同而沿用的筆數
     stale: int = 0  # 套用時畫面資料已過期而略過
     history_id: int | None = None  # 任一筆歷史編號，可傳給 ``TranslationDB.revert``
     entry_ids: list[int] = field(default_factory=list)
@@ -275,6 +286,22 @@ def _matches_packs(row: Sequence, ref_pack: str, target_pack: str) -> bool:
     return not (target_pack and pack_label(row[1], row[2]) != target_pack)
 
 
+def _ref_from_raw(row: Sequence) -> VersionRef:
+    """查詢結果一列中的參考欄位（第 9～18 欄，順序見 :func:`_build_rows`）。"""
+    return VersionRef(
+        int(row[9]),
+        row[10],
+        row[11],
+        int(row[12]),
+        row[13],
+        row[14],
+        int(row[15]),
+        int(row[16]),
+        row[17],
+        row[18],
+    )
+
+
 def _build_rows(
     raw: Iterable[Sequence],
     *,
@@ -293,20 +320,7 @@ def _build_rows(
             continue
         eid = int(row[0])
         heads.setdefault(eid, (row[1:5], row[5], row[6], row[7], row[8]))
-        grouped.setdefault(eid, []).append(
-            VersionRef(
-                int(row[9]),
-                row[10],
-                row[11],
-                int(row[12]),
-                row[13],
-                row[14],
-                int(row[15]),
-                int(row[16]),
-                row[17],
-                row[18],
-            )
-        )
+        grouped.setdefault(eid, []).append(_ref_from_raw(row))
     out = []
     for eid in sorted(grouped):
         (kind, mod_id, key, en_us), tw, source, status, revision = heads[eid]
@@ -447,17 +461,27 @@ def scan_differences(
                     target_pack=target_pack,
                 )
                 raw, locales = _prune_and_resolve(conn, raw)
-                built = _build_rows(
-                    (r for r in raw if r[19] in _REVIEWED_STATES and r[20]),
+                built = mark_jar_english(
+                    conn,
+                    version,
+                    _build_rows(
+                        (r for r in raw if r[19] in _REVIEWED_STATES and r[20]),
+                        ref_pack=ref_pack,
+                        target_pack=target_pack,
+                    ),
+                    part,
+                    ref_version=ref_version,
                     ref_pack=ref_pack,
                     target_pack=target_pack,
                 )
+                by_jar = {row.entry_id for row in built if row.jar_english_same}
                 # 原文只差大小寫或空白視為相同；原文真的不同的參考由「原文不同」頁籤列出
                 same = [
                     r
                     for r in raw
                     if _same_source(r[4], r[18])
                     and _matches_packs(r, ref_pack, target_pack)
+                    and r[0] not in by_jar  # 已依 jar 英文列出，不算「未列出」
                 ]
                 _classify_exclusions(same, summary, conn, locales)
             rows.extend(row for row in built if row.differs)
@@ -479,6 +503,102 @@ def scan_differences(
         merged.samples.extend(part_summary.samples)
     del merged.samples[_SAMPLE_LIMIT:]
     return out, merged
+
+
+def mark_jar_english(
+    conn: sqlite3.Connection,
+    version: str,
+    rows: list[CrossVersionRow],
+    target_ids: Sequence[int],
+    *,
+    ref_version: str = REFERENCE_LATEST,
+    ref_pack: str = "",
+    target_pack: str = "",
+) -> list[CrossVersionRow]:
+    """KubeJS 語系條目：沒有原文相同的參考時，改用 jar 英文判斷是不是同一句。
+
+    ``target_ids`` 是這一段的目標條目；已有原文相同參考的條目維持原樣。其餘 KubeJS 語系條目
+    重新取出其他版本全部已審核的參考，**不要求來源語系相容、也不要求原文相似**（整合包可能把
+    原文從 ``ru_ru`` 換成 ``pt_br``），只留目標與參考所在遊戲版本 jar 英文相同的參考，
+    標為 ``jar_english_same``；一個都不符時沿用原本的列（原文不同、待人工判斷）。
+    ``ref_version``、``ref_pack``、``target_pack`` 與差異查詢的意義相同。
+    """
+    same = {row.entry_id for row in rows if not row.source_changed}
+    todo = _kubejs_lang_ids(conn, [i for i in target_ids if i not in same])
+    if not todo:
+        return rows
+    raw = [
+        r
+        for r in _fetch_candidates(
+            conn,
+            version,
+            ref_version=ref_version,
+            entry_ids=todo,
+            ref_pack=ref_pack,
+            target_pack=target_pack,
+        )
+        if r[19] in _REVIEWED_STATES and _matches_packs(r, ref_pack, target_pack)
+    ]
+    english = jar_english(conn, {(content_mod_value(r[1], r[2]), r[3]) for r in raw})
+    matched = [
+        r
+        for r in raw
+        if same_jar_english(
+            english.get((content_mod_value(r[1], r[2]), r[3]), {}), version, r[10]
+        )
+    ]
+    if not matched:
+        return rows
+    last = _last_review_events(conn, {r[9] for r in matched})
+    heads: dict[int, Sequence] = {}
+    refs: dict[int, list[VersionRef]] = {}
+    for r in matched:
+        hid, at = last.get(r[9], (0, None))
+        heads.setdefault(r[0], r)
+        refs.setdefault(r[0], []).append(
+            _ref_from_raw(
+                (*r[:14], at if at is not None else r[14], r[15], hid, *r[17:19])
+            )
+        )
+    marked = {
+        eid: CrossVersionRow(
+            eid,
+            head[1],
+            head[2],
+            head[3],
+            head[4],
+            head[5] or "",
+            None if head[6] is None else int(head[6]),
+            head[7] in _REVIEWED_STATES,
+            tuple(sorted(refs[eid], key=_ref_order)),
+            None if head[8] is None else int(head[8]),
+            source_changed=not all(
+                _same_source(ref.en_us, head[4]) for ref in refs[eid]
+            ),
+            jar_english_same=True,
+        )
+        for eid, head in heads.items()
+    }
+    kept = [marked.pop(row.entry_id, row) for row in rows]
+    return sorted([*kept, *marked.values()], key=lambda row: row.entry_id)
+
+
+def _kubejs_lang_ids(conn: sqlite3.Connection, entry_ids: Sequence[int]) -> list[int]:
+    """``entry_ids`` 之中的 KubeJS 語系條目（只有它們需要比對 jar 英文）。
+
+    以條目編號查詢、在 Python 比對類型：條件寫成 ``kind = ?`` 時規劃器會改走類型索引，
+    掃過所有 KubeJS 語系條目。
+    """
+    if not entry_ids:
+        return []
+    return [
+        int(eid)
+        for eid, kind in conn.execute(
+            f"SELECT id, kind FROM entry WHERE id IN ({','.join('?' * len(entry_ids))})",
+            tuple(entry_ids),
+        )
+        if kind == KIND_KUBEJS_LANG
+    ]
 
 
 def _same_source(a: str, b: str) -> bool:
@@ -736,6 +856,8 @@ def _write_reference(
 ) -> int:
     """把參考譯文以已審核狀態寫入目標條目，回傳歷史編號。
 
+    歷史備註記錄參考版本；依 jar 英文判定相同而沿用的另有前綴，可從歷史分辨。
+
     目標尚未審核：寫入獨立的 ``SRC_CROSS_VERSION`` 列。已審核列一定贏過未審核列，
     目標原本的譯文與來源（例如模組自帶繁中）保留在自己的列，不會被覆寫。
     目標已經是已審核：改寫目標目前生效的那一列。否則新列與目標列同為已審核，誰生效
@@ -779,7 +901,7 @@ def _write_reference(
             row.target_zh_tw,
             ref.zh_tw,
             prev[0] if prev else None,
-            f"{_NOTE_PREFIX}{ref.version}",
+            f"{_JAR_NOTE_PREFIX if row.jar_english_same else _NOTE_PREFIX}{ref.version}",
             prev[1] if prev else None,
             (prev[2] if prev[2] is not None else "") if prev else None,
             written[0],
@@ -804,6 +926,7 @@ def reuse_reviewed(
     只處理 ``entry_ids``：本次匯入交易實際新增的條目或新增譯文的條目，不靠時間推測，
     所以同一秒內先前的資料不會被誤納入。參考譯文一致且目標尚未審核才寫入；
     衝突與「目標已審核且不同」只計數。同樣的匯入重跑不會再寫入（目標已等於參考）。
+    原文不同的 KubeJS 語系條目，jar 英文相同時視為同一句（:func:`mark_jar_english`）。
     """
     result = ReuseResult()
     ids = sorted({int(i) for i in entry_ids})
@@ -812,11 +935,14 @@ def reuse_reviewed(
     batch = uuid.uuid4().hex
     with db._tx(bump_generation_on_noop=False, keep_review=True) as conn:
         for start in range(0, len(ids), _ID_CHUNK):
-            rows = _fetch_rows(
+            part = ids[start : start + _ID_CHUNK]
+            rows = mark_jar_english(
                 conn,
                 version,
-                ref_version=REFERENCE_LATEST,
-                entry_ids=ids[start : start + _ID_CHUNK],
+                _fetch_rows(
+                    conn, version, ref_version=REFERENCE_LATEST, entry_ids=part
+                ),
+                part,
             )
             for row in rows:
                 _reuse_one(db, conn, row, batch, actor, result)
@@ -834,7 +960,7 @@ def _reuse_one(
 ) -> None:
     if not row.differs:
         return
-    if row.source_changed:
+    if row.source_changed and not row.jar_english_same:
         result.source_changed += 1  # 原文不同：不自動沿用，留給差異審核逐筆判斷
     elif row.conflict:
         result.conflicts += 1
@@ -843,6 +969,7 @@ def _reuse_one(
     else:
         hid = _write_reference(db, conn, row, row.reference, batch, actor)
         result.applied += 1
+        result.jar_english += int(row.jar_english_same)
         result.entry_ids.append(row.entry_id)
         result.history_id = result.history_id or hid
 
@@ -877,17 +1004,35 @@ def apply_references(
 def _current_row(
     conn: sqlite3.Connection, item: ApplyItem
 ) -> tuple[CrossVersionRow, VersionRef] | None:
-    """依畫面期待值重新讀取一筆；目標或參考有任何關鍵狀態不同就回傳 None。"""
+    """依畫面期待值重新讀取一筆；目標或參考有任何關鍵狀態不同就回傳 None。
+
+    只讀選定參考所在的整合包資料夾（KubeJS／FTB）：畫面可能把參考固定在某個整合包版本，
+    同遊戲版本的其他整合包若有原文與目標相同的參考，會讓這一列的分類（原文相同／不同）
+    與參考清單和畫面不同，選定的參考就找不到而被誤判為過期。
+    """
     head = conn.execute(
         "SELECT mc_version FROM entry WHERE id=?", (item.entry_id,)
     ).fetchone()
-    if head is None:
+    ref_head = conn.execute(
+        "SELECT kind, mod_id FROM entry WHERE id=?", (item.ref_entry_id,)
+    ).fetchone()
+    if head is None or ref_head is None:
         return None
-    rows = _fetch_rows(
+    ref_pack = pack_label(ref_head[0], ref_head[1])
+    # 與差異審核同一套規則（含 jar 英文相同的參考），否則畫面上的列在這裡會被當成過期
+    rows = mark_jar_english(
         conn,
         head[0],
+        _fetch_rows(
+            conn,
+            head[0],
+            ref_version=item.ref_version,
+            entry_ids=[item.entry_id],
+            ref_pack=ref_pack,
+        ),
+        [item.entry_id],
         ref_version=item.ref_version,
-        entry_ids=[item.entry_id],
+        ref_pack=ref_pack,
     )
     row = next((r for r in rows if r.entry_id == item.entry_id), None)
     if row is None:
