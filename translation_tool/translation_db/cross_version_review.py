@@ -1004,12 +1004,21 @@ def apply_references(
 def _current_row(
     conn: sqlite3.Connection, item: ApplyItem
 ) -> tuple[CrossVersionRow, VersionRef] | None:
-    """依畫面期待值重新讀取一筆；目標或參考有任何關鍵狀態不同就回傳 None。"""
+    """依畫面期待值重新讀取一筆；目標或參考有任何關鍵狀態不同就回傳 None。
+
+    只讀選定參考所在的整合包資料夾（KubeJS／FTB）：畫面可能把參考固定在某個整合包版本，
+    同遊戲版本的其他整合包若有原文與目標相同的參考，會讓這一列的分類（原文相同／不同）
+    與參考清單和畫面不同，選定的參考就找不到而被誤判為過期。
+    """
     head = conn.execute(
         "SELECT mc_version FROM entry WHERE id=?", (item.entry_id,)
     ).fetchone()
-    if head is None:
+    ref_head = conn.execute(
+        "SELECT kind, mod_id FROM entry WHERE id=?", (item.ref_entry_id,)
+    ).fetchone()
+    if head is None or ref_head is None:
         return None
+    ref_pack = pack_label(ref_head[0], ref_head[1])
     # 與差異審核同一套規則（含 jar 英文相同的參考），否則畫面上的列在這裡會被當成過期
     rows = mark_jar_english(
         conn,
@@ -1019,9 +1028,11 @@ def _current_row(
             head[0],
             ref_version=item.ref_version,
             entry_ids=[item.entry_id],
+            ref_pack=ref_pack,
         ),
         [item.entry_id],
         ref_version=item.ref_version,
+        ref_pack=ref_pack,
     )
     row = next((r for r in rows if r.entry_id == item.entry_id), None)
     if row is None:

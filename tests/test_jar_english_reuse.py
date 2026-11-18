@@ -290,3 +290,29 @@ def test_dialog_apply_writes_jar_english_rows(db, old_text, locale):
         "SELECT note FROM history WHERE id = ?", (result.history_id,)
     ).fetchone()[0]
     assert note.startswith("依 jar 英文相同")
+
+
+@pytest.mark.parametrize(
+    "jar", [True, False], ids=["jar-english", "plain-source-change"]
+)
+def test_apply_rechecks_only_the_pinned_reference_pack(db, jar):
+    """參考固定在 8.3 時，套用的重新確認不能被 8.5（原文與目標相同）的參考改變分類而判定過期。"""
+    pack_mid = "actuallyadditions@All the Mods 10 8.5@dddddddddddd"
+    if jar:
+        _jar(db, "1.21.1", "Crafting Ingredients")
+    _reviewed_pack(db, "1.21.1", PACK_OLD, OLD_PT, "合成材料")
+    _reviewed_pack(db, "1.21.1", pack_mid, NEW_PT, "製作材料")
+    db.ingest("1.21.1", [_pack(PACK_NEW, NEW_PT)])
+    rows = db.list_cross_version_differences(
+        "1.21.1",
+        ref_version="1.21.1",
+        ref_pack="All the Mods 10 8.3",
+        target_pack="All the Mods 10 8.6",
+    )
+    assert [(r.source_changed, r.jar_english_same) for r in rows] == [(True, jar)]
+    items = vdd.selected_items(rows, {rows[0].entry_id}, False)
+
+    result = db.apply_cross_version_references(items)
+
+    assert (result.applied, result.stale) == (1, 0)
+    assert _entry(db, "1.21.1", PACK_NEW).zh_tw == "合成材料"
