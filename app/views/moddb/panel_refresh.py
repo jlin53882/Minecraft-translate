@@ -343,9 +343,13 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
     mod = selected_mod if selected_mod in pack_mods else ALL_MODS
     # 選了模組包版本、沒選模組：範圍是該模組包的所有模組
     mod_ids = (mod,) if mod != ALL_MODS else (tuple(pack_mods) if pack else ())
-    missing = db.count_untranslated(version, mod_ids) if db and version else 0
+    kinds = db.kinds(version) if db and version else []
+    kind = request.get("kind") if request.get("kind") in kinds else None
+    missing = (
+        db.count_untranslated(version, mod_ids, kind=kind) if db and version else 0
+    )
     reusable = (
-        db.count_reusable(version, mod_ids)
+        db.count_reusable(version, mod_ids, kind=kind)
         if db and version and request.get("reuse")
         else 0
     )
@@ -357,6 +361,8 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         mods=mods,
         pack=pack,
         mod=mod,
+        kinds=kinds,
+        kind=kind,
         missing=missing,
         reusable=reusable,
         planned_items=None,

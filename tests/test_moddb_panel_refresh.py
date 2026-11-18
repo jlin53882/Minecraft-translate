@@ -13,14 +13,18 @@ class _CountOnlyDatabase:
         assert version == "1.21.1"
         return ["example"]
 
-    def count_untranslated(self, version, mod_ids):
+    def kinds(self, version):
         assert version == "1.21.1"
-        assert mod_ids == ()
+        return ["lang"]
+
+    def count_untranslated(self, version, mod_ids, *, kind=None):
+        assert version == "1.21.1"
+        assert mod_ids == () and kind is None
         return 120
 
-    def count_reusable(self, version, mod_ids):
+    def count_reusable(self, version, mod_ids, *, kind=None):
         assert version == "1.21.1"
-        assert mod_ids == ()
+        assert mod_ids == () and kind is None
         return 20
 
     def untranslated_entries(self, *_args, **_kwargs):

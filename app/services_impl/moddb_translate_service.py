@@ -109,6 +109,8 @@ class TranslateOptions:
     version: str
     mod_ids: tuple[str, ...] = ()  # 空 = 全部模組
     limit: int = DEFAULT_LIMIT  # 單次最多翻幾筆；0 = 不限
+    # 只翻這個條目類型；None = 全部類型。只影響一般機翻（格式修復在預覽中另有類型篩選）
+    kind: str | None = None
     dry_run: bool = False
     reuse_other_versions: bool = True
     write_cache: bool = True  # 結果除了寫入資料庫，也寫入翻譯快取（「快取資料」資料夾）
@@ -315,6 +317,7 @@ def estimate_scope_plan(
     mod_ids: tuple[str, ...] | list[str] = (),
     limit: int = 0,
     reuse_other_versions: bool = True,
+    kind: str | None = None,
 ) -> tuple[int, int]:
     """Return the exact selected AI rows and their shared planned batch count."""
     rows = db.untranslated_entries(
@@ -322,6 +325,7 @@ def estimate_scope_plan(
         list(mod_ids),
         limit or None,
         exclude_reusable=reuse_other_versions,
+        kind=kind,
     )
     items = _grouped_items(db, rows)
     _attach_translation_sessions(
@@ -340,6 +344,7 @@ def estimate_scope_batches(
     mod_ids: tuple[str, ...] | list[str] = (),
     limit: int = 0,
     reuse_other_versions: bool = True,
+    kind: str | None = None,
 ) -> int:
     """Return the planned batch count for the exact filtered AI rows."""
     return estimate_scope_plan(
@@ -348,6 +353,7 @@ def estimate_scope_batches(
         mod_ids=mod_ids,
         limit=limit,
         reuse_other_versions=reuse_other_versions,
+        kind=kind,
     )[1]
 
 
@@ -505,26 +511,30 @@ def _noop_cache(*_args, **_kwargs) -> bool:
 
 def _select_rows(session, db, options: TranslateOptions, report: TranslateReport):
     """沿用其他版本譯文後挑出要機翻的條目；預覽或沒有條目時回傳 None（已寫好摘要）。"""
-    mods = list(options.mod_ids)
+    mods, kind = list(options.mod_ids), options.kind
     if options.reuse_other_versions and not options.dry_run:
-        report.reused = db.reuse_from_other_versions(options.version, mods)
+        report.reused = db.reuse_from_other_versions(options.version, mods, kind=kind)
         if report.reused:
             _log(session, f"♻️ 沿用其他版本相同譯文 {report.reused} 筆（未呼叫 AI）")
     # 預覽不寫入，所以沿用的筆數用查詢估算，並從「要送 AI 的條目」中排除
     preview_reuse = options.dry_run and options.reuse_other_versions
     rows = db.untranslated_entries(
-        options.version, mods, options.limit or None, exclude_reusable=preview_reuse
+        options.version,
+        mods,
+        options.limit or None,
+        exclude_reusable=preview_reuse,
+        kind=kind,
     )
     report.candidates = len(rows)
     report.remaining = (
-        db.count_untranslated(options.version, mods)
+        db.count_untranslated(options.version, mods, kind=kind)
         if options.dry_run
         else report.candidates
     )
     if options.dry_run:
         report.scope_remaining = report.remaining
         if preview_reuse:
-            report.reused = db.count_reusable(options.version, mods)
+            report.reused = db.count_reusable(options.version, mods, kind=kind)
             _log(
                 session,
                 f"♻️ 預覽：其中約 {report.reused:,} 筆其他版本已有相同譯文，"
@@ -831,7 +841,9 @@ def _translation_lm_cfg(lm_config: Any) -> dict[str, Any]:
 def _count_scope_remaining(db, options: TranslateOptions) -> int | None:
     """執行結束後整個範圍仍未翻譯的筆數（與預覽的「此範圍仍未翻譯」同一個查詢）。"""
     try:
-        return db.count_untranslated(options.version, list(options.mod_ids))
+        return db.count_untranslated(
+            options.version, list(options.mod_ids), kind=options.kind
+        )
     except sqlite3.Error:
         logger.warning("Mod 資料庫機翻：讀取範圍內未翻譯筆數失敗", exc_info=True)
         return None
