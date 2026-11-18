@@ -225,6 +225,18 @@ def test_moddb_pack_scan_never_reads_parent_of_selected_folder(tmp_path):
         assert not any("開始分析" in log for log in logs)
 
 
+def test_moddb_pack_scan_ignores_root_inferred_above_selected_config(tmp_path):
+    """選 <模組包>/config（或更深）時，往下找到 quests 反推出的 <模組包> 也不能採用。"""
+    _write_fixture(tmp_path)
+    for selected in (tmp_path / "config", tmp_path / "config" / "ftbquests"):
+        logs, report = _scan_logs_and_report(selected)
+
+        assert report.pack_root == ""
+        assert report.pack_root_candidates == []
+        assert report.pack_items_found == 0
+        assert not any("開始分析" in log for log in logs)
+
+
 def test_moddb_pack_scan_finds_single_root_below_selected_folder(tmp_path):
     wrapper = tmp_path / "overrides"
     _write_fixture(wrapper)

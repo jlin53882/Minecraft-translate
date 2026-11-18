@@ -246,8 +246,9 @@ def discover_pack_roots(
     ``overrides`` 或直接根目錄。這裡只做有限深度、拒絕 reparse point 的
     結構探索；多個結果不會自動合併，呼叫端必須讓使用者明確選擇。
 
-    ``include_parents`` 為 False 時只看指定路徑本身與底下，不把上層目錄當候選；
-    Mod 資料庫掃描用這個模式，避免讀到所選資料夾以外的內容。
+    ``include_parents`` 為 False 時只回傳指定路徑本身與底下的根目錄，不把上層目錄當候選
+    （包含從底下的 ``config/ftbquests/quests`` 反推出的上層）；Mod 資料庫掃描用這個模式，
+    避免讀到所選資料夾以外的內容。
     """
     current = _discovery_start(folder)
     if current is None:
@@ -260,6 +261,13 @@ def discover_pack_roots(
         for parent in current.parents[:4]:
             _add_discovery_root(roots, parent, 1)
     _walk_discovery_tree(current, max_depth, roots)
+    if not include_parents:
+        # 選 <模組包>/config 時，往下找到 quests 會反推出 <模組包>：同樣在所選路徑之外
+        roots = {
+            root: rank
+            for root, rank in roots.items()
+            if root == current or current in root.parents
+        }
     return _rank_discovery_roots(roots, max_candidates)
 
 
