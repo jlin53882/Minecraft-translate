@@ -316,3 +316,15 @@ def test_apply_rechecks_only_the_pinned_reference_pack(db, jar):
 
     assert (result.applied, result.stale) == (1, 0)
     assert _entry(db, "1.21.1", PACK_NEW).zh_tw == "合成材料"
+
+
+def test_same_game_version_as_reference_uses_the_other_packs(db):
+    """參考選「固定 1.21.1」而目標也是 1.21.1：參考是同版本其他整合包，不含目標自己的整合包。"""
+    _reviewed_pack(db, "1.21.1", PACK_OLD, NEW_PT, "合成材料")
+    db.ingest("1.21.1", [_pack(PACK_NEW, NEW_PT)])
+    rows = db.list_cross_version_differences(
+        "1.21.1", ref_version="1.21.1", target_pack="All the Mods 10 8.6"
+    )
+    assert [(r.mod_id, r.reference.mod_id) for r in rows] == [(PACK_NEW, PACK_OLD)]
+    items = vdd.selected_items(rows, {rows[0].entry_id}, False)
+    assert db.apply_cross_version_references(items).applied == 1

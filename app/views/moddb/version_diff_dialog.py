@@ -118,12 +118,15 @@ def reference_options(
     """參考下拉選單：各條目最近審核者、固定遊戲版本、固定遊戲版本中的某個整合包版本。
 
     同一個遊戲版本可以有多個整合包版本（例如 8.1～8.5 都是 1.21.1），所以整合包版本
-    另列，包含目標所在的遊戲版本（參考同遊戲版本的其他整合包版本）。
+    另列，包含目標所在的遊戲版本（參考同遊戲版本的其他整合包版本）。目標所在的遊戲版本
+    有整合包時也列出整個版本：參考為同版本的其他整合包（一般模組條目同版本沒有參考）。
     """
     options = [(LATEST_KEY, LATEST_LABEL)]
     for version in versions:
         if version != target:
             options.append((version, f"固定 {version}"))
+        elif packs.get(version):
+            options.append((version, f"固定 {version}（同版本其他整合包）"))
         options += [
             (f"{version}{PACK_SEP}{pack}", f"固定 {version} · {pack}")
             for pack in packs.get(version, [])
