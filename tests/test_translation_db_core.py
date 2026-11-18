@@ -31,6 +31,7 @@ from translation_tool.translation_db.identity import (
 from translation_tool.translation_db.models import (
     EntryFilter,
     QualityFilter,
+    SameTextRow,
     TimeFilter,
 )
 from translation_tool.translation_db.quality import (
@@ -47,6 +48,7 @@ from translation_tool.translation_db.scanner import (
     scan_jar,
 )
 from translation_tool.translation_db.schema import (
+    KIND_KUBEJS_LANG,
     SCHEMA_VERSION,
     SRC_AI,
     SRC_AI_REPAIR,
@@ -2028,6 +2030,43 @@ def test_list_entries_filters_and_detail(db):
     assert [r.key for r in detail.same_text] == ["k3"]  # 原文相同、不同模組
 
 
+def test_same_text_crosses_lang_and_kubejs_lang_but_not_other_kinds(db):
+    """模組 lang 與整合包 KubeJS lang 的相同原文互相可見；其他類型不混入。"""
+    pack = "ad_astra@All the Mods 10 8.5@93985ec940f7"
+    db.ingest(
+        "1.21.1",
+        [
+            item(
+                key="itemGroup.ad_astra.main",
+                en="Ad Astra",
+                tw="飛向星辰",
+                mod="ad_astra",
+            ),
+            item(
+                key="itemGroup.ad_astra.main",
+                en="Ad Astra",
+                mod=pack,
+                kind=KIND_KUBEJS_LANG,
+            ),
+            item(
+                key="quest.title",
+                en="Ad Astra",
+                tw="任務",
+                mod="ad_astra",
+                kind=KIND_ADVANCEMENT,
+            ),
+        ],
+    )
+    lang_id = db.list_entries("1.21.1", mod_id="ad_astra", kind=KIND_LANG)[0][0].id
+    kubejs_id = db.list_entries("1.21.1", mod_id=pack)[0][0].id
+    from_lang = db.entry_detail(lang_id).same_text
+    assert [(r.mod_id, r.kind) for r in from_lang] == [(pack, KIND_KUBEJS_LANG)]
+    from_kubejs = db.entry_detail(kubejs_id).same_text
+    assert [(r.mod_id, r.kind, r.zh_tw) for r in from_kubejs] == [
+        ("ad_astra", KIND_LANG, "飛向星辰")
+    ]
+
+
 def test_overview_and_stats(db):
     db.ingest("1.21.1", [item(tw="A"), item(key="k2", en="Second Entry")])
     db.ingest("1.20.1", [item(tw="B")])
@@ -3422,3 +3461,21 @@ def test_manual_save_keeps_review_when_another_source_would_still_win(db):
     ).fetchone()[0]
     assert jar == "reviewed"  # 退回也換不到人工，不丟審核標記
     assert db.get_entry(entry.id).zh_tw == "丙"  # 畫面不會莫名切成 AI 的甲
+
+
+def test_same_text_tag_hides_pack_hash():
+    from app.views.moddb.suggestions import _same_text_tag
+
+    row = SameTextRow(
+        1,
+        "1.21.1",
+        "ad_astra@All the Mods 10 8.3@40b3569cc156",
+        "itemGroup.ad_astra.main",
+        "飛向星辰",
+        None,
+        None,
+        KIND_KUBEJS_LANG,
+    )
+    assert _same_text_tag(row) == "ad_astra（All the Mods 10 8.3）・main・1.21.1"
+    plain = SameTextRow(2, "1.20.1", "ad_astra", "a.b.title", "", None, None, KIND_LANG)
+    assert _same_text_tag(plain) == "ad_astra・title・1.20.1"

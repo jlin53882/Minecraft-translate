@@ -43,6 +43,8 @@ from app.views.moddb.smart_review_reviewer_state import (
     STATUS_LABEL,
     SmartReviewReviewerState,
 )
+from app.views.moddb.source_text_label import source_text_name
+from app.views.moddb.text_compare import compare_chips, text_control
 
 _STATUS_TONE = {
     SmartReviewStatus.READY: "em",
@@ -546,15 +548,29 @@ class SmartReviewReviewer:
         )
 
     @staticmethod
-    def _text_card(title: str, value: str, tone: str = "neutral") -> ft.Control:
-        """建立「標題 + 可選取文字」的卡片。"""
+    def _text_card(
+        title: str,
+        value: str,
+        tone: str = "neutral",
+        *,
+        base: str | None = None,
+        base_label: str = "",
+    ) -> ft.Control:
+        """建立「標題 + 可選取文字」的卡片。
+
+        不可見字元一律以標記顯示；給 ``base_label`` 時再與 ``base`` 比對差異並列出說明。
+        只影響顯示，``value`` 與可編輯草稿不受影響。
+        """
         color = {"gold": C.GOLD, "dia": C.DIA, "em": C.EM}.get(tone, C.MUTED)
+        body = (
+            text_control(value, base)
+            if value
+            else ft.Text("（無內容）", size=13, selectable=True)
+        )
+        notes = compare_chips(value, base, base_label=base_label) if base_label else []
         return ft.Container(
             content=ft.Column(
-                [
-                    ft.Text(title, size=11.5, color=color),
-                    ft.Text(value or "（無內容）", size=13, selectable=True),
-                ],
+                [ft.Text(title, size=11.5, color=color), body, *notes],
                 spacing=6,
                 tight=True,
             ),
@@ -580,13 +596,23 @@ class SmartReviewReviewer:
         """建立 AI 說明與左右檢視欄，讓理由不必捲到頁面下方才看得到。"""
         left = ft.Column(
             [
-                self._text_card("英文原文", row.en_us, "dia"),
+                self._text_card(
+                    source_text_name(row.kind, row.source_locale), row.en_us, "dia"
+                ),
                 self._text_card(
                     f"目前譯文（來源：{self._source_label(row)} · 審核：{row.review_status or '未標記'}）",
                     row.current_zh_tw,
                     "gold",
+                    base=row.suggested_zh_tw,
+                    base_label="AI 建議",
                 ),
-                self._text_card("AI 建議譯文", row.suggested_zh_tw or "", "em"),
+                self._text_card(
+                    "AI 建議譯文",
+                    row.suggested_zh_tw or "",
+                    "em",
+                    base=row.current_zh_tw,
+                    base_label="目前譯文",
+                ),
             ],
             spacing=10,
             horizontal_alignment=ft.CrossAxisAlignment.STRETCH,

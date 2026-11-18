@@ -12,6 +12,7 @@ from app.views.moddb.species_bulk_lookup import SpeciesBulkLookup
 from app.views.moddb.species_dialog import SpeciesCandidateDialog
 from app.views.moddb.species_suggestion import SpeciesSuggestion
 from tests.conftest import mock_page
+from translation_tool.translation_db.operation_progress import PhaseProgress
 
 
 def _rejecting_page():
@@ -134,3 +135,41 @@ def test_entries_panel_abandon_save_unblocks_editor():
     panel._abandon_save()
     assert panel._save_running is False
     assert panel.saved_text.value == ""
+
+
+def test_post_to_ui_quiet_failure_does_not_log_warning(monkeypatch):
+    from app.ui import page_post
+
+    warnings: list[str] = []
+    monkeypatch.setattr(page_post, "log_warning", warnings.append)
+    assert post_to_ui(_rejecting_page(), lambda: None, label="x", quiet=True) is False
+    assert warnings == []
+
+
+def test_cleanup_dialog_progress_post_failure_keeps_busy_and_is_silent(monkeypatch):
+    from app.ui import page_post
+
+    warnings: list[str] = []
+    monkeypatch.setattr(page_post, "log_warning", warnings.append)
+    dialog = CleanupDialog(_rejecting_page(), lambda: None, lambda: None)
+    dialog._set_busy(True, "刪除中…")
+    dialog._progress_reporter()(
+        PhaseProgress(1, 2, "掃描", 5, 10)
+    )  # 寫入交易還在跑，進度更新失敗不可讓視窗誤以為已結束
+    assert dialog._busy is True
+    assert warnings == []
+
+
+def test_duplicate_cleanup_dialog_progress_post_failure_keeps_busy_and_is_silent(
+    monkeypatch,
+):
+    from app.ui import page_post
+    from app.views.moddb.duplicate_cleanup_dialog import DuplicateCleanupDialog
+
+    warnings: list[str] = []
+    monkeypatch.setattr(page_post, "log_warning", warnings.append)
+    dialog = DuplicateCleanupDialog(_rejecting_page(), lambda: None, "1.21.1", None)
+    dialog._set_busy(True, "清理中…")
+    dialog._progress_reporter()(PhaseProgress(1, 2, "掃描", 5, 10))
+    assert dialog._busy is True
+    assert warnings == []

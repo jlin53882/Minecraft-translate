@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import flet as ft
 
-from app.services_impl.moddb_service import EntryFilter
+from app.services_impl.moddb_service import EntryFilter, current_settings
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -14,6 +14,17 @@ from app.views.moddb.batch_replace_dialog import BatchReplaceDialog
 from app.views.moddb.bulk_review_dialog import BulkReviewDialog
 from app.views.moddb.editor_drafts import reset_editor_for_database_change
 from app.views.moddb.formatting import STATE_LABELS, kind_label
+from app.views.moddb.pack_scope_dropdown import PackScopeDropdown
+from app.views.moddb.review_tools_menu import (
+    TOOL_BATCH_REPLACE,
+    TOOL_BULK_REVIEW,
+    TOOL_SAME_TEXT,
+    TOOL_SMART_REVIEW,
+    TOOL_SPECIES_SCAN,
+    TOOL_VERSION_DIFF,
+    ReviewToolsMenu,
+)
+from app.views.moddb.same_text_review_dialog import SameTextReviewDialog
 from app.views.moddb.smart_review_dialog import SmartReviewDialog
 from app.views.moddb.smart_review_marks import (
     ALL_SMART_REVIEW,
@@ -60,6 +71,7 @@ def apply_filter_options(panel, snapshot: dict) -> bool:
             panel._db_identity = identity
     dropdowns = {
         "version": panel.version_dd,
+        "pack": panel.pack_dd,
         "mod": panel.mod_dd,
         "kind": panel.kind_dd,
         "source": panel.source_filter.dropdown,
@@ -87,6 +99,7 @@ def apply_filter_options(panel, snapshot: dict) -> bool:
     )
     panel.version = snapshot.get("version")
     panel.version_dd.value = panel.version
+    options_changed["pack"] = _apply_pack_options(panel, snapshot)
     mods = snapshot.get("mods", [])
     options_changed["mod"] = kit.set_dropdown_options(
         panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
@@ -138,16 +151,7 @@ class FilterFlush:
             (
                 advanced.active_text.value,
                 advanced.clear_button.visible,
-                tuple(
-                    button.disabled
-                    for button in (
-                        panel.batch_replace_btn,
-                        panel.bulk_review_btn,
-                        panel.version_diff_btn,
-                        panel.smart_review_btn,
-                        panel.species_scan_btn,
-                    )
-                ),
+                panel.review_tools.disabled,
             ),
             (advanced.error_text.value, advanced.error_text.visible),
         )
@@ -183,6 +187,89 @@ def refresh_after_database_change(panel) -> None:
     )
 
 
+def load_filter_options_sync(panel) -> None:
+    """在呼叫端執行緒用與條目清單相同的 scope 重新載入 module/source 選項。
+
+    standalone panel 與同步 fallback 頁面沒有父層 snapshot worker，由面板自行更新；
+    使用與 ``ModDbView`` worker 快照相同的選項語意（``apply_filter_options``）。
+    """
+    db = panel.db()
+    if db is None:
+        panel.version_dd.options = []
+        load_mod_and_kind_options_sync(panel)
+        return
+
+    # 區域 import：panel_refresh 會從 entries_panel 匯入 PAGE_SIZE，頂層 import 會形成循環。
+    from app.views.moddb.panel_refresh import _resolve_entries_scope
+
+    try:
+        criteria = panel._entry_filter()
+    except ValueError:
+        # 顯示給使用者的驗證錯誤由 _load_list 負責。
+        # 回報錯誤時保留上一次有效的相依選項，避免在此處再次拋出例外。
+        return
+    scope = _resolve_entries_scope(
+        db,
+        {
+            "criteria": criteria,
+            "version": panel.version,
+            "mod_id": panel.mod_id,
+            "pack": panel.pack,
+            "kind": panel.kind,
+        },
+        current_settings(),
+    )
+    apply_filter_options(
+        panel,
+        {
+            "identity": panel._database_identity(db),
+            "source_catalog": panel._render_source_catalog,
+            "effective_source_codes": scope["source_codes"],
+            "filter_options_are_filtered": scope["options_are_filtered"],
+            "versions": scope["versions"],
+            "version": scope["version"],
+            "mods": scope["mods"],
+            "packs": scope["packs"],
+            "pack": scope["pack"],
+            "pack_mod_ids": scope["pack_mod_ids"],
+            "kinds": scope["kinds"],
+            "source": scope["source"],
+            "mod_id": scope["mod_id"],
+            "kind": scope["kind"],
+        },
+    )
+
+
+def load_mod_and_kind_options_sync(panel) -> None:
+    """換遊戲版本時，同步依該版本重新載入模組與類型下拉選項（選值不在新清單就清掉）。"""
+    db = panel.db()
+    version = panel.version
+    mods = db.mods(version) if (db and version) else []
+    kit.set_dropdown_options(
+        panel.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
+    )
+    if panel.mod_id not in mods:
+        panel.mod_id = None
+    panel.mod_dd.value = panel.mod_id or ALL_MODS
+    # 類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。
+    kinds = db.kinds(version) if (db and version) else []
+    kit.set_dropdown_options(
+        panel.kind_dd,
+        [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
+    )
+    if panel.kind not in kinds:
+        panel.kind = None
+    panel.kind_dd.value = panel.kind or ALL_KINDS
+
+
+def _apply_pack_options(panel, snapshot: dict) -> bool:
+    """模組包版本選項：選了遊戲版本才有清單；該版本沒有 KubeJS／FTB 內容時只有「全部」。"""
+    panel.pack = snapshot.get("pack")
+    panel.pack_mod_ids = snapshot.get("pack_mod_ids")
+    panel.pack_filter.select(panel.pack)
+    return panel.pack_filter.set_scopes(snapshot.get("packs", []))
+
+
 def prepare_entries_snapshot(panel, snapshot: dict) -> tuple[dict, bool]:
     """同步快照的資料庫身分，必要時丟棄舊 scope 並重新查詢。"""
     if "identity" not in snapshot:
@@ -214,6 +301,8 @@ def _build_controls(panel) -> None:
     panel.version_dd = kit.dropdown(
         label="遊戲版本", dense=True, width=220, on_select=panel._on_version
     )
+    panel.pack_filter = PackScopeDropdown(panel._on_pack)
+    panel.pack_dd = panel.pack_filter.control
     panel.mod_dd = kit.searchable_dropdown(
         label="模組", dense=True, width=220, on_select=panel._on_mod
     )
@@ -253,43 +342,15 @@ def _build_controls(panel) -> None:
         panel._on_state,
     )
     panel.advanced_filters = AdvancedFilters(panel._on_advanced_change)
-    panel.batch_replace_btn = kit.button(
-        "批次取代",
-        "secondary",
-        icon=ft.Icons.FIND_REPLACE,
-        size="sm",
-        on_click=panel._open_batch_replace,
-    )
-    panel.bulk_review_btn = kit.button(
-        "批量審核",
-        "secondary",
-        icon=ft.Icons.VERIFIED_OUTLINED,
-        size="sm",
-        on_click=panel._open_bulk_review,
-    )
-    panel.version_diff_btn = kit.button(
-        "版本差異審核",
-        "secondary",
-        icon=ft.Icons.COMPARE_ARROWS,
-        size="sm",
-        on_click=panel._open_version_diff,
-        tooltip="比較其他版本已審核的相同內容，套用或保留目標譯文",
-    )
-    panel.smart_review_btn = kit.button(
-        "智慧校對",
-        "secondary",
-        icon=ft.Icons.AUTO_AWESOME,
-        size="sm",
-        on_click=lambda event: open_smart_review(panel, event),
-        tooltip="以本地 AI 產生未審核譯文的人工校對候選",
-    )
-    panel.species_scan_btn = kit.button(
-        "掃描學名",
-        "secondary",
-        icon=ft.Icons.SCIENCE_OUTLINED,
-        size="sm",
-        on_click=lambda event: open_species_scan(panel, event),
-        tooltip="掃描目前版本／模組／類型範圍中的英文原文，找出可能的學名",
+    panel.review_tools = ReviewToolsMenu(
+        {
+            TOOL_BULK_REVIEW: panel._open_bulk_review,
+            TOOL_VERSION_DIFF: panel._open_version_diff,
+            TOOL_SAME_TEXT: panel._open_same_text_review,
+            TOOL_SMART_REVIEW: lambda event: open_smart_review(panel, event),
+            TOOL_SPECIES_SCAN: lambda event: open_species_scan(panel, event),
+            TOOL_BATCH_REPLACE: panel._open_batch_replace,
+        }
     )
 
 
@@ -324,11 +385,7 @@ def _build_filter_card(panel) -> None:
             panel.advanced_filters.toggle_button,
             panel.advanced_filters.active_text,
             panel.advanced_filters.clear_button,
-            panel.batch_replace_btn,
-            panel.bulk_review_btn,
-            panel.version_diff_btn,
-            panel.smart_review_btn,
-            panel.species_scan_btn,
+            panel.review_tools.control,
         ],
         spacing=8,
         vertical_alignment=ft.CrossAxisAlignment.CENTER,
@@ -341,6 +398,7 @@ def _build_filter_card(panel) -> None:
                     ft.Row(
                         [
                             panel.version_dd,
+                            panel.pack_dd,
                             panel.mod_dd,
                             panel.kind_dd,
                             panel.source_filter.dropdown,
@@ -385,6 +443,7 @@ def entry_filter(panel) -> EntryFilter:
     return EntryFilter(
         version=panel.version or "",
         mod_id=panel.mod_id,
+        pack_mod_ids=panel.pack_mod_ids,
         kind=panel.kind,
         state=panel.state,
         query=panel.query,
@@ -438,7 +497,27 @@ def on_advanced_change(panel) -> None:
     refresh_entry_filter(panel, defer_options=True)
 
 
+def panel_ready(panel) -> bool:
+    """審核工具共用的開啟前檢查：資料載入中或清單有錯誤時不開啟（已打開的選單仍可點到項目）。
+
+    停用狀態只擋得住尚未打開的選單；選單打開後才進入載入或出錯時，項目仍然點得到，
+    所以每個處理函式開頭都要再檢查一次，並顯示同一則提示。
+    """
+    if getattr(panel, "_data_loading", False):
+        show_snack(panel._page, "條目資料仍在載入，請稍候再操作。", C.GOLD)
+        return False
+    error = getattr(panel, "_list_error", None)
+    if error:
+        show_snack(
+            panel._page, f"目前清單有錯誤（{error}），請先修正篩選條件。", C.GOLD
+        )
+        return False
+    return True
+
+
 def open_batch_replace(panel, _e=None) -> None:
+    if not panel_ready(panel):
+        return
     if panel.drafts:
         show_snack(
             panel._page,
@@ -464,6 +543,8 @@ def open_batch_replace(panel, _e=None) -> None:
 
 def open_bulk_review(panel, _e=None) -> None:
     """開啟批量審核，預填目前頁面支援的範圍但不自動產生預覽。"""
+    if not panel_ready(panel):
+        return
     if panel.drafts:
         show_snack(
             panel._page,
@@ -482,11 +563,14 @@ def open_bulk_review(panel, _e=None) -> None:
         mod_id=panel.mod_id,
         kind=panel.kind,
         effective_source=panel.source_filter.code,
+        pack_scope=getattr(panel, "pack", None),
     ).open()
 
 
 def open_version_diff(panel, _e=None) -> None:
     """開啟版本差異審核，目標版本預設為目前檢視的版本。"""
+    if not panel_ready(panel):
+        return
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -495,8 +579,34 @@ def open_version_diff(panel, _e=None) -> None:
     ).open()
 
 
+def open_same_text_review(panel, _e=None, *, en_us: str | None = None) -> None:
+    """開啟同文一致性審核，範圍預設為目前版本與模組包；``en_us`` 只看與這段原文相同的群組。"""
+    if not panel_ready(panel):
+        return
+    if panel.drafts:
+        show_snack(
+            panel._page,
+            "目前清單含尚未寫入的機翻草稿；請先離開草稿檢視再執行同文一致性審核。",
+            C.GOLD,
+        )
+        return
+    if panel.db() is None or not panel.version:
+        show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
+        return
+    SameTextReviewDialog(
+        panel._page,
+        panel.db,
+        panel.version,
+        panel._after_batch_replace,
+        pack_scope=getattr(panel, "pack", None),
+        en_us=en_us,
+    ).open()
+
+
 def open_species_scan(panel, _e=None) -> None:
     """開啟學名候選掃描對話框，並預填目前版本、模組與來源範圍。"""
+    if not panel_ready(panel):
+        return
     if panel.db() is None or not panel.version:
         show_snack(panel._page, "目前沒有可用的資料庫版本。", C.GOLD)
         return
@@ -508,13 +618,13 @@ def open_species_scan(panel, _e=None) -> None:
         panel.kind,
         on_open_entry=panel.open_species_entry,
         effective_source=panel.source_filter.code,
+        pack_scope=getattr(panel, "pack", None),
     ).open()
 
 
 def open_smart_review(panel, _e=None) -> None:
     """開啟智慧校對對話框並傳入目前資料庫與篩選範圍。"""
-    if getattr(panel, "_data_loading", False):
-        show_snack(panel._page, "條目資料仍在載入，請稍候再操作。", C.GOLD)
+    if not panel_ready(panel):
         return
     if panel.drafts:
         show_snack(

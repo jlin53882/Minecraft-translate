@@ -29,6 +29,7 @@ from app.views.moddb.background_read import run_read
 from app.views.moddb.format_issue_rendering import quality_issue_summary
 from app.views.moddb.formatting import impact_text, shorten
 from app.views.moddb.operation_summaries import manual_review_result_text
+from app.views.moddb.source_text_label import source_text_parts
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 
@@ -119,6 +120,8 @@ class ReviewScopeController:
         self.panel = panel
         self._impact_ticket = 0
         self._confirm_ticket = 0
+        self._previewing = False
+        self._confirm_label = ""
         self._executing = False
 
     def update_impact(self) -> None:
@@ -206,7 +209,7 @@ class ReviewScopeController:
             and entry.review_status not in ("reviewed", "legacy_unknown")
         )
         panel.confirm_btn.visible = ready
-        panel.confirm_btn.disabled = not ready
+        panel.confirm_btn.disabled = not ready or self._previewing
         self._update_clear_review_button(entry, changed)
 
     def update_actions_without_impact(self, entry: EntryRow) -> None:
@@ -258,11 +261,16 @@ class ReviewScopeController:
                 C.GOLD,
             )
             return
+        if self._previewing:
+            return  # 上一次審核範圍查詢還沒回來
         propagate = bool(panel.sync_row.value)
         self._confirm_ticket += 1
         ticket = self._confirm_ticket
+        self._set_previewing(True)
 
         def apply(preview, error) -> None:
+            if ticket == self._confirm_ticket:
+                self._set_previewing(False)  # 成功、被拒絕、失敗或已換條目都要恢復按鈕
             selected = panel.selected
             if (
                 ticket != self._confirm_ticket
@@ -285,7 +293,23 @@ class ReviewScopeController:
             owner="moddb-review-scope-preview",
         )
         if not launched:
+            self._set_previewing(False)
             show_snack(panel._page, "審核預覽無法啟動，或應用程式正在關閉。", C.GOLD)
+
+    def _set_previewing(self, previewing: bool) -> None:
+        """審核範圍查詢期間停用「審核」按鈕並顯示「查詢中…」，結束後恢復原標籤與狀態。"""
+        panel = self.panel
+        if previewing == self._previewing:
+            return
+        self._previewing = previewing
+        if previewing:
+            self._confirm_label = panel.confirm_btn.content
+            panel.confirm_btn.content = "查詢中…"
+            panel.confirm_btn.disabled = True
+        else:
+            panel.confirm_btn.content = self._confirm_label or panel.confirm_btn.content
+            self.update_buttons()
+        update_regions(panel.confirm_btn)
 
     @staticmethod
     def _preview_review(
@@ -541,6 +565,12 @@ class ReviewScopeController:
             padding=ft.Padding.only(bottom=2),
         )
 
+    def _source_text_parts(self, entry: EntryRow) -> tuple[str, str]:
+        """原文欄的名稱與語系；語系取自編輯面板已載入的條目詳情，不另外查資料庫。"""
+        detail = getattr(self.panel, "detail", None)
+        loaded = detail is not None and detail.entry.id == entry.id
+        return source_text_parts(entry.kind, detail.source_locale if loaded else None)
+
     def _build_entry_comparison(self, entry: EntryRow, db: TranslationDB) -> ft.Column:
         catalog = source_catalog_for(db)
         source_name = source_label(entry.source, catalog, entry.review_status)
@@ -566,7 +596,7 @@ class ReviewScopeController:
                 ft.Row(
                     [
                         self._build_language_box(
-                            "英文原文", "en_us", entry.en_us, "dia"
+                            *self._source_text_parts(entry), entry.en_us, "dia"
                         ),
                         self._build_language_box(
                             "繁體中文譯文", "zh_tw", entry.zh_tw, "em", quality

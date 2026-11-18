@@ -17,7 +17,7 @@ app/views/config/
   ├─ config_actions.py                   ← 泛化的載入／儲存（load_config_into_view / save_config_from_view）
   ├─ config_form.py                      ← 共用 UI 工具（build_card / build_header / build_footer / build_key_row / build_key_field）
   ├─ chatgpt_oauth_panel.py              ← ChatGPT 登入與模型選單區塊（ChatGPTOAuthPanel）
-  └─ db_location.py                      ← 頁面頂部「資料庫位置」資訊列
+  └─ db_location.py                      ← 頁面頂部「資料庫位置」資訊列（清除未使用自訂來源在背景執行）
 ```
 
 新增一個一般設定只需在 `config_schema.SETTINGS` 加一個 `Setting`（見 `docs/reference/configuration.md`）；

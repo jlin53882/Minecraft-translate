@@ -62,6 +62,9 @@ def texts_of(control) -> list[str]:
     value = getattr(control, "value", None)
     if isinstance(value, str) and type(control).__name__ == "Text":
         found.append(value)
+    spans = getattr(control, "spans", None)
+    if type(control).__name__ == "Text" and spans:
+        found.append("".join(span.text or "" for span in spans))
     for attr in ("controls", "content"):
         child = getattr(control, attr, None)
         if isinstance(child, list):
@@ -344,14 +347,14 @@ def test_database_tab_refreshes_and_entry_filters_run_in_worker(db_path, monkeyp
             assert view._panels[key].refresh_indicator.visible is True
             if key == "entries":
                 assert view.entries._data_loading is True
-                assert view.entries.smart_review_btn.disabled is True
+                assert view.entries.review_tools.disabled is True
             assert page.operation_registry.wait_for_idle(timeout=2)
             page._run_all_tasks()
             page._tasks.clear()
             assert view._panels[key].refresh_indicator.visible is False
             if key == "entries":
                 assert view.entries._data_loading is False
-                assert view.entries.smart_review_btn.disabled is False
+                assert view.entries.review_tools.disabled is False
         assert view.entries.total == 3
         assert view.scan._db_versions == {"1.21.1", "1.20.1"}
         assert "未翻譯" in view.translate.count_text.value
@@ -1800,9 +1803,14 @@ def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
         panel.mode == "zip" and panel.source_dd.visible and panel.zip_pick_btn.visible
     )
     assert panel.mode_note.visible is True
+    # zh_tw 固定逐字匯入，開關改管 zh_cn；替換規則只在讀 zh_cn 時可開
     assert (
-        panel.jar_tr_row.visible is False and panel.rules_row.visible is False
-    )  # zh_tw 不判讀、不套規則
+        panel.jar_tr_row.visible and panel.rules_row.visible and panel.pack_row.visible
+    )
+    assert panel.jar_tr_row.label == scan_panel.ZIP_JAR_TR_LABEL
+    assert not panel.jar_tr_row.disabled_state and not panel.rules_row.disabled_state
+    assert not panel.pack_row.disabled_state
+    assert panel.jar_tr_row.value is True and panel.rules_row.value is True
     assert panel.start_btn.content == "開始匯入 1.21.1"
 
     panel.source_dd.value = str(scan_panel.SRC_SUBTITLE)
@@ -1810,7 +1818,7 @@ def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
     opts = panel.build_options()
     assert (
         opts.translated is True
-        and opts.apply_rules is False
+        and opts.apply_rules is True
         and opts.read_jar_translations is True
     )
     assert (
@@ -1822,6 +1830,57 @@ def test_scan_panel_zip_mode_switches_controls_and_options(db_path):
     assert (
         panel.start_btn.content == "開始掃描 1.21.1" and panel.rules_row.visible is True
     )
+    assert not panel.rules_row.disabled_state and panel.rules_row.value is True
+    assert panel.jar_tr_row.label == scan_panel.JAR_TR_LABEL
+
+
+def test_scan_panel_jar_convert_cn_requires_reading_zh_cn(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel.jar_tr_row.value = False
+    panel._on_jar_tr_change()
+    assert panel.cn_row.disabled_state and panel.cn_row.value is False
+    assert not panel.rules_row.disabled_state
+    assert panel.build_options().convert_cn is False
+    panel.jar_tr_row.value = True
+    panel._on_jar_tr_change()
+    assert not panel.cn_row.disabled_state and panel.cn_row.value is True
+
+
+def test_scan_panel_zip_rules_require_zh_cn(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel._on_mode("zip")
+    panel.jar_tr_row.value = False
+    panel._on_jar_tr_change()
+    assert panel.rules_row.disabled_state and panel.rules_row.value is False
+    opts = panel.build_options()
+    assert opts.read_jar_translations is False and opts.apply_rules is False
+    assert panel.cn_row.disabled_state and panel.cn_row.value is False
+    assert opts.convert_cn is False
+    panel.jar_tr_row.value = True
+    panel._on_jar_tr_change()
+    assert not panel.rules_row.disabled_state and panel.rules_row.value is True
+    assert not panel.cn_row.disabled_state and panel.cn_row.value is True
+    assert panel.build_options().apply_rules is True
+
+
+def test_scan_panel_restores_user_choices_after_zip_mode_roundtrip(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.rules_row.value = False
+    panel.jar_tr_row.value = False
+    panel._on_mode("zip")
+    panel._on_mode("jar")
+    assert panel.rules_row.value is False and panel.jar_tr_row.value is False
+
+
+def test_scan_panel_zip_mode_passes_pack_option_through(db_path):
+    panel = scan_panel.ScanPanel(mock_page(), mock_filepicker(), lambda: None)
+    panel.version_field.value = "1.21.1"
+    panel._on_mode("zip")
+    assert panel.build_options().include_pack_content is True
+    panel.pack_row.value = False
+    assert panel.build_options().include_pack_content is False
 
 
 def test_scan_panel_imports_a_translated_zip_directly(db_path, tmp_path, monkeypatch):
@@ -2549,7 +2608,7 @@ def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
 
     assert panel._list_error == "日期格式請使用 YYYY-MM-DD"
     assert panel.count_badge.value.startswith("日期條件錯誤：")
-    assert panel.batch_replace_btn.disabled is True
+    assert panel.review_tools.disabled is True
     assert "無法套用日期篩選" in texts_of(panel.list_view)
     with pytest.raises(ValueError, match="日期格式"):
         panel.advanced_filters.time_filter()
@@ -2559,7 +2618,7 @@ def test_invalid_custom_date_has_error_state_and_blocks_batch_query(db_path):
     panel.advanced_filters.time_kind.value = "none"
     panel.advanced_filters._selection_changed()
     assert panel._list_error is not None
-    assert panel.batch_replace_btn.disabled is True
+    assert panel.review_tools.disabled is True
 
     panel.advanced_filters.start_date.value = "2026-03-01"
     panel.advanced_filters._custom_changed()

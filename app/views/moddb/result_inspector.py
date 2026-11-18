@@ -8,6 +8,7 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
 from app.views.moddb.repair_reviewer import open_repair_reviewer
+from app.views.moddb.source_text_label import source_text_name
 
 
 def _repair_detail_card(item: dict, index: int) -> ft.Container:
@@ -21,7 +22,11 @@ def _repair_detail_card(item: dict, index: int) -> ft.Container:
             [
                 ft.Text(f"{index}. {identity}", size=12, color=C.MUTED),
                 ft.Text(str(item.get("key") or ""), size=12.5, selectable=True),
-                ft.Text("英文原文", size=11, color=C.MUTED),
+                ft.Text(
+                    source_text_name(item.get("kind"), item.get("source_locale")),
+                    size=11,
+                    color=C.MUTED,
+                ),
                 ft.Text(str(item.get("en_us") or ""), selectable=True),
                 ft.Text("保留的舊譯文", size=11, color=C.MUTED),
                 ft.Text(str(item.get("old_translation") or ""), selectable=True),

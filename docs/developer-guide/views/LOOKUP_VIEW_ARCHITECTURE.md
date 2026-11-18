@@ -47,8 +47,8 @@ batch_lookup_clicked(e)
        └─ for update in run_batch_lookup_service(json_text):  # generator
             ├─ update.error → 記下 log 文字、break
             ├─ update.result → 記下結果文字
-            └─ update.progress → 記下進度值
-        finally: 經 _run_on_ui 一次套用結果文字 / 進度，並復原 UI（button + ProgressBar）
+            └─ update.progress → 記下進度值，並以 `_PROGRESS_MIN_INTERVAL`（0.1 秒）節流，經 `_push_batch_progress` → _run_on_ui 即時更新進度條與文字
+        finally: 經 _run_on_ui 套用最終結果文字 / 進度（一定執行），並復原 UI（button + ProgressBar）
 ```
 
 ## Service 層（app/services_impl/pipelines/lookup_service.py）

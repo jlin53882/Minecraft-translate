@@ -18,6 +18,7 @@ from translation_tool.translation_db import (
     QualityFilter,
     TranslationDB,
 )
+from translation_tool.translation_db.content_identity import pack_scope_of
 from translation_tool.utils.species_cache import (
     STATUS_ERROR,
     STATUS_FOUND,
@@ -83,6 +84,7 @@ def scan_species_candidates(
     kind: str | None = None,
     effective_source: int | None = None,
     require_key_hint: bool = True,
+    pack_scope: str | None = None,
 ) -> SpeciesScanResult:
     """找出指定版本／模組／類型中所有可能是學名的條目。
 
@@ -94,6 +96,10 @@ def scan_species_candidates(
     criteria = EntryFilter(
         version=version,
         mod_id=mod_id,
+        # 模組包版本：只掃該模組包身分的模組（已選模組時以模組為準）
+        pack_mod_ids=(
+            tuple(db.pack_scope_mods(version, pack_scope)) if pack_scope else None
+        ),
         kind=kind,
         source=effective_source,
         quality=QualityFilter(
@@ -129,6 +135,26 @@ def _species_scope_triples(
     ]
 
 
+def _species_pack_triples(
+    db: TranslationDB, version: str, require_key_hint: bool, pack_scope: str | None
+) -> list[tuple[str, int | None, str]]:
+    """學名候選配對中屬於指定模組包身分的部分；沒有指定時為全部。"""
+    triples = _species_scope_triples(db, version, require_key_hint)
+    if not pack_scope:
+        return triples
+    return [row for row in triples if pack_scope_of(row[0]) == pack_scope]
+
+
+def species_pack_options(
+    db: TranslationDB | None, version: str | None, *, require_key_hint: bool = True
+) -> tuple[str, ...]:
+    """含學名候選的模組包身分（KubeJS／FTB）；模組包版本選單只列這些。"""
+    if db is None or not version:
+        return ()
+    triples = _species_scope_triples(db, version, require_key_hint)
+    return tuple(sorted({scope for row in triples if (scope := pack_scope_of(row[0]))}))
+
+
 def species_scope_options(
     db: TranslationDB | None,
     version: str | None,
@@ -136,6 +162,7 @@ def species_scope_options(
     kind: str | None = None,
     source: int | None = None,
     require_key_hint: bool = True,
+    pack_scope: str | None = None,
 ) -> tuple[tuple[str, ...], dict[str | None, tuple[int, ...]]]:
     """取得含學名候選的模組與目前生效來源對照。
 
@@ -146,8 +173,8 @@ def species_scope_options(
         return (), {None: ()}
     in_kind = [
         (mod_id, source_code)
-        for mod_id, source_code, kind_value in _species_scope_triples(
-            db, version, require_key_hint
+        for mod_id, source_code, kind_value in _species_pack_triples(
+            db, version, require_key_hint, pack_scope
         )
         if kind is None or kind_value == kind
     ]
@@ -184,6 +211,7 @@ def species_kind_options(
     mod_id: str | None = None,
     source: int | None = None,
     require_key_hint: bool = True,
+    pack_scope: str | None = None,
 ) -> tuple[str, ...]:
     """目前模組與來源選擇下，仍有學名候選的類型（類型本身的選擇不限制）。"""
     if db is None or not version:
@@ -192,8 +220,8 @@ def species_kind_options(
         sorted(
             {
                 kind_value
-                for mod_value, source_code, kind_value in _species_scope_triples(
-                    db, version, require_key_hint
+                for mod_value, source_code, kind_value in _species_pack_triples(
+                    db, version, require_key_hint, pack_scope
                 )
                 if (mod_id is None or mod_value == mod_id)
                 and (source is None or source_code == source)

@@ -48,6 +48,7 @@ from app.views.moddb.operation_summaries import (
     translation_kpi_titles,
     translation_scope_text,
 )
+from app.views.moddb.pack_scope_dropdown import PackModScope, PackScopeDropdown
 from app.views.moddb.repair_card import create_repair_card, repair_copy
 from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
@@ -126,9 +127,13 @@ class TranslatePanel(ft.Column):
         self.version_dd = kit.dropdown(
             label="遊戲版本", dense=True, width=220, on_select=self._on_scope_changed
         )
+        self.pack_filter = PackScopeDropdown(self._on_scope_changed)
+        self.pack_dd = self.pack_filter.control
         self.mod_dd = kit.searchable_dropdown(
             label="模組", dense=True, width=260, on_select=self._on_scope_changed
         )
+        # 模組包版本與模組選單由目前版本的模組清單在畫面端換算
+        self.scope_mods = PackModScope(self.pack_filter, self.mod_dd, all_mods=ALL_MODS)
         self.limit_field = kit.text_field(
             "單次上限（筆，0 = 不限）",
             hint="例如 2000",
@@ -154,7 +159,12 @@ class TranslatePanel(ft.Column):
             ft.Column(
                 [
                     ft.Row(
-                        [self.version_dd, self.mod_dd, self.limit_field],
+                        [
+                            self.version_dd,
+                            self.pack_dd,
+                            self.mod_dd,
+                            self.limit_field,
+                        ],
                         spacing=12,
                         wrap=True,
                     ),
@@ -451,22 +461,20 @@ class TranslatePanel(ft.Column):
             self._clear_repair_preview()
             self._refresh_full = True  # 修復預覽區也被清掉：整個面板要更新
         versions = snapshot.get("versions", [])
-        values_before = (self.version_dd.value, self.mod_dd.value)
+        scope_dropdowns = (self.version_dd, self.pack_dd, self.mod_dd)
+        values_before = tuple(dd.value for dd in scope_dropdowns)
         changed_dropdowns: list[ft.Control] = []
         if kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions]):
             changed_dropdowns.append(self.version_dd)
         self.version_dd.value = snapshot.get("version")
-        mods = snapshot.get("mods", [])
-        if kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
-        ):
-            changed_dropdowns.append(self.mod_dd)
+        self.pack_filter.select(snapshot.get("pack"))
+        changed_dropdowns.extend(
+            self.scope_mods.set_version_mods(snapshot.get("mods", []))
+        )
         self.mod_dd.value = snapshot.get("mod", ALL_MODS)
-        if values_before != (self.version_dd.value, self.mod_dd.value):
+        if values_before != tuple(dd.value for dd in scope_dropdowns):
             changed_dropdowns.extend(
-                dd
-                for dd in (self.version_dd, self.mod_dd)
-                if dd not in changed_dropdowns
+                dd for dd in scope_dropdowns if dd not in changed_dropdowns
             )
         self._refresh_dropdowns = changed_dropdowns
         if snapshot.get("error"):
@@ -490,12 +498,7 @@ class TranslatePanel(ft.Column):
     def _refresh_mods(self) -> None:
         db = self._get_db()
         version = self.version_dd.value
-        mods = db.mods(version) if db and version else []
-        kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, "全部模組"), *((m, m) for m in mods)]
-        )
-        if self.mod_dd.value not in [ALL_MODS, *mods]:
-            self.mod_dd.value = ALL_MODS
+        self.scope_mods.set_version_mods(db.mods(version) if db and version else [])
 
     def _scope_refresh_in_background(self) -> bool:
         return callable(self._request_scope_refresh) and has_background_scheduler(
@@ -505,10 +508,16 @@ class TranslatePanel(ft.Column):
     def _on_scope_changed(self, e=None) -> None:
         # 背景可用時，模組清單與筆數由上層的背景快照載入，畫面執行緒不查資料庫。
         background = self._scope_refresh_in_background()
-        if e is not None and getattr(e, "control", None) is self.version_dd:
+        control = getattr(e, "control", None) if e is not None else None
+        if control is self.version_dd:
+            self.pack_filter.select(None)
             self.mod_dd.value = ALL_MODS
             if not background:
                 self._refresh_mods()
+        elif control is self.pack_dd:
+            # 換模組包版本：模組選單立刻換成它的模組（畫面端換算，不必等背景快照）
+            self.mod_dd.value = ALL_MODS
+            self.scope_mods.refresh()
         self._clear_repair_preview()
         if background:
             self.count_text.value = "正在計算此範圍的筆數…"
@@ -519,8 +528,8 @@ class TranslatePanel(ft.Column):
             self._request_scope_refresh()
 
     def mod_ids(self) -> tuple[str, ...]:
-        value = self.mod_dd.value
-        return () if not value or value == ALL_MODS else (value,)
+        """機翻範圍的模組（見 ``PackModScope.mod_ids``）；空 tuple 為全部模組。"""
+        return self.scope_mods.mod_ids()
 
     def limit(self) -> int:
         try:

@@ -560,3 +560,121 @@ def test_sync_preview_matches_execution_when_another_source_is_reviewed(db):
     result = db.execute_bulk_review(plan, actor="使用者")
     assert (result.reviewed, result.synced) == (1, 0)
     assert _entry(db, "1.20.1", "k").zh_tw == "乙"
+
+
+def test_preview_progress_is_monotonic_and_does_not_change_the_plan(db, monkeypatch):
+    from translation_tool.translation_db import bulk_review
+
+    monkeypatch.setattr(bulk_review, "_ID_CHUNK", 3)
+    db.ingest("1.21.1", [_item(f"k{i}", f"Text {i}", f"文字 {i}") for i in range(8)])
+    db.ingest("1.20.1", [_item(f"k{i}", f"Text {i}", f"舊 {i}") for i in range(8)])
+    calls: list[tuple[int, int]] = []
+
+    with_progress = db.preview_bulk_review(
+        "1.21.1",
+        SRC_JAR_TW,
+        propagate=True,
+        progress=lambda done, total: calls.append((done, total)),
+    )
+    plain = db.preview_bulk_review("1.21.1", SRC_JAR_TW, propagate=True)
+
+    assert calls == [(0, 8), (3, 8), (6, 8), (8, 8)]
+    assert [done for done, _ in calls] == sorted(done for done, _ in calls)
+    assert with_progress.candidates == plain.candidates
+    assert with_progress.sibling_info == plain.sibling_info
+
+
+def test_preview_without_propagate_reports_no_chunk_progress(db):
+    db.ingest("1.21.1", [_item("k", "Steel", "鋼")])
+    calls: list[tuple[int, int]] = []
+
+    plan = db.preview_bulk_review(
+        "1.21.1", SRC_JAR_TW, progress=lambda done, total: calls.append((done, total))
+    )
+
+    assert calls == [] and len(plan.candidates) == 1
+
+
+def test_dialog_preview_shows_phase_text_then_determinate_progress(db, monkeypatch):
+    from app.views.moddb import bulk_review_dialog as module
+    from tests.conftest import mock_page
+    from translation_tool.translation_db import bulk_review
+
+    monkeypatch.setattr(bulk_review, "_ID_CHUNK", 3)
+    monkeypatch.setattr(module, "_PROGRESS_INTERVAL", 0.0)
+    db.ingest("1.21.1", [_item(f"k{i}", f"Text {i}", f"文字 {i}") for i in range(8)])
+    db.ingest("1.20.1", [_item(f"k{i}", f"Text {i}", f"舊 {i}") for i in range(8)])
+    seen: list[tuple[str, float | None]] = []
+    monkeypatch.setattr(
+        module,
+        "launch_page_operation",
+        lambda _page, target, **_kwargs: (target(), True)[1],
+    )
+    monkeypatch.setattr(
+        module.BulkReviewDialog,
+        "_post",
+        lambda self, callback, *args, **_kwargs: callback(*args),
+    )
+    dialog = module.BulkReviewDialog(mock_page(), lambda: db, "1.21.1", None)
+    original = dialog._show_preview_progress
+
+    def spy(generation, done, total):
+        original(generation, done, total)
+        seen.append((dialog.status.value, dialog.progress.value))
+
+    monkeypatch.setattr(dialog, "_show_preview_progress", spy)
+    dialog.source_dd.value = str(SRC_JAR_TW)
+    dialog.sync_switch.value = True
+    texts: list[str] = []
+    real_set_busy = dialog._set_busy
+    monkeypatch.setattr(
+        dialog,
+        "_set_busy",
+        lambda busy, text="": (texts.append(text), real_set_busy(busy, text))[1],
+    )
+
+    dialog._preview()
+
+    assert texts[0] == module.PREVIEW_FIND_TEXT
+    assert seen[0] == ("正在整理 0 / 8 筆…", 0.0)
+    assert seen[-1] == ("正在整理 8 / 8 筆…", 1.0)
+    fractions = [fraction for _, fraction in seen]
+    assert fractions == sorted(fractions)
+    assert dialog.plan is not None and len(dialog.plan.candidates) == 8
+    assert dialog._busy is False
+
+
+def test_dialog_ignores_stale_preview_progress(db, monkeypatch):
+    from app.views.moddb import bulk_review_dialog as module
+    from tests.conftest import mock_page
+
+    dialog = module.BulkReviewDialog(mock_page(), lambda: db, "1.21.1", None)
+    dialog._set_busy(True, module.PREVIEW_FIND_TEXT)
+    dialog._show_preview_progress(dialog._generation + 1, 5, 10)  # 世代不符
+    assert dialog.status.value == module.PREVIEW_FIND_TEXT
+    assert dialog.progress.value is None
+    dialog._show_preview_progress(dialog._generation, 5, 10)
+    assert dialog.progress.value == 0.5
+    dialog._set_busy(False)
+    dialog._show_preview_progress(dialog._generation, 6, 10)  # 已結束
+    assert dialog.progress.value == 0
+    dialog._closed = True
+    dialog._set_busy(True, "x")
+    dialog._show_preview_progress(dialog._generation, 7, 10)  # 已關閉
+    assert dialog.status.value == "x"
+
+
+def test_dialog_revert_shows_busy_text_and_disables_buttons(db, monkeypatch):
+    from app.views.moddb import bulk_review_dialog as module
+    from tests.conftest import mock_page
+
+    dialog = module.BulkReviewDialog(mock_page(), lambda: db, "1.21.1", None)
+    dialog.result = type("R", (), {"batch": "b"})()
+    monkeypatch.setattr(module, "launch_page_operation", lambda *a, **k: True)
+
+    dialog._revert()
+
+    assert dialog.status.value == module.REVERT_BUSY_TEXT
+    assert dialog.progress.value is None  # 單一交易：不確定進度
+    assert dialog.revert_btn.disabled and dialog.preview_btn.disabled
+    assert dialog.close_btn.disabled and dialog.apply_btn.disabled

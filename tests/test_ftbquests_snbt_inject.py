@@ -177,3 +177,24 @@ def test_patch_lang_snbt_file_rejects_existing_malformed_target(
         ftbquests_snbt_inject.patch_lang_snbt_file(
             str(source), str(output), {"title": "新的繁中"}
         )
+
+
+def test_patch_lang_snbt_file_tolerates_trailing_extra_brace(tmp_path: Path) -> None:
+    """來源與既有目標結尾多餘的 } 與掃描端一致地忽略；輸出檔括號平衡。"""
+    import ftb_snbt_lib as snbt
+
+    source = tmp_path / "en_us.snbt"
+    output = tmp_path / "zh_tw.snbt"
+    source.write_text('{ title: "English", keep: "Keep" }\n}\n', encoding="utf-8")
+    output.write_text('{ title: "舊", keep: "保留" }\n}\n', encoding="utf-8")
+    source_before = source.read_bytes()
+
+    changed, candidates = ftbquests_snbt_inject.patch_lang_snbt_file(
+        str(source), str(output), {"title": "繁體中文"}
+    )
+
+    with output.open(encoding="utf-8") as stream:
+        result = snbt.load(stream)  # 嚴格解析成功＝輸出已不含多餘的 }
+    assert (changed, candidates) == (1, 1)
+    assert str(result["title"]) == "繁體中文" and str(result["keep"]) == "保留"
+    assert source.read_bytes() == source_before

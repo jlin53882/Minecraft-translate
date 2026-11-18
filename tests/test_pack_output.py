@@ -30,7 +30,7 @@ from translation_tool.translation_db.pack_sources import (
 )
 from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
-from translation_tool.translation_db.schema import KIND_KUBEJS_LANG
+from translation_tool.translation_db.schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG
 
 
 def test_effective_db_translations_write_to_format_specific_overlay(tmp_path: Path):
@@ -901,3 +901,38 @@ def test_legacy_ftb_selector_without_path_evidence_is_still_reported(tmp_path: P
 
     Plan.item.origin = origin
     assert _find_rescanned_items(Plan, {}) == []
+
+
+def test_export_allows_tolerated_ftb_source_warning(tmp_path: Path):
+    """來源 SNBT 可容錯時，成功產出的 overlay 不應被來源警告擋住。"""
+    root = tmp_path / "pack"
+    source = root / "config/ftbquests/quests/lang/en_us.snbt"
+    source.parent.mkdir(parents=True)
+    source.write_text('{chapter.A.title:"Hello"}\n}\n', encoding="utf-8")
+
+    db = TranslationDB(root / "translation.db")
+    try:
+        list(
+            scan_folder_generator(
+                db,
+                root,
+                ScanOptions("1.21.1", include_pack_content=True),
+                workers=1,
+            )
+        )
+        scope = scan_pack_sources(root, "1.21.1").pack_scope
+        entry_id = db._one(
+            "SELECT id FROM entry WHERE kind=? AND key=?",
+            (KIND_FTB_QUEST_LANG, "__root__.snbt|lang:chapter.A.title"),
+        )[0]
+        db.save_manual(entry_id, "你好", propagate=False)
+
+        output = tmp_path / "overlay"
+        report = export_pack_overlay(db, root, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok
+        assert "你好" in (output / "config/ftbquests/quests/lang/zh_tw.snbt").read_text(
+            encoding="utf-8"
+        )
+    finally:
+        db.close()

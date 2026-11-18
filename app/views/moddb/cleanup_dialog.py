@@ -37,6 +37,11 @@ from app.views.moddb.operation_summaries import (
     cleanup_category_lines,
     cleanup_plan_lines,
 )
+from app.views.moddb.progress_reporter import (
+    progress_text,
+    progress_value,
+    throttled_progress,
+)
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PREVIEW_REQUIRED_HINT = "請先按「預覽刪除」，確認可刪除筆數後才能執行。"
@@ -59,6 +64,7 @@ class CleanupDialog:
         self._busy = False
         self._closed = False
         self._generation = 0
+        self._op_token = 0  # 每次進入忙碌狀態加一；過期操作的進度回報據此忽略
         self._plan = (
             None  # (檢查檔, 預覽結果, 預覽時的資料庫)；任何選項或資料庫變動都要作廢
         )
@@ -381,12 +387,16 @@ class CleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "掃描條目並匯出檢查檔…")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             report = error = None
             try:
                 report = svc.export_cleanup(
-                    db, version, with_translation=with_translation
+                    db,
+                    version,
+                    with_translation=with_translation,
+                    progress=report_progress,
                 )
             except (OSError, sqlite3.Error) as exc:
                 error = exc
@@ -461,11 +471,12 @@ class CleanupDialog:
         generation = self._generation
         self._reset_plan()
         self._set_busy(True, "讀取檢查檔並重新檢查…")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             plan = error = None
             try:
-                plan = svc.preview_cleanup(db, path)
+                plan = svc.preview_cleanup(db, path, progress=report_progress)
             except (ValueError, OSError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -533,11 +544,14 @@ class CleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "刪除中…")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             plan = error = None
             try:
-                plan = svc.apply_cleanup(db, path, previewed.token)
+                plan = svc.apply_cleanup(
+                    db, path, previewed.token, progress=report_progress
+                )
             except (ValueError, OSError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -590,11 +604,12 @@ class CleanupDialog:
             return
         generation = self._generation
         self._set_busy(True, "還原中…")
+        report_progress = self._progress_reporter()
 
         def work() -> None:
             result = error = None
             try:
-                result = svc.revert_cleanup(db, info.batch_id)
+                result = svc.revert_cleanup(db, info.batch_id, progress=report_progress)
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
             except Exception as exc:  # noqa: BLE001 - worker boundary reports unexpected failures
@@ -672,6 +687,30 @@ class CleanupDialog:
             on_failure=self._mark_post_failure,
         )
 
+    def _progress_reporter(self):
+        """目前操作的節流進度回報（背景呼叫，只把更新排回畫面執行緒）。"""
+        token = self._op_token
+        return throttled_progress(lambda progress: self._post_progress(token, progress))
+
+    def _post_progress(self, token: int, progress) -> None:
+        """進度更新排回畫面；失敗時靜默略過（寫入交易仍在執行，不可回收忙碌狀態）。"""
+        post_to_ui(
+            self.page,
+            self._show_progress,
+            token,
+            progress,
+            label="Mod 資料庫清理進度",
+            quiet=True,
+        )
+
+    def _show_progress(self, token: int, progress) -> None:
+        """在畫面執行緒顯示目前階段的確定進度；視窗已關閉、操作已結束或已被新操作取代時略過。"""
+        if self._closed or not self._busy or token != self._op_token:
+            return
+        self.progress.value = progress_value(progress)
+        self.status.value = progress_text(progress)
+        self._safe_update()
+
     def _callback_is_current(self, generation) -> bool:
         """只允許仍屬於目前開啟視窗的結果更新 UI。"""
         return not self._closed and (
@@ -684,6 +723,8 @@ class CleanupDialog:
 
     def _set_busy(self, busy: bool, text: str = "") -> None:
         self._busy = busy
+        if busy:
+            self._op_token += 1
         for control in (
             self.version_dd,
             self.export_btn,

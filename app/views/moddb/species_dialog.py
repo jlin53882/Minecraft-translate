@@ -17,6 +17,7 @@ from app.services_impl.moddb_service import (
     cached_species_lookup,
     scan_species_candidates,
     species_kind_options,
+    species_pack_options,
     species_scope_options,
 )
 from app.tasks.operation_registry import (
@@ -40,6 +41,7 @@ from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
 from app.views.moddb import species_bulk_lookup as bulk
 from app.views.moddb.formatting import kind_label
+from app.views.moddb.pack_scope_dropdown import PackScopeDropdown, pack_scope_label
 from translation_tool.utils.log_unit import log_exception
 
 # 候選列表每頁顯示幾筆（候選數量不設上限，用頁碼切換）。
@@ -92,10 +94,12 @@ class SpeciesCandidateDialog:
         on_open_entry=None,
         *,
         effective_source: int | None = None,
+        pack_scope: str | None = None,
     ):
         self.page = page
         self.get_db = get_db
         self.version = version
+        self.pack_scope = (pack_scope or "").strip() or None
         self.mod_id = mod_id
         self.kind = kind
         self.effective_source = effective_source
@@ -122,6 +126,8 @@ class SpeciesCandidateDialog:
 
     def _scope_text(self) -> str:
         version = self.version or "未選擇版本"
+        if self.pack_scope:
+            version += f"・{pack_scope_label(self.pack_scope)}"
         mod = self.mod_id or "全部模組"
         kind = kind_label(self.kind) if self.kind else "全部類型"
         source = (
@@ -139,6 +145,8 @@ class SpeciesCandidateDialog:
             color=C.MUTED,
             selectable=True,
         )
+        self.pack_filter = PackScopeDropdown(self._on_pack, initial=self.pack_scope)
+        self.pack_dd = self.pack_filter.control
         self.mod_dd = kit.searchable_dropdown(
             label="模組",
             dense=True,
@@ -256,15 +264,23 @@ class SpeciesCandidateDialog:
         self.background_btn.visible = False
         self.close_btn = ft.TextButton("關閉", on_click=self._close)
 
-    def _scope_query(self, require_key_hint: bool, kind, mod_id, source):
-        """在背景工作中讀取學名候選的模組、來源與類型對照（依目前選擇互相縮小）。"""
+    def _scope_query(
+        self, require_key_hint: bool, kind, mod_id, source, pack_scope=None
+    ):
+        """在背景工作中讀取學名候選的模組包版本、模組、來源與類型對照（依目前選擇互相縮小）。"""
         db = self.get_db()
+        packs = species_pack_options(
+            db, self.version, require_key_hint=require_key_hint
+        )
+        if pack_scope not in packs:
+            pack_scope = None
         modules, sources_by_mod = species_scope_options(
             db,
             self.version,
             kind=kind,
             source=source,
             require_key_hint=require_key_hint,
+            pack_scope=pack_scope,
         )
         kinds = species_kind_options(
             db,
@@ -272,8 +288,9 @@ class SpeciesCandidateDialog:
             mod_id=mod_id,
             source=source,
             require_key_hint=require_key_hint,
+            pack_scope=pack_scope,
         )
-        return modules, sources_by_mod, kinds
+        return modules, sources_by_mod, kinds, packs
 
     def _start_scope_options_load(self) -> None:
         """背景載入學名篩選選項，避免開啟或切換條件時阻塞 UI。"""
@@ -281,6 +298,7 @@ class SpeciesCandidateDialog:
         seq = self._scope_seq
         require_key_hint = not bool(self.loose_check.value)
         kind, mod_id, source = self.kind, self.mod_id, self.effective_source
+        pack_scope = self.pack_scope
         self._scope_loading = True
         self.status.value = "正在更新學名候選的模組、來源與類型選單…"
         if self._opened:
@@ -290,7 +308,9 @@ class SpeciesCandidateDialog:
             """執行範圍唯讀查詢，只回傳下拉選單需要的資料。"""
             result = error = None
             try:
-                result = self._scope_query(require_key_hint, kind, mod_id, source)
+                result = self._scope_query(
+                    require_key_hint, kind, mod_id, source, pack_scope
+                )
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
                 log_exception("Mod 資料庫學名掃描範圍選單載入失敗")
@@ -306,7 +326,11 @@ class SpeciesCandidateDialog:
                 if self._opened:
                     self._flush(force=True)
                 return
-            modules, sources_by_mod, kinds = result
+            modules, sources_by_mod, kinds, packs = result
+            # 只列有學名候選的模組包；原本選的不在清單裡時退回「全部」
+            self.pack_filter.set_scopes(packs)
+            self.pack_scope = self.pack_filter.scope
+            self.scope.value = self._scope_text()
             self._scope_modules = tuple(modules)
             self._scope_sources_by_mod = {
                 key: tuple(values) for key, values in sources_by_mod.items()
@@ -325,6 +349,15 @@ class SpeciesCandidateDialog:
             "載入學名掃描範圍選單",
             presentation=OperationPresentation.MAINTENANCE,
         )
+
+    def _on_pack(self, _e=None) -> None:
+        """模組包版本變更時模組清單跟著換，已選的模組不一定屬於它，所以一併清掉。"""
+        self.pack_scope = self.pack_filter.scope
+        self.mod_id = None
+        self.mod_dd.value = ALL_MODS
+        self.scope.value = self._scope_text()
+        self._invalidate_scan()
+        self._start_scope_options_load()
 
     def _refresh_mod_options(self) -> None:
         """模組選單只列目前類型與來源下有學名候選的模組；選擇失效時改回全部模組。"""
@@ -409,7 +442,7 @@ class SpeciesCandidateDialog:
                         self.scope,
                         self.hint,
                         ft.Row(
-                            [self.mod_dd, self.kind_dd, self.source_dd],
+                            [self.pack_dd, self.mod_dd, self.kind_dd, self.source_dd],
                             spacing=10,
                             wrap=True,
                         ),
@@ -511,6 +544,7 @@ class SpeciesCandidateDialog:
                     kind=self.kind,
                     effective_source=self.effective_source,
                     require_key_hint=not loose,
+                    pack_scope=self.pack_scope,
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
@@ -894,6 +928,7 @@ class SpeciesCandidateDialog:
         self._busy = busy
         self.scan_btn.disabled = busy or self.job.running
         self.loose_check.disabled = busy or self.job.running
+        self.pack_filter.set_busy(busy or self.job.running)
         self.mod_dd.disabled = busy or self.job.running
         self.source_dd.disabled = busy or self.job.running
         self._sync_query_all_enabled()

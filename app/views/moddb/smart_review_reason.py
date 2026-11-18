@@ -7,6 +7,7 @@ import flet as ft
 from app.services_impl.moddb_smart_review_service import SmartReviewCandidate
 from app.ui.design import C
 from app.views.moddb.smart_review_evidence import SmartReviewEvidencePresenter
+from app.views.moddb.text_compare import text_control
 
 
 def reason_text(row: SmartReviewCandidate) -> str:
@@ -19,21 +20,36 @@ def issue_text(row: SmartReviewCandidate) -> str:
     return "、".join(row.issue_types) or "未標記"
 
 
-def build_batch_text_line(label: str, value: str, *, main: bool = False) -> ft.Row:
-    """建立批量卡片的原文／現況／建議摘要列。"""
+def build_batch_text_line(
+    label: str,
+    value: str,
+    *,
+    main: bool = False,
+    base: str | None = None,
+    compare: bool = False,
+) -> ft.Row:
+    """建立批量卡片的原文／現況／建議摘要列。
+
+    ``compare`` 為真時是譯文列：不可見字元以標記顯示，並與 ``base`` 比對差異；
+    否則（AI 理由、問題類型）維持純文字。只影響顯示，不改 ``value``。
+    """
+    size = 13 if main else 12
+    color = C.TEXT if main else C.MUTED
+    if compare and value:
+        text = text_control(value, base, size=size, color=color, max_lines=3)
+        text.expand = True
+    else:
+        text = ft.Text(
+            value or "（無內容）",
+            size=size,
+            color=color,
+            selectable=True,
+            expand=True,
+            max_lines=3,
+            overflow=ft.TextOverflow.ELLIPSIS,
+        )
     return ft.Row(
-        [
-            ft.Container(ft.Text(label, size=10.5, color=C.DIM), width=30),
-            ft.Text(
-                value or "（無內容）",
-                size=13 if main else 12,
-                color=C.TEXT if main else C.MUTED,
-                selectable=True,
-                expand=True,
-                max_lines=3,
-                overflow=ft.TextOverflow.ELLIPSIS,
-            ),
-        ],
+        [ft.Container(ft.Text(label, size=10.5, color=C.DIM), width=30), text],
         spacing=6,
         vertical_alignment=ft.CrossAxisAlignment.START,
     )

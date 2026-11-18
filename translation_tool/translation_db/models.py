@@ -80,6 +80,8 @@ class SameSourceAIEntry:
     revision: int | None = None
     checker: str = ""
     review_status: str | None = None
+    # 原文的可信來源語系；查詢後由服務層補上，無法確定為 None
+    source_locale: str | None = None
 
 
 @dataclass(frozen=True)
@@ -127,6 +129,7 @@ class SameTextRow:
     zh_tw: str
     source: int | None
     review_status: str | None = None
+    kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -241,6 +244,9 @@ class EntryFilter:
     exclude_ids: tuple[int, ...] = ()
     # 只列最近一次智慧校對批次中處於該狀態群組的條目（鍵見 SMART_REVIEW_FILTER_GROUPS）
     smart_review: str | None = None
+    # 整合包版本篩選：只列這些模組識別（該整合包的 KubeJS／FTB 模組，見
+    # TranslationDB.pack_mods）；None 為不限。已選模組時以模組為準。
+    pack_mod_ids: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.smart_review is not None and (
@@ -264,6 +270,10 @@ class EntryFilter:
             "manual_activity_oldest",
         }:
             raise ValueError(f"未知條目排序：{self.sort_by}")
+        if self.pack_mod_ids is not None:
+            object.__setattr__(
+                self, "pack_mod_ids", tuple(dict.fromkeys(self.pack_mod_ids))
+            )
         for name in ("entry_ids", "include_ids", "exclude_ids"):
             values = getattr(self, name)
             if values is not None:
@@ -534,6 +544,8 @@ class EntryDetail:
     entry: EntryRow
     translations: list[TranslationRow] = field(default_factory=list)
     origins: list[EntryOrigin] = field(default_factory=list)
+    # 原文欄的可信來源語系（KubeJS／FTB 沒有 en_us 時會以其他語系為原文）；無法確定為 None
+    source_locale: str | None = None
     references: list[SourceReference] = field(default_factory=list)
     versions: list[str] = field(default_factory=list)
     # 與 versions 一一對應：KubeJS／FTB 內容的整合包資料夾名稱，其餘為空字串。
@@ -722,6 +734,8 @@ class BulkReviewPlan:
     sibling_info: tuple[tuple[int, int, int, str], ...] = ()
     # 類型範圍（None 代表全部類型）；放在最後是為了保留既有欄位的位置參數順序
     kind: str | None = None
+    # 模組包版本範圍（模組包身分；None 代表不限）
+    pack_scope: str | None = None
 
     def sibling_totals(self, excluded: Iterable[int] = ()) -> tuple[int, int]:
         """扣掉被排除的條目後，同步會寫入的其他版本筆數與其中會取代不同譯文的筆數。"""

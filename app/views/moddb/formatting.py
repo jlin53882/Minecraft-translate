@@ -53,6 +53,12 @@ def shorten(text: str, limit: int = 60) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
+def clip_text(text: str, limit: int = 60) -> str:
+    """只截斷、不折疊空白：結尾空白等不可見字元要留給標記顯示（截斷處以「…」結尾）。"""
+    text = text or ""
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def format_count(value: int | None) -> str:
     return "—" if value is None else f"{value:,}"
 

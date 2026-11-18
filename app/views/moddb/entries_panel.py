@@ -43,9 +43,12 @@ from app.views.moddb.entry_filters import (
     build_filter_controls,
     database_identity,
     entry_filter,
+    load_filter_options_sync,
+    load_mod_and_kind_options_sync,
     on_advanced_change,
     open_batch_replace,
     open_bulk_review,
+    open_same_text_review,
     open_version_diff,
     prepare_entries_snapshot,
     refresh_entry_filter,
@@ -57,7 +60,6 @@ from app.views.moddb.format_diff_review import FormatDiffReview
 from app.views.moddb.format_diff_viewer import FormatDiffViewer
 from app.views.moddb.formatting import (
     format_count,
-    kind_label,
     whitespace_note,
 )
 from app.views.moddb.history_renderer import render_history
@@ -71,6 +73,7 @@ from app.views.moddb.smart_review_marks import (
     smart_review_mark_chip,
 )
 from app.views.moddb.source_filter import SourceFilter
+from app.views.moddb.source_text_label import source_text_label
 from app.views.moddb.species_suggestion import (
     TAB_KEY as SPECIES_TAB_KEY,
 )
@@ -122,6 +125,9 @@ class EntriesPanel(ft.Column):
         self._search_debounce = Debouncer(lambda: self._page, SEARCH_DEBOUNCE_SECONDS)
         self.version: str | None = None
         self.mod_id: str | None = None
+        # 模組包版本篩選：名稱與它解析後的模組清單（由背景快照填入）
+        self.pack: str | None = None
+        self.pack_mod_ids: tuple[str, ...] | None = None
         self.kind: str | None = None
         # 批次機翻「特殊字元不一致」的檢視：只列這些條目，並把 AI 譯文預填到譯文框供修正
         self.entry_ids: list[int] | None = None
@@ -382,22 +388,11 @@ class EntriesPanel(ft.Column):
 
     def _update_data_actions(self) -> None:
         disabled = self._data_loading or bool(self._list_error)
-        changed = []
-        for name in (
-            "batch_replace_btn",
-            "bulk_review_btn",
-            "version_diff_btn",
-            "smart_review_btn",
-            "species_scan_btn",
-        ):
-            button = getattr(self, name, None)
-            if button is not None and button.disabled != disabled:
-                button.disabled = disabled
-                changed.append(button)
+        menu = getattr(self, "review_tools", None)
         # 篩選卡可能在載入中被別的事件（例如搜尋欄）整張送出，帶著停用狀態；
-        # 篩選列的差異比對不知道這件事，所以按鈕狀態一改變就直接送出這幾顆按鈕。
-        if changed:
-            update_regions(*changed)
+        # 篩選列的差異比對不知道這件事，所以選單狀態一改變就直接送出審核工具選單。
+        if menu is not None and menu.set_disabled(disabled):
+            update_regions(menu.control)
 
     @staticmethod
     def _database_identity(db):
@@ -427,6 +422,9 @@ class EntriesPanel(ft.Column):
     def _open_version_diff(self, _e=None) -> None:
         open_version_diff(self, _e)
 
+    def _open_same_text_review(self, _e=None, *, en_us: str | None = None) -> None:
+        open_same_text_review(self, _e, en_us=en_us)
+
     def _after_batch_replace(self, result) -> None:
         entry_writes.after_data_change(self)
 
@@ -452,7 +450,7 @@ class EntriesPanel(ft.Column):
         identity = self._database_identity(db)
         self._render_source_catalog = source_catalog_for(db)
         self._sync_database_identity(identity)
-        self._refresh_filter_options()
+        load_filter_options_sync(self)
         self._load_list(keep_selection=keep_selection, keep_scroll=keep_scroll)
 
     def apply_refresh_snapshot(self, snapshot: dict) -> None:
@@ -502,74 +500,6 @@ class EntriesPanel(ft.Column):
         if self._post_refresh_message and self.selected is not None:
             self.saved_text.value = self._post_refresh_message
         self._post_refresh_message = None
-
-    def _load_mods(self) -> None:
-        db = self.db()
-        mods = db.mods(self.version) if (db and self.version) else []
-        kit.set_dropdown_options(
-            self.mod_dd, [(ALL_MODS, ALL_MODS), *((m, m) for m in mods)]
-        )
-        if self.mod_id not in mods:
-            self.mod_id = None
-        self.mod_dd.value = self.mod_id or ALL_MODS
-        self._load_kinds()
-
-    def _refresh_filter_options(self) -> None:
-        """使用與條目清單相同的 scope 重新載入 module/source 選項。"""
-        db = self.db()
-        if db is None:
-            self.version_dd.options = []
-            self._load_mods()
-            return
-
-        # 讓同步 fallback 與 standalone panel 測試使用和 ModDbView worker snapshot 相同的選項語意。
-        # 這裡刻意採用區域 import，因為 panel_refresh 會從本模組匯入 PAGE_SIZE。
-        from app.views.moddb.panel_refresh import _resolve_entries_scope
-
-        try:
-            criteria = self._entry_filter()
-        except ValueError:
-            # 顯示給使用者的驗證錯誤由 _load_list 負責。
-            # 回報錯誤時保留上一次有效的相依選項，避免在此處再次拋出例外。
-            return
-        scope = _resolve_entries_scope(
-            db,
-            {
-                "criteria": criteria,
-                "version": self.version,
-                "mod_id": self.mod_id,
-                "kind": self.kind,
-            },
-            current_settings(),
-        )
-        apply_filter_options(
-            self,
-            {
-                "identity": self._database_identity(db),
-                "source_catalog": self._render_source_catalog,
-                "effective_source_codes": scope["source_codes"],
-                "filter_options_are_filtered": scope["options_are_filtered"],
-                "versions": scope["versions"],
-                "version": scope["version"],
-                "mods": scope["mods"],
-                "kinds": scope["kinds"],
-                "source": scope["source"],
-                "mod_id": scope["mod_id"],
-                "kind": scope["kind"],
-            },
-        )
-
-    def _load_kinds(self) -> None:
-        """類型選項取自資料庫實際出現的類型（日後新增類型會自動出現）。"""
-        db = self.db()
-        kinds = db.kinds(self.version) if (db and self.version) else []
-        kit.set_dropdown_options(
-            self.kind_dd,
-            [(ALL_KINDS, ALL_KINDS), *((k, kind_label(k)) for k in kinds)],
-        )
-        if self.kind not in kinds:
-            self.kind = None
-        self.kind_dd.value = self.kind or ALL_KINDS
 
     def _load_list(
         self,
@@ -629,7 +559,15 @@ class EntriesPanel(ft.Column):
         if self._on_filter_changed is None:
             # standalone panel 與同步 fallback 頁面沒有父層 snapshot worker
             # 可以套用相依下拉選項，因此由面板自行更新。
-            self._refresh_filter_options()
+            load_filter_options_sync(self)
+
+    def _on_no_data_hint(self) -> bool:
+        """背景查到日期範圍說明後重畫空清單；清單已有資料時回傳 False（結果不再適用）。"""
+        if self.rows:
+            return False
+        self._render_list(keep_scroll=True)
+        self._flush_list()
+        return True
 
     def _render_list(self, *, keep_scroll: bool = False) -> None:
         self.count_badge.value = (
@@ -644,7 +582,9 @@ class EntriesPanel(ft.Column):
             time_hint = (
                 None
                 if self._list_error or not self.version
-                else self.advanced_filters.announce_no_data(self.db, self._entry_filter)
+                else self.advanced_filters.no_data_hint_text(
+                    self._page, self.db, self._entry_filter, self._on_no_data_hint
+                )
             )
             empty = kit.empty_state(
                 "無法套用日期篩選" if self._list_error else "沒有符合的條目",
@@ -739,6 +679,7 @@ class EntriesPanel(ft.Column):
             self.tw_field.value or "",
             metadata=[self.source_chip, self.review_chip, self.smart_chip],
             kind=entry.kind,
+            source_label=source_text_label(entry.kind, detail.source_locale),
         )
         if impact is not None and impact.entry_id == entry.id:
             self._update_format_hints()
@@ -801,6 +742,7 @@ class EntriesPanel(ft.Column):
             self.sug_tab,
             self._apply_suggestion,
             catalog=catalog or source_catalog_for(self.db()),
+            on_review_same_text=lambda en_us: self._open_same_text_review(en_us=en_us),
         )
 
     def _render_history(self, *, catalog=None) -> None:
@@ -809,9 +751,21 @@ class EntriesPanel(ft.Column):
     # ------------------------------------------------------------------ 事件
     def _on_version(self, e) -> None:
         self.version = e.control.value
+        self._clear_pack()
         self.mod_id = None
         if self._on_filter_changed is None:
-            self._load_mods()
+            load_mod_and_kind_options_sync(self)
+        refresh_entry_filter(self, full_refresh=True)
+
+    def _clear_pack(self) -> None:
+        self.pack = None
+        self.pack_mod_ids = None
+
+    def _on_pack(self, e) -> None:
+        """換模組包版本：模組清單跟著換，原本選的模組不一定屬於它，所以一併清掉。"""
+        self._clear_pack()
+        self.pack = self.pack_filter.scope
+        self.mod_id = None
         refresh_entry_filter(self, full_refresh=True)
 
     def _on_mod(self, e) -> None:
@@ -1081,6 +1035,7 @@ class EntriesPanel(ft.Column):
         """從批次機翻跳進來：只列「特殊字元不一致、沒寫入」的條目，並預填 AI 譯文供修正。"""
         self._sync_database_identity(self._database_identity(self.db()))
         self.version = version
+        self._clear_pack()
         self.mod_id = None
         self.kind = None
         self.version_dd.value = version

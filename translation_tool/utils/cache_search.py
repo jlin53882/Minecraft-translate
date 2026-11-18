@@ -618,16 +618,22 @@ def rebuild_from_cache_dicts(
     engine: CacheSearchEngine,
     cache_types: list[str],
     cache_state: dict[str, dict[str, Any]],
+    on_progress: Callable[[int, int, str | None], None] | None = None,
 ) -> int:
-    """依序重建多個類型的索引，回傳實際索引筆數。"""
+    """依序重建多個類型的索引，回傳實際索引筆數。
+
+    每個類型索引完成後呼叫 ``on_progress(已完成類型數, 類型總數, 訊息)``。
+    """
     total_indexed = 0
-    for cache_type in cache_types:
+    for index, cache_type in enumerate(cache_types, start=1):
         entries = build_index_entries(
             cache_type, cache_store.get_cache_type_dict(cache_state, cache_type)
         )
         if entries:
             engine.index_batch(entries)
             total_indexed += len(entries)
+        if on_progress is not None:
+            on_progress(index, len(cache_types), f"已索引 {cache_type}")
 
     return total_indexed
 
@@ -677,7 +683,10 @@ class SearchOrchestrator:
             return self._engine
 
     def rebuild_search_index(
-        self, cache_types: list[str], cache_state: dict[str, dict[str, Any]]
+        self,
+        cache_types: list[str],
+        cache_state: dict[str, dict[str, Any]],
+        on_progress: Callable[[int, int, str | None], None] | None = None,
     ) -> int:
         """以暫存檔重建整體索引，完成後原子替換正式索引檔。
 
@@ -689,7 +698,9 @@ class SearchOrchestrator:
 
         for attempt in range(max_retries):
             try:
-                return self._do_rebuild_search_index(db_path, cache_types, cache_state)
+                return self._do_rebuild_search_index(
+                    db_path, cache_types, cache_state, on_progress
+                )
             except PermissionError:
                 if attempt < max_retries - 1:
                     import time
@@ -701,7 +712,11 @@ class SearchOrchestrator:
                     raise
 
     def _do_rebuild_search_index(
-        self, db_path, cache_types: list[str], cache_state: dict[str, dict[str, Any]]
+        self,
+        db_path,
+        cache_types: list[str],
+        cache_state: dict[str, dict[str, Any]],
+        on_progress: Callable[[int, int, str | None], None] | None = None,
     ) -> int:
         """先在暫存檔建好新索引，再原子替換正式索引檔。
 
@@ -713,9 +728,14 @@ class SearchOrchestrator:
 
         tmp_engine = CacheSearchEngine(str(tmp_path))
         try:
-            total_indexed = rebuild_from_cache_dicts(
-                tmp_engine, cache_types, cache_state
-            )
+            if on_progress is None:
+                total_indexed = rebuild_from_cache_dicts(
+                    tmp_engine, cache_types, cache_state
+                )
+            else:
+                total_indexed = rebuild_from_cache_dicts(
+                    tmp_engine, cache_types, cache_state, on_progress
+                )
         except BaseException:
             tmp_engine.close()
             _remove_sqlite_files(tmp_path)

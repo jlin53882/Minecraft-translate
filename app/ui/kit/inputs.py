@@ -239,16 +239,21 @@ class SwitchRow(ft.Container):
         disabled: bool = False,
     ) -> None:
         self.label = label
+        self._label_text = ft.Text(
+            label, size=13, weight=ft.FontWeight.W_500, color=C.TEXT
+        )
         self.switch = ft.Switch(value=value, on_change=on_change, disabled=disabled)
+        self._sub_text = ft.Text(sub, size=11.5, color=C.DIM) if sub else None
         text_col = ft.Column(
             [
-                ft.Text(label, size=13, weight=ft.FontWeight.W_500, color=C.TEXT),
-                *([ft.Text(sub, size=11.5, color=C.DIM)] if sub else []),
+                self._label_text,
+                *([self._sub_text] if self._sub_text else []),
             ],
             spacing=2,
             tight=True,
             expand=True,
         )
+        self._text_col = text_col
         super().__init__(
             content=ft.Row(
                 [text_col, self.switch],
@@ -273,6 +278,19 @@ class SwitchRow(ft.Container):
 
     def set_disabled(self, disabled: bool) -> None:
         self.switch.disabled = disabled
+
+    def set_label(self, label: str) -> None:
+        """更新標題（同一個開關在不同模式代表不同範圍時使用）。"""
+        self.label = label
+        self._label_text.value = label
+
+    def set_sub(self, sub: str) -> None:
+        """更新說明文字（例如說明這個選項在目前模式為何不能切換）。"""
+        if self._sub_text is None:
+            self._sub_text = ft.Text(sub, size=11.5, color=C.DIM)
+            self._text_col.controls.append(self._sub_text)
+        self._sub_text.value = sub
+        self._sub_text.visible = bool(sub)
 
 
 class Segmented(ft.Container):

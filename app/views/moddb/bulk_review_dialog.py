@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import time
 
 import flet as ft
 
@@ -27,8 +28,10 @@ from app.ui.dialogs import (
 from app.ui.page_post import post_to_ui
 from app.ui.snack import show_snack
 from app.ui.update_scope import isolate, update_regions
-from app.views.moddb.formatting import format_count, kind_label, shorten
+from app.views.moddb.formatting import clip_text, format_count, kind_label, shorten
 from app.views.moddb.operation_summaries import bulk_review_result_text
+from app.views.moddb.pack_scope_dropdown import PackScopeDropdown
+from app.views.moddb.text_compare import text_control
 from translation_tool.utils.log_unit import log_exception, log_info, log_warning
 
 PAGE_SIZE = 50
@@ -36,6 +39,9 @@ ACTOR = "使用者"
 ALL_MODS = "__all__"
 ALL_KINDS = "__all__"
 ALL_SOURCES = "__all__"
+PREVIEW_FIND_TEXT = "正在找出符合條件的條目…"
+REVERT_BUSY_TEXT = "正在還原本次批量審核，請稍候…"
+_PROGRESS_INTERVAL = 0.1  # 預覽進度最多每秒回報 10 次
 PREVIEW_REQUIRED_HINT = "請先按「產生預覽」，確認批量審核範圍後才能執行。"
 
 
@@ -52,6 +58,7 @@ class BulkReviewDialog:
         mod_id: str | None = None,
         kind: str | None = None,
         effective_source: int | None = None,
+        pack_scope: str | None = None,
     ):
         """初始化對話框，必要時預填條目頁的模組、類型與目前生效來源。
 
@@ -79,6 +86,9 @@ class BulkReviewDialog:
             initial_kind=kind,
             initial_effective_source=effective_source,
         )
+        # 完整選項由背景範圍查詢補上；先放呼叫端的預填值
+        self.pack_filter = PackScopeDropdown(self._on_pack, initial=pack_scope)
+        self.pack_dd = self.pack_filter.control
         self._build_dialog()
         self._start_scope_options_load()
 
@@ -220,6 +230,7 @@ class BulkReviewDialog:
                         ft.Row(
                             [
                                 self.version_dd,
+                                self.pack_dd,
                                 self.mod_dd,
                                 self.kind_dd,
                                 self.source_dd,
@@ -291,11 +302,17 @@ class BulkReviewDialog:
         mod_id: str | None,
         kind: str | None,
         source: int | None,
+        pack_scope: str | None = None,
     ):
-        """在背景工作中讀取版本與需要審核的模組、來源與類型對照（依目前選擇互相縮小）。"""
+        """在背景工作中讀取版本與需要審核的模組包版本、模組、來源與類型對照（依目前選擇互相縮小）。"""
         db = self.get_db()
         if db is None or not version:
-            return [], (), {None: ()}, ()
+            return [], (), {None: ()}, (), ()
+        packs = db.bulk_review_pack_options(
+            version, quality_pass_only=quality_pass_only
+        )
+        if pack_scope not in packs:
+            pack_scope = None
         return (
             list(db.versions()),
             *db.bulk_review_scope_options(
@@ -303,13 +320,16 @@ class BulkReviewDialog:
                 quality_pass_only=quality_pass_only,
                 kind=kind,
                 source=source,
+                pack_scope=pack_scope,
             ),
             db.bulk_review_kind_options(
                 version,
                 quality_pass_only=quality_pass_only,
                 mod_id=mod_id,
                 source=source,
+                pack_scope=pack_scope,
             ),
+            packs,
         )
 
     def _start_scope_options_load(self) -> None:
@@ -319,6 +339,7 @@ class BulkReviewDialog:
         version = self.version_dd.value
         quality_pass_only = bool(self.quality_check.value)
         mod_id, kind, source = self._selected_scope()
+        pack_scope = self.pack_filter.scope
         self._scope_loading = True
         self.status.visible = True
         self.status.value = "正在更新需要審核的模組、來源與類型選單…"
@@ -330,7 +351,7 @@ class BulkReviewDialog:
             result = error = None
             try:
                 result = self._scope_query(
-                    version, quality_pass_only, mod_id, kind, source
+                    version, quality_pass_only, mod_id, kind, source, pack_scope
                 )
             except Exception as exc:  # noqa: BLE001 - worker boundary
                 error = exc
@@ -361,7 +382,8 @@ class BulkReviewDialog:
             if self._opened:
                 self._safe_update()
             return
-        versions, modules, sources_by_mod, kinds = result
+        versions, modules, sources_by_mod, kinds, packs = result
+        self.pack_filter.set_scopes(packs)
         current_version = self.version_dd.value
         kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions])
         self.version_dd.value = current_version if current_version in versions else None
@@ -418,9 +440,16 @@ class BulkReviewDialog:
 
     def _on_version(self, _e=None) -> None:
         """版本選擇變更時重載需要審核的模組、類型與來源，並使舊預覽失效。"""
+        self.pack_filter.select(None)
         self.mod_dd.value = ALL_MODS
         self.kind_dd.value = ALL_KINDS
         self.source_dd.value = ALL_SOURCES
+        self._invalidate()
+        self._start_scope_options_load()
+
+    def _on_pack(self, _e=None) -> None:
+        """模組包版本變更時模組清單跟著換，已選的模組不一定屬於它，所以一併清掉。"""
+        self.mod_dd.value = ALL_MODS
         self._invalidate()
         self._start_scope_options_load()
 
@@ -473,10 +502,23 @@ class BulkReviewDialog:
         source = None if source_value == ALL_SOURCES else int(source_value)
         source_text = "全部來源" if source is None else str(source)
         mod_id, kind, _source = self._selected_scope()
+        pack_scope = self.pack_filter.scope
         quality = bool(self.quality_check.value)
         propagate = bool(self.sync_switch.value)
         generation = self._generation
-        self._set_busy(True, "查詢符合條目…")
+        self._set_busy(True, PREVIEW_FIND_TEXT)
+        last_report = 0.0
+
+        def report(done: int, total: int) -> None:
+            """背景整理其他版本快照的進度：節流後排回 UI 執行緒（首尾必報）。"""
+            nonlocal last_report
+            now = time.monotonic()
+            if 0 < done < total and now - last_report < _PROGRESS_INTERVAL:
+                return
+            last_report = now
+            self._post(
+                self._show_preview_progress, generation, done, total, final=False
+            )
 
         def work() -> None:
             """執行背景查詢或寫入工作，完成後把結果排回 UI 執行緒。"""
@@ -489,6 +531,8 @@ class BulkReviewDialog:
                     kind=kind,
                     quality_pass_only=quality,
                     propagate=propagate,
+                    pack_scope=pack_scope,
+                    progress=report,
                 )
             except (ValueError, sqlite3.Error) as exc:
                 error = exc
@@ -500,6 +544,16 @@ class BulkReviewDialog:
             self._post(self._apply_preview, generation, plan, error)
 
         self._launch(work, "Mod 資料庫批量審核預覽", CommitPolicy.PARTIAL_ALLOWED)
+
+    def _show_preview_progress(self, generation: int, done: int, total: int) -> None:
+        """在 UI 執行緒顯示預覽整理進度（已過期、已關閉或已結束的預覽不更新）。"""
+        if self._closed or generation != self._generation or not self._busy:
+            return
+        if total <= 0:
+            return
+        self.progress.value = min(1.0, done / total)
+        self.status.value = f"正在整理 {format_count(done)} / {format_count(total)} 筆…"
+        self._safe_update()
 
     def _apply_preview(self, generation: int, plan, error) -> None:
         if self._closed:
@@ -592,10 +646,8 @@ class BulkReviewDialog:
                                 spacing=8,
                                 wrap=True,
                             ),
-                            self._text_line("原文", shorten(candidate.en_us, 80)),
-                            self._text_line(
-                                "譯文", shorten(candidate.zh_tw, 80), main=True
-                            ),
+                            self._text_line("原文", candidate.en_us),
+                            self._text_line("譯文", candidate.zh_tw, main=True),
                         ],
                         spacing=4,
                         tight=True,
@@ -609,18 +661,26 @@ class BulkReviewDialog:
     @staticmethod
     def _text_line(label: str, text: str, *, main: bool = False) -> ft.Control:
         """卡片內的「原文／譯文」一行：左側小標籤，右側內容（譯文用主色、較大字）。"""
+        body = (
+            text_control(
+                clip_text(text, 80),
+                size=13 if main else 12.5,
+                color=C.TEXT if main else C.MUTED,
+                show_diff=False,
+                max_lines=3,
+                selectable=False,
+            )
+            if text
+            else ft.Text("（無原文）", size=12.5, color=C.MUTED)
+        )
+        body.expand = True
         return ft.Row(
             [
                 ft.Container(
                     ft.Text(label, size=10.5, color=C.DIM),
                     width=30,
                 ),
-                ft.Text(
-                    text or "（無原文）",
-                    size=13 if main else 12.5,
-                    color=C.TEXT if main else C.MUTED,
-                    expand=True,
-                ),
+                body,
             ],
             spacing=6,
             vertical_alignment=ft.CrossAxisAlignment.START,
@@ -749,7 +809,7 @@ class BulkReviewDialog:
         if db is None or result is None or self._busy:
             return
         generation = self._generation
-        self._set_busy(True, "還原中…")
+        self._set_busy(True, REVERT_BUSY_TEXT)
 
         def work() -> None:
             count = error = None
@@ -869,6 +929,7 @@ class BulkReviewDialog:
         self._busy = busy
         self.preview_btn.disabled = busy
         self.version_dd.disabled = busy
+        self.pack_filter.set_busy(busy)
         self.source_dd.disabled = busy
         self.quality_check.disabled = busy
         self.sync_switch.disabled = busy

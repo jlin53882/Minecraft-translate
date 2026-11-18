@@ -1,4 +1,4 @@
-"""版本差異審核：批次套用的勾選規則（衝突不可批次、目標已審核需明確納入）。"""
+"""版本差異審核：批次套用的勾選規則（衝突不可批次、目標已審核需明確納入、原文不同可批次）。"""
 
 from __future__ import annotations
 
@@ -47,3 +47,13 @@ def test_selected_items_follow_selection_and_include_flag():
     assert selected_items(rows, set(), True) == []
     item = selected_items(rows, {2}, False)[0]
     assert (item.expected_target_zh_tw, item.expected_ref_zh_tw) == ("明亮", "亮色")
+
+
+def test_source_changed_rows_are_batch_selectable():
+    """原文不同的條目可以勾選批次套用（套用前由視窗再確認一次）。"""
+    from dataclasses import replace
+
+    row = replace(_row(4, reviewed=False), source_changed=True)
+    assert row.source_changed and not row.conflict
+    assert selectable(row, include_reviewed=False)
+    assert [i.entry_id for i in selected_items([row], {4}, False)] == [4]

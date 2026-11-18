@@ -9,7 +9,7 @@ import json
 import logging
 import sqlite3
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -30,6 +30,7 @@ from app.services_impl.moddb_species_service import (
     lookup_species_name,
     scan_species_candidates,
     species_kind_options,
+    species_pack_options,
     species_scope_options,
 )
 from app.services_impl.pipelines._pipeline_logging import (
@@ -61,7 +62,11 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
-from translation_tool.translation_db.content_identity import pack_label
+from translation_tool.translation_db.content_identity import (
+    content_mod_value,
+    pack_label,
+    pack_scope_of,
+)
 from translation_tool.translation_db.cross_version_review import (
     REFERENCE_LATEST,
     ApplyItem,
@@ -73,6 +78,16 @@ from translation_tool.translation_db.quality import token_issues, whitespace_not
 from translation_tool.translation_db.query_interrupt import (
     QueryCancelled,
     QueryInterrupt,
+)
+from translation_tool.translation_db.same_text_review import (
+    CATEGORY_FILL,
+    CATEGORY_INCONSISTENT,
+    MAX_SOURCE_CHARS,
+    CanonicalCandidate,
+    SameTextApplyItem,
+    SameTextApplyResult,
+    SameTextGroup,
+    SameTextMember,
 )
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 from translation_tool.translation_db.schema import (
@@ -103,6 +118,11 @@ from translation_tool.utils.worker_count import resolve_worker_count
 
 # View 經由本模組取用資料庫型別與常數（View 不直接 import translation_tool 引擎）
 __all__ = [
+    "CATEGORY_FILL",
+    "CATEGORY_INCONSISTENT",
+    "MAX_SOURCE_CHARS",
+    "NO_PACK_SCOPE_HINT",
+    "PACK_SCOPE_HINT",
     "QUALITY_TOKEN_CATEGORIES",
     "REFERENCE_LATEST",
     "SOURCE_NAMES",
@@ -124,6 +144,7 @@ __all__ = [
     "BulkReviewCandidate",
     "BulkReviewPlan",
     "BulkReviewResult",
+    "CanonicalCandidate",
     "CrossVersionRow",
     "DbSettings",
     "EntryDetail",
@@ -132,6 +153,10 @@ __all__ = [
     "QualityFilter",
     "QueryCancelled",
     "ReviewPreviewItem",
+    "SameTextApplyItem",
+    "SameTextApplyResult",
+    "SameTextGroup",
+    "SameTextMember",
     "ScanOptions",
     "SmartReviewCandidate",
     "SmartReviewRunResult",
@@ -144,6 +169,7 @@ __all__ = [
     "VersionRef",
     "VersionStat",
     "cached_species_lookup",
+    "content_mod_value",
     "current_settings",
     "custom_date_bounds",
     "custom_source_codes",
@@ -157,15 +183,19 @@ __all__ = [
     "load_db_settings",
     "lookup_species",
     "lookup_species_name",
+    "mods_in_pack",
     "normalize_db_path",
     "open_database",
     "pack_format_hint",
     "pack_label",
+    "pack_scope_options",
+    "pack_scopes_of",
     "preview_new_source_names",
     "quick_date_bounds",
     "run_moddb_scan_service",
     "scan_species_candidates",
     "species_kind_options",
+    "species_pack_options",
     "species_scope_options",
     "strip_quotes",
     "summarize_database",
@@ -277,6 +307,39 @@ def version_choices(db: TranslationDB | None = None) -> list[str]:
     except (OSError, ValueError) as exc:
         logger.debug("讀取版本清單失敗：%s", exc)
     return seen
+
+
+PACK_SCOPE_HINT = (
+    "匯入 KubeJS／FTB Quests 時所選資料夾（或 ZIP）的名稱；不一定是模組包，自建內容也會列在這裡。"
+    "模組 jar 的內容不分模組包版本。"
+)
+NO_PACK_SCOPE_HINT = "這個遊戲版本沒有匯入 KubeJS／FTB Quests 內容"
+
+
+def pack_scope_options(scopes: Sequence[str]) -> list[tuple[str, str]]:
+    """模組包版本選單的 ``(值, 顯示文字)``：值是模組包身分，文字是資料夾名稱。
+
+    不同位置的同名資料夾在名稱後面加上路徑雜湊的前六碼，否則選單上分不出來。
+    """
+    names = [scope.rpartition("@")[0] for scope in scopes]
+    options: list[tuple[str, str]] = []
+    for scope, name in zip(scopes, names, strict=True):
+        duplicated = names.count(name) > 1
+        suffix = f"（{scope.rpartition('@')[2][:6]}）" if duplicated else ""
+        options.append((scope, f"{name}{suffix}"))
+    return options
+
+
+def pack_scopes_of(mods: Sequence[str]) -> list[str]:
+    """模組清單中出現的模組包身分（排序、不重複）。"""
+    return sorted({scope for mod_id in mods if (scope := pack_scope_of(mod_id))})
+
+
+def mods_in_pack(mods: Sequence[str], scope: str | None) -> list[str]:
+    """模組清單中屬於指定模組包身分的模組；``scope`` 為空時回傳整份清單。"""
+    if not scope:
+        return list(mods)
+    return [mod_id for mod_id in mods if pack_scope_of(mod_id) == scope]
 
 
 def pack_format_hint(label: str) -> str:
