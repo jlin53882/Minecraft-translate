@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 import flet as ft
 
+from app.services_impl.moddb_translate_service import format_duration
 from app.ui import kit
 from app.ui.design import C
 
@@ -36,7 +37,8 @@ class RepairCardControls:
 SCOPE_HINT = (
     "修復的範圍沿用上方「1　選擇要機翻的範圍」的遊戲版本、模組與單次上限，"
     "AI 修復的快取寫入也遵循其中的「每次寫入新快取分片」；"
-    "「先沿用其他版本的相同譯文」只影響一般機翻。要換範圍請改上方設定後重新預覽。"
+    "「類型」與「先沿用其他版本的相同譯文」只影響一般機翻（修復可在預覽中依類型篩選）。"
+    "要換範圍請改上方設定後重新預覽。"
 )
 
 
@@ -201,3 +203,112 @@ def create_repair_card(
         newline_row,
         sync_row,
     )
+
+
+_PROGRESS_DEFAULTS = {
+    "source": "0 / 0（0%）",
+    "ai": "0 / 0",
+    "batches": "0 / 0",
+    "elapsed": "00:00",
+    "eta": "計算中",
+    "current": "等待開始",
+}
+
+
+def _progress_metric(title: str, value: ft.Text) -> ft.Column:
+    return ft.Column(
+        [ft.Text(title, size=11, color=C.MUTED), value], expand=True, spacing=2
+    )
+
+
+class RepairProgressPanel:
+    """譯文格式修復執行中的進度面板：來源項目、AI 修復項目、規劃批次、目前執行與時間。
+
+    只顯示修復專用的計數，不和一般機翻的統計卡混在一起。
+    """
+
+    def __init__(self) -> None:
+        self.source = ft.Text(size=15, color=C.TEXT)
+        self.ai = ft.Text(size=15, color=C.TEXT)
+        self.batches = ft.Text(size=15, color=C.TEXT)
+        self.elapsed = ft.Text(size=13, color=C.MUTED)
+        self.eta = ft.Text(size=13, color=C.MUTED)
+        self.current = ft.Text(size=13, color=C.TEXT, selectable=True)
+        title = ft.Text("Mod 資料庫｜譯文格式修復", size=14, weight=ft.FontWeight.W_600)
+        self.control = ft.Container(
+            visible=False,
+            padding=12,
+            bgcolor=C.PANEL2,
+            border=ft.Border.all(1, C.LINE),
+            border_radius=10,
+            content=ft.Column(
+                [
+                    ft.Row(
+                        [title, ft.Text("AI 翻譯中", size=12, color=C.EM)],
+                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+                    ),
+                    ft.Row(
+                        [
+                            _progress_metric("來源項目處理進度", self.source),
+                            _progress_metric("AI 修復項目", self.ai),
+                            _progress_metric("規劃批次", self.batches),
+                        ],
+                        spacing=16,
+                    ),
+                    ft.Row(
+                        [ft.Text("目前執行：", size=11, color=C.MUTED), self.current],
+                        spacing=4,
+                    ),
+                    ft.Row(
+                        [
+                            ft.Text("已耗時", size=11, color=C.MUTED),
+                            self.elapsed,
+                            ft.Text("　預估剩餘：", size=11, color=C.MUTED),
+                            self.eta,
+                        ],
+                        spacing=2,
+                    ),
+                ],
+                spacing=8,
+            ),
+        )
+        self.reset()
+
+    def reset(self) -> None:
+        """隱藏面板並把所有欄位回到開始前的文字。"""
+        self.control.visible = False
+        for name, text in _PROGRESS_DEFAULTS.items():
+            getattr(self, name).value = text
+
+    def show_live(self, live: dict) -> None:
+        """依修復服務回報的即時資料（``format_repair_live`` 的欄位）更新各欄。"""
+        source_done = int(live.get("source_processed", live.get("processed", 0)) or 0)
+        source_total = int(live.get("source_total", live.get("total", 0)) or 0)
+        source_percent = 100 * source_done / max(source_total, 1)
+        self.source.value = (
+            f"{source_done:,} / {source_total:,}（{source_percent:.0f}%）"
+        )
+        self.ai.value = (
+            f"{int(live.get('ai_completed', 0) or 0):,} / "
+            f"{int(live.get('ai_total', 0) or 0):,}"
+        )
+        self.batches.value = (
+            f"{int(live.get('planned_batches_done', live.get('batch_done', 0)) or 0):,} / "
+            f"{int(live.get('planned_batches_total', live.get('batch_est', 0)) or 0):,}"
+        )
+        self.elapsed.value = format_duration(live.get("elapsed_sec"))
+        eta = live.get("eta_sec")
+        self.eta.value = format_duration(eta) if eta is not None else "計算中"
+        profile = live.get("current_profile")
+        batch = live.get("current_batch")
+        status = live.get("current_status") or "等待開始"
+        if profile and batch:
+            current = (
+                f"{status}｜{profile} 項目（第 {batch} / "
+                f"{live.get('current_batch_total')} 批）"
+            )
+        else:
+            current = str(status)
+        if live.get("model_label"):
+            current += f"｜模型：{live.get('model_label')}"
+        self.current.value = current

@@ -5344,12 +5344,18 @@ class TranslationDB(
         return AITranslationReplaceResult("updated", len(synced))
 
     # --------------------------------------------------------- 批次機翻（資料庫內）
-    def _untranslated_where(self, mod_ids: Sequence[str] | None) -> tuple[str, list]:
+    def _untranslated_where(
+        self, mod_ids: Sequence[str] | None, kind: str | None = None
+    ) -> tuple[str, list]:
+        """未翻譯條件（版本參數由呼叫端放在最前面）；``kind`` 為 ``None`` 時不限類型。"""
         where = "e.mc_version = ? AND f.entry_id IS NULL AND e.en_us <> ''"
         params: list = []
         if mod_ids:
             where += f" AND e.mod_id IN ({','.join('?' * len(mod_ids))})"
             params += list(mod_ids)
+        if kind:
+            where += " AND e.kind = ?"
+            params.append(kind)
         return where, params
 
     # 其他版本已有「類型／模組／鍵值／原文都相同」的生效譯文（可直接沿用，不必呼叫 AI）
@@ -5380,7 +5386,12 @@ class TranslationDB(
         )
 
     def _untranslated_candidates_cte(
-        self, version: str, mod_ids: Sequence[str] | None, *, ordered: bool = True
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None,
+        *,
+        ordered: bool = True,
+        kind: str | None = None,
     ) -> tuple[str, list]:
         """未翻譯候選（``ordered`` 時依 (類型, 模組, 鍵值) 排序）；先用窄索引找出 id，再讀寬欄位。
 
@@ -5394,6 +5405,9 @@ class TranslationDB(
         if mod_ids:
             mod_filter = f" AND i.mod_id IN ({','.join('?' * len(mod_ids))})"
             params.extend(mod_ids)
+        if kind:
+            mod_filter += " AND i.kind = ?"
+            params.append(kind)
         sql = (
             "WITH u AS MATERIALIZED ("
             "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us, "
@@ -5407,18 +5421,30 @@ class TranslationDB(
         )
         return sql, params
 
-    def count_reusable(self, version: str, mod_ids: Sequence[str] | None = None) -> int:
+    def count_reusable(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        kind: str | None = None,
+    ) -> int:
         """未翻譯條目中，其他版本已有相同內容譯文、開始機翻時會直接沿用的筆數。"""
-        cte, params = self._untranslated_candidates_cte(version, mod_ids, ordered=False)
+        cte, params = self._untranslated_candidates_cte(
+            version, mod_ids, ordered=False, kind=kind
+        )
         reusable_peers = self._reusable_peers_sql()
         sql = f"{cte}SELECT COUNT(*) FROM u WHERE {reusable_peers} = 1"
         return self._cached_count(sql, params)
 
     def count_untranslated(
-        self, version: str, mod_ids: Sequence[str] | None = None
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        kind: str | None = None,
     ) -> int:
-        """某版本「有原文、沒有任何譯文」的條目數（可限定模組）。"""
-        where, extra = self._untranslated_where(mod_ids)
+        """某版本「有原文、沒有任何譯文」的條目數（可限定模組與類型）。"""
+        where, extra = self._untranslated_where(mod_ids, kind)
         sql = (
             "SELECT COUNT(*) FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
             f"WHERE {where}"
@@ -5443,20 +5469,22 @@ class TranslationDB(
         limit: int | None = None,
         *,
         exclude_reusable: bool = False,
+        kind: str | None = None,
     ) -> list[tuple[int, str, str, str, str]]:
         """未翻譯條目 ``(id, 類型, 模組, 鍵值, 原文)``；順序固定，重跑會接續同一批。
 
         ``exclude_reusable``：排除「其他版本已有相同內容譯文」的條目（那些會直接沿用，不送 AI）。
+        ``kind``：只取這個類型；``None`` 為全部類型。
         """
         if exclude_reusable:
-            cte, params = self._untranslated_candidates_cte(version, mod_ids)
+            cte, params = self._untranslated_candidates_cte(version, mod_ids, kind=kind)
             reusable_peers = self._reusable_peers_sql()
             sql = (
                 f"{cte}SELECT id, kind, mod_id, key, en_us FROM u "
                 f"WHERE {reusable_peers} <> 1 ORDER BY kind, mod_id, key"
             )
         else:
-            where, extra = self._untranslated_where(mod_ids)
+            where, extra = self._untranslated_where(mod_ids, kind)
             sql = (
                 "SELECT e.id, e.kind, e.mod_id, e.key, e.en_us "
                 "FROM entry e LEFT JOIN effective f ON f.entry_id = e.id "
@@ -5641,13 +5669,17 @@ class TranslationDB(
                         )
 
     def reuse_from_other_versions(
-        self, version: str, mod_ids: Sequence[str] | None = None
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        kind: str | None = None,
     ) -> int:
         """其他版本已有「類型／模組／鍵值／原文都相同」的譯文時直接沿用（不呼叫 AI）。
 
-        只填沒有任何譯文的條目；沿用時保留原本的來源標記。回傳補上的條目數。
+        只填沒有任何譯文的條目（可限定模組與類型）；沿用時保留原本的來源標記。回傳補上的條目數。
         """
-        where, extra = self._untranslated_where(mod_ids)
+        where, extra = self._untranslated_where(mod_ids, kind)
         with self._tx() as conn:
             rows = conn.execute(
                 "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
