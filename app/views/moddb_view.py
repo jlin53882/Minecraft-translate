@@ -780,6 +780,7 @@ class ModDbView(ft.Column):
                 "version": self.translate.version_dd.value,
                 "pack": self.translate.pack_filter.scope,
                 "mod": self.translate.mod_dd.value,
+                "kind": self.translate.kind_filter.kind,
                 "limit": self.translate.limit(),
                 "reuse": bool(self.translate.reuse_row.value),
             }

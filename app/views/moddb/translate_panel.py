@@ -43,13 +43,18 @@ from app.ui.update_scope import update_regions
 from app.views._log import LogView, load_ui_logging_config
 from app.views.moddb import retranslation_controller
 from app.views.moddb.formatting import format_count
+from app.views.moddb.kind_scope_dropdown import KindScopeDropdown
 from app.views.moddb.operation_summaries import (
     scope_batches_text,
     translation_kpi_titles,
     translation_scope_text,
 )
 from app.views.moddb.pack_scope_dropdown import PackModScope, PackScopeDropdown
-from app.views.moddb.repair_card import create_repair_card, repair_copy
+from app.views.moddb.repair_card import (
+    RepairProgressPanel,
+    create_repair_card,
+    repair_copy,
+)
 from app.views.moddb.repair_summary import repair_summary_detail_lines
 from app.views.moddb.result_inspector import TranslationResultInspector
 from translation_tool.utils.config_manager import load_config
@@ -134,6 +139,8 @@ class TranslatePanel(ft.Column):
         )
         # 模組包版本與模組選單由目前版本的模組清單在畫面端換算
         self.scope_mods = PackModScope(self.pack_filter, self.mod_dd, all_mods=ALL_MODS)
+        self.kind_filter = KindScopeDropdown(self._on_scope_changed)
+        self.kind_dd = self.kind_filter.control
         self.limit_field = kit.text_field(
             "單次上限（筆，0 = 不限）",
             hint="例如 2000",
@@ -163,6 +170,7 @@ class TranslatePanel(ft.Column):
                             self.version_dd,
                             self.pack_dd,
                             self.mod_dd,
+                            self.kind_dd,
                             self.limit_field,
                         ],
                         spacing=12,
@@ -190,7 +198,7 @@ class TranslatePanel(ft.Column):
         self.progress_bar = kit.progress_bar(0, "em", height=8)
         # 批次、已處理筆數、已用時間、預估剩餘時間、預計完成時刻（每批結束更新）
         self.live_text = ft.Text("", size=12.5, color=C.MUTED, selectable=True)
-        self._build_repair_progress_panel()
+        self.repair_progress = RepairProgressPanel()
         ui_cfg = load_ui_logging_config(load_config)
         self.log_view = LogView(
             page=self._page,
@@ -276,7 +284,7 @@ class TranslatePanel(ft.Column):
                         vertical_alignment=ft.CrossAxisAlignment.CENTER,
                     ),
                     self.progress_bar,
-                    self.repair_progress_panel,
+                    self.repair_progress.control,
                     self.live_text,
                     self.log_view,
                     self.log_explainer,
@@ -286,84 +294,6 @@ class TranslatePanel(ft.Column):
             ),
             icon=ft.Icons.AUTO_AWESOME,
             tone="em",
-        )
-
-    def _build_repair_progress_panel(self) -> None:
-        self.repair_progress_source = ft.Text("0 / 0（0%）", size=15, color=C.TEXT)
-        self.repair_progress_ai = ft.Text("0 / 0", size=15, color=C.TEXT)
-        self.repair_progress_batches = ft.Text("0 / 0", size=15, color=C.TEXT)
-        self.repair_progress_elapsed = ft.Text("00:00", size=13, color=C.MUTED)
-        self.repair_progress_eta = ft.Text("計算中", size=13, color=C.MUTED)
-        self.repair_progress_current = ft.Text(
-            "等待開始", size=13, color=C.TEXT, selectable=True
-        )
-        self.repair_progress_panel = ft.Container(
-            visible=False,
-            padding=12,
-            bgcolor=C.PANEL2,
-            border=ft.Border.all(1, C.LINE),
-            border_radius=10,
-            content=ft.Column(
-                [
-                    ft.Row(
-                        [
-                            ft.Text(
-                                "Mod 資料庫｜譯文格式修復",
-                                size=14,
-                                weight=ft.FontWeight.W_600,
-                            ),
-                            ft.Text("AI 翻譯中", size=12, color=C.EM),
-                        ],
-                        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
-                    ),
-                    ft.Row(
-                        [
-                            ft.Column(
-                                [
-                                    ft.Text("來源項目處理進度", size=11, color=C.MUTED),
-                                    self.repair_progress_source,
-                                ],
-                                expand=True,
-                                spacing=2,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text("AI 修復項目", size=11, color=C.MUTED),
-                                    self.repair_progress_ai,
-                                ],
-                                expand=True,
-                                spacing=2,
-                            ),
-                            ft.Column(
-                                [
-                                    ft.Text("規劃批次", size=11, color=C.MUTED),
-                                    self.repair_progress_batches,
-                                ],
-                                expand=True,
-                                spacing=2,
-                            ),
-                        ],
-                        spacing=16,
-                    ),
-                    ft.Row(
-                        [
-                            ft.Text("目前執行：", size=11, color=C.MUTED),
-                            self.repair_progress_current,
-                        ],
-                        spacing=4,
-                    ),
-                    ft.Row(
-                        [
-                            ft.Text("已耗時", size=11, color=C.MUTED),
-                            self.repair_progress_elapsed,
-                            ft.Text("　預估剩餘：", size=11, color=C.MUTED),
-                            self.repair_progress_eta,
-                        ],
-                        spacing=2,
-                    ),
-                ],
-                spacing=8,
-            ),
         )
 
     def _bind_kpi_titles(self) -> None:
@@ -461,7 +391,7 @@ class TranslatePanel(ft.Column):
             self._clear_repair_preview()
             self._refresh_full = True  # 修復預覽區也被清掉：整個面板要更新
         versions = snapshot.get("versions", [])
-        scope_dropdowns = (self.version_dd, self.pack_dd, self.mod_dd)
+        scope_dropdowns = (self.version_dd, self.pack_dd, self.mod_dd, self.kind_dd)
         values_before = tuple(dd.value for dd in scope_dropdowns)
         changed_dropdowns: list[ft.Control] = []
         if kit.set_dropdown_options(self.version_dd, [(v, v) for v in versions]):
@@ -472,6 +402,9 @@ class TranslatePanel(ft.Column):
             self.scope_mods.set_version_mods(snapshot.get("mods", []))
         )
         self.mod_dd.value = snapshot.get("mod", ALL_MODS)
+        if self.kind_filter.set_kinds(snapshot.get("kinds", [])):
+            changed_dropdowns.append(self.kind_dd)
+        self.kind_filter.select(snapshot.get("kind"))
         if values_before != tuple(dd.value for dd in scope_dropdowns):
             changed_dropdowns.extend(
                 dd for dd in scope_dropdowns if dd not in changed_dropdowns
@@ -499,6 +432,7 @@ class TranslatePanel(ft.Column):
         db = self._get_db()
         version = self.version_dd.value
         self.scope_mods.set_version_mods(db.mods(version) if db and version else [])
+        self.kind_filter.set_kinds(db.kinds(version) if db and version else [])
 
     def _scope_refresh_in_background(self) -> bool:
         return callable(self._request_scope_refresh) and has_background_scheduler(
@@ -542,9 +476,10 @@ class TranslatePanel(ft.Column):
         if not db or not version:
             self.count_text.value = "資料庫還沒有資料，請先到「掃描匯入」建立"
             return
-        missing = db.count_untranslated(version, self.mod_ids())
+        mods, kind = self.mod_ids(), self.kind_filter.kind
+        missing = db.count_untranslated(version, mods, kind=kind)
         reusable = (
-            db.count_reusable(version, self.mod_ids()) if self.reuse_row.value else 0
+            db.count_reusable(version, mods, kind=kind) if self.reuse_row.value else 0
         )
         self._set_count_text(missing, reusable)
 
@@ -610,10 +545,11 @@ class TranslatePanel(ft.Column):
         retranslation_controller.update_start_button(self, running=running)
 
     def _scope_key(self) -> tuple:
-        """預覽批數適用的範圍：版本、模組、上限與是否沿用其他版本。"""
+        """預覽批數適用的範圍：版本、模組、類型、上限與是否沿用其他版本。"""
         return (
             self.version_dd.value or "",
             tuple(self.mod_ids()),
+            self.kind_filter.kind,
             self.limit(),
             bool(self.reuse_row.value),
         )
@@ -622,6 +558,7 @@ class TranslatePanel(ft.Column):
         return TranslateOptions(
             version=self.version_dd.value or "",
             mod_ids=self.mod_ids(),
+            kind=self.kind_filter.kind,
             limit=self.limit(),
             dry_run=dry_run,
             reuse_other_versions=bool(self.reuse_row.value),
@@ -898,7 +835,7 @@ class TranslatePanel(ft.Column):
         self._repair_summary = dict(s)
         self._repair_summary_final = final
         quality_repair = s.get("operation") == "repair_special_character_mismatch"
-        self.repair_progress_panel.visible = True
+        self.repair_progress.control.visible = True
         self.result_inspector.set_repair_results(s)
         self._set_kpi_mode(
             "repair",
@@ -992,38 +929,7 @@ class TranslatePanel(ft.Column):
                 "elapsed_sec": summary.get("elapsed_sec", 0),
                 "eta_sec": 0 if summary.get("status") == "DONE" else None,
             }
-        source_done = int(live.get("source_processed", live.get("processed", 0)) or 0)
-        source_total = int(live.get("source_total", live.get("total", 0)) or 0)
-        source_percent = 100 * source_done / max(source_total, 1)
-        self.repair_progress_source.value = (
-            f"{source_done:,} / {source_total:,}（{source_percent:.0f}%）"
-        )
-        self.repair_progress_ai.value = (
-            f"{int(live.get('ai_completed', 0) or 0):,} / "
-            f"{int(live.get('ai_total', 0) or 0):,}"
-        )
-        self.repair_progress_batches.value = (
-            f"{int(live.get('planned_batches_done', live.get('batch_done', 0)) or 0):,} / "
-            f"{int(live.get('planned_batches_total', live.get('batch_est', 0)) or 0):,}"
-        )
-        self.repair_progress_elapsed.value = format_duration(live.get("elapsed_sec"))
-        self.repair_progress_eta.value = (
-            format_duration(live.get("eta_sec"))
-            if live.get("eta_sec") is not None
-            else "計算中"
-        )
-        profile = live.get("current_profile")
-        batch = live.get("current_batch")
-        batch_total = live.get("current_batch_total")
-        status = live.get("current_status") or "等待開始"
-        model = live.get("model_label")
-        if profile and batch:
-            current = f"{status}｜{profile} 項目（第 {batch} / {batch_total} 批）"
-        else:
-            current = str(status)
-        if model:
-            current += f"｜模型：{model}"
-        self.repair_progress_current.value = current
+        self.repair_progress.show_live(live)
 
     def _on_repair_review_changed(self, unresolved_count: int) -> None:
         if (
@@ -1136,13 +1042,7 @@ class TranslatePanel(ft.Column):
 
     def _reset_stats(self, *, mode: str = "normal") -> None:
         self._repair_summary = None
-        self.repair_progress_panel.visible = False
-        self.repair_progress_current.value = "等待開始"
-        self.repair_progress_source.value = "0 / 0（0%）"
-        self.repair_progress_ai.value = "0 / 0"
-        self.repair_progress_batches.value = "0 / 0"
-        self.repair_progress_elapsed.value = "00:00"
-        self.repair_progress_eta.value = "計算中"
+        self.repair_progress.reset()
         for card in self._stat_cards:
             card.set_value("—", delta="")
         self.result_inspector.clear()

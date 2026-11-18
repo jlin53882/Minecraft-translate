@@ -255,7 +255,9 @@ flowchart TD
 
 ### 批次機翻與異常清單
 
-翻譯頁的範圍刷新只查詢未翻譯與可沿用筆數，畫面上的批次數是快速估算（標示「粗估」）；不會在每次版本或模組篩選變更時建立完整翻譯項目。同一範圍（版本、模組、上限、是否沿用）按過預覽後，範圍說明改用預覽精確規劃的批數（「預覽規劃 N 批」）；範圍改變、開始執行，或範圍刷新得到的未翻譯／可沿用筆數和預覽時不同（其他操作改了資料）時回到粗估。按「預覽」或「開始機翻」後，服務層才依篩選後的項目、`cache_type`／`_batch_group`、session 與固定提示詞 token 重新執行精確批次規劃。
+翻譯頁的範圍刷新只查詢未翻譯與可沿用筆數，畫面上的批次數是快速估算（標示「粗估」）；不會在每次版本或模組篩選變更時建立完整翻譯項目。同一範圍（版本、模組、類型、上限、是否沿用）按過預覽後，範圍說明改用預覽精確規劃的批數（「預覽規劃 N 批」）；範圍改變、開始執行，或範圍刷新得到的未翻譯／可沿用筆數和預覽時不同（其他操作改了資料）時回到粗估。按「預覽」或「開始機翻」後，服務層才依篩選後的項目、`cache_type`／`_batch_group`、session 與固定提示詞 token 重新執行精確批次規劃。
+
+範圍列依序是遊戲版本、模組包版本、模組、類型與單次上限。類型選單（`TranslatePanel.kind_dd`，`KindScopeDropdown`）列出該遊戲版本資料庫裡出現過的類型（`TranslationDB.kinds`），預設「全部類型」；換版本後選的類型不在新清單裡時退回全部。選了類型時 `TranslateOptions.kind` 讓未翻譯計數、可沿用計數、待翻列（`untranslated_entries`）、沿用其他版本（`reuse_from_other_versions`）與結束後的範圍計數都只算這個類型；背景範圍快照（`panel_refresh._load_translate_snapshot`）以請求中的 `kind` 計數並回傳 `kinds`。
 
 ```mermaid
 flowchart TD
@@ -280,7 +282,7 @@ flowchart TD
 
 修復有兩種模式：`quality_mismatch`（來源譯文特殊字元修復）與 `same_source_ai`（舊 AI 同原文重翻）。先預覽、再確認、最後才送 AI。
 
-修復與「1　選擇要機翻的範圍」共用同一組遊戲版本、模組與單次上限（`TranslatePanel.build_options`），AI 修復的快取寫入也遵循「每次寫入新快取分片」；「先沿用其他版本的相同譯文」只影響一般機翻。修復卡片頂端以 `repair_card.SCOPE_HINT` 說明這點。
+修復與「1　選擇要機翻的範圍」共用同一組遊戲版本、模組與單次上限（`TranslatePanel.build_options`），AI 修復的快取寫入也遵循「每次寫入新快取分片」；「類型」與「先沿用其他版本的相同譯文」只影響一般機翻（修復在預覽中另有類型篩選）。修復卡片頂端以 `repair_card.SCOPE_HINT` 說明這點。
 
 ```mermaid
 flowchart TD
@@ -364,7 +366,7 @@ flowchart TD
 - 畫面執行緒連線上的統計快取寫入（`stat_cache`）不等待其他連線的寫入鎖；掃描或批次寫入進行時，畫面執行緒的讀取不會因此凍結。
 - 條目清單列由 `EntryTilePool` 一次建好 50 列並原地更新內容（只改文字、顏色與 `visible`），翻頁不新增或移除控制項；連續點選時只重畫選取狀態改變的兩列。
 - 寫入後重載套用時只更新內容有變的列（`EntryTilePool.set_rows` 回傳有變的列；超過 `MAX_ROW_UPDATES` 列改更新整個清單）；寫入完成先交出背景重載請求再顯示提示，儲存結果不另外重算影響預覽或重畫編輯區。
-- 批次機翻的範圍變更（版本、模組、上限）只更新筆數文字與有變的下拉選單（`TranslatePanel.flush_loading`／`flush_refresh`）；上限欄位逐字輸入只更新 `count_text`；工作結束後的範圍筆數交給背景快照。批次規劃用的 tokenizer 在 App 啟動時由背景預先載入（`warm_token_encoder`），第一次預覽不會讓事件迴圈停住。
+- 批次機翻的範圍變更（版本、模組、類型、上限）只更新筆數文字與有變的下拉選單（`TranslatePanel.flush_loading`／`flush_refresh`）；上限欄位逐字輸入只更新 `count_text`；工作結束後的範圍筆數交給背景快照。批次規劃用的 tokenizer 在 App 啟動時由背景預先載入（`warm_token_encoder`），第一次預覽不會讓事件迴圈停住。
 
 ## 狀態與資料
 
