@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import traceback
@@ -539,6 +540,7 @@ def _write_output_manifest(
     staging_dir: str,
     content_manifest_path: str | None = None,
     additional_records: list[dict[str, str]] | None = None,
+    source_locale_keys: set[str] | None = None,
 ) -> str:
     """Write a file-level disposition report outside the Resource Pack ZIP."""
 
@@ -571,6 +573,7 @@ def _write_output_manifest(
             continue
         records.append(record)
         recorded_outputs.add(output_key)
+    _mark_source_locale_records(records, source_locale_keys or set())
 
     records.sort(key=lambda item: (item["status"], item["source"].casefold()))
     counts = Counter(record["status"] for record in records)
@@ -683,6 +686,51 @@ def _materialize_bundle_plan(
         else:
             written += 1
     return copied, merged, written, unchanged, expected
+
+
+_SOURCE_LOCALE_DIR = re.compile(r"^_?(?:en_us|zh_cn)(?:_\d+)?$", re.IGNORECASE)
+_SOURCE_LOCALE_NAME = re.compile(r"^.+_(?:en_us|zh_cn)(?:_\d+)?$", re.IGNORECASE)
+_SOURCE_LOCALE_REASON = "source_locale_not_bundled"
+
+
+def _carries_source_locale(rel_path: str) -> bool:
+    """路徑是否仍帶原文語系記號（``en_us``／``zh_cn``），這種檔案不屬於繁中資源包。
+
+    資料夾：``_zh_cn/``、``en_us_0/`` 等；檔名：``<名稱>_en_us.txt`` 這類語系寫在檔名尾端的
+    指南文字檔。``lang/en_us.json`` 這種檔名本身就是語系的語言檔不在此列（它們由語言檔流程處理）。
+    jar 內原本就有這些檔案，資源包不收錄也不影響遊戲讀取。
+    """
+
+    parts = Path(rel_path).parts
+    if any(_SOURCE_LOCALE_DIR.match(part) for part in parts[2:-1]):
+        return True
+    name = parts[-1] if parts else ""
+    stem, suffix = os.path.splitext(name)
+    return suffix.casefold() in GUIDE_SUFFIXES and bool(_SOURCE_LOCALE_NAME.match(stem))
+
+
+def _source_locale_plan_keys(
+    plan: dict[str, tuple[str, list[_BundleSourceCandidate]]],
+) -> set[str]:
+    """plan 中帶原文語系記號、最後要從 staging 移除的輸出鍵。"""
+
+    return {
+        key for key, (rel_path, _) in plan.items() if _carries_source_locale(rel_path)
+    }
+
+
+def _mark_source_locale_records(
+    records: list[dict[str, str]], dropped_keys: set[str]
+) -> None:
+    """把已從 staging 移除的原文語系輸出在 manifest 改記為 excluded。"""
+
+    for record in records:
+        output = str(record.get("output", ""))
+        if record.get("status") != "emitted" or not output:
+            continue
+        if os.path.normcase(output.replace("/", os.sep)) in dropped_keys:
+            record["status"] = "excluded"
+            record["reason"] = _SOURCE_LOCALE_REASON
 
 
 def _safe_staging_path(staging_root: Path, rel: str) -> Path | None:
@@ -905,12 +953,16 @@ def build_bundle_staging(
         guide_support_manifest_records,
     ) = _mirror_localized_guide_support(staging_dir, expected)
     warnings.extend(guide_support_warnings)
+    # 原文語系檔要留到鏡像完成後才移除：繁中指南找不到中性來源時會改用 _zh_cn 支援檔。
+    source_locale_keys = _source_locale_plan_keys(plan)
+    expected -= source_locale_keys
     manifest_path = _write_output_manifest(
         sources,
         plan,
         staging_dir,
         content_manifest_path,
         guide_support_manifest_records,
+        source_locale_keys,
     )
     removed += _prune_staging(staging_dir, expected)
     return {

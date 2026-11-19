@@ -36,6 +36,10 @@ from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismat
 # merge runs pass a fresh per-invocation cache through process_content... .
 # ----------------------------------------------------------------------
 _patchouli_eff_cache: dict = {}
+
+# 簡中語系資料夾：``zh_cn/``、GuideME 的 ``_zh_cn/``，以及帶序號的 ``zh_cn_0/``
+# （Ice and Fire 圖鑑 ``lang/bestiary/zh_cn_0``）；轉繁中時保留序號。
+_ZH_CN_DIR = re.compile(r"zh_cn(_\d+)?/", re.IGNORECASE)
 _patchouli_eff_cache_lock = threading.RLock()
 
 
@@ -393,7 +397,9 @@ def process_content_or_copy_file_impl(
     )
     # 全局關閉 zh_cn 時，直接跳過所有 zh_cn 內容檔案（非 lang 也要檢查）
     norm_lower = input_path.lower().replace("\\", "/")
-    if not _process_zh_cn and ("/zh_cn/" in norm_lower or "/zh_cn." in norm_lower):
+    if not _process_zh_cn and (
+        _ZH_CN_DIR.search(norm_lower) is not None or "/zh_cn." in norm_lower
+    ):
         return {"success": True, "log": None}
 
     if only_process_lang:
@@ -712,7 +718,7 @@ def process_content_or_copy_file_impl(
     log_prefix = f"處理內容檔案 '{input_path}':"
     file_name = os.path.basename(input_path)
     ext = os.path.splitext(file_name)[1].lower()
-    is_path_localized = "zh_cn/" in normalized_path
+    is_path_localized = _ZH_CN_DIR.search(normalized_path) is not None
     is_filename_localized = (
         re.search(
             r"zh_cn.*?\.(lang|md|txt|snbt|json|properties|json5|gui|hl)$",
@@ -743,7 +749,7 @@ def process_content_or_copy_file_impl(
     tw_path = input_path
     if is_localized_cn_file:
         if is_path_localized:
-            tw_path = input_path.replace("\\", "/").replace("zh_cn/", "zh_tw/")
+            tw_path = _ZH_CN_DIR.sub(r"zh_tw\1/", input_path.replace("\\", "/"))
         tw_path = re.sub(r"zh_cn(\..*)$", r"zh_tw\1", tw_path, flags=re.IGNORECASE)
         try:
             final_output_path = safe_join(output_dir, tw_path)

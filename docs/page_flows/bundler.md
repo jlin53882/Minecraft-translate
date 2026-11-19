@@ -16,6 +16,7 @@
 
 - 標準語言檔輸出為 `assets/<namespace>/lang/zh_tw.json`；`data/<namespace>/lang` 只可作為掃描來源，不能直接成為資源包 ZIP 內容。
 - 標準 Patchouli 的 `assets/<namespace>/patchouli_books/<book>/en_us/...` 會輸出到 `zh_tw/`；沒有明確語系資料夾的自訂書本（例如 Herbs and Harvest 的 `assets/herbsandharvest/books/...`）保留原相對路徑。
+- 資源包只放繁中內容：一鍵流水線的打包暫存（`bundle_service.build_bundle_staging`）在鏡像指南支援檔之後，移除路徑仍帶原文語系記號的檔案，manifest 記為 `excluded`／`source_locale_not_bundled`。判斷規則（`_carries_source_locale`）：`assets/<namespace>/` 之下任一資料夾是 `en_us`、`zh_cn`（可帶前導 `_` 與 `_<序號>`，例如 `_zh_cn`、「en_us_0」），或 `.md`／`.mdx`／`.txt` 檔名以 `_en_us`／`_zh_cn` 結尾。`_zh_cn` 支援檔（圖片、結構）在鏡像時仍可當繁中指南的來源，只是本身不進 ZIP；`lang/en_us.json` 這種檔名就是語系的語言檔不在此規則內。
 - Advancement 的 `data/<namespace>/advancement(s)/...` 不會進入 Resource Pack。使用 translate key 的文字應透過 `assets/<namespace>/lang/zh_tw.json` 生效；literal 文字會列為「目前資源包無法直接套用」，需要另建 Data Pack 才能套用。
 - 舊版 `extra_folders: list[str]` 仍維持 `resource_pack` 行為：只接受 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。
 - 新版來源物件可指定 `mode: "raw_attachment"`、`recursive` 與 `target`。這個模式會遞迴複製所有一般檔案（含 `.md`、`.txt`、`.snbt`、JSON、圖片與二進位檔），不解析、不翻譯、不改寫 bytes，並保留來源相對目錄。
