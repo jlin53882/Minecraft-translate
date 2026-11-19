@@ -257,7 +257,7 @@ flowchart TD
 
 翻譯頁的範圍刷新只查詢未翻譯與可沿用筆數，畫面上的批次數是快速估算（標示「粗估」）；不會在每次版本或模組篩選變更時建立完整翻譯項目。同一範圍（版本、模組、類型、上限、是否沿用）按過預覽後，範圍說明改用預覽精確規劃的批數（「預覽規劃 N 批」）；範圍改變、開始執行，或範圍刷新得到的未翻譯／可沿用筆數和預覽時不同（其他操作改了資料）時回到粗估。按「預覽」或「開始機翻」後，服務層才依篩選後的項目、`cache_type`／`_batch_group`、session 與固定提示詞 token 重新執行精確批次規劃。
 
-範圍列依序是遊戲版本、模組包版本、模組、類型與單次上限。類型選單（`TranslatePanel.kind_dd`，`KindScopeDropdown`）列出該遊戲版本資料庫裡出現過的類型（`TranslationDB.kinds`），預設「全部類型」；換版本後選的類型不在新清單裡時退回全部。選了類型時 `TranslateOptions.kind` 讓未翻譯計數、可沿用計數、待翻列（`untranslated_entries`）、沿用其他版本（`reuse_from_other_versions`）與結束後的範圍計數都只算這個類型；背景範圍快照（`panel_refresh._load_translate_snapshot`）以請求中的 `kind` 計數並回傳 `kinds`。
+範圍列依序是遊戲版本、模組包版本、模組、類型與單次上限。單次上限逐字輸入時不重算範圍：停止輸入約 0.7 秒、或按 Enter 才重算筆數（`TranslatePanel._commit_limit`），輸入中不會被背景重載打斷。類型選單（`TranslatePanel.kind_dd`，`KindScopeDropdown`）列出該遊戲版本資料庫裡出現過的類型（`TranslationDB.kinds`），預設「全部類型」；換版本後選的類型不在新清單裡時退回全部。選了類型時 `TranslateOptions.kind` 讓未翻譯計數、可沿用計數、待翻列（`untranslated_entries`）、沿用其他版本（`reuse_from_other_versions`）與結束後的範圍計數都只算這個類型；背景範圍快照（`panel_refresh._load_translate_snapshot`）以請求中的 `kind` 計數並回傳 `kinds`。
 
 ```mermaid
 flowchart TD

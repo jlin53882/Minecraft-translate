@@ -33,6 +33,7 @@ from app.tasks.operation_registry import (
 )
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
+from app.ui.debounce import Debouncer
 from app.ui.design import C
 from app.ui.kit.inputs import BUTTON_HEIGHTS
 from app.ui.page_post import has_background_scheduler
@@ -61,6 +62,7 @@ from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import log_info, log_warning
 
 _POLL_INTERVAL_SEC = 0.2
+LIMIT_TYPING_DELAY = 0.7  # 單次上限停止輸入多久後才重算範圍（秒）
 # 四張統計卡的標題列同高（「檢視」按鈕出現時卡片不會變高）
 STAT_HEAD_HEIGHT = BUTTON_HEIGHTS["sm"] + 2
 ALL_MODS = "__all__"
@@ -146,8 +148,11 @@ class TranslatePanel(ft.Column):
             hint="例如 2000",
             value=str(DEFAULT_LIMIT),
             width=220,
-            on_change=lambda _e: self._on_limit_changed(),
+            on_change=lambda _e: self._on_limit_typed(),
+            on_submit=lambda _e: self._commit_limit(),
         )
+        self._limit_applied = self.limit_field.value
+        self._limit_debouncer = Debouncer(lambda: self._page, LIMIT_TYPING_DELAY)
         self.count_text = ft.Text("", size=13, color=C.TEXT)
         self.reuse_row = kit.SwitchRow(
             "先沿用其他版本的相同譯文",
@@ -522,7 +527,19 @@ class TranslatePanel(ft.Column):
             warn_large=not limit and will > LARGE_RUN_WARNING,
         )
 
+    def _on_limit_typed(self) -> None:
+        """逐字輸入：停下來一小段時間才重算，避免每個字都重載範圍而打斷輸入。"""
+        self._limit_debouncer.call(self._commit_limit)
+
+    def _commit_limit(self) -> None:
+        """輸入完成（停頓、Enter 或失焦）：上限有變才重算範圍筆數。"""
+        self._limit_debouncer.cancel()
+        if self.limit_field.value == self._limit_applied:
+            return
+        self._on_limit_changed()
+
     def _on_limit_changed(self) -> None:
+        self._limit_applied = self.limit_field.value
         had_preview = self._repair_preview is not None or self._repair_preview_running
         self._clear_repair_preview()
         if self._scope_refresh_in_background():
@@ -732,6 +749,7 @@ class TranslatePanel(ft.Column):
         self._safe_update()
 
     def will_unmount(self) -> None:
+        self._limit_debouncer.cancel()
         self._poller.stop()
 
     def resume(self) -> None:

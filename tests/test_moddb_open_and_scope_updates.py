@@ -199,3 +199,42 @@ def test_clearing_the_log_can_leave_the_page_update_to_the_caller():
 
     log_view.clear()
     assert updates == [1]
+
+
+def test_typing_the_limit_waits_for_a_pause_before_recounting(monkeypatch):
+    requests: list = []
+    panel, regions = _panel(monkeypatch, requests=requests)
+    scheduled: list = []
+    panel._limit_debouncer.call = lambda fn, *a: scheduled.append(fn)
+
+    panel.limit_field.value = "12"
+    panel.limit_field.on_change(None)
+
+    assert requests == []  # 逐字輸入不重算、不重載範圍
+    assert regions == []
+    assert scheduled == [panel._commit_limit]
+
+
+def test_limit_commit_recounts_once_and_skips_when_unchanged(monkeypatch):
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+
+    panel.limit_field.on_submit(None)  # 沒改過就按 Enter：不重算
+    assert requests == []
+
+    panel.limit_field.value = "50"
+    panel.limit_field.on_submit(None)
+    panel.limit_field.on_submit(None)  # 重複 Enter：不重複算
+
+    assert requests == [1]
+
+
+def test_limit_field_does_not_recount_on_blur(monkeypatch):
+    """欄位失焦（含重繪造成的失焦）不能觸發重算，只有停頓或 Enter 才會。"""
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+
+    panel.limit_field.value = "5"
+    panel.limit_field.on_blur(None)
+
+    assert requests == []
