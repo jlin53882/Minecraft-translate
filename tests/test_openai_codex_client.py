@@ -11,6 +11,17 @@ from translation_tool.core import openai_codex_client as client
 from translation_tool.core.codex_cli_auth import CodexCLICredentials
 
 
+@pytest.fixture(autouse=True)
+def _isolated_fallback_state():
+    """備援沿用狀態是程序內共用的；每個測試都從「沒有任務、沒有沿用」開始。"""
+    from translation_tool.utils import ui_mirror
+
+    client._sticky_tasks.clear()
+    with ui_mirror.task_scope(None):
+        yield
+    client._sticky_tasks.clear()
+
+
 class _FakeStreamResponse:
     def __init__(self, events, *, status_code=200, headers=None):
         self.events = events
