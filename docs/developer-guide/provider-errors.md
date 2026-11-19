@@ -78,4 +78,8 @@ HTTP 200，錯誤在串流事件裡）時，改用本機 Codex CLI 的登入重�
   任一邊沒有 email 或不相同就不送出備援請求，避免把翻譯內容與額度用到別的帳號。
 - 其他錯誤碼（額度耗盡、401 等）不切換，維持 `_handle_chatgpt_api_error` 的既有處理。
 - 備援不可用（無登入檔、不是 ChatGPT 登入、token 過期）或備援也失敗時，拋出原本的分享額度錯誤，由 `_chatgpt_api_error_message` 轉成使用者訊息。
-- 切換與備援不可用都會以 `log_warning` 寫入後台記錄（`[ChatGPT] 分享額度已達上限…`），並出現在任務日誌。
+- 備援成功後，同一個任務（與帳號）的後續請求直接走 Codex 登入，不再每批先被 OAuth 路線拒絕一次；新任務不繼承，會重新先試 OAuth 路線。
+  任務識別取自 `ui_mirror.current_task()`，沒有任務 context 時每次請求都重新判斷；只保留最近 `_STICKY_LIMIT` 個任務。
+  沿用期間若 Codex 登入失效（`CodexCLIAuthError` 或 401），清除沿用狀態並改回一般登入重新判斷；逾時、5xx 等其他錯誤照原樣往上拋，由批次層既有的重試處理。
+- 日誌：切換時 `log_warning`「嘗試改用本機 Codex CLI 登入重試」，備援不可用時 `log_warning`「且無法改用 Codex 登入」，
+  備援成功時 `log_info`「已改用本機 Codex CLI 登入完成請求」（只在切換當下記一次，沿用期間不逐批記錄）。
