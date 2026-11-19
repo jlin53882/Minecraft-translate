@@ -529,6 +529,10 @@ class TranslatePanel(ft.Column):
 
     def _on_limit_typed(self) -> None:
         """逐字輸入：停下來一小段時間才重算，避免每個字都重載範圍而打斷輸入。"""
+        if self._repair_preview is not None or self._repair_preview_running:
+            # 既有預覽的候選集已不符新上限：立刻作廢，不等停頓（只有重算範圍才延遲）
+            self._clear_repair_preview()
+            self._safe_update()
         self._limit_debouncer.call(self._commit_limit)
 
     def _commit_limit(self) -> None:

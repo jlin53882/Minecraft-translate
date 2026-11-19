@@ -251,3 +251,19 @@ def test_repair_preview_commits_a_pending_limit_first(monkeypatch):
 
     assert requests == [1]
     assert panel._limit_applied == "7"
+
+
+def test_typing_the_limit_invalidates_an_existing_repair_preview_at_once(monkeypatch):
+    """預覽的候選集依舊上限產生：輸入就作廢，不能等停頓（切頁會取消延遲回呼）。"""
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+    panel._limit_debouncer.call = lambda fn, *a: None
+    cleared: list = []
+    panel._repair_preview = object()
+    monkeypatch.setattr(panel, "_clear_repair_preview", lambda: cleared.append(1))
+
+    panel.limit_field.value = "9"
+    panel.limit_field.on_change(None)
+
+    assert cleared == [1]
+    assert requests == []  # 重算範圍仍等停頓
