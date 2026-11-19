@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -245,3 +246,43 @@ def test_token_budget_settings_live_on_their_own_settings_page():
         for path in getattr(block, "paths", ())
     }
     assert not any(path.rsplit(".", 1)[1] in moved for path in batch_paths)
+
+
+@pytest.fixture
+def _reset_legacy_budget_warning(monkeypatch):
+    monkeypatch.setattr(cm, "_LEGACY_BUDGET_WARNED", False)
+
+
+@pytest.mark.usefixtures("_reset_legacy_budget_warning")
+def test_legacy_budget_smaller_than_the_cap_warns_once(caplog):
+    config = {"max_output_token_budget": 24000, "max_output_tokens": 65536}
+
+    with caplog.at_level(logging.WARNING):
+        _validate_lm_translator_config(config)
+        _validate_lm_translator_config(config)
+
+    messages = [
+        r.getMessage()
+        for r in caplog.records
+        if "max_output_token_budget" in r.getMessage()
+    ]
+    assert len(messages) == 1
+    assert "24000" in messages[0]
+    assert "max_output_tokens" in messages[0]
+
+
+@pytest.mark.usefixtures("_reset_legacy_budget_warning")
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"max_output_token_budget": 65536, "max_output_tokens": 65536},
+        {"max_output_token_budget": 128000, "max_output_tokens": 65536},
+        {"max_output_token_budget": 24000, "max_output_tokens": 0},
+        {"max_output_tokens": 65536},
+    ],
+)
+def test_legacy_budget_not_smaller_than_the_cap_does_not_warn(caplog, config):
+    with caplog.at_level(logging.WARNING):
+        _validate_lm_translator_config(config)
+
+    assert not any("max_output_token_budget" in r.getMessage() for r in caplog.records)

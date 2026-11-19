@@ -506,3 +506,32 @@ def test_output_budget_falls_back_when_no_cap_is_sent():
     assert BudgetConfig.from_config({}).max_output_token_budget == (
         d.max_output_token_budget
     )
+
+
+def test_output_budget_falls_back_when_every_enabled_model_disables_the_cap():
+    d = BudgetConfig()
+    cfg = BudgetConfig.from_config(
+        {
+            "max_output_tokens": 1024,
+            "models": {
+                "a": {"enabled": True, "max_output_tokens": 0},
+                "b": {"enabled": True, "max_output_tokens": 0},
+            },
+        }
+    )
+
+    assert cfg.max_output_token_budget == d.max_output_token_budget
+
+
+def test_output_budget_ignores_models_that_disable_the_cap_when_others_have_one():
+    cfg = BudgetConfig.from_config(
+        {
+            "max_output_tokens": 1024,
+            "models": {
+                "off": {"enabled": True, "max_output_tokens": 0},
+                "on": {"enabled": True, "max_output_tokens": 4096},
+            },
+        }
+    )
+
+    assert cfg.max_output_token_budget == 4096

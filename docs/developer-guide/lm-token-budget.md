@@ -89,7 +89,8 @@ ChatGPT tokenizer 的準確度。
 
 - Gemini：取已啟用模型中「有效上限」的最小值，有效上限為該模型的 `max_output_tokens` 覆寫，沒有覆寫則用全域值。
 - ChatGPT：只用全域 `max_output_tokens`（Gemini 模型的覆寫不適用）。
-- 沒有任何正整數上限（全域為 `0` 且無覆寫）時退回預設 `65536`。
+- 沒有任何正整數上限（全域為 `0` 且無覆寫），或已啟用的 Gemini 模型全都明確設成 `0` 時，退回預設 `65536`（全域值不會被任何模型使用，不拿來當預算）。
+- 舊設定檔的 `max_output_token_budget` 不再讀取；它小於 `max_output_tokens` 時，載入設定會警告一次，提示把 `max_output_tokens` 調成原本的預算值才能維持較小的單批。
 - 撞牆後的學習縮放（`budget_min_scale` 等）仍作用在這個預算上。
 
 ### 注意：`max_output_tokens` 不可超過模型上限

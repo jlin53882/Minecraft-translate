@@ -932,6 +932,37 @@ def _validate_token_budget_config(lm: dict) -> None:
                     f"目前為 {type(value).__name__}：'{value}'"
                 )
 
+    _warn_legacy_output_budget(lm.get("max_output_token_budget"), out_tokens)
+
+
+_LEGACY_BUDGET_WARNED = False
+
+
+def _warn_legacy_output_budget(budget: object, out_tokens: object) -> None:
+    """舊設定的 ``max_output_token_budget`` 已不再使用；比輸出上限小時提醒一次行為變了。
+
+    切批預算現在直接取 ``max_output_tokens``，原本刻意設得比上限小（較保守的切批）的人
+    會發現單批變大，所以只在「舊預算小於輸出上限」時警告，並指出怎麼維持原本的大小。
+    """
+    global _LEGACY_BUDGET_WARNED
+    if (
+        _LEGACY_BUDGET_WARNED
+        or isinstance(budget, bool)
+        or not isinstance(budget, int)
+        or budget <= 0
+        or isinstance(out_tokens, bool)
+        or not isinstance(out_tokens, int)
+        or out_tokens <= budget
+    ):
+        return
+    _LEGACY_BUDGET_WARNED = True
+    logging.warning(  # noqa: LOG015
+        f"設定檔的 lm_translator.max_output_token_budget ({budget}) 已不再使用，"
+        f"切批預算改取 lm_translator.max_output_tokens ({out_tokens})；"
+        f"若要維持原本較小的單批輸出，請把 max_output_tokens 調成 {budget}，"
+        "並可從設定檔移除 max_output_token_budget。"
+    )
+
 
 def _validate_translator_config(translator: dict) -> None:
     """驗證 translator 區塊的型別（ATK-C-2）。"""

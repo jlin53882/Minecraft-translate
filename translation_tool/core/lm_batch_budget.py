@@ -250,23 +250,29 @@ def output_budget_from_caps(lm_cfg: dict[str, Any], fallback: int) -> int:
 
     Gemini 取已啟用模型中「該模型有效上限」的最小值（有 per-model 覆蓋用覆蓋值，
     否則用全域值），切批才不會放進任何一個模型都裝不下的內容；ChatGPT 只用全域值。
-    上限為 0（不送輸出上限）或沒有可用的值時，退回 ``fallback``。
+    上限為 0（不送輸出上限）、已啟用的模型全都明確設成 0，或沒有可用的值時，退回 ``fallback``。
     """
     global_cap = lm_cfg.get("max_output_tokens")
     global_cap = global_cap if _is_cap(global_cap) else None
     effective: list[int] = []
+    has_enabled_model = False
     models = lm_cfg.get("models")
     if lm_cfg.get("provider") != "chatgpt" and isinstance(models, dict):
         for name, model in models.items():
             if not isinstance(model, dict) or not model.get("enabled", False):
                 continue
+            has_enabled_model = True
             override = model_output_token_cap(lm_cfg, name)
             cap = override if override is not None else global_cap
             if _is_cap(cap):
                 effective.append(cap)
-    if not effective and global_cap is not None:
-        effective.append(global_cap)
-    return min(effective) if effective else fallback
+    if effective:
+        return min(effective)
+    # 已啟用的模型全都明確設成 0（不送輸出上限）時，全域值不會被任何模型使用，
+    # 不能拿來當預算；只有完全沒有已啟用模型（或 ChatGPT）才用全域值。
+    if not has_enabled_model and global_cap is not None:
+        return global_cap
+    return fallback
 
 
 @dataclass(frozen=True)
