@@ -28,6 +28,7 @@ from .guide_translation import (
     GUIDE_SUPPORT_SUFFIXES,
     is_guide_directory_segment,
 )
+from .locale_path import KIND_DIR, has_locale_dir, iter_locale_markers, replace_locale
 from .neutral_book_json import load_neutral_book_json
 from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismatch
 
@@ -36,6 +37,7 @@ from .patchouli_compat import find_patchouli_marker_issue, find_patchouli_mismat
 # merge runs pass a fresh per-invocation cache through process_content... .
 # ----------------------------------------------------------------------
 _patchouli_eff_cache: dict = {}
+
 _patchouli_eff_cache_lock = threading.RLock()
 
 
@@ -57,6 +59,34 @@ def _is_guide_support_path(normalized_path: str) -> bool:
     return any(
         is_guide_directory_segment(part) for part in parts[assets_index + 2 : -1]
     )
+
+
+def _is_guide_markdown(normalized_path: str) -> bool:
+    """指南樹裡的 Markdown（GuideME）：不是 Patchouli 書，語系由一般內容流程處理。
+
+    Patchouli 書只有 JSON 與圖片。GuideME 指南可能放在名稱碰巧列入 Patchouli 名單的資料夾
+    （Powah 的 ``guides/powah/book/``），若走 Patchouli 分支，``_zh_cn``／``_zh_tw`` 會被當成
+    書名，簡中原樣輸出、英文原件直接打包。
+    """
+
+    parts = normalized_path.split("/")
+    if os.path.splitext(parts[-1])[1] not in (".md", ".mdx"):
+        return False
+    return any(is_guide_directory_segment(part) for part in parts[2:-1])
+
+
+def _zh_cn_dirs_to_zh_tw(path: str) -> str:
+    """把路徑中的簡中語系資料夾換成繁中，保留寫法與序號。
+
+    ``zh_cn/`` → ``zh_tw/``、GuideME ``_zh_cn/`` → ``_zh_tw/``、
+    Ice and Fire 圖鑑 ``zh_cn_0/`` → ``zh_tw_0/``。
+    """
+
+    parts = path.replace("\\", "/").split("/")
+    for marker in list(iter_locale_markers(parts)):
+        if marker.kind == KIND_DIR and marker.code == "zh_cn":
+            parts = replace_locale(parts, marker, "zh_tw")
+    return "/".join(parts)
 
 
 def clear_patchouli_eff_cache() -> None:
@@ -393,7 +423,9 @@ def process_content_or_copy_file_impl(
     )
     # 全局關閉 zh_cn 時，直接跳過所有 zh_cn 內容檔案（非 lang 也要檢查）
     norm_lower = input_path.lower().replace("\\", "/")
-    if not _process_zh_cn and ("/zh_cn/" in norm_lower or "/zh_cn." in norm_lower):
+    if not _process_zh_cn and (
+        has_locale_dir(norm_lower.split("/"), "zh_cn") or "/zh_cn." in norm_lower
+    ):
         return {"success": True, "log": None}
 
     if only_process_lang:
@@ -560,7 +592,11 @@ def process_content_or_copy_file_impl(
         return None
 
     # ── PATCHOULI 處理（v3 ratio 方案）────────────────────────────────────
-    hit = get_patchouli_book_root(normalized_path)
+    hit = (
+        None
+        if _is_guide_markdown(normalized_path)
+        else get_patchouli_book_root(normalized_path)
+    )
     book_root, _matched_dir_name = hit if hit else (None, None)
 
     if book_root:
@@ -712,7 +748,7 @@ def process_content_or_copy_file_impl(
     log_prefix = f"處理內容檔案 '{input_path}':"
     file_name = os.path.basename(input_path)
     ext = os.path.splitext(file_name)[1].lower()
-    is_path_localized = "zh_cn/" in normalized_path
+    is_path_localized = has_locale_dir(normalized_path.split("/"), "zh_cn")
     is_filename_localized = (
         re.search(
             r"zh_cn.*?\.(lang|md|txt|snbt|json|properties|json5|gui|hl)$",
@@ -743,7 +779,7 @@ def process_content_or_copy_file_impl(
     tw_path = input_path
     if is_localized_cn_file:
         if is_path_localized:
-            tw_path = input_path.replace("\\", "/").replace("zh_cn/", "zh_tw/")
+            tw_path = _zh_cn_dirs_to_zh_tw(input_path)
         tw_path = re.sub(r"zh_cn(\..*)$", r"zh_tw\1", tw_path, flags=re.IGNORECASE)
         try:
             final_output_path = safe_join(output_dir, tw_path)

@@ -83,6 +83,7 @@ BundlerView.start_bundling_clicked()
   - 來源沒有 pack.mcmeta 時一律寫入（`_write_pack_mcmeta`）：所有 format 數值皆為整數。`pack_format` 1～17 只寫 `pack_format`；18～64（1.20.2～1.21.8）寫 `pack_format` 加 `supported_formats`，`min_inclusive` 為 `pack_format`，`max_inclusive` 使用者未填時在 18～46 為 46、47～64 為 64；65 以上（1.21.9 起，`supported_formats` 已移除）不寫 `pack_format`，改寫 `min_format`（`pack_format`）與 `max_format`（未填為 9999）。使用者填的最大使用版本取代上述預設；`pack_format` 18～64 而最大使用版本 ≥ 65 時，另外寫入 `min_format`（`pack_format`）與 `max_format`（最大使用版本），新舊版遊戲各讀自己認得的欄位。小於 `pack_format` 時拋出 ValueError，1～17 沒有對應欄位而忽略。未指定版本時 `pack_format` 為 34（1.21～1.21.1）。規則集中在 `translation_tool/core/pack_mcmeta.py`（`build_pack_mcmeta`、`parse_pack_format`），輸入換算在 `translation_tool/core/pack_format_lookup.py`（`resolve_version_input`、`resolve_max_input`、`explain_version_input`）。
   - pack.png 僅接受 `.png/.jpg/.jpeg` 副檔名；UI 來源若與已寫入的 `pack.png` 衝突 → 改名 `pack_1.png`
 - ZIP 壓縮：`ZIP_DEFLATED` + `compresslevel=ZIP_COMPRESS_LEVEL`（常數值 6）。
+- **原文語系路徑**：`_folder_candidates` 略過 `resource_pack` 來源中 `assets/<namespace>/` 之下帶 `en_us`／`zh_cn` 語系資料夾（含 `_zh_cn`、「en_us_0」）或檔名尾端（`.md`／`.mdx`／`.txt` 的 `_en_us`、`_zh_cn`）的檔案（`locale_path.carries_source_locale`）；指紋、寫入計畫與來源預覽都經過它，三者檔案數一致。略過的數量與前幾個路徑以 `_source_locale_skip_message` 組成一行警告，yield 與 `log_warning` 文字相同。`raw_attachment` 不套用。
 - 子資料夾名為 `root`（不分大小寫）時直接放 ZIP 根目錄，其餘以資料夾名為根路徑。
 - root_dir 下的散檔（非資料夾）也打包進 ZIP 根目錄（與既有檔名衝突時同樣 `_N` 後綴）。
 - 進度：0.0~0.15 為 pack 檔階段，0.15~0.85 為子資料夾/額外項目階段，1.0 完成。

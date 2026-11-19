@@ -29,6 +29,11 @@ from translation_tool.core.guide_blocks import (
     has_translatable_text,
 )
 from translation_tool.core.lang_merge_dict import contains_cjk
+from translation_tool.core.locale_path import (
+    KIND_NAME,
+    find_locale_marker,
+    replace_locale,
+)
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
     is_project_doc_name,
@@ -403,11 +408,11 @@ def guide_locale_rel(rel: Path, root: Path, locale: str) -> Path:
 
     parts = list(normalize_guideme_default_locale_rel(rel).parts)
     offset = 1 if parts and parts[0].endswith("_extracted") else 0
-    for index in range(offset + 2, len(parts) - 1):
-        segment = parts[index].lower()
-        if segment in ("en_us", "_en_us"):
-            parts[index] = locale if segment.startswith("_") else locale.lstrip("_")
-            return Path(*parts)
+    # 原文已帶語系記號就原地替換：語系資料夾（含帶序號的 ``en_us_0``），或寫在檔名尾端的
+    # ``<名稱>_en_us.txt``（Tombstone 依 ``<名稱>_<語系>`` 讀取，另建語系資料夾不會被讀到）。
+    marker = find_locale_marker(parts, "en_us", offset + 2)
+    if marker is not None and marker.kind != KIND_NAME:
+        return Path(*replace_locale(parts, marker, locale.lstrip("_")))
 
     # GuideME puts the locale immediately below the registered content root.
     # For a default GuideBuilder this root is not just ``guides``: the builder

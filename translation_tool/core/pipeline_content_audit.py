@@ -20,11 +20,18 @@ from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
     has_translatable_text,
 )
-from translation_tool.core.guide_translation import guide_locale_rel
+from translation_tool.core.guide_translation import (
+    guide_locale_rel,
+    normalize_guideme_default_locale_rel,
+)
 from translation_tool.core.lang_merge_dict import contains_cjk
+from translation_tool.core.locale_path import (
+    KIND_NAME,
+    find_locale_marker,
+    has_locale_dir,
+)
 
 _TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt"})
-_LOCALE_DIRS = frozenset({"en_us", "_en_us", "zh_tw", "_zh_tw"})
 _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
 
 
@@ -110,7 +117,7 @@ def _pending_guide_rel(relative: Path, root: Path | None = None) -> Path:
     """Add a synthetic English locale only when the source has no locale slot."""
 
     parts = list(relative.parts)
-    if any(part.lower() in _LOCALE_DIRS for part in parts[2:-1]):
+    if has_locale_dir(parts, "en_us", 2) or has_locale_dir(parts, "zh_tw", 2):
         return relative
     if len(parts) < 2:
         return relative
@@ -121,6 +128,48 @@ def _pending_guide_rel(relative: Path, root: Path | None = None) -> Path:
     # against a different tree and was the source of the in-game "Page does
     # not exist" errors.
     return guide_locale_rel(relative, root or Path(), "_en_us")
+
+
+def _is_official_translation(relative: Path, text: str) -> bool:
+    """模組自帶、可以直接保留的繁中譯文。
+
+    路徑要帶繁中語系記號（``_zh_tw/``、``zh_tw_0/``、``<名稱>_zh_tw.txt``），內容也要含中文：
+    有些模組在 ``_zh_tw`` 放未翻譯的英文備用頁，那種檔案不能算官方譯文，對應的英文原件仍要送翻譯。
+    """
+
+    marker = find_locale_marker(relative.parts, "zh_tw")
+    return marker is not None and marker.kind != KIND_NAME and contains_cjk(text)
+
+
+def _official_translation_keys(source_root: Path) -> set[str]:
+    """``other_output`` 內模組自帶、可直接保留的繁中指南／文字檔（相對 ``assets`` 的比對鍵）。
+
+    必須在分類開始前一次算好：分類過程會把處理完的來源移走，逐檔檢查會受處理順序影響。
+    判斷條件與 ``_route_text_source`` 保留官方譯文的條件相同，兩邊不一致時英文原件
+    會被略過、官方檔又沒輸出，兩者都不會進資源包。
+    """
+
+    keys: set[str] = set()
+    for path in source_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _TEXT_SUFFIXES:
+            continue
+        relative = path.relative_to(source_root)
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError):
+            continue  # 讀不出來的檔案由分類迴圈記為 parse_failed
+        if _is_official_translation(relative, text):
+            keys.add(Path("assets", relative).as_posix().casefold())
+    return keys
+
+
+def _official_counterpart_key(relative: Path, root: Path) -> str:
+    """英文原文對應的繁中檔比對鍵（與翻譯輸出位置相同的規則）。"""
+
+    target = normalize_guideme_default_locale_rel(
+        guide_locale_rel(relative, root, "_zh_tw")
+    )
+    return target.as_posix().casefold()
 
 
 def _copy_if_needed(source: Path, destination: Path) -> bool:
@@ -135,6 +184,51 @@ def _copy_if_needed(source: Path, destination: Path) -> bool:
             pass
     shutil.copy2(source, destination)
     return True
+
+
+def _route_text_source(
+    source: Path,
+    relative: Path,
+    *,
+    root: Path,
+    scan_root: Path,
+    pending_root: Path,
+    official_keys: set[str],
+) -> dict[str, str]:
+    """決定一個 ``other_output`` 文字檔的去向，回傳 manifest 欄位；處理完的來源會被移走。
+
+    譯文來源的優先序：模組自帶的繁中 > 簡中轉繁（語系整理已直接寫進 ``assets``）；
+    模組已有繁中時，英文原件不再送 LM 翻譯，避免機器譯文蓋掉官方譯文。
+    """
+
+    text = source.read_text(encoding="utf-8-sig")
+    assets_rel = Path("assets", relative)
+    official = _is_official_translation(relative, text)
+    if official or (
+        contains_cjk(text) and not _needs_guide_translation(text, source.name)
+    ):
+        destination = root / assets_rel
+        reason = (
+            "official_translation_preserved" if official else "localized_text_preserved"
+        )
+        status = "emitted"
+    elif _official_counterpart_key(assets_rel, scan_root) in official_keys:
+        source.unlink()
+        return {
+            "status": "excluded",
+            "reason": "english_text_has_official_translation",
+        }
+    else:
+        destination = pending_root / _pending_guide_rel(assets_rel, scan_root)
+        reason = "english_text_queued_for_guide_translation"
+        status = "pending"
+    _copy_if_needed(source, destination)
+    source.unlink()
+    return {
+        "status": status,
+        "output": destination.relative_to(root).as_posix(),
+        "reason": reason,
+    }
 
 
 def classify_other_output_assets(
@@ -156,8 +250,8 @@ def classify_other_output_assets(
     root = Path(merge_output_dir)
     source_root = root / "other_output" / "assets"
 
-    canonical_root = root / "assets"
     pending_root = root / "patchouli_output" / pending_folder_name
+    official_keys = _official_translation_keys(source_root)
     records: list[dict[str, Any]] = []
 
     for source in sorted(
@@ -178,27 +272,16 @@ def classify_other_output_assets(
             continue
 
         try:
-            text = source.read_text(encoding="utf-8-sig")
-            if contains_cjk(text) and not _needs_guide_translation(text, source.name):
-                destination = canonical_root / relative
-                _copy_if_needed(source, destination)
-                source.unlink()
-                record.update(
-                    status="emitted",
-                    output=destination.relative_to(root).as_posix(),
-                    reason="localized_text_preserved",
+            record.update(
+                _route_text_source(
+                    source,
+                    relative,
+                    root=root,
+                    scan_root=source_root.parent,
+                    pending_root=pending_root,
+                    official_keys=official_keys,
                 )
-            else:
-                destination = pending_root / _pending_guide_rel(
-                    Path("assets", relative), source_root.parent
-                )
-                _copy_if_needed(source, destination)
-                source.unlink()
-                record.update(
-                    status="pending",
-                    output=destination.relative_to(root).as_posix(),
-                    reason="english_text_queued_for_guide_translation",
-                )
+            )
         except (OSError, UnicodeError) as exc:
             record.update(
                 status="parse_failed",

@@ -70,7 +70,7 @@ flowchart TD
 - 讀取的設定鍵：`lang_merger.pending_folder_name`、`lang_merger.pending_organized_folder_name`、`lm_translator.lm_translate_folder_name`（經 `get_lm_translate_folder_name()`，與機器翻譯頁共用；不是單一資料夾名稱時記錄警告並改用預設 `LM翻譯後`）、`output_bundler.output_zip_name`、`jar_extractor.lang_codes`（精靈預設語系）。
 - 打包的 `pack_format` 由單一「版本或 pack_format」輸入框決定：含 `.` 當 Minecraft 版本，由 `translation_tool/core/pack_format_table.json` 換算；純整數直接使用；空白用預設 34（1.21～1.21.1）。選填的「最大使用版本」可填版本或整數，空白用預設上限。輸入無效或最大版本小於 `pack_format` 時，單步對話框與一鍵精靈都會擋下、不啟動打包。
 - 資料庫選項：`merge_db_snapshot` 與 `lm_db_snapshot` 在點擊當下由 `snapshot_for_run()` 取得，之後的 worker 只使用快照。
-- 打包步驟會先由 `build_bundle_staging` 把三個來源（既有譯文、Patchouli 譯文、LLM 新譯文，優先序由低到高）整合到暫存目錄，再由 `run_bundling_service` 產生 ZIP。
+- 打包步驟會先由 `build_bundle_staging` 把三個來源（既有譯文、Patchouli 譯文、LLM 新譯文，優先序由低到高）整合到暫存目錄，再由 `run_bundling_service` 產生 ZIP；路徑仍帶 `en_us`／`zh_cn` 語系記號的檔案不放進暫存（規則見 `docs/page_flows/bundler.md` 的資源包輸出契約）。
 - 翻譯步驟只處理「存在且含檔案」的來源目錄；若兩個來源都沒有檔案，寫入 `[系統]` 日誌並略過，不視為失敗。
 
 ## 錯誤處理

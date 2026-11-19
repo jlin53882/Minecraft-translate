@@ -25,10 +25,12 @@ from translation_tool.core.bundle_sources import (
     normalize_extra_bundle_sources,
 )
 from translation_tool.core.guide_translation import (
+    GUIDE_SUFFIXES,
     is_guideme_default_locale_alias,
     normalize_guideme_default_locale_rel,
     select_guideme_canonical_candidates,
 )
+from translation_tool.core.locale_path import carries_source_locale
 from translation_tool.core.pack_mcmeta import (
     DEFAULT_PACK_FORMAT,
     build_pack_mcmeta,
@@ -440,8 +442,13 @@ def _folder_candidates(
     folder_path: str,
     base_path_in_zip: str,
     exclude: frozenset[str] | None = None,
+    source_locale_skipped: list[str] | None = None,
 ) -> Iterator[tuple[bool, str, str]]:
-    """回傳資料夾內的 (是否為 GuideME 舊別名, ZIP 路徑, 實體路徑)。"""
+    """回傳資料夾內的 (是否為 GuideME 舊別名, ZIP 路徑, 實體路徑)。
+
+    路徑仍帶 ``en_us``／``zh_cn`` 語系記號的檔案不屬於繁中資源包，與一鍵流水線的打包暫存
+    用同一條規則略過；有傳入 ``source_locale_skipped`` 時把略過的 ZIP 路徑記進去。
+    """
     for relative_path, file_path in _walk_files(folder_path, exclude):
         raw_archive_name = os.path.join(base_path_in_zip, relative_path).replace(
             "\\", "/"
@@ -453,6 +460,10 @@ def _folder_candidates(
         if _is_invalid_pack_metadata_entry(archive_name):
             continue
         if "/" not in archive_name and _is_pack_file(archive_name):
+            continue
+        if carries_source_locale(archive_name, GUIDE_SUFFIXES):
+            if source_locale_skipped is not None:
+                source_locale_skipped.append(archive_name)
             continue
         yield is_legacy_guideme_alias, archive_name, file_path
 
@@ -606,9 +617,21 @@ def _collect_sources(
     return sources
 
 
+def _source_locale_skip_message(skipped: list[str]) -> str:
+    """略過原文語系檔的日誌：數量與前幾個路徑，讓使用者知道來源裡還有未整理的檔案。"""
+
+    examples = "、".join(skipped[:3])
+    more = " 等" if len(skipped) > 3 else ""
+    return (
+        f"警告：略過 {len(skipped)} 個路徑仍帶 en_us／zh_cn 語系的檔案"
+        f"（繁中資源包不收錄，jar 內原檔不受影響）：{examples}{more}"
+    )
+
+
 def _plan_resource_pack_writes(
     resource_folders: list[tuple[str, str, str]],
     exclude: frozenset[str] | None = None,
+    source_locale_skipped: list[str] | None = None,
 ) -> dict[str, list[tuple[str, str]]]:
     """建立跨所有來源資料夾共用的 Resource Pack 寫入計畫。
 
@@ -621,7 +644,7 @@ def _plan_resource_pack_writes(
     for _folder_index, (_label, folder, base) in enumerate(resource_folders):
         folder_key = _norm(folder)
         for is_legacy, archive_name, file_path in _folder_candidates(
-            folder, base, exclude
+            folder, base, exclude, source_locale_skipped
         ):
             grouped.setdefault(archive_name, []).append(
                 (sequence, is_legacy, file_path, folder_key)
@@ -1065,7 +1088,10 @@ def bundle_outputs_generator(
             return
         # 重建期間不得留下舊的有效狀態：任何中途失敗／取消，下次都必須重建。
         _remove_quietly(_state_path(output_zip_path))
-        write_plan = _plan_resource_pack_writes(resource_folders, exclude)
+        source_locale_skipped: list[str] = []
+        write_plan = _plan_resource_pack_writes(
+            resource_folders, exclude, source_locale_skipped
+        )
         planned_file_count = sum(len(items) for items in write_plan.values()) + sum(
             len(plan.entries) for plan in raw_plans
         )
@@ -1078,6 +1104,10 @@ def bundle_outputs_generator(
                 message = (
                     f"警告：略過非 Resource Pack 輸出來源 '{ignored}'（只收集 assets/）"
                 )
+            yield {"progress": tracker.progress, "log": message}
+            log_warning(message)
+        if source_locale_skipped:
+            message = _source_locale_skip_message(source_locale_skipped)
             yield {"progress": tracker.progress, "log": message}
             log_warning(message)
 

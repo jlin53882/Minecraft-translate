@@ -142,6 +142,7 @@ JAR 提取頁的 Lang、Book、Lang + Book 三種模式也必須使用 `build_pi
 3. **啟動翻譯**：只翻譯 `translate_input_dirs` 中有檔案的資料夾；沒有待翻譯內容 → 記錄並略過（步驟仍成功）。任一輸入 session.error → 停止。
 4. **打包資源**：
    - `build_bundle_staging(bundle_sources, bundle_staging_dir)`（`app/services_impl/pipelines/bundle_service.py`）：增量更新暫存，依序疊加各來源的 `assets/`；同路徑 JSON 逐 key 合併（後者覆蓋），其他檔案直接覆蓋，略過待翻譯資料夾；內容未變的檔案沿用，不再屬於任何來源的殘留檔案由 `_prune_staging` 移除。
+   - 鏡像指南支援檔之後，路徑仍帶 `en_us`／`zh_cn` 語系記號的檔案（`locale_path.carries_source_locale`）從暫存移除，manifest 記為 `excluded`／`source_locale_not_bundled`；`_zh_cn` 支援檔在鏡像時仍可當繁中指南頁的來源。
    - 暫存為空 → session.set_error()。
    - 否則 `PipelineActions.bundle(input_root_dir=bundle_staging_dir, ...)`；bundle generator 回傳 `error` → session.set_error()。
    - 打包前必須先在暫存目錄中合併各來源：打包 generator 遇到多個來源的同路徑檔案會改名（`_1`）而不合併，因此既有譯文與新譯文須先疊成一份。
