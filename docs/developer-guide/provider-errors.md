@@ -63,3 +63,17 @@
 `validate_api_keys` 與 `validate_api_keys_from_ui` 共用 `lm_config_rules._gemini_key_format_error`
 （前綴 `AIza`／`AQ.`、至少 35 字元、僅英數字與 `-`、`_`）。`redaction` 的遮蔽規則刻意更寬，用來避免漏遮，
 不可拿來判斷金鑰是否合法。
+
+## ChatGPT 分享額度備援
+
+`openai_codex_client.call_chatgpt_responses` 先用本程式自己登入的 ChatGPT OAuth 打 `https://api.openai.com/v1/responses`。
+這條路屬於第三方「訂閱分享」額度；錯誤碼為 `subscription_sharing_usage_limit_exceeded`（`_SHARING_LIMIT_CODES`，
+HTTP 200，錯誤在串流事件裡）時，改用本機 Codex CLI 的登入重試一次：
+
+- 憑證來自 `codex_cli_auth.load_codex_cli_credentials`，讀 `$CODEX_HOME/auth.json`（預設 `~/.codex/auth.json`）。
+  只讀不更新：refresh token 為單次輪替，由本程式更新會讓 Codex CLI 自己的登入失效，所以 access token 過期時只提示使用者先執行 `codex`。
+- 備援請求打 `https://chatgpt.com/backend-api/codex/responses`，帶 `ChatGPT-Account-ID`，`originator` 與 `User-Agent` 為 `minecraft-translate`，不偽裝成 Codex。
+  這條路不送 `max_output_tokens` 與 `service_tier`。
+- 其他錯誤碼（額度耗盡、401 等）不切換，維持 `_handle_chatgpt_api_error` 的既有處理。
+- 備援不可用（無登入檔、不是 ChatGPT 登入、token 過期）或備援也失敗時，拋出原本的分享額度錯誤，由 `_chatgpt_api_error_message` 轉成使用者訊息。
+- 切換與備援不可用都會以 `log_warning` 寫入後台記錄（`[ChatGPT] 分享額度已達上限…`），並出現在任務日誌。

@@ -1187,3 +1187,110 @@ def test_call_passes_output_guard_without_sending_output_cap(monkeypatch):
 
     assert seen["request"]["max_output_tokens"] is None
     assert seen["guard"] == 4096
+
+
+def test_codex_backend_request_omits_output_cap_and_identifies_the_app(monkeypatch):
+    captured = {}
+
+    def post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return requests.Response()
+
+    monkeypatch.setattr(client.requests, "post", post)
+
+    client._stream_request(
+        token="codex-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "a", "value": "Hello"}]},
+        timeout=30,
+        max_output_tokens=100000,
+        service_tier="priority",
+        codex_account_id="acct-1",
+    )
+
+    assert captured["url"] == "https://chatgpt.com/backend-api/codex/responses"
+    assert captured["headers"]["Authorization"] == "Bearer codex-token"
+    assert captured["headers"]["ChatGPT-Account-ID"] == "acct-1"
+    assert captured["headers"]["originator"] == "minecraft-translate"
+    assert "codex" not in captured["headers"]["User-Agent"].lower()
+    assert "max_output_tokens" not in captured["json"]
+    assert "service_tier" not in captured["json"]
+
+
+def _call_kwargs():
+    return {
+        "model_name": "gpt-5-codex",
+        "system_prompt": "Translate.",
+        "payload": {"items": []},
+        "timeout": 30,
+    }
+
+
+def _sharing_limit_error():
+    return client.ChatGPTAPIError(
+        "subscription_sharing_usage_limit_exceeded", "limit", status=200
+    )
+
+
+def test_sharing_limit_falls_back_to_codex_login(monkeypatch):
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    seen = {}
+
+    def codex_route(**kwargs):
+        seen.update(kwargs)
+        return "from-codex"
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+
+    assert client.call_chatgpt_responses(**_call_kwargs()) == "from-codex"
+    assert seen["model_name"] == "gpt-5-codex"
+
+
+def test_other_errors_do_not_fall_back(monkeypatch):
+    def oauth_route(**_kwargs):
+        raise client.ChatGPTAPIError("insufficient_quota", "no", status=429)
+
+    def codex_route(**_kwargs):
+        raise AssertionError("must not be called")
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+
+    with pytest.raises(client.ChatGPTAPIError) as caught:
+        client.call_chatgpt_responses(**_call_kwargs())
+    assert caught.value.code == "insufficient_quota"
+
+
+def test_unusable_codex_login_surfaces_the_original_limit_error(monkeypatch):
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    def codex_route(**_kwargs):
+        raise client.CodexCLIAuthError("expired")
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+
+    with pytest.raises(client.ChatGPTAPIError) as caught:
+        client.call_chatgpt_responses(**_call_kwargs())
+    assert caught.value.code == "subscription_sharing_usage_limit_exceeded"
+
+
+def test_fallback_is_logged(monkeypatch):
+    messages = []
+
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", lambda **_kw: "ok")
+    monkeypatch.setattr(client, "log_warning", messages.append)
+
+    client.call_chatgpt_responses(**_call_kwargs())
+
+    assert any("改用本機 Codex CLI 登入" in message for message in messages)
