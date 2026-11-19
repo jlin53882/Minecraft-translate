@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json as std_json
 import os
 import zipfile
 from abc import ABC, abstractmethod
@@ -62,6 +63,12 @@ class DirReader(ABC):
             return {}
         try:
             return json.loads(cleaned)
+        except json.JSONDecodeError:
+            pass
+        try:
+            # orjson 不接受字串裡未跳脫的 tab／換行，但遊戲照樣讀得到；
+            # 改用標準庫寬鬆模式，與 Mod DB 掃描器一致
+            return std_json.loads(cleaned, strict=False)
         except Exception as e:
             raise RuntimeError(f"無法讀取 JSON: {rel_path}") from e
 

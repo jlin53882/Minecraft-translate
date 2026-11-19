@@ -27,7 +27,8 @@ def load_json_auto_encoding(path: Path) -> dict[str, Any] | None:
             text = path.read_text(encoding=enc).strip()
             if not text:
                 return None
-            data = json.loads(text)
+            # 字串裡未跳脫的 tab／換行遊戲照樣讀得到，與 Mod DB 掃描器一樣容許
+            data = json.loads(text, strict=False)
             if isinstance(data, dict):
                 return data
         except Exception:  # noqa: BLE001, S112 - 逐一嘗試編碼；全部失敗才回傳 None

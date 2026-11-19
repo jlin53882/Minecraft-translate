@@ -62,6 +62,7 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 - pending 同樣排序後寫入 `must_translate_dir` 的 `en_us.json`（路徑與 final 相同、僅檔名替換）；pending 為空時刪除舊檔
 - 輸出路徑自動剝離 ZIP 統一包裝前綴（單一頂層資料夾且非 assets/book/patchouli_books/resources 時）
 - 檔案格式：來源為 `.lang` → 輸出 `.lang`，否則 `.json`（依 `base_path_hint` 判斷）
+- 語言檔 JSON 讀取（`lang_merge_io.DirReader.read_json`、第二階段的 `safe_json_loader.load_json_auto_encoding`）容許字串裡未跳脫的 tab、換行等控制字元，與 Mod DB 掃描器一致；其他語法錯誤仍視為解析失敗，原檔隔離到 `errordata_output/`，並附上記錄原因的 `.reason.txt`。
 - CJK 判斷由 `lang_merge_dict.py` 的 `contains_cjk`（支援巢狀結構，字串部分以 `lru_cache` memoize）提供；純英文判斷 `is_pure_english` 需「至少一段文字」且「全部不含 CJK」
 
 ## 路徑語系記號（`lang_merge_content_copy.py`）
