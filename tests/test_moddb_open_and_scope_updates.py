@@ -199,3 +199,71 @@ def test_clearing_the_log_can_leave_the_page_update_to_the_caller():
 
     log_view.clear()
     assert updates == [1]
+
+
+def test_typing_the_limit_waits_for_a_pause_before_recounting(monkeypatch):
+    requests: list = []
+    panel, regions = _panel(monkeypatch, requests=requests)
+    scheduled: list = []
+    panel._limit_debouncer.call = lambda fn, *a: scheduled.append(fn)
+
+    panel.limit_field.value = "12"
+    panel.limit_field.on_change(None)
+
+    assert requests == []  # 逐字輸入不重算、不重載範圍
+    assert regions == []
+    assert scheduled == [panel._commit_limit]
+
+
+def test_limit_commit_recounts_once_and_skips_when_unchanged(monkeypatch):
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+
+    panel.limit_field.on_submit(None)  # 沒改過就按 Enter：不重算
+    assert requests == []
+
+    panel.limit_field.value = "50"
+    panel.limit_field.on_submit(None)
+    panel.limit_field.on_submit(None)  # 重複 Enter：不重複算
+
+    assert requests == [1]
+
+
+def test_limit_field_does_not_recount_on_blur(monkeypatch):
+    """欄位失焦（含重繪造成的失焦）不能觸發重算，只有停頓或 Enter 才會。"""
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+
+    panel.limit_field.value = "5"
+    panel.limit_field.on_blur(None)
+
+    assert requests == []
+
+
+def test_repair_preview_commits_a_pending_limit_first(monkeypatch):
+    """預覽前先套用等待中的上限，之後的延遲回呼不會再清掉這次預覽。"""
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+    panel.version_dd.value = None  # 預覽在選版本檢查就返回，只驗證順序
+    panel.limit_field.value = "7"
+
+    panel.preview_retranslation()
+
+    assert requests == [1]
+    assert panel._limit_applied == "7"
+
+
+def test_typing_the_limit_invalidates_an_existing_repair_preview_at_once(monkeypatch):
+    """預覽的候選集依舊上限產生：輸入就作廢，不能等停頓（切頁會取消延遲回呼）。"""
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+    panel._limit_debouncer.call = lambda fn, *a: None
+    cleared: list = []
+    panel._repair_preview = object()
+    monkeypatch.setattr(panel, "_clear_repair_preview", lambda: cleared.append(1))
+
+    panel.limit_field.value = "9"
+    panel.limit_field.on_change(None)
+
+    assert cleared == [1]
+    assert requests == []  # 重算範圍仍等停頓

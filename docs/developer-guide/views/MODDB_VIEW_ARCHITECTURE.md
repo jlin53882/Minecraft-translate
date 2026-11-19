@@ -172,7 +172,7 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 `panel_refresh._load_translate_snapshot` 在背景刷新時只讀取版本／模組／類型清單、未翻譯筆數與可沿用筆數（依請求中的模組與類型計算），避免每次範圍變更都載入整個版本並建立翻譯 session。`TranslatePanel` 以這些數字顯示快速批次估算；按下預覽或開始機翻後，`moddb_translate_service` 才建立完整 items、附加同模組 session 與已審核術語，並由共用 planner 產生精確批次數。預覽與實際翻譯仍使用相同的批次規劃路徑；格式修復的即時進度會快取剩餘 canonical plan，只有批次容量、token 預算或 session history 使下一批大小改變時才重新規劃剩餘範圍。
 
-範圍列的模組包版本與模組連動由 `PackModScope` 負責，類型選單由 `KindScopeDropdown`（`kind_scope_dropdown.py`）負責選項與選值；兩者都不查資料庫，清單來自背景快照或 `refresh_scope`。格式修復執行中的進度面板是 `repair_card.RepairProgressPanel`（版面、`show_live` 更新與 `reset`），`TranslatePanel` 只在 `_apply_repair_live` 準備即時資料後交給它。
+「單次上限」欄位逐字輸入時由 `TranslatePanel._limit_debouncer`（`Debouncer`，`LIMIT_TYPING_DELAY`）延遲：停頓或按 Enter 時 `TranslatePanel._commit_limit` 才取消等待中的計時並呼叫 `_on_limit_changed` 重算範圍，數值沒變就不重算；既有的格式修復預覽在輸入當下就作廢（候選集依舊上限產生），只有重算範圍才延遲；欄位不用失焦觸發（避免重繪造成的失焦立刻重算，也保留 `SyncTextField` 的失焦同步）。格式修復預覽（`retranslation_controller.preview`）開始前先 `_commit_limit`，避免等待中的變更之後清掉這次預覽；`will_unmount` 取消等待中的計時。範圍列的模組包版本與模組連動由 `PackModScope` 負責，類型選單由 `KindScopeDropdown`（`kind_scope_dropdown.py`）負責選項與選值；兩者都不查資料庫，清單來自背景快照或 `refresh_scope`。格式修復執行中的進度面板是 `repair_card.RepairProgressPanel`（版面、`show_live` 更新與 `reset`），`TranslatePanel` 只在 `_apply_repair_live` 準備即時資料後交給它。
 
 Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_gate`（`_repair_validation_issues`），翻譯端的品質重試因此使用與寫回驗證相同的規則；重試結果由 `_count_quality_retry` 累計到報告。
 
