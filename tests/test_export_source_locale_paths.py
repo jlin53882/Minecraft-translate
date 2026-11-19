@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -29,6 +30,7 @@ from translation_tool.core.locale_path import (
     has_locale_dir,
     replace_locale,
 )
+from translation_tool.core.output_bundler import bundle_outputs_generator
 from translation_tool.core.pipeline_content_audit import (
     _pending_guide_rel,
     classify_other_output_assets,
@@ -274,3 +276,30 @@ def test_official_zh_tw_is_kept_and_english_is_not_retranslated(tmp_path: Path):
         .read_text("utf-8")
         .startswith("# 燃燒發電機")
     )
+
+
+# ---------------------------------------------------------------------------
+# 資源包打包頁手動打包：與一鍵流水線用同一條原文語系規則
+# ---------------------------------------------------------------------------
+
+
+def test_manual_bundle_skips_source_locale_files(tmp_path: Path):
+    guide = tmp_path / "src/assets/demo/guides/demo/guide"
+    (guide / "_zh_tw/images").mkdir(parents=True)
+    (guide / "_zh_tw/index.md").write_text("# 指南\n", "utf-8")
+    (guide / "_zh_tw/images/a.png").write_bytes(b"tw")
+    (guide / "_zh_cn/images").mkdir(parents=True)
+    (guide / "_zh_cn/images/a.png").write_bytes(b"cn")
+    text = tmp_path / "src/assets/tombstone/text/_zh_tw"
+    text.mkdir(parents=True)
+    (text / "coral_chant_1_en_us.txt").write_text("舊的錯誤路徑", "utf-8")
+    output_zip = tmp_path / "pack.zip"
+
+    updates = list(bundle_outputs_generator(str(tmp_path / "src"), str(output_zip)))
+
+    with zipfile.ZipFile(output_zip) as zf:
+        names = set(zf.namelist())
+    assert "assets/demo/guides/demo/guide/_zh_tw/images/a.png" in names
+    assert not any("zh_cn" in name or "en_us" in name for name in names)
+    warnings = [u["log"] for u in updates if "語系的檔案" in str(u.get("log", ""))]
+    assert len(warnings) == 1 and "略過 2 個" in warnings[0]

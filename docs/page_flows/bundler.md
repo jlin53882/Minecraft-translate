@@ -19,7 +19,7 @@
 - 路徑中的語系記號由 `translation_tool/core/locale_path.py` 統一判斷與替換，掃描（`text_sniffer.split_locale`）、語系整理、內容分類、指南翻譯輸出與打包暫存共用同一套規則：語系資料夾（`zh_tw/`、`_zh_tw/`、帶序號的「zh_tw_0/」）、檔名尾端（`<名稱>_zh_tw.txt`）與檔名本身（`lang/zh_tw.json`）；替換時保留前導 `_`、序號與副檔名。
 - 指南樹裡的 Markdown（GuideME）不走 Patchouli 分支，即使資料夾名稱在 `lm_translator.patchouli.dir_names` 內（例如 Powah 的 `guides/powah/book/`）。
 - 同一份指南有多個譯文來源時，模組自帶的繁中優先：內容分類（`pipeline_content_audit.classify_other_output_assets`）把帶繁中語系記號、含中文的檔案整份保留（`official_translation_preserved`，覆蓋簡中轉繁的結果）；對應的英文原件不送 LM（`excluded`／`english_text_has_official_translation`）。沒有模組自帶繁中時，簡中轉繁與 LM 譯文都會產生，打包時 LM 譯文的來源優先序較高。
-- 資源包只放繁中內容：一鍵流水線的打包暫存（`bundle_service.build_bundle_staging`）在鏡像指南支援檔之後，移除路徑仍帶原文語系記號的檔案，manifest 記為 `excluded`／`source_locale_not_bundled`。判斷規則（`_carries_source_locale`）：`assets/<namespace>/` 之下任一資料夾是 `en_us`、`zh_cn`（可帶前導 `_` 與 `_<序號>`，例如 `_zh_cn`、「en_us_0」），或 `.md`／`.mdx`／`.txt` 檔名以 `_en_us`／`_zh_cn` 結尾。`_zh_cn` 支援檔（圖片、結構）在鏡像時仍可當繁中指南的來源，只是本身不進 ZIP；`lang/en_us.json` 這種檔名就是語系的語言檔不在此規則內。
+- 資源包只放繁中內容：一鍵流水線的打包暫存（`bundle_service.build_bundle_staging`）在鏡像指南支援檔之後，移除路徑仍帶原文語系記號的檔案，manifest 記為 `excluded`／`source_locale_not_bundled`。判斷規則（`_carries_source_locale`）：`assets/<namespace>/` 之下任一資料夾是 `en_us`、`zh_cn`（可帶前導 `_` 與 `_<序號>`，例如 `_zh_cn`、「en_us_0」），或 `.md`／`.mdx`／`.txt` 檔名以 `_en_us`／`_zh_cn` 結尾。`_zh_cn` 支援檔（圖片、結構）在鏡像時仍可當繁中指南的來源，只是本身不進 ZIP；`lang/en_us.json` 這種檔名就是語系的語言檔不在此規則內。規則本身是 `locale_path.carries_source_locale`，資源包打包頁的手動打包（`output_bundler._folder_candidates`）也套用同一條規則：`resource_pack` 模式的來源中這類檔案不進 ZIP，也不計入指紋與來源預覽的檔案數，日誌以一行警告列出略過的數量與前幾個路徑；手動打包沒有鏡像步驟，`_zh_cn` 支援檔直接略過。`raw_attachment` 模式依設計原樣複製，不套用此規則。
 - Advancement 的 `data/<namespace>/advancement(s)/...` 不會進入 Resource Pack。使用 translate key 的文字應透過 `assets/<namespace>/lang/zh_tw.json` 生效；literal 文字會列為「目前資源包無法直接套用」，需要另建 Data Pack 才能套用。
 - 舊版 `extra_folders: list[str]` 仍維持 `resource_pack` 行為：只接受 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。
 - 新版來源物件可指定 `mode: "raw_attachment"`、`recursive` 與 `target`。這個模式會遞迴複製所有一般檔案（含 `.md`、`.txt`、`.snbt`、JSON、圖片與二進位檔），不解析、不翻譯、不改寫 bytes，並保留來源相對目錄。
@@ -114,7 +114,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     A["輸入目錄存在？"] -- 否 --> E1["yield error 並結束"]
-    A -- 是 --> B["_collect_sources：只收集 assets/，剝除一層合法 wrapper，排除 data/ 與輸出 ZIP 相關檔案"]
+    A -- 是 --> B["_collect_sources：只收集 assets/，剝除一層合法 wrapper，排除 data/、輸出 ZIP 相關檔案與帶 en_us／zh_cn 語系路徑的檔案"]
     B --> C["_compute_fingerprint：來源與 pack 參數的指紋"]
     C --> D{"指紋相同且 ZIP 未被改動（_load_reusable_state）且未強制重建？"}
     D -- 是 --> E2["yield「沿用上次的 ZIP」並結束"]

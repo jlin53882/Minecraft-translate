@@ -14,8 +14,9 @@ Minecraft 模組放語系的方式不只一種，掃描、語系整理、翻譯�
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
+from pathlib import PurePath
 
 # 常見的單獨語言碼資料夾（``de``、``ru``）；兩字母的一般資料夾名如 ``ui`` 不算
 BARE_LOCALES = "de|fr|es|it|pt|ru|ja|ko|pl|nl|tr|cs|sv|uk"
@@ -120,13 +121,38 @@ def has_locale_dir(parts: Sequence[str], code: str, start: int = 0) -> bool:
     )
 
 
+SOURCE_LOCALES = frozenset({"en_us", "zh_cn"})
+
+
+def carries_source_locale(rel_path: str, text_suffixes: Iterable[str]) -> bool:
+    """資源包路徑（``assets/<namespace>/…``）是否仍帶原文語系記號，不屬於繁中資源包。
+
+    資料夾：``_zh_cn/``、``en_us_0/`` 等；檔名：``text_suffixes`` 副檔名的檔案以
+    ``_en_us``／``_zh_cn`` 結尾（Tombstone 這類語系寫在檔名尾端的文字檔）。
+    ``lang/en_us.json`` 這種檔名就是語系的語言檔不在此列，由語言檔流程處理。
+    """
+
+    parts = PurePath(rel_path.replace("\\", "/")).parts
+    if not parts:
+        return False
+    suffixes = {suffix.casefold() for suffix in text_suffixes}
+    text_file = _split_ext(parts[-1])[1].casefold() in suffixes
+    return any(
+        marker.code in SOURCE_LOCALES
+        and (marker.kind == KIND_DIR or (marker.kind == KIND_SUFFIX and text_file))
+        for marker in iter_locale_markers(parts, 2)
+    )
+
+
 __all__ = [
     "BARE_LOCALES",
     "KIND_DIR",
     "KIND_NAME",
     "KIND_SUFFIX",
     "LOCALE_CODE",
+    "SOURCE_LOCALES",
     "LocaleMarker",
+    "carries_source_locale",
     "find_locale_marker",
     "has_locale_dir",
     "iter_locale_markers",
