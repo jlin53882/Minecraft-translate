@@ -303,3 +303,24 @@ def test_manual_bundle_skips_source_locale_files(tmp_path: Path):
     assert not any("zh_cn" in name or "en_us" in name for name in names)
     warnings = [u["log"] for u in updates if "語系的檔案" in str(u.get("log", ""))]
     assert len(warnings) == 1 and "略過 2 個" in warnings[0]
+
+
+def test_english_fallback_under_zh_tw_does_not_suppress_translation(tmp_path: Path):
+    """``_zh_tw`` 只是未翻譯的英文備用頁時，英文原件仍要送翻譯，不能兩邊都消失。"""
+
+    merge = tmp_path / "merge"
+    guide = merge / "other_output/assets/demo/ae2guide"
+    (guide / "_en_us").mkdir(parents=True)
+    (guide / "_zh_tw").mkdir(parents=True)
+    english = "# Page\n\nThis page explains how the machine works.\n"
+    (guide / "_en_us/page.md").write_text(english, "utf-8")
+    (guide / "_zh_tw/page.md").write_text(english, "utf-8")
+
+    records = {
+        r["relative_path"]: (r["status"], r["reason"], r.get("output", ""))
+        for r in classify_other_output_assets(merge)
+    }
+
+    status, reason, output = records["assets/demo/ae2guide/_en_us/page.md"]
+    assert (status, reason) == ("pending", "english_text_queued_for_guide_translation")
+    assert (merge / output).is_file()

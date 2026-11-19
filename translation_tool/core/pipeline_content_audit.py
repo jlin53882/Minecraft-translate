@@ -130,26 +130,37 @@ def _pending_guide_rel(relative: Path, root: Path | None = None) -> Path:
     return guide_locale_rel(relative, root or Path(), "_en_us")
 
 
-def _is_official_translation(relative: Path) -> bool:
-    """路徑帶繁中語系記號（``_zh_tw/``、``zh_tw_0/``、``<名稱>_zh_tw.txt``）的模組自帶譯文。"""
+def _is_official_translation(relative: Path, text: str) -> bool:
+    """模組自帶、可以直接保留的繁中譯文。
+
+    路徑要帶繁中語系記號（``_zh_tw/``、``zh_tw_0/``、``<名稱>_zh_tw.txt``），內容也要含中文：
+    有些模組在 ``_zh_tw`` 放未翻譯的英文備用頁，那種檔案不能算官方譯文，對應的英文原件仍要送翻譯。
+    """
 
     marker = find_locale_marker(relative.parts, "zh_tw")
-    return marker is not None and marker.kind != KIND_NAME
+    return marker is not None and marker.kind != KIND_NAME and contains_cjk(text)
 
 
 def _official_translation_keys(source_root: Path) -> set[str]:
-    """``other_output`` 內模組自帶的繁中指南／文字檔（相對 ``assets`` 的比對鍵）。
+    """``other_output`` 內模組自帶、可直接保留的繁中指南／文字檔（相對 ``assets`` 的比對鍵）。
 
     必須在分類開始前一次算好：分類過程會把處理完的來源移走，逐檔檢查會受處理順序影響。
+    判斷條件與 ``_route_text_source`` 保留官方譯文的條件相同，兩邊不一致時英文原件
+    會被略過、官方檔又沒輸出，兩者都不會進資源包。
     """
 
-    return {
-        Path("assets", path.relative_to(source_root)).as_posix().casefold()
-        for path in source_root.rglob("*")
-        if path.is_file()
-        and path.suffix.lower() in _TEXT_SUFFIXES
-        and _is_official_translation(path.relative_to(source_root))
-    }
+    keys: set[str] = set()
+    for path in source_root.rglob("*"):
+        if not path.is_file() or path.suffix.lower() not in _TEXT_SUFFIXES:
+            continue
+        relative = path.relative_to(source_root)
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError):
+            continue  # 讀不出來的檔案由分類迴圈記為 parse_failed
+        if _is_official_translation(relative, text):
+            keys.add(Path("assets", relative).as_posix().casefold())
+    return keys
 
 
 def _official_counterpart_key(relative: Path, root: Path) -> str:
@@ -192,7 +203,7 @@ def _route_text_source(
 
     text = source.read_text(encoding="utf-8-sig")
     assets_rel = Path("assets", relative)
-    official = _is_official_translation(relative) and contains_cjk(text)
+    official = _is_official_translation(relative, text)
     if official or (
         contains_cjk(text) and not _needs_guide_translation(text, source.name)
     ):
