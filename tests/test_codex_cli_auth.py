@@ -17,6 +17,7 @@ def _jwt(exp, account="acct-claim"):
     claims = {
         "exp": exp,
         "https://api.openai.com/auth": {"chatgpt_account_id": account},
+        "https://api.openai.com/profile": {"email": "Me@Example.com"},
     }
     return f"{enc({'alg': 'none'})}.{enc(claims)}.sig"
 
@@ -36,6 +37,7 @@ def test_loads_valid_chatgpt_login(tmp_path, monkeypatch):
     creds = auth.load_codex_cli_credentials()
     assert creds.access_token == token
     assert creds.account_id == "a1"
+    assert creds.email == "me@example.com"
 
 
 def test_account_id_falls_back_to_token_claim(tmp_path, monkeypatch):

@@ -11,7 +11,10 @@ from translation_tool.core.codex_cli_auth import (
     CodexCLIAuthError,
     load_codex_cli_credentials,
 )
-from translation_tool.core.codex_oauth import get_chatgpt_access_token
+from translation_tool.core.codex_oauth import (
+    chatgpt_account_status,
+    get_chatgpt_access_token,
+)
 from translation_tool.core.lm_api_client import _build_translation_response_schema
 from translation_tool.core.lm_batch_budget import estimate_text_tokens
 from translation_tool.core.retry_after import parse_retry_after_header_value
@@ -470,9 +473,19 @@ def _call_codex_login_route(
     conversation_history: list[dict] | None,
     response_schema: dict | None,
     output_guard_tokens: int | None = None,
+    expected_email: str = "",
 ) -> str:
-    """用本機 Codex CLI 的登入打 Codex 後端；token 過期時不自行更新。"""
+    """用本機 Codex CLI 的登入打 Codex 後端；token 過期時不自行更新。
+
+    ``expected_email`` 是本程式所選 ChatGPT 帳號的 email；Codex CLI 登入的帳號
+    必須與它相同，否則不送出，避免把翻譯內容用到別的帳號與額度。
+    """
     credentials = load_codex_cli_credentials()
+    if not expected_email or credentials.email != expected_email:
+        raise CodexCLIAuthError(
+            "Codex CLI 登入的帳號與目前選用的 ChatGPT 帳號不同或無法確認，"
+            "為避免使用到別的帳號，不改用 Codex 登入。"
+        )
     request_kwargs = {
         "token": credentials.access_token,
         "model_name": model_name,
@@ -498,6 +511,17 @@ def _call_codex_login_route(
     return _consume_stream(response, meta_out, output_guard_tokens)
 
 
+def _selected_account_email(profile_id: str | None) -> str:
+    """回傳本程式所選 ChatGPT 帳號（指定 profile 或目前啟用者）的 email；查不到回空字串。"""
+    status = chatgpt_account_status()
+    if profile_id is None:
+        return str(status.get("email") or "").strip().casefold()
+    for account in status.get("accounts", []):
+        if account.get("profile_id") == profile_id:
+            return str(account.get("email") or "").strip().casefold()
+    return ""
+
+
 def call_chatgpt_responses(**kwargs: Any) -> str:
     """先走自己的 OAuth 登入；第三方分享額度用盡時改用本機 Codex CLI 登入。"""
     try:
@@ -506,7 +530,7 @@ def call_chatgpt_responses(**kwargs: Any) -> str:
         if exc.code not in _SHARING_LIMIT_CODES:
             raise
         original = exc
-    log_warning("[ChatGPT] 分享額度已達上限，改用本機 Codex CLI 登入重試。")
+    log_warning("[ChatGPT] 分享額度已達上限，嘗試改用本機 Codex CLI 登入重試。")
     try:
         return _call_codex_login_route(
             model_name=kwargs["model_name"],
@@ -518,6 +542,7 @@ def call_chatgpt_responses(**kwargs: Any) -> str:
             conversation_history=kwargs.get("conversation_history"),
             response_schema=kwargs.get("response_schema"),
             output_guard_tokens=kwargs.get("output_guard_tokens"),
+            expected_email=_selected_account_email(kwargs.get("profile_id")),
         )
     except CodexCLIAuthError as auth_error:
         log_warning(f"[ChatGPT] 分享額度已達上限，且無法改用 Codex 登入：{auth_error}")

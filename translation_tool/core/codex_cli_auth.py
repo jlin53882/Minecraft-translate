@@ -28,6 +28,7 @@ class CodexCLIAuthError(RuntimeError):
 class CodexCLICredentials:
     access_token: str
     account_id: str
+    email: str = ""
 
 
 def codex_auth_path() -> Path:
@@ -81,4 +82,10 @@ def load_codex_cli_credentials() -> CodexCLICredentials:
         auth_claims.get("chatgpt_account_id") if isinstance(auth_claims, dict) else ""
     )
     account_id = str(tokens.get("account_id") or claim_account or "")
-    return CodexCLICredentials(access_token=access_token, account_id=account_id)
+    profile_claims = claims.get("https://api.openai.com/profile")
+    email = profile_claims.get("email") if isinstance(profile_claims, dict) else ""
+    return CodexCLICredentials(
+        access_token=access_token,
+        account_id=account_id,
+        email=str(email or "").strip().casefold(),
+    )

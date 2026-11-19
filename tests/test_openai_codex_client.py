@@ -8,6 +8,7 @@ import pytest
 import requests
 
 from translation_tool.core import openai_codex_client as client
+from translation_tool.core.codex_cli_auth import CodexCLICredentials
 
 
 class _FakeStreamResponse:
@@ -1246,6 +1247,9 @@ def test_sharing_limit_falls_back_to_codex_login(monkeypatch):
 
     monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
     monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
 
     assert client.call_chatgpt_responses(**_call_kwargs()) == "from-codex"
     assert seen["model_name"] == "gpt-5-codex"
@@ -1260,6 +1264,9 @@ def test_other_errors_do_not_fall_back(monkeypatch):
 
     monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
     monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
 
     with pytest.raises(client.ChatGPTAPIError) as caught:
         client.call_chatgpt_responses(**_call_kwargs())
@@ -1275,6 +1282,9 @@ def test_unusable_codex_login_surfaces_the_original_limit_error(monkeypatch):
 
     monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
     monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
 
     with pytest.raises(client.ChatGPTAPIError) as caught:
         client.call_chatgpt_responses(**_call_kwargs())
@@ -1289,8 +1299,61 @@ def test_fallback_is_logged(monkeypatch):
 
     monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
     monkeypatch.setattr(client, "_call_codex_login_route", lambda **_kw: "ok")
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
     monkeypatch.setattr(client, "log_warning", messages.append)
 
     client.call_chatgpt_responses(**_call_kwargs())
 
     assert any("改用本機 Codex CLI 登入" in message for message in messages)
+
+
+def _codex_route_kwargs(expected_email):
+    return {
+        "model_name": "gpt-5-codex",
+        "system_prompt": "Translate.",
+        "payload": {"items": []},
+        "timeout": 30,
+        "meta_out": None,
+        "reasoning_effort": None,
+        "conversation_history": None,
+        "response_schema": None,
+        "expected_email": expected_email,
+    }
+
+
+@pytest.mark.parametrize("expected", ["other@example.com", ""])
+def test_codex_login_of_a_different_account_is_never_used(monkeypatch, expected):
+    monkeypatch.setattr(
+        client,
+        "load_codex_cli_credentials",
+        lambda: CodexCLICredentials("tok", "acct", "me@example.com"),
+    )
+
+    def post(*_args, **_kwargs):
+        raise AssertionError("request must not be sent")
+
+    monkeypatch.setattr(client.requests, "post", post)
+
+    with pytest.raises(client.CodexCLIAuthError, match="不同或無法確認"):
+        client._call_codex_login_route(**_codex_route_kwargs(expected))
+
+
+def test_selected_account_email_follows_the_pinned_profile(monkeypatch):
+    monkeypatch.setattr(
+        client,
+        "chatgpt_account_status",
+        lambda: {
+            "email": "Active@Example.com",
+            "accounts": [
+                {"profile_id": "p1", "email": "One@Example.com"},
+                {"profile_id": "p2", "email": ""},
+            ],
+        },
+    )
+
+    assert client._selected_account_email(None) == "active@example.com"
+    assert client._selected_account_email("p1") == "one@example.com"
+    assert client._selected_account_email("p2") == ""
+    assert client._selected_account_email("missing") == ""
