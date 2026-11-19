@@ -138,6 +138,7 @@ def preview(panel, _e=None) -> None:
     if panel._repair_preview_running:
         show_snack(panel._page, "譯文修復預覽仍在查詢中，請稍候", C.GOLD)
         return
+    panel._commit_limit()  # 還在等停頓的上限變更先套用，之後才不會清掉這次預覽
     panel._reset_stats(mode="repair")
     clear_preview(panel)
     if not panel.version_dd.value:

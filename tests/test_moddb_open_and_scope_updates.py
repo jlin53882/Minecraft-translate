@@ -238,3 +238,16 @@ def test_limit_field_does_not_recount_on_blur(monkeypatch):
     panel.limit_field.on_blur(None)
 
     assert requests == []
+
+
+def test_repair_preview_commits_a_pending_limit_first(monkeypatch):
+    """預覽前先套用等待中的上限，之後的延遲回呼不會再清掉這次預覽。"""
+    requests: list = []
+    panel, _regions = _panel(monkeypatch, requests=requests)
+    panel.version_dd.value = None  # 預覽在選版本檢查就返回，只驗證順序
+    panel.limit_field.value = "7"
+
+    panel.preview_retranslation()
+
+    assert requests == [1]
+    assert panel._limit_applied == "7"
