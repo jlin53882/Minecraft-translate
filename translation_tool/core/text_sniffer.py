@@ -17,12 +17,13 @@ import re
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
+from translation_tool.core.locale_path import LOCALE_CODE
+
 TEXT_SUFFIXES = (".md", ".mdx", ".txt", ".json", ".lang", ".snbt")
 
 _SOURCE_LANGS = ("en_us", "zh_tw", "zh_cn")
-# 語系記號：``zh_tw``／``pt-br``，或常見的單獨語言碼資料夾（``de``、``ru``；兩字母的一般資料夾名如 ``ui`` 不算）
-_BARE_LOCALES = "de|fr|es|it|pt|ru|ja|ko|pl|nl|tr|cs|sv|uk"
-_LOCALE_CODE = rf"[a-z]{{2}}[_-][a-z]{{2}}|{_BARE_LOCALES}"
+# 語系記號：``zh_tw``／``pt-br``，或常見的單獨語言碼資料夾；定義與其他階段共用（locale_path）
+_LOCALE_CODE = LOCALE_CODE
 _LOCALE_TOKEN = re.compile(rf"^_?({_LOCALE_CODE})(?:_\d+)?$", re.IGNORECASE)
 _LOCALE_SUFFIX = re.compile(rf"^(.*?)_({_LOCALE_CODE})(?:_\d+)?$", re.IGNORECASE)
 

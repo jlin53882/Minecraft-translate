@@ -16,6 +16,9 @@
 
 - 標準語言檔輸出為 `assets/<namespace>/lang/zh_tw.json`；`data/<namespace>/lang` 只可作為掃描來源，不能直接成為資源包 ZIP 內容。
 - 標準 Patchouli 的 `assets/<namespace>/patchouli_books/<book>/en_us/...` 會輸出到 `zh_tw/`；沒有明確語系資料夾的自訂書本（例如 Herbs and Harvest 的 `assets/herbsandharvest/books/...`）保留原相對路徑。
+- 路徑中的語系記號由 `translation_tool/core/locale_path.py` 統一判斷與替換，掃描（`text_sniffer.split_locale`）、語系整理、內容分類、指南翻譯輸出與打包暫存共用同一套規則：語系資料夾（`zh_tw/`、`_zh_tw/`、帶序號的「zh_tw_0/」）、檔名尾端（`<名稱>_zh_tw.txt`）與檔名本身（`lang/zh_tw.json`）；替換時保留前導 `_`、序號與副檔名。
+- 指南樹裡的 Markdown（GuideME）不走 Patchouli 分支，即使資料夾名稱在 `lm_translator.patchouli.dir_names` 內（例如 Powah 的 `guides/powah/book/`）。
+- 同一份指南有多個譯文來源時，模組自帶的繁中優先：內容分類（`pipeline_content_audit.classify_other_output_assets`）把帶繁中語系記號、含中文的檔案整份保留（`official_translation_preserved`，覆蓋簡中轉繁的結果）；對應的英文原件不送 LM（`excluded`／`english_text_has_official_translation`）。沒有模組自帶繁中時，簡中轉繁與 LM 譯文都會產生，打包時 LM 譯文的來源優先序較高。
 - 資源包只放繁中內容：一鍵流水線的打包暫存（`bundle_service.build_bundle_staging`）在鏡像指南支援檔之後，移除路徑仍帶原文語系記號的檔案，manifest 記為 `excluded`／`source_locale_not_bundled`。判斷規則（`_carries_source_locale`）：`assets/<namespace>/` 之下任一資料夾是 `en_us`、`zh_cn`（可帶前導 `_` 與 `_<序號>`，例如 `_zh_cn`、「en_us_0」），或 `.md`／`.mdx`／`.txt` 檔名以 `_en_us`／`_zh_cn` 結尾。`_zh_cn` 支援檔（圖片、結構）在鏡像時仍可當繁中指南的來源，只是本身不進 ZIP；`lang/en_us.json` 這種檔名就是語系的語言檔不在此規則內。
 - Advancement 的 `data/<namespace>/advancement(s)/...` 不會進入 Resource Pack。使用 translate key 的文字應透過 `assets/<namespace>/lang/zh_tw.json` 生效；literal 文字會列為「目前資源包無法直接套用」，需要另建 Data Pack 才能套用。
 - 舊版 `extra_folders: list[str]` 仍維持 `resource_pack` 行為：只接受 `assets/` 內容與根目錄 `pack.mcmeta`／`pack.png`；散落檔案、`data/`、`other_output/` 會被略過並在日誌中說明。

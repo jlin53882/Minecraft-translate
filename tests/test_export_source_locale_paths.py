@@ -4,6 +4,8 @@
 - 帶序號的語系資料夾（Ice and Fire 圖鑑 ``lang/bestiary/en_us_0``、``zh_cn_0``）
 - 語系寫在檔名尾端（Tombstone ``text/<名稱>_en_us.txt``）
 - GuideME 的 ``_zh_cn`` 支援檔（圖片、結構）只當鏡像來源，不進資源包
+- 放在 Patchouli 名單資料夾內的 GuideME 指南（Powah ``guides/powah/book``）
+- 模組自帶繁中時，英文原件不再送 LM 覆蓋官方譯文
 """
 
 from __future__ import annotations
@@ -22,7 +24,15 @@ from translation_tool.core.guide_translation import guide_output_rel
 from translation_tool.core.lang_merge_content_copy import (
     process_content_or_copy_file_impl,
 )
-from translation_tool.core.pipeline_content_audit import _pending_guide_rel
+from translation_tool.core.locale_path import (
+    find_locale_marker,
+    has_locale_dir,
+    replace_locale,
+)
+from translation_tool.core.pipeline_content_audit import (
+    _pending_guide_rel,
+    classify_other_output_assets,
+)
 
 
 @pytest.mark.parametrize(
@@ -140,3 +150,127 @@ def test_zh_cn_guide_support_is_mirror_source_but_not_bundled(tmp_path: Path):
     assert [(r["status"], r["reason"]) for r in dropped] == [
         ("excluded", "source_locale_not_bundled")
     ]
+
+
+# ---------------------------------------------------------------------------
+# 共用語系路徑規則
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("rel", "code", "expected"),
+    [
+        (
+            "assets/m/patchouli_books/b/en_us/e.json",
+            "zh_tw",
+            "assets/m/patchouli_books/b/zh_tw/e.json",
+        ),
+        ("assets/m/ae2guide/_en_us/p.md", "zh_tw", "assets/m/ae2guide/_zh_tw/p.md"),
+        (
+            "assets/m/lang/bestiary/en_us_0/a.txt",
+            "zh_tw",
+            "assets/m/lang/bestiary/zh_tw_0/a.txt",
+        ),
+        ("assets/m/text/chant_1_en_us.txt", "zh_tw", "assets/m/text/chant_1_zh_tw.txt"),
+        ("assets/m/lang/en_us.json", "zh_tw", "assets/m/lang/zh_tw.json"),
+    ],
+)
+def test_replace_locale_keeps_original_style(rel: str, code: str, expected: str):
+    parts = Path(rel).parts
+    marker = find_locale_marker(parts, "en_us")
+    assert marker is not None
+    assert Path(*replace_locale(parts, marker, code)) == Path(expected)
+
+
+def test_locale_markers_ignore_ordinary_names():
+    parts = Path("assets/m/textures/gui/en_us_button.png").parts
+    assert find_locale_marker(parts, "en_us") is None
+    assert has_locale_dir(Path("assets/m/guide/_zh_cn/a.png").parts, "zh_cn")
+    assert not has_locale_dir(Path("assets/m/lang/zh_cn.json").parts, "zh_cn")
+
+
+# ---------------------------------------------------------------------------
+# GuideME 指南不走 Patchouli 分支（Powah 把指南放在 guides/powah/book/）
+# ---------------------------------------------------------------------------
+
+
+def _powah_kwargs(tmp_path: Path, writes: dict[str, str]) -> dict:
+    kwargs = _copy_kwargs(tmp_path, writes)
+    kwargs["load_config_fn"] = lambda: {
+        "lang_merger": {},
+        "lm_translator": {"patchouli": {"dir_names": ["patchouli_books", "book"]}},
+    }
+    kwargs["patchouli_output_dir"] = str(tmp_path / "patchouli")
+    return kwargs
+
+
+def test_guideme_zh_cn_under_book_folder_becomes_zh_tw(tmp_path: Path):
+    writes: dict[str, str] = {}
+
+    process_content_or_copy_file_impl(
+        input_path="assets/powah/guides/powah/book/_zh_cn/index.md",
+        **_powah_kwargs(tmp_path, writes),
+    )
+
+    assert list(writes) == ["out/assets/powah/guides/powah/book/_zh_tw/index.md"]
+
+
+def test_guideme_english_under_book_folder_goes_to_other_output(tmp_path: Path):
+    """英文原件交給內容分類（送翻譯或因已有官方譯文而略過），不直接打包。"""
+
+    writes: dict[str, str] = {}
+
+    process_content_or_copy_file_impl(
+        input_path="assets/powah/guides/powah/book/generators/furnator.md",
+        **_powah_kwargs(tmp_path, writes),
+    )
+
+    assert list(writes) == [
+        "other/assets/powah/guides/powah/book/generators/furnator.md"
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 官方繁中優先：模組自帶 _zh_tw 時，英文原件不再送 LM
+# ---------------------------------------------------------------------------
+
+
+def test_official_zh_tw_is_kept_and_english_is_not_retranslated(tmp_path: Path):
+    merge = tmp_path / "merge"
+    book = merge / "other_output/assets/powah/guides/powah/book"
+    (book / "_zh_tw/generators").mkdir(parents=True)
+    (book / "generators").mkdir(parents=True)
+    # 官方譯文含英文名詞（Powah、FE）也要整份保留，不能被當成待翻譯
+    (book / "_zh_tw/generators/furnator.md").write_text(
+        "# 燃燒發電機\n\n以 Powah 的 FE 供電。\n", "utf-8"
+    )
+    (book / "generators/furnator.md").write_text(
+        "# Furnator\n\nGenerates FE from burnable items.\n", "utf-8"
+    )
+    (book / "generators/magmator.md").write_text(
+        "# Magmator\n\nGenerates FE from lava and other hot fluids.\n", "utf-8"
+    )
+    (book / "index.md").write_text("# Powah\n\nAll about energy here.\n", "utf-8")
+
+    records = {
+        Path(r["relative_path"]).as_posix().split("book/")[1]: (
+            r["status"],
+            r["reason"],
+        )
+        for r in classify_other_output_assets(merge)
+    }
+
+    assert records["_zh_tw/generators/furnator.md"] == (
+        "emitted",
+        "official_translation_preserved",
+    )
+    assert records["generators/furnator.md"] == (
+        "excluded",
+        "english_text_has_official_translation",
+    )
+    assert records["generators/magmator.md"][0] == "pending"
+    assert (
+        (merge / "assets/powah/guides/powah/book/_zh_tw/generators/furnator.md")
+        .read_text("utf-8")
+        .startswith("# 燃燒發電機")
+    )

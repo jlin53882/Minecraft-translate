@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import shutil
 import sqlite3
 import traceback
@@ -35,6 +34,7 @@ from translation_tool.core.guide_translation import (
     resolve_guide_support_reference,
     select_guideme_canonical_candidates,
 )
+from translation_tool.core.locale_path import KIND_DIR, KIND_SUFFIX, iter_locale_markers
 from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.output_bundler import (
     DEFAULT_OUTPUT_ZIP_NAME,  # noqa: F401 - View 由此取用
@@ -688,8 +688,7 @@ def _materialize_bundle_plan(
     return copied, merged, written, unchanged, expected
 
 
-_SOURCE_LOCALE_DIR = re.compile(r"^_?(?:en_us|zh_cn)(?:_\d+)?$", re.IGNORECASE)
-_SOURCE_LOCALE_NAME = re.compile(r"^.+_(?:en_us|zh_cn)(?:_\d+)?$", re.IGNORECASE)
+_SOURCE_LOCALES = frozenset({"en_us", "zh_cn"})
 _SOURCE_LOCALE_REASON = "source_locale_not_bundled"
 
 
@@ -702,11 +701,12 @@ def _carries_source_locale(rel_path: str) -> bool:
     """
 
     parts = Path(rel_path).parts
-    if any(_SOURCE_LOCALE_DIR.match(part) for part in parts[2:-1]):
-        return True
-    name = parts[-1] if parts else ""
-    stem, suffix = os.path.splitext(name)
-    return suffix.casefold() in GUIDE_SUFFIXES and bool(_SOURCE_LOCALE_NAME.match(stem))
+    guide_text = os.path.splitext(parts[-1])[1].casefold() in GUIDE_SUFFIXES
+    return any(
+        marker.code in _SOURCE_LOCALES
+        and (marker.kind == KIND_DIR or (marker.kind == KIND_SUFFIX and guide_text))
+        for marker in iter_locale_markers(parts, 2)
+    )
 
 
 def _source_locale_plan_keys(
