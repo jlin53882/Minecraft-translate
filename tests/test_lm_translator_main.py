@@ -312,7 +312,8 @@ def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
     assert kwargs["provider"] == provider
     assert kwargs["lm_config"] is runtime.lm_cfg
     assert kwargs["temperature"] == 0.4
-    assert kwargs["max_output_tokens"] == 1024
+    # ChatGPT 不送輸出上限；這個值只用來估算切批大小。
+    assert kwargs["max_output_tokens"] == (None if provider == "chatgpt" else 1024)
     if provider == "chatgpt":
         assert kwargs["reasoning_effort"] == "high"
         assert kwargs["profile_id"] == "profile-a"

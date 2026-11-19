@@ -12,7 +12,7 @@
 |---|---|
 | 觀測 | `call_gemini_requests(..., meta_out=dict)` 回報 `finishReason`、`promptTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`；回傳值仍是字串 |
 | 截斷診斷 | 截斷時 log 一行 `[截斷診斷]`：原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞）、送出筆數、估算與實際 token |
-| 上限 | Gemini 送 `generationConfig.maxOutputTokens`、OpenAI Responses 送 `max_output_tokens`（預設 65536），避免模型重複輸出燒光額度 |
+| 上限 | Gemini 送 `generationConfig.maxOutputTokens`（預設 65536），避免模型重複輸出燒光額度；ChatGPT 不送輸出上限 |
 | 切批 | `lm_batch_budget.select_batch_size`：`character` 模式由前往後線性累加；`tiktoken_calibrated` 模式先以 `1、2、4…` 做指數探測找出超出預算的前綴，再用二分搜尋找出最大可用前綴。兩者都以項目數上限／輸出 token 預算／輸入 token 預算中先到者為準，永遠只取輸入的**前綴** |
 | 學習 | 依 profile（lang / ftb / kubejs / md / patch）保存。`MAX_TOKENS` 截斷 → 輸出預算減半；連續成功 → 緩慢回升到設定值 |
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
@@ -73,9 +73,8 @@ ChatGPT tokenizer 的準確度。
 | 鍵 | 預設 | 說明 |
 |---|---|---|
 | `token_budget_enabled` | `true` | `false` = 回到舊行為，只看項目數 |
-| `max_output_token_budget` | `65536` | 單批預期輸出 token 上限（保守值） |
 | `max_input_token_budget` | `256000` | 單批輸入 token 上限，避免單次呼叫吃掉太多 TPM；ChatGPT 實際使用值還會取全域值與模型覆寫上限的較小值 |
-| `max_output_tokens` | `65536` | 送給 Gemini／OpenAI Responses 的輸出上限；`0` = 不送，ChatGPT 使用 `1～15` 會被拒絕 |
+| `max_output_tokens` | `65536` | Gemini 的輸出上限，同時是單批輸出預算的來源；ChatGPT 不送這個欄位，只用它估算切批；`0` = 不送輸出上限，切批退回 `65536` |
 | `output_token_factor` | `1.5` | 預期輸出 / 輸入係數，範圍 0.3~6.0，會依實際用量校正 |
 | `budget_min_scale` | `0.0625` | 撞牆後輸出預算最多縮到設定值的幾倍 |
 | `budget_recover_after` | `3` | 連續成功幾批後開始回升 |
@@ -83,7 +82,15 @@ ChatGPT tokenizer 的準確度。
 | `retry_same_as_source` | `true` | 同一批中譯文與原文相同的項目，在持久化前只重新確認一次 |
 
 缺少的鍵由預設值補上；型別或範圍錯誤在載入設定時就會報錯（`ConfigValidationError`）。
-`max_output_token_budget` 大於 `max_output_tokens` 只會警告。
+
+### 單批輸出預算
+
+單批輸出預算沒有獨立設定，直接取輸出上限（`BudgetConfig.from_config` 呼叫 `output_budget_from_caps`），所以預算不會超過 API 會截斷的上限：
+
+- Gemini：取已啟用模型中「有效上限」的最小值，有效上限為該模型的 `max_output_tokens` 覆寫，沒有覆寫則用全域值。
+- ChatGPT：只用全域 `max_output_tokens`（Gemini 模型的覆寫不適用）。
+- 沒有任何正整數上限（全域為 `0` 且無覆寫）時退回預設 `65536`。
+- 撞牆後的學習縮放（`budget_min_scale` 等）仍作用在這個預算上。
 
 ### 注意：`max_output_tokens` 不可超過模型上限
 
@@ -126,5 +133,5 @@ request slot 在真正發送前仍可取消，但一旦提交就固定保留，�
 
 ### Per-model 上限（PR-5）
 
-`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送輸出上限。使用 ChatGPT Responses provider 時，非零值必須至少為 16；Gemini 仍依模型限制處理。舊版只含 `enabled` 的 models schema 不需要 migration。
+`lm_translator.models.<model>.max_output_tokens` 是 optional override。未設定或為 `null` 時回退到全域 `lm_translator.max_output_tokens`；設為 `0` 時不送輸出上限。ChatGPT 批次翻譯不送輸出上限；Gemini 仍依模型限制處理。舊版只含 `enabled` 的 models schema 不需要 migration。
 - 根目錄 `conftest.py`：測試間重置學到的預算

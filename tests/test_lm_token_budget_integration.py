@@ -29,7 +29,7 @@ LONG = "a" * 2000  # 約 500 value token；預設預算下一批約 31 條
 
 def _lm_cfg(**extra) -> dict:
     cfg = {
-        "max_output_token_budget": 24000,
+        "max_output_tokens": 24000,
         "max_input_token_budget": 60000,
         "initial_batch_size_lang": 300,
         "initial_batch_size_patchouli": 100,
@@ -155,7 +155,7 @@ def test_shared_loop_falls_back_oversized_item_without_api_or_cache(monkeypatch)
         "lm_translator": {
             "token_budget_enabled": True,
             "max_input_token_budget": 40,
-            "max_output_token_budget": 40,
+            "max_output_tokens": 40,
             "output_token_factor": 1.5,
             "initial_batch_size_lang": 10,
         }
@@ -580,7 +580,7 @@ def test_shared_loop_oversized_policy_is_limited_to_moddb_items(monkeypatch):
         "lm_translator": {
             "token_budget_enabled": True,
             "max_input_token_budget": 40,
-            "max_output_token_budget": 40,
+            "max_output_tokens": 40,
             "output_token_factor": 1.5,
             "initial_batch_size_lang": 10,
         }
@@ -615,7 +615,7 @@ def test_fixed_input_over_budget_is_not_an_oversized_item():
     cfg = {
         "token_budget_enabled": True,
         "max_input_token_budget": 1000,
-        "max_output_token_budget": 100000,
+        "max_output_tokens": 100000,
     }
     item = {"path": "p", "text": "short", "source_text": "short"}
 
@@ -629,7 +629,7 @@ def test_learned_output_scale_does_not_make_normal_items_oversized():
     cfg = {
         "token_budget_enabled": True,
         "max_input_token_budget": 100000,
-        "max_output_token_budget": 1000,
+        "max_output_tokens": 1000,
     }
     item = {"path": "p", "text": "a short line", "source_text": "a short line"}
     tracker = get_tracker("lang")

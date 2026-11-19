@@ -32,6 +32,7 @@ try:
 except ImportError:  # pragma: no cover - exercised only in minimal installs
     tiktoken = None
 
+from translation_tool.core.lm_config_schema import model_output_token_cap
 from translation_tool.core.lm_format_policy import (
     build_translation_payload,
     estimate_format_spec_tokens,
@@ -240,6 +241,34 @@ def uses_lang_prompt(profile: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _is_cap(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def output_budget_from_caps(lm_cfg: dict[str, Any], fallback: int) -> int:
+    """單批輸出預算：直接取 API 輸出上限（``max_output_tokens``），不另設欄位。
+
+    Gemini 取已啟用模型中「該模型有效上限」的最小值（有 per-model 覆蓋用覆蓋值，
+    否則用全域值），切批才不會放進任何一個模型都裝不下的內容；ChatGPT 只用全域值。
+    上限為 0（不送輸出上限）或沒有可用的值時，退回 ``fallback``。
+    """
+    global_cap = lm_cfg.get("max_output_tokens")
+    global_cap = global_cap if _is_cap(global_cap) else None
+    effective: list[int] = []
+    models = lm_cfg.get("models")
+    if lm_cfg.get("provider") != "chatgpt" and isinstance(models, dict):
+        for name, model in models.items():
+            if not isinstance(model, dict) or not model.get("enabled", False):
+                continue
+            override = model_output_token_cap(lm_cfg, name)
+            cap = override if override is not None else global_cap
+            if _is_cap(cap):
+                effective.append(cap)
+    if not effective and global_cap is not None:
+        effective.append(global_cap)
+    return min(effective) if effective else fallback
+
+
 @dataclass(frozen=True)
 class BudgetConfig:
     """token 預算相關設定（來自 config 的 ``lm_translator`` 區段）。"""
@@ -279,11 +308,8 @@ class BudgetConfig:
         enabled = lm_cfg.get("token_budget_enabled", d.enabled)
         return cls(
             enabled=bool(enabled),
-            max_output_token_budget=_num(
-                "max_output_token_budget",
-                d.max_output_token_budget,
-                cast=int,
-                minimum=1,
+            max_output_token_budget=output_budget_from_caps(
+                lm_cfg, d.max_output_token_budget
             ),
             max_input_token_budget=_num(
                 "max_input_token_budget", d.max_input_token_budget, cast=int, minimum=1

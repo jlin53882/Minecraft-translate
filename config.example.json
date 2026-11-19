@@ -134,7 +134,6 @@
         "rpm_cooldown_sec": 0,
         "max_output_tokens": 65536,
         "key_failure_cooldown_sec": 3600,
-        "max_output_token_budget": 65536,
         "max_input_token_budget": 256000,
         "token_budget_enabled": true,
         "output_token_factor": 1.5,

@@ -813,7 +813,7 @@ def _validate_token_budget_config(lm: dict) -> None:
             f"目前為 {type(enabled).__name__}：'{enabled}'"
         )
 
-    for key in ("max_output_token_budget", "max_input_token_budget"):
+    for key in ("max_input_token_budget",):
         value = _typed(key, (int,), "正整數")
         if value is not None and value <= 0:
             raise ConfigValidationError(
@@ -931,19 +931,6 @@ def _validate_token_budget_config(lm: dict) -> None:
                     f"lm_translator.token_estimator.{key} 必須為{label}，"
                     f"目前為 {type(value).__name__}：'{value}'"
                 )
-
-    budget = lm.get("max_output_token_budget")
-    if (
-        isinstance(budget, int)
-        and isinstance(out_tokens, int)
-        and out_tokens > 0
-        and budget > out_tokens
-    ):
-        # 不阻擋啟動：預算超過 API 上限只是會讓單批更容易被截斷，屬於設定不合理
-        logging.warning(  # noqa: LOG015
-            f"lm_translator.max_output_token_budget ({budget}) 大於 max_output_tokens "
-            f"({out_tokens})：單批預期輸出可能超過 API 上限，建議調低預算。"
-        )
 
 
 def _validate_translator_config(translator: dict) -> None:
