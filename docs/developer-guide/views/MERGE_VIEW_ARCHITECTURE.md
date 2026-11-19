@@ -64,6 +64,12 @@ MergeView（頁面標題「語系比對合併」）整合 en_us、zh_cn、zh_tw 
 - 檔案格式：來源為 `.lang` → 輸出 `.lang`，否則 `.json`（依 `base_path_hint` 判斷）
 - CJK 判斷由 `lang_merge_dict.py` 的 `contains_cjk`（支援巢狀結構，字串部分以 `lru_cache` memoize）提供；純英文判斷 `is_pure_english` 需「至少一段文字」且「全部不含 CJK」
 
+## 路徑語系記號（`lang_merge_content_copy.py`）
+
+- 是否為簡中路徑、要換成什麼路徑都由 `translation_tool/core/locale_path.py` 判斷（`has_locale_dir`、`find_locale_marker`、`replace_locale`）：`zh_cn/`、`_zh_cn/`、帶序號的「zh_cn_0/」都算簡中資料夾，`_zh_cn_dirs_to_zh_tw` 換成繁中時保留前導 `_` 與序號。`process_zh_cn_switch` 關閉時略過的也是同一組資料夾。
+- `_is_guide_markdown`：`.md`／`.mdx` 且位在指南資料夾（GuideME）底下時不呼叫 `get_patchouli_book_root`，即使資料夾名稱在 Patchouli 名單內（例如 `book`）。
+- 語系整理之後，一鍵流水線的內容分類（`pipeline_content_audit.classify_other_output_assets`）讓模組自帶、含中文的繁中檔案優先；規則見 `docs/page_flows/bundler.md` 的資源包輸出契約。
+
 ## Patchouli 有效翻譯判定（`lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness`）
 
 - 對 book 根目錄下 `zh_tw/`、`zh_cn/` 各自掃描 `.json` / `.md` / `.txt` 檔；單一檔案的 CJK 字元佔比 >= 0.5（寫死）才算「有效檔案」（JSON 取所有字串值計算）
