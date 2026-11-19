@@ -544,6 +544,10 @@ def call_chatgpt_responses(**kwargs: Any) -> str:
             output_guard_tokens=kwargs.get("output_guard_tokens"),
             expected_email=_selected_account_email(kwargs.get("profile_id")),
         )
-    except CodexCLIAuthError as auth_error:
-        log_warning(f"[ChatGPT] 分享額度已達上限，且無法改用 Codex 登入：{auth_error}")
-        raise original from auth_error
+    except (CodexCLIAuthError, ChatGPTAPIError) as fallback_error:
+        # 備援失敗（含 Codex 登入被撤銷的 401）只記在日誌；使用者看到的仍是原本的
+        # 分享額度錯誤，避免把 Codex 登入的失敗誤導成「請重新登入本程式的帳號」。
+        log_warning(
+            f"[ChatGPT] 分享額度已達上限，且無法改用 Codex 登入：{fallback_error}"
+        )
+        raise original from fallback_error

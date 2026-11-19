@@ -1357,3 +1357,26 @@ def test_selected_account_email_follows_the_pinned_profile(monkeypatch):
     assert client._selected_account_email("p1") == "one@example.com"
     assert client._selected_account_email("p2") == ""
     assert client._selected_account_email("missing") == ""
+
+
+def test_failed_codex_request_keeps_the_original_limit_error(monkeypatch):
+    messages = []
+
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    def codex_route(**_kwargs):
+        raise client.ChatGPTAPIError("invalid_token", "revoked", status=401)
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+    monkeypatch.setattr(client, "log_warning", messages.append)
+
+    with pytest.raises(client.ChatGPTAPIError) as caught:
+        client.call_chatgpt_responses(**_call_kwargs())
+
+    assert caught.value.code == "subscription_sharing_usage_limit_exceeded"
+    assert any("invalid_token" in message for message in messages)
