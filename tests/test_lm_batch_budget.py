@@ -535,3 +535,29 @@ def test_output_budget_ignores_models_that_disable_the_cap_when_others_have_one(
     )
 
     assert cfg.max_output_token_budget == 4096
+
+
+def test_legacy_output_budget_still_caps_the_batch_budget():
+    # 舊設定檔刻意把預算設得比上限小：升級後單批大小維持不變。
+    cfg = BudgetConfig.from_config(
+        {"max_output_tokens": 65_536, "max_output_token_budget": 24_000}
+    )
+
+    assert cfg.max_output_token_budget == 24_000
+
+
+def test_legacy_output_budget_never_exceeds_the_output_cap():
+    cfg = BudgetConfig.from_config(
+        {"max_output_tokens": 8_000, "max_output_token_budget": 65_536}
+    )
+
+    assert cfg.max_output_token_budget == 8_000
+
+
+@pytest.mark.parametrize("legacy", [0, -1, True, "24000", None])
+def test_invalid_legacy_output_budget_is_ignored(legacy):
+    cfg = BudgetConfig.from_config(
+        {"max_output_tokens": 32_000, "max_output_token_budget": legacy}
+    )
+
+    assert cfg.max_output_token_budget == 32_000

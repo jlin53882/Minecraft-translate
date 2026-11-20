@@ -330,8 +330,10 @@ def call_gemini_requests(
             "meta_out": meta_out,
             "reasoning_effort": reasoning_effort,
         }
+        # ChatGPT 不送輸出上限（openai/codex#61487：大的輸出上限會被誤判成分享額度用盡）；
+        # 呼叫端給的上限改成本地保護，串流輸出明顯超過時中止並交給縮批重試。
         if max_output_tokens is not None:
-            chatgpt_kwargs["max_output_tokens"] = max_output_tokens
+            chatgpt_kwargs["output_guard_tokens"] = max_output_tokens
         if fast:
             chatgpt_kwargs["fast"] = True
         if conversation_history:

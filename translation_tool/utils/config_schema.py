@@ -776,7 +776,7 @@ SETTINGS: tuple[Setting, ...] = (
         "全域最大輸出 Tokens",
         "batch_limits",
         C_BATCH,
-        "Gemini 請求的輸出上限，也是切批時單批輸出預算的來源（已啟用模型中最小的有效上限）。ChatGPT 不送這個欄位，只用它估算切批大小。0 表示不送輸出上限，切批退回預設預算。",
+        "Gemini 請求的輸出上限，也是切批時單批輸出預算的來源（已啟用模型中最小的有效上限）。ChatGPT 不送這個欄位，只用它估算切批大小與在本地擋住重複輸出。0 表示不送輸出上限，切批退回預設預算。",
         default=65536,
         blank="zero",
         timing="next_batch",

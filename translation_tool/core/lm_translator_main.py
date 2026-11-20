@@ -2652,17 +2652,17 @@ def _provider_request_kwargs(
     network_event_callback=None,
 ):
     """建立單次 provider 請求共用與 ChatGPT 專用的參數。"""
-    provider = getattr(runtime, "provider", runtime.lm_cfg.get("provider", "gemini"))
     kwargs = {
         "model_name": model_name,
         "system_prompt": prompt,
         "payload": payload,
         "api_key": api_key,
         "temperature": runtime.model_temperature,
-        # ChatGPT 不送輸出上限（沿用模型自己的上限）；這個值只用來估算切批大小。
-        "max_output_tokens": None if provider == "chatgpt" else output_cap,
+        "max_output_tokens": output_cap,
         "meta_out": meta_out,
-        "provider": provider,
+        "provider": getattr(
+            runtime, "provider", runtime.lm_cfg.get("provider", "gemini")
+        ),
         "lm_config": runtime.lm_cfg,
         "fast": bool(runtime.lm_cfg.get("fast", False)),
     }

@@ -77,7 +77,8 @@ class TestCallGeminiRequests:
             system_prompt="Translate.",
             payload=payload,
             timeout=45,
-            max_output_tokens=1234,
+            # ChatGPT 不送輸出上限，改成本地輸出保護。
+            output_guard_tokens=1234,
             meta_out=meta,
             reasoning_effort="high",
             fast=True,

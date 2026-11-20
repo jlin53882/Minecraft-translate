@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -249,40 +248,51 @@ def test_token_budget_settings_live_on_their_own_settings_page():
 
 
 @pytest.fixture
-def _reset_legacy_budget_warning(monkeypatch):
-    monkeypatch.setattr(cm, "_LEGACY_BUDGET_WARNED", False)
+def legacy_budget_warnings(monkeypatch):
+    from translation_tool.core import lm_batch_budget
+
+    messages: list[str] = []
+    monkeypatch.setattr(lm_batch_budget, "_legacy_budget_warned", False)
+    monkeypatch.setattr(lm_batch_budget, "log_warning", messages.append)
+    return messages
 
 
-@pytest.mark.usefixtures("_reset_legacy_budget_warning")
-def test_legacy_budget_smaller_than_the_cap_warns_once(caplog):
+def test_legacy_budget_smaller_than_the_cap_warns_once(legacy_budget_warnings):
     config = {"max_output_token_budget": 24000, "max_output_tokens": 65536}
 
-    with caplog.at_level(logging.WARNING):
-        _validate_lm_translator_config(config)
-        _validate_lm_translator_config(config)
+    BudgetConfig.from_config(config)
+    BudgetConfig.from_config(config)
 
-    messages = [
-        r.getMessage()
-        for r in caplog.records
-        if "max_output_token_budget" in r.getMessage()
-    ]
-    assert len(messages) == 1
-    assert "24000" in messages[0]
-    assert "max_output_tokens" in messages[0]
+    assert len(legacy_budget_warnings) == 1
+    assert "24000" in legacy_budget_warnings[0]
+    assert "65536" in legacy_budget_warnings[0]
 
 
-@pytest.mark.usefixtures("_reset_legacy_budget_warning")
+def test_legacy_budget_warns_when_it_lowers_the_fallback_budget(
+    legacy_budget_warnings,
+):
+    # 輸出上限為 0 時預算退回預設值，舊欄位仍會把它壓低，所以也要提醒。
+    BudgetConfig.from_config({"max_output_token_budget": 24000, "max_output_tokens": 0})
+
+    assert len(legacy_budget_warnings) == 1
+
+
 @pytest.mark.parametrize(
     "config",
     [
         {"max_output_token_budget": 65536, "max_output_tokens": 65536},
         {"max_output_token_budget": 128000, "max_output_tokens": 65536},
-        {"max_output_token_budget": 24000, "max_output_tokens": 0},
         {"max_output_tokens": 65536},
     ],
 )
-def test_legacy_budget_not_smaller_than_the_cap_does_not_warn(caplog, config):
-    with caplog.at_level(logging.WARNING):
-        _validate_lm_translator_config(config)
+def test_legacy_budget_not_smaller_than_the_cap_does_not_warn(
+    legacy_budget_warnings, config
+):
+    BudgetConfig.from_config(config)
 
-    assert not any("max_output_token_budget" in r.getMessage() for r in caplog.records)
+    assert legacy_budget_warnings == []
+
+
+def test_legacy_budget_no_longer_fails_config_validation():
+    # 舊欄位只在切批時當額外上限讀取，型別不對時忽略，不擋設定載入。
+    _validate_lm_translator_config({"max_output_token_budget": "abc"})

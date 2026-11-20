@@ -12,7 +12,7 @@
 |---|---|
 | 觀測 | `call_gemini_requests(..., meta_out=dict)` 回報 `finishReason`、`promptTokenCount`、`candidatesTokenCount`、`thoughtsTokenCount`；回傳值仍是字串 |
 | 截斷診斷 | 截斷時 log 一行 `[截斷診斷]`：原因（`MAX_TOKENS` 或 `STOP` 但 JSON 壞）、送出筆數、估算與實際 token |
-| 上限 | Gemini 送 `generationConfig.maxOutputTokens`（預設 65536），避免模型重複輸出燒光額度；ChatGPT 不送輸出上限 |
+| 上限 | Gemini 送 `generationConfig.maxOutputTokens`（預設 65536），避免模型重複輸出燒光額度；ChatGPT 不送輸出上限（批次翻譯與智慧校對都一樣），改由本地輸出保護擋住重複輸出（見下方「ChatGPT 本地輸出保護」） |
 | 切批 | `lm_batch_budget.select_batch_size`：`character` 模式由前往後線性累加；`tiktoken_calibrated` 模式先以 `1、2、4…` 做指數探測找出超出預算的前綴，再用二分搜尋找出最大可用前綴。兩者都以項目數上限／輸出 token 預算／輸入 token 預算中先到者為準，永遠只取輸入的**前綴** |
 | 學習 | 依 profile（lang / ftb / kubejs / md / patch）保存。`MAX_TOKENS` 截斷 → 輸出預算減半；連續成功 → 緩慢回升到設定值 |
 | 校正 | 成功回應後，以實際輸出（`candidates` + 思考 token）用 EMA 校正「輸出 / 輸入」係數 |
@@ -90,8 +90,17 @@ ChatGPT tokenizer 的準確度。
 - Gemini：取已啟用模型中「有效上限」的最小值，有效上限為該模型的 `max_output_tokens` 覆寫，沒有覆寫則用全域值。
 - ChatGPT：只用全域 `max_output_tokens`（Gemini 模型的覆寫不適用）。
 - 沒有任何正整數上限（全域為 `0` 且無覆寫），或已啟用的 Gemini 模型全都明確設成 `0` 時，退回預設 `65536`（全域值不會被任何模型使用，不拿來當預算）。
-- 舊設定檔的 `max_output_token_budget` 不再讀取；它小於 `max_output_tokens` 時，載入設定會警告一次，提示把 `max_output_tokens` 調成原本的預算值才能維持較小的單批。
+- 舊設定檔留有 `max_output_token_budget`（設定頁不再顯示）時，它只當額外的上限：預算取 `min(上述結果, max_output_token_budget)`，所以不會超過輸出上限，原本刻意設小的單批大小也維持不變。它實際壓低預算時，日誌警告一次並提示可從設定檔移除；不是正整數時忽略。
 - 撞牆後的學習縮放（`budget_min_scale` 等）仍作用在這個預算上。
+
+### ChatGPT 本地輸出保護
+
+`call_gemini_requests` 分派到 ChatGPT 時不送 `max_output_tokens`，呼叫端給的上限改成 `output_guard_tokens` 傳給 `call_chatgpt_responses`：
+
+- `_consume_stream` 以 `estimate_text_tokens` 累計串流輸出文字的估算 token，超過 `output_guard_tokens × OUTPUT_GUARD_MARGIN`（1.5）時關閉串流，拋出 `ChatGPTAPIError("incomplete")`。
+- 批次翻譯（`_handle_chatgpt_api_error`）與智慧校對把 `incomplete` 當成截斷，縮小批次後重試。
+- 批次翻譯的上限是該模型的輸出上限（`_provider_request_kwargs` 的 `output_cap`）；智慧校對是 `smart_review_max_output_tokens`（預設 16384）。
+- 估算只算可見輸出，不含推理 token；上限不是正整數時不保護。
 
 ### 注意：`max_output_tokens` 不可超過模型上限
 

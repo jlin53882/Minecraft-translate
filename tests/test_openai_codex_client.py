@@ -215,7 +215,9 @@ def test_call_retries_once_after_unauthorized_and_keeps_reasoning(monkeypatch):
         )
 
     monkeypatch.setattr(client, "_stream_request", stream_request)
-    monkeypatch.setattr(client, "_consume_stream", lambda _response, _meta: "done")
+    monkeypatch.setattr(
+        client, "_consume_stream", lambda _response, _meta, _guard=None: "done"
+    )
 
     assert (
         client.call_chatgpt_responses(
@@ -260,7 +262,9 @@ def test_call_fast_mode_uses_codex_priority_service_tier(monkeypatch):
         return _SuccessResponse()
 
     monkeypatch.setattr(client, "_stream_request", stream_request)
-    monkeypatch.setattr(client, "_consume_stream", lambda _response, _meta: "done")
+    monkeypatch.setattr(
+        client, "_consume_stream", lambda _response, _meta, _guard=None: "done"
+    )
 
     assert (
         client.call_chatgpt_responses(
@@ -1107,3 +1111,79 @@ def test_http_429_retry_after_over_cap_fails_without_sleeping(monkeypatch):
     with pytest.raises(RuntimeError, match="等待"):
         main._handle_batch_error(SimpleNamespace(chatgpt_retry_count=0), error, 0)
     assert waits == []
+
+
+def _completed_event():
+    return {"type": "response.completed", "response": {"status": "completed"}}
+
+
+def test_consume_stream_output_guard_aborts_runaway_output():
+    # 模型重複輸出：ChatGPT 不送輸出上限，由本地保護中止並交給縮批重試。
+    deltas = [{"type": "response.output_text.delta", "delta": "x" * 400}] * 10
+    response = _FakeStreamResponse([*deltas, _completed_event()])
+
+    with pytest.raises(client.ChatGPTAPIError) as exc_info:
+        client._consume_stream(response, None, output_guard_tokens=100)
+
+    assert exc_info.value.code == "incomplete"
+    assert "local_output_guard" in str(exc_info.value)
+    assert response.closed is True
+
+
+def test_consume_stream_output_guard_allows_output_within_margin():
+    # 估算是近似值：只超過上限一點（未超過寬限倍數）不中止。
+    response = _FakeStreamResponse(
+        [
+            {"type": "response.output_text.delta", "delta": "x" * 480},
+            _completed_event(),
+        ]
+    )
+
+    assert client._consume_stream(response, None, output_guard_tokens=100) == (
+        "x" * 480
+    )
+
+
+@pytest.mark.parametrize("guard", [None, 0, -1, True])
+def test_consume_stream_without_output_guard_never_aborts(guard):
+    response = _FakeStreamResponse(
+        [
+            {"type": "response.output_text.delta", "delta": "x" * 100_000},
+            _completed_event(),
+        ]
+    )
+
+    assert len(client._consume_stream(response, None, guard)) == 100_000
+
+
+def test_call_passes_output_guard_without_sending_output_cap(monkeypatch):
+    monkeypatch.setattr(
+        client, "get_chatgpt_access_token", lambda **_kwargs: "access-token"
+    )
+    seen: dict = {}
+
+    class _Ok:
+        status_code = 200
+        ok = True
+
+    def stream_request(**kwargs):
+        seen["request"] = kwargs
+        return _Ok()
+
+    def consume(_response, _meta, guard=None):
+        seen["guard"] = guard
+        return "done"
+
+    monkeypatch.setattr(client, "_stream_request", stream_request)
+    monkeypatch.setattr(client, "_consume_stream", consume)
+
+    client.call_chatgpt_responses(
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": []},
+        timeout=30,
+        output_guard_tokens=4096,
+    )
+
+    assert seen["request"]["max_output_tokens"] is None
+    assert seen["guard"] == 4096
