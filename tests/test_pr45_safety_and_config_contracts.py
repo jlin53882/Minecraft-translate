@@ -143,7 +143,6 @@ def test_active_cache_root_does_not_follow_unsaved_runtime_config(
 def test_apply_metadata_covers_new_fields_wildcards_and_cache_root():
     expected_timing = {
         "lm_translator.max_output_tokens": "next_batch",
-        "lm_translator.max_output_token_budget": "next_batch",
         "lm_translator.max_input_token_budget": "next_batch",
         "lm_translator.key_failure_cooldown_sec": "next_request",
         # 存檔後自動重載（有任務時等任務結束），見 app/shell/config_effects.py
@@ -197,7 +196,6 @@ def test_config_view_presents_central_apply_metadata_for_lm_fields(monkeypatch):
 
     for path in (
         "lm_translator.max_output_tokens",
-        "lm_translator.max_output_token_budget",
         "lm_translator.max_input_token_budget",
         "lm_translator.key_failure_cooldown_sec",
     ):

@@ -126,7 +126,7 @@ app/views/config/
 - `lm_translator.parallel_execution_workers` 必須 int > 0
 - `lm_translator.temperature` 必須 0.0~2.0 數字
 - `lm_translator.models` 必須是 dict，每個模型為 object，`max_output_tokens` 為非負整數或 null
-- token 預算相關欄位（`token_budget_enabled`、`max_output_token_budget`、`max_input_token_budget`、`max_output_tokens`、`output_token_factor`、`budget_min_scale`、`budget_recover_after`、`budget_recover_factor`）型別與範圍；`key_failure_cooldown_sec` 必須為 >= 0 的數字
+- token 預算相關欄位（`token_budget_enabled`、`max_input_token_budget`、`max_output_tokens`、`output_token_factor`、`budget_min_scale`、`budget_recover_after`、`budget_recover_factor`）型別與範圍；`key_failure_cooldown_sec` 必須為 >= 0 的數字
 - `translator.parallel_execution_workers` 必須 int > 0
 - 偵測 `iniital_*`（拼錯）舊鍵 → 僅 warn deprecation（不再被引擎讀取）
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 
 import pytest
@@ -18,7 +17,6 @@ from translation_tool.utils.config_manager import (
 
 KEYS = [
     "token_budget_enabled",
-    "max_output_token_budget",
     "max_input_token_budget",
     "max_output_tokens",
     "output_token_factor",
@@ -34,7 +32,8 @@ def test_defaults_exist_and_match_budget_config_defaults():
 
     assert all(k in lm for k in KEYS)
     assert lm["token_budget_enabled"] is d.enabled
-    assert lm["max_output_token_budget"] == d.max_output_token_budget == 65536
+    assert "max_output_token_budget" not in lm
+    assert d.max_output_token_budget == 65536
     assert lm["max_input_token_budget"] == d.max_input_token_budget == 256000
     assert lm["max_output_tokens"] == d.max_output_tokens == 65536
     assert lm["output_token_factor"] == d.output_token_factor
@@ -96,7 +95,6 @@ def test_valid_custom_values_are_accepted():
     _validate_lm_translator_config(
         {
             "token_budget_enabled": False,
-            "max_output_token_budget": 10000,
             "max_input_token_budget": 20000,
             "max_output_tokens": 0,  # 0 = 不送 maxOutputTokens
             "output_token_factor": 2,
@@ -188,11 +186,6 @@ def test_chatgpt_model_overrides_reject_output_caps_below_api_minimum(value):
     [
         ("token_budget_enabled", "yes"),
         ("token_budget_enabled", 1),
-        ("max_output_token_budget", 0),
-        ("max_output_token_budget", -5),
-        ("max_output_token_budget", "24000"),
-        ("max_output_token_budget", True),
-        ("max_output_token_budget", 1.5),
         ("max_input_token_budget", 0),
         ("max_output_tokens", -1),
         ("max_output_tokens", "big"),
@@ -210,15 +203,6 @@ def test_chatgpt_model_overrides_reject_output_caps_below_api_minimum(value):
 def test_invalid_values_are_rejected_with_the_key_name(key, value):
     with pytest.raises(ConfigValidationError, match=key):
         _validate_lm_translator_config({key: value})
-
-
-def test_budget_larger_than_api_cap_only_warns(caplog):
-    with caplog.at_level(logging.WARNING):
-        _validate_lm_translator_config(
-            {"max_output_token_budget": 40000, "max_output_tokens": 32768}
-        )
-
-    assert any("max_output_token_budget" in r.getMessage() for r in caplog.records)
 
 
 def test_user_config_without_the_keys_gets_defaults_after_merge(tmp_path):
@@ -240,7 +224,6 @@ def test_token_budget_settings_live_on_their_own_settings_page():
     from translation_tool.utils.config_schema import C_TOKEN_BUDGET, SETTINGS_BY_PATH
 
     moved = (
-        "max_output_token_budget",
         "max_input_token_budget",
         "token_budget_enabled",
         "output_token_factor",
@@ -262,3 +245,54 @@ def test_token_budget_settings_live_on_their_own_settings_page():
         for path in getattr(block, "paths", ())
     }
     assert not any(path.rsplit(".", 1)[1] in moved for path in batch_paths)
+
+
+@pytest.fixture
+def legacy_budget_warnings(monkeypatch):
+    from translation_tool.core import lm_batch_budget
+
+    messages: list[str] = []
+    monkeypatch.setattr(lm_batch_budget, "_legacy_budget_warned", False)
+    monkeypatch.setattr(lm_batch_budget, "log_warning", messages.append)
+    return messages
+
+
+def test_legacy_budget_smaller_than_the_cap_warns_once(legacy_budget_warnings):
+    config = {"max_output_token_budget": 24000, "max_output_tokens": 65536}
+
+    BudgetConfig.from_config(config)
+    BudgetConfig.from_config(config)
+
+    assert len(legacy_budget_warnings) == 1
+    assert "24000" in legacy_budget_warnings[0]
+    assert "65536" in legacy_budget_warnings[0]
+
+
+def test_legacy_budget_warns_when_it_lowers_the_fallback_budget(
+    legacy_budget_warnings,
+):
+    # 輸出上限為 0 時預算退回預設值，舊欄位仍會把它壓低，所以也要提醒。
+    BudgetConfig.from_config({"max_output_token_budget": 24000, "max_output_tokens": 0})
+
+    assert len(legacy_budget_warnings) == 1
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"max_output_token_budget": 65536, "max_output_tokens": 65536},
+        {"max_output_token_budget": 128000, "max_output_tokens": 65536},
+        {"max_output_tokens": 65536},
+    ],
+)
+def test_legacy_budget_not_smaller_than_the_cap_does_not_warn(
+    legacy_budget_warnings, config
+):
+    BudgetConfig.from_config(config)
+
+    assert legacy_budget_warnings == []
+
+
+def test_legacy_budget_no_longer_fails_config_validation():
+    # 舊欄位只在切批時當額外上限讀取，型別不對時忽略，不擋設定載入。
+    _validate_lm_translator_config({"max_output_token_budget": "abc"})

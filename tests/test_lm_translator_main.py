@@ -312,6 +312,7 @@ def test_provider_request_kwargs_only_send_chatgpt_reasoning(provider):
     assert kwargs["provider"] == provider
     assert kwargs["lm_config"] is runtime.lm_cfg
     assert kwargs["temperature"] == 0.4
+    # ChatGPT 不送輸出上限由 provider 分派層（call_gemini_requests）處理。
     assert kwargs["max_output_tokens"] == 1024
     if provider == "chatgpt":
         assert kwargs["reasoning_effort"] == "high"

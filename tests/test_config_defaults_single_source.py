@@ -234,8 +234,9 @@ def test_budget_config_defaults_equal_schema_defaults():
     default = BudgetConfig()
     from_empty = BudgetConfig.from_config({})
     for cfg in (default, from_empty):
+        # 單批輸出預算沒有獨立設定，後備值與輸出上限的預設相同。
         assert cfg.max_output_token_budget == get_default(
-            "lm_translator.max_output_token_budget"
+            "lm_translator.max_output_tokens"
         )
         assert cfg.max_input_token_budget == get_default(
             "lm_translator.max_input_token_budget"

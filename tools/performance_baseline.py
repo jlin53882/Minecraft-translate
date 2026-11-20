@@ -229,7 +229,7 @@ def measure_batch_selection(repeats: int) -> list[dict]:
             "token_budget",
             {
                 "token_budget_enabled": True,
-                "max_output_token_budget": 24_000,
+                "max_output_tokens": 24_000,
                 "max_input_token_budget": 60_000,
                 "output_token_factor": 1.5,
             },

@@ -275,7 +275,6 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 Gap(),
                 Head("預算上限"),
                 R(
-                    "lm_translator.max_output_token_budget",
                     "lm_translator.max_input_token_budget",
                     "lm_translator.output_token_factor",
                 ),

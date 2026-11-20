@@ -9,6 +9,7 @@ import requests
 
 from translation_tool.core.codex_oauth import get_chatgpt_access_token
 from translation_tool.core.lm_api_client import _build_translation_response_schema
+from translation_tool.core.lm_batch_budget import estimate_text_tokens
 from translation_tool.core.retry_after import parse_retry_after_header_value
 from translation_tool.utils.redaction import redact_text
 
@@ -202,7 +203,33 @@ def _find_refusal(response_data: dict[str, Any]) -> str:
     return ""
 
 
-def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
+# 本地輸出保護的寬限倍數：估算是近似值，只有明顯超出（例如模型重複輸出）才中止。
+OUTPUT_GUARD_MARGIN = 1.5
+
+
+def _output_guard_limit(output_guard_tokens: int | None) -> float | None:
+    """回傳本地輸出保護的 token 上限；未設定或不是正整數時不保護。"""
+    if (
+        isinstance(output_guard_tokens, bool)
+        or not isinstance(output_guard_tokens, int)
+        or output_guard_tokens <= 0
+    ):
+        return None
+    return output_guard_tokens * OUTPUT_GUARD_MARGIN
+
+
+def _consume_stream(
+    response: requests.Response,
+    meta_out: dict | None,
+    output_guard_tokens: int | None = None,
+) -> str:
+    """讀取 Responses 串流；輸出估算超過本地保護上限時中止並視為未完整完成。
+
+    ChatGPT 請求不送 ``max_output_tokens``，模型重複輸出時沒有 API 端的上限擋住，
+    所以由這裡以本地估算中止，拋出 ``incomplete`` 交給既有的縮批重試。
+    """
+    guard_limit = _output_guard_limit(output_guard_tokens)
+    estimated_output = 0.0
     chunks: list[str] = []
     refusal_chunks: list[str] = []
     completed_response: dict[str, Any] | None = None
@@ -210,7 +237,7 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
     event_data: list[str] = []
 
     def consume_event() -> None:
-        nonlocal completed, completed_response
+        nonlocal completed, completed_response, estimated_output
         payload = _event_payload("\n".join(event_data))
         event_data.clear()
         if payload is None:
@@ -220,6 +247,14 @@ def _consume_stream(response: requests.Response, meta_out: dict | None) -> str:
             delta = payload.get("delta")
             if isinstance(delta, str):
                 chunks.append(delta)
+                if guard_limit is not None:
+                    estimated_output += estimate_text_tokens(delta)
+                    if estimated_output > guard_limit:
+                        raise ChatGPTAPIError(
+                            "incomplete",
+                            f"local_output_guard：輸出估計超過 {output_guard_tokens} tokens"
+                            f" 的 {OUTPUT_GUARD_MARGIN:g} 倍",
+                        )
         elif event_type == "response.refusal.delta":
             delta = payload.get("delta")
             if isinstance(delta, str):
@@ -350,8 +385,13 @@ def call_chatgpt_responses(
     profile_id: str | None = None,
     conversation_history: list[dict] | None = None,
     response_schema: dict | None = None,
+    output_guard_tokens: int | None = None,
 ) -> str:
-    """使用本機 ChatGPT OAuth token 呼叫 Responses 串流。"""
+    """使用本機 ChatGPT OAuth token 呼叫 Responses 串流。
+
+    ``max_output_tokens`` 會送給 API；``output_guard_tokens`` 不送，只在本地估算輸出、
+    明顯超過時中止串流（見 ``_consume_stream``）。
+    """
     token_kwargs = {"profile_id": profile_id} if profile_id is not None else {}
     token = get_chatgpt_access_token(**token_kwargs)
     request_kwargs = {
@@ -389,4 +429,4 @@ def call_chatgpt_responses(
         error = _response_error(response)
         response.close()
         raise error
-    return _consume_stream(response, meta_out)
+    return _consume_stream(response, meta_out, output_guard_tokens)

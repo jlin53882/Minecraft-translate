@@ -32,11 +32,12 @@ try:
 except ImportError:  # pragma: no cover - exercised only in minimal installs
     tiktoken = None
 
+from translation_tool.core.lm_config_schema import model_output_token_cap
 from translation_tool.core.lm_format_policy import (
     build_translation_payload,
     estimate_format_spec_tokens,
 )
-from translation_tool.utils.log_unit import log_debug, log_info
+from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
 # 這些是舊版相容常數。新的估算器把 system prompt 與 item payload 分開校正，
 # 並把 input / output 的 JSON 包裝成本拆開；保留名稱可避免外部工具與舊測試失效。
@@ -240,6 +241,73 @@ def uses_lang_prompt(profile: str | None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+# 舊設定的單批輸出預算；設定頁不再提供，設定檔留有時只當額外的上限。
+LEGACY_OUTPUT_BUDGET_KEY = "max_output_token_budget"
+
+
+def _is_cap(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _output_cap_budget(lm_cfg: dict[str, Any], fallback: int) -> int:
+    """由輸出上限推出單批輸出預算（不含舊設定的額外上限）。"""
+    global_cap = lm_cfg.get("max_output_tokens")
+    global_cap = global_cap if _is_cap(global_cap) else None
+    effective: list[int] = []
+    has_enabled_model = False
+    models = lm_cfg.get("models")
+    if lm_cfg.get("provider") != "chatgpt" and isinstance(models, dict):
+        for name, model in models.items():
+            if not isinstance(model, dict) or not model.get("enabled", False):
+                continue
+            has_enabled_model = True
+            override = model_output_token_cap(lm_cfg, name)
+            cap = override if override is not None else global_cap
+            if _is_cap(cap):
+                effective.append(cap)
+    if effective:
+        return min(effective)
+    # 已啟用的模型全都明確設成 0（不送輸出上限）時，全域值不會被任何模型使用，
+    # 不能拿來當預算；只有完全沒有已啟用模型（或 ChatGPT）才用全域值。
+    if not has_enabled_model and global_cap is not None:
+        return global_cap
+    return fallback
+
+
+def output_budget_from_caps(lm_cfg: dict[str, Any], fallback: int) -> int:
+    """單批輸出預算：直接取 API 輸出上限（``max_output_tokens``），不另設欄位。
+
+    Gemini 取已啟用模型中「該模型有效上限」的最小值（有 per-model 覆蓋用覆蓋值，
+    否則用全域值），切批才不會放進任何一個模型都裝不下的內容；ChatGPT 只用全域值。
+    上限為 0（不送輸出上限）、已啟用的模型全都明確設成 0，或沒有可用的值時，退回 ``fallback``。
+
+    設定檔仍留有舊欄位 ``max_output_token_budget``（設定頁不再提供）時，它只能把預算
+    再壓低、不會超過輸出上限，讓原本刻意設小的單批大小維持不變。
+    """
+    budget = _output_cap_budget(lm_cfg, fallback)
+    legacy = lm_cfg.get(LEGACY_OUTPUT_BUDGET_KEY)
+    if not _is_cap(legacy) or legacy >= budget:
+        return budget
+    _warn_legacy_output_budget_once(legacy, budget)
+    return legacy
+
+
+_legacy_budget_warned = False
+
+
+def _warn_legacy_output_budget_once(legacy: int, cap_budget: int) -> None:
+    """舊欄位實際壓低了預算時提醒一次：設定頁看不到它，使用者要知道去哪裡改。"""
+    global _legacy_budget_warned
+    if _legacy_budget_warned:
+        return
+    _legacy_budget_warned = True
+    log_warning(
+        f"設定檔的 lm_translator.{LEGACY_OUTPUT_BUDGET_KEY} ({legacy}) 設定頁已不再顯示，"
+        f"但仍作為單批輸出預算的上限（由輸出上限推出的預算為 {cap_budget}）；"
+        "若不需要較小的單批，可從設定檔移除這個欄位。"
+    )
+
+
 @dataclass(frozen=True)
 class BudgetConfig:
     """token 預算相關設定（來自 config 的 ``lm_translator`` 區段）。"""
@@ -279,11 +347,8 @@ class BudgetConfig:
         enabled = lm_cfg.get("token_budget_enabled", d.enabled)
         return cls(
             enabled=bool(enabled),
-            max_output_token_budget=_num(
-                "max_output_token_budget",
-                d.max_output_token_budget,
-                cast=int,
-                minimum=1,
+            max_output_token_budget=output_budget_from_caps(
+                lm_cfg, d.max_output_token_budget
             ),
             max_input_token_budget=_num(
                 "max_input_token_budget", d.max_input_token_budget, cast=int, minimum=1

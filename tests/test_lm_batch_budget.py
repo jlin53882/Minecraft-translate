@@ -438,7 +438,6 @@ def test_select_batch_size_disabled_matches_old_count_only_behaviour():
 def test_budget_config_reads_values_and_falls_back_on_bad_ones():
     cfg = BudgetConfig.from_config(
         {
-            "max_output_token_budget": 1000,
             "max_input_token_budget": "abc",  # 型別錯 → 預設
             "max_output_tokens": -5,  # 不合法 → 預設
             "output_token_factor": 99,  # 超出範圍 → 預設
@@ -450,7 +449,7 @@ def test_budget_config_reads_values_and_falls_back_on_bad_ones():
     )
 
     d = BudgetConfig()
-    assert cfg.max_output_token_budget == 1000
+    assert cfg.max_output_token_budget == d.max_output_token_budget
     assert cfg.max_input_token_budget == d.max_input_token_budget
     assert cfg.max_output_tokens == d.max_output_tokens
     assert cfg.output_token_factor == d.output_token_factor
@@ -463,3 +462,102 @@ def test_budget_config_reads_values_and_falls_back_on_bad_ones():
 def test_budget_config_defaults_when_missing():
     assert BudgetConfig.from_config(None) == BudgetConfig()
     assert BudgetConfig.from_config({}) == BudgetConfig()
+
+
+def test_output_budget_follows_the_global_output_cap():
+    cfg = BudgetConfig.from_config({"max_output_tokens": 128_000})
+
+    assert cfg.max_output_token_budget == 128_000
+
+
+def test_output_budget_uses_the_smallest_cap_of_enabled_models():
+    cfg = BudgetConfig.from_config(
+        {
+            "max_output_tokens": 128_000,
+            "models": {
+                "small": {"enabled": True, "max_output_tokens": 8_000},
+                "plain": {"enabled": True},
+                "off": {"enabled": False, "max_output_tokens": 100},
+            },
+        }
+    )
+
+    assert cfg.max_output_token_budget == 8_000
+
+
+def test_output_budget_ignores_gemini_model_caps_for_chatgpt():
+    cfg = BudgetConfig.from_config(
+        {
+            "provider": "chatgpt",
+            "max_output_tokens": 128_000,
+            "models": {"small": {"enabled": True, "max_output_tokens": 8_000}},
+        }
+    )
+
+    assert cfg.max_output_token_budget == 128_000
+
+
+def test_output_budget_falls_back_when_no_cap_is_sent():
+    d = BudgetConfig()
+
+    assert BudgetConfig.from_config(
+        {"max_output_tokens": 0}
+    ).max_output_token_budget == (d.max_output_token_budget)
+    assert BudgetConfig.from_config({}).max_output_token_budget == (
+        d.max_output_token_budget
+    )
+
+
+def test_output_budget_falls_back_when_every_enabled_model_disables_the_cap():
+    d = BudgetConfig()
+    cfg = BudgetConfig.from_config(
+        {
+            "max_output_tokens": 1024,
+            "models": {
+                "a": {"enabled": True, "max_output_tokens": 0},
+                "b": {"enabled": True, "max_output_tokens": 0},
+            },
+        }
+    )
+
+    assert cfg.max_output_token_budget == d.max_output_token_budget
+
+
+def test_output_budget_ignores_models_that_disable_the_cap_when_others_have_one():
+    cfg = BudgetConfig.from_config(
+        {
+            "max_output_tokens": 1024,
+            "models": {
+                "off": {"enabled": True, "max_output_tokens": 0},
+                "on": {"enabled": True, "max_output_tokens": 4096},
+            },
+        }
+    )
+
+    assert cfg.max_output_token_budget == 4096
+
+
+def test_legacy_output_budget_still_caps_the_batch_budget():
+    # 舊設定檔刻意把預算設得比上限小：升級後單批大小維持不變。
+    cfg = BudgetConfig.from_config(
+        {"max_output_tokens": 65_536, "max_output_token_budget": 24_000}
+    )
+
+    assert cfg.max_output_token_budget == 24_000
+
+
+def test_legacy_output_budget_never_exceeds_the_output_cap():
+    cfg = BudgetConfig.from_config(
+        {"max_output_tokens": 8_000, "max_output_token_budget": 65_536}
+    )
+
+    assert cfg.max_output_token_budget == 8_000
+
+
+@pytest.mark.parametrize("legacy", [0, -1, True, "24000", None])
+def test_invalid_legacy_output_budget_is_ignored(legacy):
+    cfg = BudgetConfig.from_config(
+        {"max_output_tokens": 32_000, "max_output_token_budget": legacy}
+    )
+
+    assert cfg.max_output_token_budget == 32_000
