@@ -73,7 +73,7 @@ HTTP 200，錯誤在串流事件裡）時，改用本機 Codex CLI 的登入重�
 - 憑證來自 `codex_cli_auth.load_codex_cli_credentials`，讀 `$CODEX_HOME/auth.json`（預設 `~/.codex/auth.json`）。
   只讀不更新：refresh token 為單次輪替，由本程式更新會讓 Codex CLI 自己的登入失效，所以 access token 過期時只提示使用者先執行 `codex`。
 - 備援請求打 `https://chatgpt.com/backend-api/codex/responses`，帶 `ChatGPT-Account-ID`，`originator` 與 `User-Agent` 為 `minecraft-translate`，不偽裝成 Codex。
-  這條路不送 `max_output_tokens` 與 `service_tier`。
+  這條路不送 `max_output_tokens` 與 `service_tier`；本地輸出保護（`output_guard_tokens`）照常生效。
 - 帳號必須相同：Codex CLI 登入的 email 要與本程式所選的 ChatGPT 帳號（任務釘選的 `profile_id`，未指定則為目前啟用帳號）相同；
   任一邊沒有 email 或不相同就不送出備援請求，避免把翻譯內容與額度用到別的帳號。
 - 其他錯誤碼（額度耗盡、401 等）不切換，維持 `_handle_chatgpt_api_error` 的既有處理。

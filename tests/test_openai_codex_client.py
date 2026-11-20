@@ -1266,6 +1266,29 @@ def test_sharing_limit_falls_back_to_codex_login(monkeypatch):
     assert seen["model_name"] == "gpt-5-codex"
 
 
+def test_codex_fallback_keeps_the_local_output_guard(monkeypatch):
+    # 備援路線同樣不送輸出上限，本地輸出保護要跟著帶過去。
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    seen = {}
+
+    def codex_route(**kwargs):
+        seen.update(kwargs)
+        return "from-codex"
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+
+    client.call_chatgpt_responses(**_call_kwargs(), output_guard_tokens=4096)
+
+    assert seen["output_guard_tokens"] == 4096
+    assert "max_output_tokens" not in seen
+
+
 def test_other_errors_do_not_fall_back(monkeypatch):
     def oauth_route(**_kwargs):
         raise client.ChatGPTAPIError("insufficient_quota", "no", status=429)
