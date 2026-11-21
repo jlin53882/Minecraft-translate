@@ -2167,6 +2167,7 @@ def test_batch_replace_requires_second_confirmation_of_same_plan(db_path):
     assert approved_plan is not None
     dialog._open_final_confirmation()
     assert dialog.final_summary.value.find("可替換 1 筆") >= 0
+    assert "⚠" not in dialog.final_summary.value  # 筆數少時不提醒寫入時間
     assert len(page.overlay) == 1
     dialog.final_ack.value = True
     dialog.plan = None  # Any changed preview invalidates the final confirmation.
@@ -3136,3 +3137,16 @@ def test_every_module_filter_with_many_modules_is_searchable():
     ):
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert "self.mod_dd = kit.searchable_dropdown(" in source, module.__name__
+
+
+def test_batch_replace_scale_warning_only_for_large_replacements():
+    from app.views.moddb.operation_summaries import (
+        LARGE_REPLACE_THRESHOLD,
+        batch_replace_scale_warning,
+    )
+
+    assert batch_replace_scale_warning(LARGE_REPLACE_THRESHOLD - 1) == ""
+    text = batch_replace_scale_warning(78_471)
+    assert "改寫 78,471 筆" in text and "約需 20 秒" in text
+    assert "不可取消" in text and "背景機翻" in text and "縮小篩選範圍" in text
+    assert "約需 5 秒" in batch_replace_scale_warning(LARGE_REPLACE_THRESHOLD)

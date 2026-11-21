@@ -98,6 +98,22 @@ def batch_replace_result_text(
 
 
 # ------------------------------------------------------------------ 審核
+# 批次取代寫入時每秒約可改寫的條目數（70 萬條目的資料庫實測約 3,500～4,000 筆／秒）
+_REPLACE_ROWS_PER_SECOND = 3500
+LARGE_REPLACE_THRESHOLD = 10_000
+
+
+def batch_replace_scale_warning(update_count: int) -> str:
+    """可替換筆數很多時，最後確認要多一行提醒寫入時間與影響；筆數不多時回傳空字串。"""
+    if update_count < LARGE_REPLACE_THRESHOLD:
+        return ""
+    seconds = max(5, round(update_count / _REPLACE_ROWS_PER_SECOND / 5) * 5)
+    return (
+        f"\n⚠ 這次會改寫 {update_count:,d} 筆，寫入約需 {seconds} 秒且不可取消，"
+        "期間背景機翻的寫入會等待；範圍太大時建議先縮小篩選範圍再取代。"
+    )
+
+
 def bulk_review_result_text(plan, excluded: Collection, result) -> str:
     """批量審核完成的訊息：用預覽的欄位（納入、同步其他版本），並列出預覽時的預估以便對照。"""
     included = len(plan.candidates) - len(excluded)

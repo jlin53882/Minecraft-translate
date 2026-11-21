@@ -289,3 +289,70 @@ def test_repairable_entries_sql_prefilter_matches_full_python_scan(db):
         )
     }
     assert expected and actual == expected
+
+
+# ------------------------------------------------------------------ 批次取代的品質比對
+def _reference_comparison(source: str, before: str, after: str, kind: str):
+    """捷徑之前的實作：取代前後各跑一次完整分析。"""
+    from translation_tool.core.format_diagnostics import analyze_format_diagnostics
+    from translation_tool.translation_db.quality import (
+        _result_messages,
+        _token_issue_deltas_from_results,
+    )
+
+    old = analyze_format_diagnostics(source, before, kind=kind)
+    new = analyze_format_diagnostics(source, after, kind=kind)
+    return (
+        _result_messages(old, source),
+        _result_messages(new, source),
+        _token_issue_deltas_from_results(old, new),
+    )
+
+
+@pytest.mark.parametrize(
+    "kind", ["lang", "kubejs_lang", "ftb_quests", "patchouli", "unknown_kind"]
+)
+def test_format_quality_comparison_shortcut_matches_full_analysis(kind):
+    from translation_tool.translation_db.quality import format_quality_comparison
+
+    replacements = [("的", "之"), ("中文", ""), ("s", "d"), ("的", "%"), ("&", "")]
+    extra_texts = ["使用%的s", "純中文的", "顏色&的a", "<的imp>", "$(l:的)連結$()"]
+    for source, before in itertools.product(TEXTS[:12], TEXTS + extra_texts):
+        for find, replace in replacements:
+            if find not in before:
+                continue
+            after = before.replace(find, replace)
+            got = format_quality_comparison(source, before, after, kind=kind)
+            assert tuple(map(tuple, got[:2])) + (tuple(got[2]),) == tuple(
+                map(tuple, _reference_comparison(source, before, after, kind)[:2])
+            ) + (tuple(_reference_comparison(source, before, after, kind)[2]),), (
+                source,
+                before,
+                after,
+            )
+
+
+def test_format_quality_comparison_skips_analysis_for_plain_text(monkeypatch):
+    from translation_tool.translation_db import quality
+
+    calls: list[str] = []
+    original = quality.analyze_format_diagnostics
+    monkeypatch.setattr(
+        quality,
+        "analyze_format_diagnostics",
+        lambda source, text, **kw: calls.append(text) or original(source, text, **kw),
+    )
+    # 原文與取代前後都沒有格式符號：不必分析
+    assert quality.format_quality_comparison("Plain", "純中文的", "純中文之") == (
+        [],
+        [],
+        (),
+    )
+    assert calls == []
+    # 原文有格式符號、譯文沒有：只分析一次，前後結果相同
+    quality.format_quality_comparison("Use %s", "使用的", "使用之")
+    assert calls == ["使用的"]
+    # 指南類型有自己的標記語法：不走捷徑
+    calls.clear()
+    quality.format_quality_comparison("Plain", "純中文的", "純中文之", kind="patchouli")
+    assert calls == ["純中文的", "純中文之"]

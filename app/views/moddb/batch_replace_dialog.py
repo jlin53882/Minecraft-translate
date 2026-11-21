@@ -39,6 +39,7 @@ from app.views.moddb.batch_replace_preview import (
 from app.views.moddb.operation_summaries import (
     batch_replace_counts_text,
     batch_replace_result_text,
+    batch_replace_scale_warning,
 )
 from translation_tool.utils.log_unit import log_info
 from translation_tool.utils.redaction import redact_secrets
@@ -262,7 +263,7 @@ class BatchReplaceDialog:
                     spacing=12,
                 ),
                 width=min(dialog_width, 520),
-                height=min(dialog_height, 320),
+                height=min(dialog_height, 380),
                 data=RESPONSIVE_DIALOG_MARKER,
             ),
             actions=[
@@ -957,7 +958,7 @@ class BatchReplaceDialog:
             f"品質惡化 {plan.quality_worsened_count:,d} 筆；"
             f"品質混合變化 {plan.quality_mixed_count:,d} 筆\n"
             "若資料庫快照與此預覽不同，交易會拒絕寫入並要求重新預覽。"
-        )
+        ) + batch_replace_scale_warning(plan.update_count)
         self.final_ack.value = False
         self.confirm_final_btn.disabled = True
         self._final_open = True

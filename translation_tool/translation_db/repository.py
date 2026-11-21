@@ -367,6 +367,37 @@ register_cache(
 )
 
 
+def _batch_change_matches_row(change: BatchReplaceChange, row: tuple) -> bool:
+    """目前的資料列（``_batch_replace_select_sql`` 的欄位）是否仍與預覽時的快照相同。"""
+    return (
+        row[7] is not None
+        and (row[1], row[2], row[3], row[4], row[5], row[6] or "")
+        == (
+            change.kind,
+            change.mc_version,
+            change.mod_id,
+            change.key,
+            change.en_us,
+            change.old_zh_tw,
+        )
+        and (int(row[7]), row[8] or "", row[9], row[20], row[13])
+        == (
+            change.effective_source,
+            change.effective_checker,
+            change.effective_review_status,
+            change.effective_revision,
+            change.effective_updated_at,
+        )
+        and (row[15], row[16], row[17], row[18])
+        == (
+            change.manual_zh_tw,
+            change.manual_checker,
+            change.manual_review_status,
+            change.manual_revision,
+        )
+    )
+
+
 def _like(text: str) -> str:
     """把使用者輸入轉成 LIKE 的字面比對（跳脫 % _ \\）。"""
     return like_pattern(text)
@@ -3341,18 +3372,9 @@ class TranslationDB(
         with self._tx(bump_generation_on_noop=False) as conn:
             if self._database_identity() != plan.database_identity:
                 raise ValueError("資料庫已切換，請重新預覽批次替換")
-            current = self._build_batch_replace_plan(
-                plan.criteria,
-                plan.find_text,
-                plan.replace_text,
-                propagate=plan.propagate,
-                confirmed_quality_worsening=plan.confirmed_quality_worsening,
-                conn=conn,
-                progress_callback=progress_callback,
-            )
             # 只比對預覽要寫入的條目：每筆變更都帶舊譯文與 revision，
             # 其餘條目（例如背景機翻新增的譯文）變動不影響這批寫入的正確性。
-            if not set(plan.changes) <= set(current.changes):
+            if self._planned_changes_stale(conn, plan, progress_callback):
                 raise ValueError("預覽後條目已變動，請重新產生批次替換預覽")
             if progress_callback is not None:
                 progress_callback("提交中（本階段不可取消）", 0.55)
@@ -3417,6 +3439,51 @@ class TranslationDB(
             plan.total_unique_entries,
             shadowed,
         )
+
+    def _planned_changes_stale(
+        self,
+        conn: sqlite3.Connection,
+        plan: BatchReplacePlan,
+        progress_callback: Callable[[str, float], None] | None = None,
+    ) -> bool:
+        """預覽要寫入的條目是否有任何一筆在預覽後變動。
+
+        只依條目 id 讀回這些條目，與預覽時的快照逐欄比對（生效譯文、來源、審核、revision、
+        人工譯文與原文）；根條目另外要仍符合篩選條件。新譯文由舊譯文與尋找／取代文字決定，
+        品質篩選也只看這些欄位，所以快照相同就代表預覽內容仍然成立。成本只跟要寫入的
+        筆數有關，不必重新掃描整個範圍。
+        """
+        cond, params = self._filter_sql(plan.criteria)
+        head = f"{self._batch_replace_select_sql()} {self._query_source()} WHERE "
+        total = max(1, len(plan.changes))
+        done = 0
+        for extra in (False, True):
+            wanted = {
+                change.entry_id: change
+                for change in plan.changes
+                if change.is_extra_version == extra
+            }
+            ids = list(wanted)
+            for start in range(0, len(ids), _CHUNK):
+                raise_if_cancelled()
+                chunk = ids[start : start + _CHUNK]
+                marks = ",".join("?" * len(chunk))
+                if extra:  # 其他版本的條目不在篩選的版本內，只比對快照
+                    sql, args = f"{head}e.id IN ({marks})", chunk
+                else:
+                    sql, args = (
+                        f"{head}({cond}) AND e.id IN ({marks})",
+                        [*params, *chunk],
+                    )
+                rows = conn.execute(sql, args).fetchall()
+                if len(rows) != len(chunk) or not all(
+                    _batch_change_matches_row(wanted[int(row[0])], row) for row in rows
+                ):
+                    return True
+                done += len(chunk)
+                if progress_callback is not None:
+                    progress_callback("重新檢查資料庫快照", 0.05 + 0.1 * done / total)
+        return False
 
     @staticmethod
     def _count_shadowed_replacements(conn: sqlite3.Connection, changes) -> int:

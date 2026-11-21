@@ -216,6 +216,13 @@ def _token_issue_deltas_from_results(
     return tuple(deltas)
 
 
+def _token_text_without_marks(text: str, kind: str) -> bool:
+    """一般 token 分析器的類型，且文字沒有格式符號、自訂標記或色碼。"""
+    return format_kind_policy(
+        kind
+    ).analyzer_name == "token" and not has_format_structure_marks(text or "")
+
+
 def format_quality_comparison(
     source: str,
     before: str,
@@ -223,9 +230,21 @@ def format_quality_comparison(
     *,
     kind: str | None = None,
 ) -> tuple[list[str], list[str], tuple[QualityIssueDelta, ...]]:
-    """Compare batch quality through the common kind-aware diagnostics contract."""
-    before_result = analyze_format_diagnostics(source, before, kind=kind or "lang")
-    after_result = analyze_format_diagnostics(source, after, kind=kind or "lang")
+    """Compare batch quality through the common kind-aware diagnostics contract.
+
+    一般 token 分析器的類型裡，譯文沒有任何格式符號、自訂標記或色碼時，分析結果只取決於
+    原文：取代前後都沒有時兩次結果相同只算一次，原文也沒有時一定沒有問題，不必分析。
+    """
+    kind = kind or "lang"
+    plain = _token_text_without_marks(before, kind) and _token_text_without_marks(
+        after, kind
+    )
+    if plain and not has_format_structure_marks(source or ""):
+        return [], [], ()
+    before_result = analyze_format_diagnostics(source, before, kind=kind)
+    after_result = (
+        before_result if plain else analyze_format_diagnostics(source, after, kind=kind)
+    )
     return (
         _result_messages(before_result, source),
         _result_messages(after_result, source),

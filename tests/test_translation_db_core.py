@@ -1193,6 +1193,47 @@ def test_batch_replace_rejects_when_planned_entry_no_longer_matches(db):
         db.execute_batch_replace(plan)
 
 
+def test_batch_replace_rechecks_only_planned_entries_without_rescanning(
+    db, monkeypatch
+):
+    """寫入前只依條目 id 比對快照，不重新建立整份預覽（成本只跟要寫入的筆數有關）。"""
+    db.ingest(
+        "1.21.1",
+        [item(key=f"item.scan.{i}", tw=f"before {i}") for i in range(5)],
+    )
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "before", "after")
+
+    def no_rebuild(*_a, **_k):
+        raise AssertionError("寫入前不應重新建立整份預覽")
+
+    monkeypatch.setattr(db, "_build_batch_replace_plan", no_rebuild)
+    assert db.execute_batch_replace(plan).updated == 5
+
+
+def test_batch_replace_rejects_when_a_propagated_entry_changed(db):
+    db.ingest("1.21.1", [item(key="item.prop", tw="before")])
+    db.ingest("1.20.1", [item(key="item.prop", tw="before")])
+    plan = db.preview_batch_replace(
+        EntryFilter(version="1.21.1"), "before", "after", propagate=True
+    )
+    extra = next(change for change in plan.changes if change.is_extra_version)
+    db.save_manual(extra.entry_id, "before edited", propagate=False)
+    with pytest.raises(ValueError, match="預覽後條目已變動"):
+        db.execute_batch_replace(plan)
+
+
+def test_batch_replace_rejects_when_a_root_left_the_filter(db):
+    db.ingest("1.21.1", [item(key="item.scope", tw="before scope")])
+    criteria = EntryFilter(version="1.21.1", review_status="unreviewed")
+    plan = db.preview_batch_replace(criteria, "before", "after")
+    assert plan.changes
+    entry_id = plan.changes[0].entry_id
+    # 預覽後被標成已審核：快照的審核狀態不同，也已不在「未審核」篩選內
+    db.review_manual(entry_id, expected_zh_tw="before scope", propagate=False)
+    with pytest.raises(ValueError, match="預覽後條目已變動"):
+        db.execute_batch_replace(plan)
+
+
 def test_batch_replace_requires_explicit_quality_worsening_confirmation(db):
     db.ingest("1.21.1", [item(key="item.quality", en="Token", tw="原本")])
     criteria = EntryFilter(version="1.21.1", quality=QualityFilter())

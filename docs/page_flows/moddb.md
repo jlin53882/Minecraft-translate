@@ -244,7 +244,7 @@ flowchart TD
 
 #### 格式診斷顯示與進階篩選
 
-條目校對、AI 修復審查與批次取代預覽共用同一份格式診斷：`analyze_format_diagnostics` 依條目種類的策略回傳 `FormatDiagnosticsResult`，畫面不自行判斷格式。
+條目校對、AI 修復審查與批次取代預覽共用同一份格式診斷：`analyze_format_diagnostics` 依條目種類的策略回傳 `FormatDiagnosticsResult`，畫面不自行判斷格式。批次取代預覽的前後比對（`format_quality_comparison`）在一般 token 類型、取代前後的譯文都沒有格式符號、自訂標記或色碼時，結果只取決於原文：只分析一次，原文也沒有標記時直接判定沒有問題。
 
 - 差異預覽的摘要、檢查表與原文／譯文高亮都讀同一份結果（`format_issue_rendering` 的 `diagnostic_label`、`diagnostic_spans`）。可計數的標記（佔位符、色碼、Patchouli 巨集、指南標記）各有一列，顯示原文數量、譯文數量與缺少／多出的處理建議。
 - Patchouli `<link;分類;顯示文字[;start]>` 標籤只比對分類與 `start`，第三欄的顯示文字可翻譯。
@@ -341,7 +341,9 @@ flowchart TD
     L --> M["_finish_apply → EntriesPanel._after_batch_replace 重載並通知總覽"]
 ```
 
-寫入前在同一個交易內重新建立計畫，只比對預覽要寫入的條目（舊譯文、來源、狀態與 revision 都要相同），任一筆不同就整批拒絕並提示重新預覽。範圍內其他條目在預覽後的變動（例如背景機翻新增的譯文）不會讓預覽失效，也不會被這次寫入，要納入就重新預覽。
+寫入前在同一個交易內只依條目 id 讀回預覽要寫入的條目（`TranslationDB._planned_changes_stale`），與預覽快照逐欄比對（舊譯文、來源、審核狀態、revision、人工譯文與原文都要相同），根條目另外要仍符合篩選條件；任一筆不同就整批拒絕並提示重新預覽。不重新掃描整個範圍，所以檢查時間只跟要寫入的筆數有關。範圍內其他條目在預覽後的變動（例如背景機翻新增的譯文）不會讓預覽失效，也不會被這次寫入，要納入就重新預覽。
+
+可替換筆數達 `LARGE_REPLACE_THRESHOLD`（1 萬筆）時，最後確認視窗多一行 `batch_replace_scale_warning`：預估寫入秒數、寫入不可取消、期間背景機翻的寫入會等待，並建議先縮小篩選範圍。
 
 跳過原因清單由 `_start_skipped_load` 以同樣的背景作業機制載入。
 
