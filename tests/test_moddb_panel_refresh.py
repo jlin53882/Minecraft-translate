@@ -27,6 +27,11 @@ class _CountOnlyDatabase:
         assert mod_ids == () and kind is None
         return 20
 
+    def count_untranslated_merged(self, version, mod_ids, *, kind=None):
+        assert version == "1.21.1"
+        assert mod_ids == () and kind is None
+        return 90
+
     def untranslated_entries(self, *_args, **_kwargs):
         raise AssertionError("範圍刷新不應建立完整待翻譯 items")
 
@@ -40,5 +45,6 @@ def test_translate_snapshot_only_reads_fast_counts():
 
     assert snapshot["missing"] == 120
     assert snapshot["reusable"] == 20
+    assert snapshot["merged_groups"] == 90
     assert snapshot["planned_items"] is None
     assert snapshot["planned_batches"] is None

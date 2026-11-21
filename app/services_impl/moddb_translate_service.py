@@ -24,6 +24,10 @@ from app.services_impl.moddb_service import (
     open_database,
     warm_stats_quietly,
 )
+from app.services_impl.moddb_translate_merge import (
+    MergedSelection,
+    select_merged_rows,
+)
 from app.services_impl.moddb_translate_report import (
     QUALITY_STATUS,
     format_backend_summary,
@@ -108,7 +112,8 @@ class TranslateOptions:
 
     version: str
     mod_ids: tuple[str, ...] = ()  # 空 = 全部模組
-    limit: int = DEFAULT_LIMIT  # 單次最多翻幾筆；0 = 不限
+    # 單次最多送 AI 幾筆（相同原文合併後的筆數，同組條目不另計）；0 = 不限
+    limit: int = DEFAULT_LIMIT
     # 只翻這個條目類型；None = 全部類型。只影響一般機翻（格式修復在預覽中另有類型篩選）
     kind: str | None = None
     dry_run: bool = False
@@ -126,11 +131,14 @@ class TranslateOptions:
 class TranslateReport:
     """批次機翻的結果統計。"""
 
-    candidates: int = 0  # 這次要處理的未翻譯筆數
+    candidates: int = 0  # 這次要處理的未翻譯條目數（含相同原文合併的同組條目）
+    ai_items: int = 0  # 相同原文合併後實際送 AI 的筆數
+    merged: int = 0  # 因相同原文合併、不必另外送 AI 的條目數
     reused: int = 0  # 沿用其他版本譯文（未呼叫 AI）
     translated: int = 0  # AI 已回傳
     written: int = 0  # 已寫入資料庫
-    flagged: int = 0  # 特殊字元與原文不一致，未寫入
+    flagged: int = 0  # 特殊字元與原文不一致，未寫入（含同組條目）
+    flagged_twins: int = 0  # 品質退回的代表條目底下、一併未寫入的同組條目數
     status: str = "DONE"
     dry_run: bool = False
     remaining: int = 0  # 這次的候選中仍未寫入的筆數（含特殊字元不一致）
@@ -170,6 +178,8 @@ class TranslateReport:
         """將目前物件轉成供 UI、log 或測試使用的可序列化字典。"""
         return {
             "candidates": self.candidates,
+            "ai_items": self.ai_items,
+            "merged": self.merged,
             "reused": self.reused,
             "translated": self.translated,
             "written": self.written,
@@ -210,9 +220,13 @@ def _update_remaining(report: TranslateReport) -> None:
     report.remaining = max(0, report.candidates - report.written)
 
 
-def _grouped_items(db, rows, *, check=None) -> list[dict[str, Any]]:
-    """候選列轉成依批次邊界穩定分組的項目，並附上可信的來源語系（一次查詢，不逐筆）。"""
-    locales = db.source_locales_for_entries([int(row[0]) for row in rows])
+def _grouped_items(db, rows, *, check=None, locales=None) -> list[dict[str, Any]]:
+    """候選列轉成依批次邊界穩定分組的項目，並附上可信的來源語系（一次查詢，不逐筆）。
+
+    ``locales`` 是呼叫端已查好的來源語系；沒有提供時才查詢資料庫。
+    """
+    if locales is None:
+        locales = db.source_locales_for_entries([int(row[0]) for row in rows])
     return group_items_by_batch_key(
         build_items(rows, check=check, source_locales=locales), check=check
     )
@@ -319,22 +333,65 @@ def estimate_scope_plan(
     reuse_other_versions: bool = True,
     kind: str | None = None,
 ) -> tuple[int, int]:
-    """Return the exact selected AI rows and their shared planned batch count."""
-    rows = db.untranslated_entries(
-        version,
-        list(mod_ids),
-        limit or None,
-        exclude_reusable=reuse_other_versions,
-        kind=kind,
+    """回傳相同原文合併後實際送 AI 的筆數，以及共用 planner 規劃的批數。"""
+    selection, locales = _load_merged_selection(
+        db, version, mod_ids, limit, exclude_reusable=reuse_other_versions, kind=kind
     )
-    items = _grouped_items(db, rows)
+    items = _grouped_items(db, list(selection.rows), locales=locales)
     _attach_translation_sessions(
         items,
         operation_id=f"count:{version}:{','.join(mod_ids)}",
         db=db,
         version=version,
     )
-    return len(rows), plan_batches(items)
+    return selection.ai_count, plan_batches(items)
+
+
+def _load_merged_selection(
+    db,
+    version: str,
+    mod_ids,
+    limit: int,
+    *,
+    exclude_reusable: bool,
+    kind: str | None,
+) -> tuple[MergedSelection, dict[int, str | None]]:
+    """讀出要送 AI 的未翻譯條目並合併相同原文，回傳（合併結果, 來源語系）。
+
+    沒有上限、或前綴會讀到整個範圍的四分之一以上時讀整個範圍。否則先依查詢順序讀一段前綴（組數
+    不足上限就加倍），再只重讀這些組所屬模組（同一個命名空間的所有模組包版本）的全部待翻列。同組條目
+    一定在同一個內容模組裡，而前綴的每一列都在重讀範圍內且排在最前面，所以前 ``limit`` 組與
+    同組條目都和「讀出整個範圍再分組」相同。
+    """
+
+    def load(mods, fetch):
+        rows = db.untranslated_entries(
+            version, list(mods), fetch, exclude_reusable=exclude_reusable, kind=kind
+        )
+        return rows, db.source_locales_for_entries([int(row[0]) for row in rows])
+
+    # 前綴要讀到整個範圍的不小部分時，直接讀整個範圍比反覆加倍再重讀便宜
+    total = db.count_untranslated(version, list(mod_ids), kind=kind) if limit else 0
+    fetch = limit * 2
+    while fetch * 4 <= total:
+        rows, locales = load(mod_ids, fetch)
+        window = select_merged_rows(rows, locales, limit)
+        if len(rows) < fetch:  # 排除可沿用條目後已讀完整個範圍
+            return window, locales
+        if window.ai_count >= limit:
+            break
+        fetch *= 2
+    else:
+        rows, locales = load(mod_ids, None)
+        return select_merged_rows(rows, locales, limit), locales
+    namespaces = {row[2].split("@", 1)[0] for row in window.rows}
+    related = [
+        mod
+        for mod in (mod_ids or db.mods(version))
+        if mod.split("@", 1)[0] in namespaces
+    ]
+    rows, locales = load(related, None)
+    return select_merged_rows(rows, locales, limit), locales
 
 
 def estimate_scope_batches(
@@ -509,8 +566,24 @@ def _noop_cache(*_args, **_kwargs) -> bool:
     return True
 
 
-def _select_rows(session, db, options: TranslateOptions, report: TranslateReport):
-    """沿用其他版本譯文後挑出要機翻的條目；預覽或沒有條目時回傳 None（已寫好摘要）。"""
+def _merge_summary_text(report: TranslateReport) -> str:
+    """相同原文合併的說明（沒有合併時為空字串）；預覽與實際機翻共用同一段文字。"""
+    if not report.merged:
+        return ""
+    return (
+        f"相同原文合併：{report.candidates:,} 筆條目只送 AI {report.ai_items:,} 筆"
+        f"（{report.merged:,} 筆同原文條目沿用同一個譯文）"
+    )
+
+
+def _select_rows(
+    session, db, options: TranslateOptions, report: TranslateReport
+) -> tuple[MergedSelection, dict[int, str | None]] | None:
+    """沿用其他版本譯文後挑出要機翻的條目並合併相同原文。
+
+    回傳（合併結果, 來源語系）；預覽或沒有條目時回傳 None（已寫好摘要）。
+    上限套在合併後的組數上（見 ``_load_merged_selection``）。
+    """
     mods, kind = list(options.mod_ids), options.kind
     if options.reuse_other_versions and not options.dry_run:
         report.reused = db.reuse_from_other_versions(options.version, mods, kind=kind)
@@ -518,52 +591,73 @@ def _select_rows(session, db, options: TranslateOptions, report: TranslateReport
             _log(session, f"♻️ 沿用其他版本相同譯文 {report.reused} 筆（未呼叫 AI）")
     # 預覽不寫入，所以沿用的筆數用查詢估算，並從「要送 AI 的條目」中排除
     preview_reuse = options.dry_run and options.reuse_other_versions
-    rows = db.untranslated_entries(
+    selection, locales = _load_merged_selection(
+        db,
         options.version,
         mods,
-        options.limit or None,
+        options.limit,
         exclude_reusable=preview_reuse,
         kind=kind,
     )
-    report.candidates = len(rows)
+    rows = list(selection.rows)
+    report.candidates = selection.entry_count
+    report.ai_items = selection.ai_count
+    report.merged = selection.merged_count
     report.remaining = (
         db.count_untranslated(options.version, mods, kind=kind)
         if options.dry_run
         else report.candidates
     )
     if options.dry_run:
-        report.scope_remaining = report.remaining
-        if preview_reuse:
-            report.reused = db.count_reusable(options.version, mods, kind=kind)
-            _log(
-                session,
-                f"♻️ 預覽：其中約 {report.reused:,} 筆其他版本已有相同譯文，"
-                "開始機翻時會直接沿用（不呼叫 AI）；"
-                "只有「模組、鍵值、原文都相同」才算，原文不同的不會沿用",
-            )
-        preview_items = _grouped_items(db, rows, check=None)
-        _attach_translation_sessions(
-            preview_items,
-            operation_id=f"preview:{getattr(session, 'id', '') or id(session)}",
-            db=db,
-            version=options.version,
-        )
-        report.planned_batches = plan_batches(preview_items)
-        _log(
-            session,
-            f"🔎 預覽：{report.remaining:,} 筆未翻譯，本次將送 AI 翻譯 {len(rows):,} 筆"
-            f"，預估約 {report.planned_batches:,} 批（未呼叫 AI、未寫入；"
-            "實際時間依 API 速度而定，開始後每批結束會更新預估）",
-        )
-        for _eid, _kind, mod_id, key, en_us in rows[:5]:
-            _log(session, f"　{mod_id} / {key}：{en_us[:60]!r}")
+        _report_preview_plan(session, db, options, report, rows, locales)
     elif not rows:
         _log(session, "沒有需要機翻的條目")
+    elif report.merged:
+        _log(session, f"🔗 {_merge_summary_text(report)}")
     if options.dry_run or not rows:
         session.set_progress(1.0)
         session.set_summary(report.as_dict())
         return None
-    return rows
+    return selection, locales
+
+
+def _report_preview_plan(
+    session,
+    db,
+    options: TranslateOptions,
+    report: TranslateReport,
+    rows: list,
+    locales: Mapping[int, str | None],
+) -> None:
+    """預覽：估算可沿用筆數、用實際 planner 規劃批數，並寫出預覽日誌（不呼叫 AI、不寫入）。"""
+    mods, kind = list(options.mod_ids), options.kind
+    report.scope_remaining = report.remaining
+    if options.reuse_other_versions:
+        report.reused = db.count_reusable(options.version, mods, kind=kind)
+        _log(
+            session,
+            f"♻️ 預覽：其中約 {report.reused:,} 筆其他版本已有相同譯文，"
+            "開始機翻時會直接沿用（不呼叫 AI）；"
+            "只有「模組、鍵值、原文都相同」才算，原文不同的不會沿用",
+        )
+    preview_items = _grouped_items(db, rows, check=None, locales=locales)
+    _attach_translation_sessions(
+        preview_items,
+        operation_id=f"preview:{getattr(session, 'id', '') or id(session)}",
+        db=db,
+        version=options.version,
+    )
+    report.planned_batches = plan_batches(preview_items)
+    merge_note = _merge_summary_text(report)
+    _log(
+        session,
+        f"🔎 預覽：{report.remaining:,} 筆未翻譯，本次將送 AI 翻譯 {report.ai_items:,} 筆"
+        f"，預估約 {report.planned_batches:,} 批（未呼叫 AI、未寫入；"
+        "實際時間依 API 速度而定，開始後每批結束會更新預估）"
+        + (f"；{merge_note}" if merge_note else ""),
+    )
+    for _eid, _kind, mod_id, key, en_us in rows[:5]:
+        _log(session, f"　{mod_id} / {key}：{en_us[:60]!r}")
 
 
 def _flush_buffer(session, db, version, buffer, report, failures) -> None:
@@ -617,20 +711,31 @@ def _quality_issues_for_item(
     return issues
 
 
-def _record_quality_rejection(report: TranslateReport, item: dict[str, Any]) -> None:
-    """把共享迴圈判定品質不符的項目計入報告（計數、樣本與完整清單）。"""
+def _record_quality_rejection(
+    report: TranslateReport,
+    item: dict[str, Any],
+    selection: MergedSelection | None = None,
+) -> None:
+    """把共享迴圈判定品質不符的項目計入報告（計數、樣本與完整清單）。
+
+    同組條目（相同原文合併、沒有另外送 AI）一樣沒寫入，也列進待人工確認，預填同一個譯文。
+    """
     report.translated += 1
     report.ai_response = report.translated
+    entry_id = item.get("_entry_id")
+    twins = selection.twins_of(entry_id) if selection else ()
     report.quality_rejected += 1
-    report.flagged = report.quality_rejected
+    report.flagged_twins += len(twins)
+    report.flagged = report.quality_rejected + report.flagged_twins
     source = str(item.get("source_text") or "")
     translated = str(item.get("_quality_translation_text", item.get("text") or ""))
     issues = list(item.get("_quality_issues") or ())
     if not issues:
         issues = list(_quality_issues_for_item(item, source, translated))
-    entry_id = item.get("_entry_id")
     if isinstance(entry_id, int):
         report.flagged_entries[entry_id] = translated
+    for twin in twins:
+        report.flagged_entries[int(twin[0])] = translated
     if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
         report.flagged_samples.append(
             f"{item.get('_mod_id', '')} / {item.get('path', '')}：{'、'.join(issues)}"
@@ -688,7 +793,7 @@ def _batch_ui_line(
     batch_quality = current["quality_rejected"] - previous["quality_rejected"]
     batch_total = batch_ai + batch_fallback
     cache_type = message.partition("(")[2].partition(")")[0]
-    progress = f"{report.ai_response + report.source_fallback}/{report.candidates}"
+    progress = f"{report.ai_response + report.source_fallback}/{report.ai_items or report.candidates}"
     unwritten = []
     if batch_fallback:
         unwritten.append(f"{batch_fallback} 筆回填原文")
@@ -710,15 +815,17 @@ def _log_final_summary(session, report: TranslateReport) -> None:
         if report.quality_rejected and report.quality_issues_file
         else ""
     )
+    merge_note = _merge_summary_text(report)
     _log_split(
         session,
         (
             f"{'⚠️' if final_level == 'warning' else '✅'} 翻譯完成 | "
             f"寫入 {report.written}/{report.candidates} | "
             f"仍有 {report.remaining} 筆需要處理 | 共送出 {report.batches:,} 批"
-            f"{quality_hint}"
+            f"{f' | {merge_note}' if merge_note else ''}{quality_hint}"
         ),
-        f"完成（狀態 {report.status}）：AI 回傳 {report.ai_response} 筆、"
+        f"完成（狀態 {report.status}）：送 AI {report.ai_items} 筆"
+        f"（相同原文合併 {report.merged} 筆條目）、AI 回傳 {report.ai_response} 筆、"
         f"寫入 {report.written} 筆、品質拒絕 {report.quality_rejected} 筆、"
         f"來源回填 {report.source_fallback} 筆、MAX_TOKENS {report.max_tokens_items} 筆、"
         f"契約失敗 {report.contract_failed_items} 筆、快取寫入 {report.cache_written} 筆、"
@@ -737,7 +844,7 @@ def _settle_report(session, report, options, result, failures, buffer, tracker) 
         # The shared loop still invokes a no-op callback to preserve its
         # generic contract; it must not be reported as a real cache write.
         report.cache_written = 0
-    report.flagged = report.quality_rejected
+    report.flagged = report.quality_rejected + report.flagged_twins
     report.db_written = report.written
     if failures["db_error"] or failures["db_stop"]:
         report.status = "FAILED"
@@ -796,7 +903,7 @@ def _batch_backend_line(
         f"{current['quality_retry_unresolved'] - previous['quality_retry_unresolved']}｜"
         f"品質重試配額失敗 "
         f"{current['quality_retry_quota_failed'] - previous['quality_retry_quota_failed']}｜"
-        f"總進度 {report.ai_response + report.source_fallback}/{report.candidates}"
+        f"總進度 {report.ai_response + report.source_fallback}/{report.ai_items or report.candidates}"
     )
 
 
@@ -849,10 +956,23 @@ def _count_scope_remaining(db, options: TranslateOptions) -> int | None:
         return None
 
 
+def _write_back_items(item: dict[str, Any], twins) -> list[WriteBackItem]:
+    """通過品質檢查的代表條目，連同相同原文的同組條目，轉成以同一個譯文寫回的項目。"""
+    source, text = item["source_text"], item["text"]
+    return [
+        WriteBackItem(item["_kind"], item["_mod_id"], item["path"], source, text),
+        *(
+            WriteBackItem(kind, mod_id, key, source, text)
+            for _, kind, mod_id, key, _ in twins
+        ),
+    ]
+
+
 def _translate_rows(
-    session, db, options: TranslateOptions, report: TranslateReport, rows, cancelled
+    session, db, options: TranslateOptions, report: TranslateReport, selected, cancelled
 ) -> None:
-    """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入。"""
+    """分批機翻並寫回；每批先檢查特殊字元，一致者才寫入（同組條目跟著代表條目寫入）。"""
+    selection, locales = selected
     buffer: list[WriteBackItem] = []
     failures = {"streak": 0, "aborted": False, "db_error": "", "db_stop": False}
     last_batch_counts = dict.fromkeys(_BATCH_COUNT_KEYS, 0)
@@ -885,7 +1005,7 @@ def _translate_rows(
         )
         if quality_rejected:
             failures["streak"] = 0
-            _record_quality_rejection(report, item)
+            _record_quality_rejection(report, item, selection)
             return
         if item.get("_untranslated"):
             report.source_fallback += 1
@@ -898,12 +1018,11 @@ def _translate_rows(
         failures["streak"] = 0
         report.translated += 1
         report.ai_response = report.translated
-        source, text = item["source_text"], item["text"]
         # The shared loop owns the quality gate. Keep this callback focused on
         # DB write candidates so quality rejection cannot be mistaken for an
         # ordinary source fallback or validated twice.
-        buffer.append(
-            WriteBackItem(item["_kind"], item["_mod_id"], item["path"], source, text)
+        buffer.extend(
+            _write_back_items(item, selection.twins_of(item.get("_entry_id")))
         )
 
     def flush() -> None:
@@ -939,7 +1058,7 @@ def _translate_rows(
             translate_batch_smart, batch, batch_total, event_callback
         )
 
-    items = _grouped_items(db, rows)
+    items = _grouped_items(db, list(selection.rows), locales=locales)
     operation_id = str(getattr(session, "id", "") or id(session))
     _attach_translation_sessions(
         items, operation_id=operation_id, db=db, version=options.version
@@ -1018,13 +1137,13 @@ def run_moddb_translate_service(
         _log(
             session,
             f"開始{'預覽' if options.dry_run else '機翻'}：版本 {options.version}，"
-            f"{scope}，單次上限 {options.limit or '不限'} 筆",
+            f"{scope}，單次上限送 AI {options.limit or '不限'} 筆",
         )
         selection_started = monotonic()
-        rows = _select_rows(session, db, options, report)
+        selected = _select_rows(session, db, options, report)
         report.metrics["selection_ms"] = round((monotonic() - selection_started) * 1000)
-        if rows is not None:
-            _translate_rows(session, db, options, report, rows, cancelled)
+        if selected is not None:
+            _translate_rows(session, db, options, report, selected, cancelled)
     except Exception as exc:  # noqa: BLE001 - 背景任務：任何失敗都要回報到 session
         # 服務層要把例外狀態傳回呼叫端；否則共用流水線會把預設的
         # ``DONE`` 誤當成翻譯成功，只留下 UI log 而繼續輸出。

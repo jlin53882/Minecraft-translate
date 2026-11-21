@@ -5453,6 +5453,26 @@ class TranslationDB(
         params = [version, *extra]
         return self._cached_count(sql, params)
 
+    def count_untranslated_merged(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        kind: str | None = None,
+    ) -> int:
+        """未翻譯條目依「類型、內容模組識別、原文」合併後的組數（範圍說明的快速估算）。
+
+        與機翻的相同原文合併（``app/services_impl/moddb_translate_merge.py``）同一組欄位，
+        但不區分來源語系，也不扣除可沿用其他版本的條目，所以是估算值；精確筆數由預覽計算。
+        """
+        where, extra = self._untranslated_where(mod_ids, kind)
+        sql = (
+            "SELECT COUNT(*) FROM (SELECT 1 FROM entry e "
+            "LEFT JOIN effective f ON f.entry_id = e.id "
+            f"WHERE {where} GROUP BY e.kind, {content_mod_sql('e')}, e.en_us)"
+        )
+        return self._cached_count(sql, [version, *extra])
+
     def _cached_count(self, sql: str, params: list) -> int:
         """筆數查詢的快取（同樣的條件在資料沒變時不重算；翻頁不必每頁重數）。"""
         key = (

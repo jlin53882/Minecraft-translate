@@ -52,7 +52,7 @@
     "app/views/moddb/smart_review_reviewer.py": 873,
     "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 950,
-    "app/views/moddb/translate_panel.py": 1104,
+    "app/views/moddb/translate_panel.py": 1116,
     "app/views/moddb/version_diff_dialog.py": 1029,
     "app/views/moddb_view.py": 966
   }

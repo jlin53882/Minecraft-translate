@@ -167,6 +167,22 @@ def translation_kpi_titles(
     ]
 
 
+def translation_preview_target_text(candidates: int, ai_items: int) -> str:
+    """預覽「此範圍仍未翻譯」卡片的說明：本次條目數，相同原文合併時另列送 AI 筆數。"""
+    text = f"本次將翻譯 {candidates:,} 筆"
+    if ai_items < candidates:
+        text += f"（相同原文合併，送 AI {ai_items:,} 筆）"
+    return text
+
+
+def translation_written_delta(translated: int, merged: int) -> str:
+    """實際機翻「已寫入」卡片的說明：AI 回傳筆數，相同原文合併時另列合併筆數。"""
+    text = f"AI 回傳 {translated:,} 筆"
+    if merged:
+        text += f"（相同原文合併 {merged:,} 筆）"
+    return text
+
+
 def translation_scope_text(
     missing: int,
     reusable: int,
@@ -175,19 +191,38 @@ def translation_scope_text(
     batches_text: str,
     *,
     warn_large: bool = False,
+    preview_counts: tuple[int, int] | None = None,
+    merged_groups: int | None = None,
 ) -> str:
-    """機翻範圍說明：未翻譯、可沿用、上限、本次送 AI 的筆數與批數（粗估或預覽規劃）。"""
+    """機翻範圍說明：未翻譯、可沿用、上限、本次送 AI 的筆數與批數（粗估或預覽規劃）。
+
+    相同原文只送 AI 一次，上限算的是送 AI 的筆數。``preview_counts`` 是同範圍預覽算出的
+    （送 AI 筆數, 涵蓋條目數）；沒有預覽時 ``will`` 是依合併估算的送 AI 筆數上限，實際筆數以預覽為準。
+    ``merged_groups`` 是範圍快照以 SQL 估算的相同原文合併後組數（不分來源語系、未扣除可沿用）；
+    已有預覽時改用預覽的精確筆數，不再顯示這個估算。
+    """
     text = f"此範圍有 {format_count(missing)} 筆未翻譯"
+    if preview_counts is None and merged_groups is not None and merged_groups < missing:
+        text += f"（相同原文合併後約 {format_count(merged_groups)} 筆要送 AI）"
     if reusable:
         text += (
             f"，其中約 {format_count(reusable)} 筆其他版本已有相同譯文、"
             "開始時會直接沿用（原文不同的不算）"
         )
-    text += f"；上限 {format_count(limit)} 筆" if limit else "；上限為 0（不限）"
-    text += (
-        f"，本次送 AI 翻譯{'最多 ' if limit else '全部 '}{format_count(will)} 筆"
-        f"（{batches_text}）"
-    )
+    text += f"；上限送 AI {format_count(limit)} 筆" if limit else "；上限為 0（不限）"
+    if preview_counts is None:
+        amount = f"{'最多 ' if limit else '全部 '}{format_count(will)} 筆"
+        text += f"，本次送 AI 翻譯{amount}（相同原文只送一次；{batches_text}）"
+    else:
+        ai_count, entry_count = preview_counts
+        merged = (
+            f"相同原文合併，涵蓋 {format_count(entry_count)} 筆條目；"
+            if entry_count > ai_count
+            else ""
+        )
+        text += (
+            f"，本次送 AI 翻譯 {format_count(ai_count)} 筆（{merged}{batches_text}）"
+        )
     if warn_large:
         text += "；筆數很多，會消耗大量 API 額度，建議先按「先預覽」確認"
     return text

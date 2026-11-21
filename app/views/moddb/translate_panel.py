@@ -48,7 +48,9 @@ from app.views.moddb.kind_scope_dropdown import KindScopeDropdown
 from app.views.moddb.operation_summaries import (
     scope_batches_text,
     translation_kpi_titles,
+    translation_preview_target_text,
     translation_scope_text,
+    translation_written_delta,
 )
 from app.views.moddb.pack_scope_dropdown import PackModScope, PackScopeDropdown
 from app.views.moddb.repair_card import (
@@ -98,9 +100,9 @@ class TranslatePanel(ft.Column):
         self.view_flagged_btn = self.result_inspector.button
         self._run_version = ""
         self._run_scope: tuple = ()
-        # 最近一次預覽的 (精確批數, 範圍, 未翻譯數, 可沿用數)；範圍與資料（兩個筆數）
-        # 都沒變時，範圍說明顯示預覽的批數
-        self._preview_plan: tuple[int, tuple, int, int] | None = None
+        # 最近一次預覽的 (精確批數, 範圍, 未翻譯數, 可沿用數, (送 AI 筆數, 條目數))；範圍與
+        # 資料（兩個筆數）都沒變時，範圍說明顯示預覽的批數與相同原文合併後的送 AI 筆數
+        self._preview_plan: tuple[int, tuple, int, int, tuple[int, int]] | None = None
         self._last_counts: tuple | None = None
         self._repair_preview = None
         self._repair_preview_db_identity: tuple[str, tuple[int, ...]] | None = None
@@ -425,6 +427,7 @@ class TranslatePanel(ft.Column):
                 snapshot.get("reusable", 0),
                 snapshot.get("planned_batches"),
                 snapshot.get("planned_items"),
+                snapshot.get("merged_groups"),
             )
         self.refresh_indicator.value = str(snapshot.get("error") or "")
         self.refresh_indicator.visible = bool(snapshot.get("error"))
@@ -486,7 +489,8 @@ class TranslatePanel(ft.Column):
         reusable = (
             db.count_reusable(version, mods, kind=kind) if self.reuse_row.value else 0
         )
-        self._set_count_text(missing, reusable)
+        merged = db.count_untranslated_merged(version, mods, kind=kind)
+        self._set_count_text(missing, reusable, merged_groups=merged)
 
     def _refresh_counts_after_run(self) -> None:
         """工作結束後更新範圍筆數：有背景快照時交給它（畫面執行緒不查資料庫），否則就地查詢。"""
@@ -501,9 +505,12 @@ class TranslatePanel(ft.Column):
         reusable: int,
         planned_batches: int | None = None,
         planned_items: int | None = None,
+        merged_groups: int | None = None,
     ) -> None:
         limit = self.limit()
         to_ai = max(0, missing - reusable)  # 沿用其他版本的不送 AI
+        if merged_groups is not None:  # 相同原文只送一次（估算，精確值看預覽）
+            to_ai = min(to_ai, merged_groups)
         # 背景查詢已在排除可沿用條目後套用 limit；使用它回報的精確筆數，
         # 避免「未翻譯總數 - 可沿用數」與 SQL LIMIT 順序不同而顯示不一致。
         will = (
@@ -511,9 +518,10 @@ class TranslatePanel(ft.Column):
             if planned_items is not None
             else (min(to_ai, limit) if limit else to_ai)
         )
-        self._last_counts = (missing, reusable, planned_batches, planned_items)
+        counts = (missing, reusable, planned_batches, planned_items, merged_groups)
+        self._last_counts = counts
         plan = self._preview_plan
-        if plan and plan[1:] != (self._scope_key(), missing, reusable):
+        if plan and plan[1:4] != (self._scope_key(), missing, reusable):
             # 範圍改了，或其他操作（掃描匯入、批次取代…）改了資料：預覽的批數不再適用
             self._preview_plan = plan = None
         self.count_text.value = translation_scope_text(
@@ -525,6 +533,8 @@ class TranslatePanel(ft.Column):
                 planned_batches, plan[0] if plan else None, estimate_batch_count(will)
             ),
             warn_large=not limit and will > LARGE_RUN_WARNING,
+            preview_counts=plan[4] if plan else None,
+            merged_groups=merged_groups,
         )
 
     def _on_limit_typed(self) -> None:
@@ -982,26 +992,28 @@ class TranslatePanel(ft.Column):
         dry_run = bool(s.get("dry_run"))
         self._set_kpi_mode("normal", preview=dry_run)
         candidates = s.get("candidates", 0) or 0
+        ai_items = s.get("ai_items") or candidates  # 相同原文合併後送 AI 的筆數
         if dry_run:
             self.stat_reused.set_value(
                 format_count(s.get("reused")),
                 delta="開始機翻時直接沿用（不呼叫 AI）",
             )
             self.stat_written.set_value(
-                format_count(candidates),
+                format_count(ai_items),
                 delta=f"預估約 {s.get('planned_batches', 0) or 0:,} 批",
             )
             self.stat_flagged.set_value("—", delta="開始機翻後才會檢查")
             self.stat_remaining.set_value(
                 format_count(s.get("scope_remaining", s.get("remaining"))),
-                delta=f"本次將翻譯 {candidates:,} 筆",
+                delta=translation_preview_target_text(candidates, ai_items),
             )
-            # 範圍說明改用預覽精確規劃的批數，畫面上不同時出現兩個批數
+            # 範圍說明改用預覽精確規劃的批數與送 AI 筆數，畫面上不同時出現兩組數字
             self._preview_plan = (
                 s.get("planned_batches", 0) or 0,
                 self._run_scope,
                 s.get("scope_remaining", s.get("remaining", 0)) or 0,
                 s.get("reused", 0) or 0,
+                (ai_items, candidates),
             )
             if self._last_counts is not None:
                 self._set_count_text(*self._last_counts)
@@ -1009,7 +1021,7 @@ class TranslatePanel(ft.Column):
         self.stat_reused.set_value(format_count(s.get("reused")))
         self.stat_written.set_value(
             format_count(s.get("written")),
-            delta=f"AI 回傳 {s.get('translated', 0):,} 筆",
+            delta=translation_written_delta(s.get("translated", 0), s.get("merged", 0)),
         )
         flagged, flagged_entries = self._normal_flagged_state(s)
         self.stat_flagged.set_value(

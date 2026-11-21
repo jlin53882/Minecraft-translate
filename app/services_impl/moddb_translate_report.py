@@ -241,7 +241,8 @@ def format_backend_summary(report: Any) -> str:
     lines = [
         f"[Mod DB 機翻結束摘要] 狀態：{report.status}（{status}）",
         (
-            f"  範圍　　：候選 {report.candidates} 筆｜仍未翻譯 {report.remaining} 筆｜"
+            f"  範圍　　：候選 {report.candidates} 筆（送 AI {report.ai_items} 筆，"
+            f"相同原文合併 {report.merged} 筆）｜仍未翻譯 {report.remaining} 筆｜"
             f"共 {report.batches} 批（預估 {report.planned_batches} 批）｜"
             f"耗時 {report.elapsed_sec:.0f} 秒"
         ),

@@ -1002,8 +1002,9 @@ def test_translate_panel_explains_zero_limit_means_all(db_path):
     assert "送 AI 翻譯全部 2 筆" in panel.count_text.value
     panel.limit_field.value = "2"
     panel._on_limit_changed()
-    assert "上限 2 筆" in panel.count_text.value
+    assert "上限送 AI 2 筆" in panel.count_text.value
     assert "送 AI 翻譯最多 2 筆" in panel.count_text.value
+    assert "相同原文只送一次" in panel.count_text.value
     panel.reuse_row.value = False  # 關掉沿用：3 筆全部送 AI
     panel.limit_field.value = "0"
     panel._on_limit_changed()

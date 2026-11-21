@@ -353,6 +353,12 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         if db and version and request.get("reuse")
         else 0
     )
+    # 相同原文合併後的組數（SQL 估算，不建立 items）；精確送 AI 筆數由預覽計算
+    merged_groups = (
+        db.count_untranslated_merged(version, mod_ids, kind=kind)
+        if db and version
+        else 0
+    )
     # 背景刷新只更新快速計數；完整批次規劃由預覽／開始翻譯時的 service
     # 使用同一份 items、session 與 planner 計算，避免每次範圍變更都掃完整版本。
     snapshot.update(
@@ -365,6 +371,7 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         kind=kind,
         missing=missing,
         reusable=reusable,
+        merged_groups=merged_groups,
         planned_items=None,
         planned_batches=None,
     )

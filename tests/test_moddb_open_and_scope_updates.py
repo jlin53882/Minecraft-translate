@@ -180,6 +180,7 @@ def test_finishing_a_run_without_a_scheduler_reads_the_counts_inline(monkeypatch
     panel._get_db = lambda: SimpleNamespace(
         count_untranslated=lambda *a, **k: db_calls.append("untranslated") or 0,
         count_reusable=lambda *a, **k: db_calls.append("reusable") or 0,
+        count_untranslated_merged=lambda *a, **k: db_calls.append("merged") or 0,
     )
     panel.version_dd.value = "1.21.1"
 

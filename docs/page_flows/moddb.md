@@ -266,17 +266,22 @@ flowchart TD
     C --> D["open_database(create=False) 後 _select_rows"]
     D --> E{"reuse_other_versions 且非預覽？"}
     E -- 是 --> F["reuse_from_other_versions 沿用譯文（不呼叫 AI）"]
-    E -- 否 --> G["untranslated_entries 取得待翻列"]
+    E -- 否 --> G["_load_merged_selection 取得待翻列（有上限時讀前綴與相關模組）"]
     F --> G
-    G --> H{"預覽或無待翻列？"}
+    G --> G2["select_merged_rows 合併相同原文，上限套在送 AI 筆數"]
+    G2 --> H{"預覽或無待翻列？"}
     H -- 是 --> I["寫入摘要後結束"]
-    H -- 否 --> J["_translate_rows 分批送 AI"]
+    H -- 否 --> J["_translate_rows 分批送 AI（只送代表條目）"]
     J --> K{"translation_issues 特殊字元與指南標記是否一致？"}
-    K -- 是 --> L["放入 buffer，_flush_buffer 呼叫 db.write_back"]
+    K -- 是 --> L["代表與同組條目放入 buffer，_flush_buffer 呼叫 db.write_back"]
     K -- 否 --> M["記入 report.flagged_entries，不寫入"]
     M --> N["結果檢視的異常按鈕 → ModDbView.open_flagged"]
     N --> O["EntriesPanel.show_flagged：只列異常條目並預填 AI 譯文"]
 ```
+
+相同原文只送 AI 一次（`app/services_impl/moddb_translate_merge.py`）：類型相同、內容模組識別相同（`content_mod_value`，KubeJS／FTB 語系不分模組包版本）、原文完全相同，且來源語系的批次身分相同（預設語系與無法確認的語系同一組，其他語系各自一組）的條目併成一組。每組依查詢順序的第一筆是代表條目，只有它送 AI；代表的譯文通過品質檢查後，同組條目以相同譯文一起寫回（`_write_back_items`），代表被品質檢查拒絕或回填原文時整組都不寫入；被品質檢查拒絕時同組條目也列進待人工確認，預填同一個譯文，計入 `flagged`。翻譯快取只記錄代表條目。單次上限算的是組數：沒有上限、或前綴會讀到範圍四分之一以上時，`_load_merged_selection` 讀出整個範圍再分組；其他情況先依查詢順序讀一段前綴（組數不足上限就加倍），再重讀這些組所屬命名空間（含所有模組包版本）的全部待翻列，結果與讀出整個範圍再分組相同，上限之內的組別即使同組條目排在後面也一併納入。`_select_rows` 與範圍估算 `estimate_scope_plan` 共用這個讀取。
+
+`TranslateReport` 的 `candidates` 是涵蓋的條目數，`ai_items` 是實際送 AI 的筆數，`merged` 是合併掉的條目數；`written` 與 `remaining` 以條目計，AI 回傳、品質拒絕、回填原文與批次進度（「總進度」的分母是 `ai_items`）以送 AI 筆數計。有合併時，預覽日誌、開始時的 🔗 日誌、結束摘要（畫面與後台）、後台多行摘要都會寫出「相同原文合併」的筆數；預覽的「將送 AI 翻譯」卡片顯示 `ai_items`，「此範圍仍未翻譯」卡片的說明列出條目數與送 AI 筆數（`translation_preview_target_text`），實際機翻的「已寫入」卡片說明附上合併筆數（`translation_written_delta`）。背景範圍快照不建立項目，而是以 `TranslationDB.count_untranslated_merged`（依類型、內容模組識別、原文 `GROUP BY` 的組數）估算合併後的筆數，範圍說明在預覽前寫「相同原文合併後約 N 筆要送 AI」，並用它限制本次送 AI 的估算筆數（`translation_scope_text` 的 `merged_groups`）；這個估算不分來源語系、也不扣除可沿用的條目。同範圍預覽後改用預覽的送 AI 筆數與涵蓋條目數（`translation_scope_text` 的 `preview_counts`）。
 
 ### AI 修復既有譯文與逐筆審查
 
