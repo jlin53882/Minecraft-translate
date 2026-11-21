@@ -21,9 +21,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.book_formats import is_neutral_pages_candidate
+from translation_tool.core.text_sniffer import split_locale
 from translation_tool.translation_db.identity import classify_file
 from translation_tool.translation_db.models import WriteBackItem, WriteBackStats
 from translation_tool.translation_db.repository import TranslationDB
+from translation_tool.translation_db.schema import KIND_PATCHOULI
 
 _VER = re.compile(r"\d+(?:\.\d+)+")
 
@@ -164,17 +167,50 @@ class TranslationResolver:
         return Hit(best[2], best[3], best[1], True)
 
 
+def _neutral_pages_file_key(item: dict[str, Any], root: str | Path):
+    """無語系資料夾手冊（``assets/<模組>/books/...``）的 ``(模組, 檔案鍵)``；不是回傳 None。
+
+    這種手冊沒有 Patchouli 的語系資料夾，``classify_file`` 認不出來；只有抽取器已依內容
+    確認為 ``neutral_pages`` 格式的項目才採用，檔案鍵與資料庫掃描依內容辨識時相同
+    （``sniff_groups`` 以 ``split_locale`` 去掉語系後的中性路徑），只接受英文原文檔。
+    """
+    if "format:neutral_pages" not in (item.get("semantic_evidence") or ()):
+        return None
+    path = Path(item.get("file") or "")
+    try:
+        parts = path.relative_to(root).parts
+    except ValueError:
+        try:
+            parts = path.resolve().relative_to(Path(root).resolve()).parts
+        except ValueError:
+            return None
+    if not is_neutral_pages_candidate("/".join(parts)) or len(parts) < 4:
+        return None
+    if parts[0].lower() != "assets":
+        return None
+    loc = split_locale(parts[2:])
+    if loc.other or loc.lang != "en_us":
+        return None
+    return parts[1], loc.neutral
+
+
 def item_identity(item: dict[str, Any], root: str | Path):
     """翻譯項目（``file`` / ``path`` / ``source_text``）→ ``(類型, 模組, 鍵值, 原文)``；不適用回傳 None。"""
     hinted = item.get("db_ident")  # 掃描時已知身分（依內容辨識的指南）
     if hinted is not None:
         en = item.get("source_text") or ""
         return (*hinted, en) if en else None
-    ident = classify_file(item.get("file") or "", root)
-    if ident is None or ident.lang != "en_us":
-        return None
     en = item.get("source_text") or item.get("text") or ""
     path = str(item.get("path") or "")
+    ident = classify_file(item.get("file") or "", root)
+    if ident is None:
+        neutral = _neutral_pages_file_key(item, root)
+        if neutral is None or not en or not path:
+            return None
+        mod_id, file_key = neutral
+        return KIND_PATCHOULI, mod_id, f"{file_key}#{path}", en
+    if ident.lang != "en_us":
+        return None
     if not en or not path:
         return None
     return ident.kind, ident.mod_id, ident.item_key(path), en
