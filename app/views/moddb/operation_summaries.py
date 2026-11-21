@@ -110,7 +110,7 @@ def batch_replace_scale_warning(update_count: int) -> str:
     seconds = max(5, round(update_count / _REPLACE_ROWS_PER_SECOND / 5) * 5)
     return (
         f"\n⚠ 這次會改寫 {update_count:,d} 筆，寫入約需 {seconds} 秒且不可取消，"
-        "期間背景機翻的寫入會等待；範圍太大時建議先縮小篩選範圍再取代。"
+        "期間正在執行的背景機翻可能寫入失敗而停止；建議先停止機翻或縮小篩選範圍再取代。"
     )
 
 

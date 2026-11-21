@@ -3148,5 +3148,6 @@ def test_batch_replace_scale_warning_only_for_large_replacements():
     assert batch_replace_scale_warning(LARGE_REPLACE_THRESHOLD - 1) == ""
     text = batch_replace_scale_warning(78_471)
     assert "改寫 78,471 筆" in text and "約需 20 秒" in text
-    assert "不可取消" in text and "背景機翻" in text and "縮小篩選範圍" in text
+    assert "不可取消" in text and "背景機翻可能寫入失敗" in text
+    assert "停止機翻或縮小篩選範圍" in text
     assert "約需 5 秒" in batch_replace_scale_warning(LARGE_REPLACE_THRESHOLD)

@@ -1234,6 +1234,19 @@ def test_batch_replace_rejects_when_a_root_left_the_filter(db):
         db.execute_batch_replace(plan)
 
 
+def test_batch_replace_rejects_when_only_the_filter_scope_changed(db):
+    """快照完全沒變、但根條目已不符合篩選（版本不同的另一邊被改成相同）也要拒絕。"""
+    db.ingest("1.21.1", [item(key="item.diff", tw="before diff")])
+    db.ingest("1.20.1", [item(key="item.diff", tw="other diff")])
+    criteria = EntryFilter(version="1.21.1", state="diff")
+    plan = db.preview_batch_replace(criteria, "before", "after")
+    assert len(plan.changes) == 1
+    other = next(row for row in db.list_entries("1.20.1")[0] if row.key == "item.diff")
+    db.save_manual(other.id, "before diff", propagate=False)
+    with pytest.raises(ValueError, match="預覽後條目已變動"):
+        db.execute_batch_replace(plan)
+
+
 def test_batch_replace_requires_explicit_quality_worsening_confirmation(db):
     db.ingest("1.21.1", [item(key="item.quality", en="Token", tw="原本")])
     criteria = EntryFilter(version="1.21.1", quality=QualityFilter())
