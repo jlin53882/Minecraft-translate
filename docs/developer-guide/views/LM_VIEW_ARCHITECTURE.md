@@ -117,6 +117,12 @@ LMView 本身不直接操作 cache_manager，只透過 `write_new_cache_switch` 
 - API 限流冷卻、429 `retry_after`、overload 重試、品質 retry 間隔與換 Key 緩衝使用 `interruptible_sleep()`，可被取消打斷；provider／model 的正常批次間隔由共用 request slot 管理，等待中的取消會釋放尚未送出的預約，API `Retry-After` 會推遲同一共用時鐘。每次準備下一個內部批次前，會依最新的 session history 重新計算固定 prompt token 預算，取消會在下一個批次邊界檢查。
 - 縮小 batch（`BatchAction.SHRINK_BATCH`）的情況：400 INVALID_ARGUMENT（payload 過大 / 格式錯誤）、回應被截斷或漏翻、逾時 / 5xx 類錯誤；縮小係數 `batch_shrink_factor`（預設 0.5，取自 `config_schema` 的單一來源；必須是有限數值且 `0 < factor < 1`，缺漏用預設，明確設定成 0、1 以上或非數字會在送出請求前以錯誤中止，不會默默擴大批次或回填原文）、下限 `min_batch_size`（預設 50；lang 類型下限為 `MIN_LANG_BATCH_SIZE`）。縮到極限時以原文回填（標記 `_untranslated`，不寫入快取）並繼續後續項目
 - `provider` 為 `chatgpt` 時，ChatGPT API 錯誤交由 `_handle_chatgpt_api_error` 處理：暫時性錯誤最多重試 `CHATGPT_MAX_RETRIES`（3）次，等待時間上限為 `CHATGPT_MAX_RETRY_AFTER_SEC`（120 秒），超過即回報錯誤
+- ChatGPT 多帳號**不會自動輪替**（Gemini 才有 Key 輪替）：
+  - 任務開始時 `translate_batch_smart` 讀取目前啟用的帳號（`chatgpt_account_status()` 的 `active_profile_id`）寫入 `_BatchRuntime.chatgpt_profile_id`，整個任務的每個請求都帶同一個 `profile_id`。
+  - 帳號只在設定頁（見 `CONFIG_VIEW_ARCHITECTURE.md`）呼叫 `set_active_chatgpt_account` 切換，翻譯流程不會自行切換。
+  - `subscription_sharing_usage_limit_exceeded` 屬 `CHATGPT_PERMANENT_QUOTA_ERROR_CODES`，直接中止任務，不換帳號重試。
+  - 設定的 `lm_translator.chatgpt_model_profile_id` 必須等於目前啟用帳號，否則任務拒絕開始；切換帳號後需先在設定頁更新模型清單並儲存。
+  - 分享額度用盡時的 Codex CLI 備援只用同一個帳號（email 相同才送），見 `docs/developer-guide/provider-errors.md`。
 
 ### 錯誤處理與 Key 輪替（`_handle_batch_error`）
 

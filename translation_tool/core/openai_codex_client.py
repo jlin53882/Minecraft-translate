@@ -3,17 +3,34 @@
 from __future__ import annotations
 
 import json
+import threading
+from collections import OrderedDict
 from typing import Any
 
 import requests
 
-from translation_tool.core.codex_oauth import get_chatgpt_access_token
+from translation_tool.core.codex_cli_auth import (
+    CodexCLIAuthError,
+    load_codex_cli_credentials,
+)
+from translation_tool.core.codex_oauth import (
+    chatgpt_account_status,
+    get_chatgpt_access_token,
+)
 from translation_tool.core.lm_api_client import _build_translation_response_schema
 from translation_tool.core.lm_batch_budget import estimate_text_tokens
 from translation_tool.core.retry_after import parse_retry_after_header_value
+from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.redaction import redact_text
+from translation_tool.utils.ui_mirror import current_task
 
 _RESPONSES_URL = "https://api.openai.com/v1/responses"
+_CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
+# 第三方程式必須如實表明身分，不偽裝成 Codex CLI。
+_CODEX_ORIGINATOR = "minecraft-translate"
+_CODEX_USER_AGENT = "minecraft-translate"
+# 這些錯誤代表 OAuth 路線的第三方分享額度受限，才改走 Codex 登入備援。
+_SHARING_LIMIT_CODES = frozenset({"subscription_sharing_usage_limit_exceeded"})
 
 
 class ChatGPTAPIError(RuntimeError):
@@ -117,8 +134,14 @@ def _stream_request(
     service_tier: str | None = None,
     conversation_history: list[dict] | None = None,
     response_schema: dict | None = None,
+    codex_account_id: str | None = None,
 ) -> requests.Response:
-    """建立並讀取 ChatGPT Responses 串流請求。"""
+    """建立並讀取 ChatGPT Responses 串流請求。
+
+    ``codex_account_id`` 不是 None 時改走 Codex 後端（沿用本機 Codex CLI 登入）：
+    該後端不接受輸出上限與 service_tier，所以不送；並依 Codex 後端要求帶上身分標頭。
+    """
+    use_codex_backend = codex_account_id is not None
     response_schema = response_schema or _build_translation_response_schema(payload)
     input_history = []
     for turn in conversation_history or []:
@@ -154,19 +177,29 @@ def _stream_request(
     }
     # Responses API requires at least 16 output tokens. Zero/invalid values
     # retain the provider default; never send a request the API will reject.
-    if isinstance(max_output_tokens, int) and max_output_tokens >= 16:
+    if (
+        not use_codex_backend
+        and isinstance(max_output_tokens, int)
+        and max_output_tokens >= 16
+    ):
         body["max_output_tokens"] = max_output_tokens
     if reasoning_effort is not None:
         body["reasoning"] = {"effort": reasoning_effort}
-    if service_tier:
+    if service_tier and not use_codex_backend:
         body["service_tier"] = service_tier
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+    if use_codex_backend:
+        headers["originator"] = _CODEX_ORIGINATOR
+        headers["User-Agent"] = _CODEX_USER_AGENT
+        if codex_account_id:
+            headers["ChatGPT-Account-ID"] = codex_account_id
     response = requests.post(
-        _RESPONSES_URL,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-        },
+        _CODEX_RESPONSES_URL if use_codex_backend else _RESPONSES_URL,
+        headers=headers,
         json=body,
         timeout=(min(30, max(1, timeout)), max(1, timeout)),
         stream=True,
@@ -372,7 +405,7 @@ def _consume_stream(
     return "".join(chunks)
 
 
-def call_chatgpt_responses(
+def _call_oauth_route(
     *,
     model_name: str,
     system_prompt: str,
@@ -387,7 +420,7 @@ def call_chatgpt_responses(
     response_schema: dict | None = None,
     output_guard_tokens: int | None = None,
 ) -> str:
-    """使用本機 ChatGPT OAuth token 呼叫 Responses 串流。
+    """使用本程式自己登入的 ChatGPT OAuth token 呼叫 Responses 串流。
 
     ``max_output_tokens`` 會送給 API；``output_guard_tokens`` 不送，只在本地估算輸出、
     明顯超過時中止串流（見 ``_consume_stream``）。
@@ -430,3 +463,172 @@ def call_chatgpt_responses(
         response.close()
         raise error
     return _consume_stream(response, meta_out, output_guard_tokens)
+
+
+def _call_codex_login_route(
+    *,
+    model_name: str,
+    system_prompt: str,
+    payload: dict,
+    timeout: int,
+    meta_out: dict | None,
+    reasoning_effort: str | None,
+    conversation_history: list[dict] | None,
+    response_schema: dict | None,
+    output_guard_tokens: int | None = None,
+    expected_email: str = "",
+) -> str:
+    """用本機 Codex CLI 的登入打 Codex 後端；token 過期時不自行更新。
+
+    ``expected_email`` 是本程式所選 ChatGPT 帳號的 email；Codex CLI 登入的帳號
+    必須與它相同，否則不送出，避免把翻譯內容用到別的帳號與額度。
+    """
+    credentials = load_codex_cli_credentials()
+    if not expected_email or credentials.email != expected_email:
+        raise CodexCLIAuthError(
+            "Codex CLI 登入的帳號與目前選用的 ChatGPT 帳號不同或無法確認，"
+            "為避免使用到別的帳號，不改用 Codex 登入。"
+        )
+    request_kwargs = {
+        "token": credentials.access_token,
+        "model_name": model_name,
+        "system_prompt": system_prompt,
+        "payload": payload,
+        "timeout": timeout,
+        "codex_account_id": credentials.account_id,
+    }
+    if conversation_history:
+        request_kwargs["conversation_history"] = conversation_history
+    if reasoning_effort is not None:
+        request_kwargs["reasoning_effort"] = reasoning_effort
+    if response_schema is not None:
+        request_kwargs["response_schema"] = response_schema
+    try:
+        response = _stream_request(**request_kwargs)
+    except requests.RequestException as exc:
+        raise ChatGPTAPIError("network_error", redact_text(exc)) from exc
+    if not response.ok:
+        error = _response_error(response)
+        response.close()
+        raise error
+    return _consume_stream(response, meta_out, output_guard_tokens)
+
+
+def _selected_account_email(profile_id: str | None) -> str:
+    """回傳本程式所選 ChatGPT 帳號（指定 profile 或目前啟用者）的 email；查不到回空字串。"""
+    status = chatgpt_account_status()
+    if profile_id is None:
+        return str(status.get("email") or "").strip().casefold()
+    for account in status.get("accounts", []):
+        if account.get("profile_id") == profile_id:
+            return str(account.get("email") or "").strip().casefold()
+    return ""
+
+
+def _codex_route_args(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """把一般請求參數轉成 Codex 登入路線的參數（不送輸出上限與 fast，保留本地輸出保護）。"""
+    return {
+        "model_name": kwargs["model_name"],
+        "system_prompt": kwargs["system_prompt"],
+        "payload": kwargs["payload"],
+        "timeout": kwargs["timeout"],
+        "meta_out": kwargs.get("meta_out"),
+        "reasoning_effort": kwargs.get("reasoning_effort"),
+        "conversation_history": kwargs.get("conversation_history"),
+        "response_schema": kwargs.get("response_schema"),
+        "output_guard_tokens": kwargs.get("output_guard_tokens"),
+        "expected_email": _selected_account_email(kwargs.get("profile_id")),
+    }
+
+
+# 備援成功後，同一個任務（與帳號）後續請求直接用 Codex 登入，不必每批先被 OAuth 路線拒絕一次。
+# 新任務不繼承，會重新先試 OAuth 路線；只保留最近的任務，避免長時間執行後無限成長。
+_STICKY_LIMIT = 64
+_sticky_lock = threading.Lock()
+_sticky_tasks: OrderedDict[tuple[object, str], None] = OrderedDict()
+
+
+def _sticky_key(profile_id: object) -> tuple[object, str] | None:
+    """目前任務與帳號的識別；不在任務 context 內（例如沒有 TaskSession）回傳 None。"""
+    task = current_task()
+    return None if task is None else (task, str(profile_id or ""))
+
+
+def _sticky_active(key: tuple[object, str] | None) -> bool:
+    if key is None:
+        return False
+    with _sticky_lock:
+        return key in _sticky_tasks
+
+
+def _sticky_set(key: tuple[object, str] | None) -> None:
+    if key is None:
+        return
+    with _sticky_lock:
+        _sticky_tasks[key] = None
+        _sticky_tasks.move_to_end(key)
+        while len(_sticky_tasks) > _STICKY_LIMIT:
+            _sticky_tasks.popitem(last=False)
+
+
+def _sticky_clear(key: tuple[object, str] | None) -> None:
+    if key is None:
+        return
+    with _sticky_lock:
+        _sticky_tasks.pop(key, None)
+
+
+def _call_sticky_codex_route(
+    kwargs: dict[str, Any], key: tuple[object, str]
+) -> str | None:
+    """任務已改用備援時直接送 Codex 登入；登入失效時回傳 None，讓呼叫端重新判斷。
+
+    非登入類的錯誤（逾時、5xx 等）照原樣往上拋，交給批次層既有的重試處理。
+    """
+    try:
+        return _call_codex_login_route(**_codex_route_args(kwargs))
+    except CodexCLIAuthError as exc:
+        reason = str(exc)
+    except ChatGPTAPIError as exc:
+        if exc.status != 401:
+            raise
+        reason = str(exc)
+    _sticky_clear(key)
+    log_warning(f"[ChatGPT] Codex CLI 登入已失效，本任務改回一般登入重新判斷：{reason}")
+    return None
+
+
+def call_chatgpt_responses(**kwargs: Any) -> str:
+    """先走自己的 OAuth 登入；第三方分享額度用盡時改用本機 Codex CLI 登入。
+
+    備援成功後，同一任務的後續請求直接走 Codex 登入；新任務會重新判斷。
+    """
+    key = _sticky_key(kwargs.get("profile_id"))
+    if _sticky_active(key):
+        result = _call_sticky_codex_route(kwargs, key)
+        if result is not None:
+            return result
+    try:
+        return _call_oauth_route(**kwargs)
+    except ChatGPTAPIError as exc:
+        if exc.code not in _SHARING_LIMIT_CODES:
+            raise
+        original = exc
+    log_warning("[ChatGPT] 分享額度已達上限，嘗試改用本機 Codex CLI 登入重試。")
+    try:
+        result = _call_codex_login_route(**_codex_route_args(kwargs))
+    except (CodexCLIAuthError, ChatGPTAPIError) as fallback_error:
+        # 備援失敗（含 Codex 登入被撤銷的 401）只記在日誌；使用者看到的仍是原本的
+        # 分享額度錯誤，避免把 Codex 登入的失敗誤導成「請重新登入本程式的帳號」。
+        log_warning(
+            f"[ChatGPT] 分享額度已達上限，且無法改用 Codex 登入：{fallback_error}"
+        )
+        raise original from fallback_error
+    if key is None:
+        log_info("[ChatGPT] 已改用本機 Codex CLI 登入完成請求。")
+    else:
+        _sticky_set(key)
+        log_info(
+            "[ChatGPT] 已改用本機 Codex CLI 登入完成請求；本任務後續請求直接使用 Codex 登入。"
+        )
+    return result

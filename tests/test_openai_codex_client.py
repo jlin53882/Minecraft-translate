@@ -8,6 +8,18 @@ import pytest
 import requests
 
 from translation_tool.core import openai_codex_client as client
+from translation_tool.core.codex_cli_auth import CodexCLICredentials
+
+
+@pytest.fixture(autouse=True)
+def _isolated_fallback_state():
+    """備援沿用狀態是程序內共用的；每個測試都從「沒有任務、沒有沿用」開始。"""
+    from translation_tool.utils import ui_mirror
+
+    client._sticky_tasks.clear()
+    with ui_mirror.task_scope(None):
+        yield
+    client._sticky_tasks.clear()
 
 
 class _FakeStreamResponse:
@@ -1187,3 +1199,324 @@ def test_call_passes_output_guard_without_sending_output_cap(monkeypatch):
 
     assert seen["request"]["max_output_tokens"] is None
     assert seen["guard"] == 4096
+
+
+def test_codex_backend_request_omits_output_cap_and_identifies_the_app(monkeypatch):
+    captured = {}
+
+    def post(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return requests.Response()
+
+    monkeypatch.setattr(client.requests, "post", post)
+
+    client._stream_request(
+        token="codex-token",
+        model_name="gpt-5-codex",
+        system_prompt="Translate.",
+        payload={"items": [{"id": "a", "value": "Hello"}]},
+        timeout=30,
+        max_output_tokens=100000,
+        service_tier="priority",
+        codex_account_id="acct-1",
+    )
+
+    assert captured["url"] == "https://chatgpt.com/backend-api/codex/responses"
+    assert captured["headers"]["Authorization"] == "Bearer codex-token"
+    assert captured["headers"]["ChatGPT-Account-ID"] == "acct-1"
+    assert captured["headers"]["originator"] == "minecraft-translate"
+    assert "codex" not in captured["headers"]["User-Agent"].lower()
+    assert "max_output_tokens" not in captured["json"]
+    assert "service_tier" not in captured["json"]
+
+
+def _call_kwargs():
+    return {
+        "model_name": "gpt-5-codex",
+        "system_prompt": "Translate.",
+        "payload": {"items": []},
+        "timeout": 30,
+    }
+
+
+def _sharing_limit_error():
+    return client.ChatGPTAPIError(
+        "subscription_sharing_usage_limit_exceeded", "limit", status=200
+    )
+
+
+def test_sharing_limit_falls_back_to_codex_login(monkeypatch):
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    seen = {}
+
+    def codex_route(**kwargs):
+        seen.update(kwargs)
+        return "from-codex"
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+
+    assert client.call_chatgpt_responses(**_call_kwargs()) == "from-codex"
+    assert seen["model_name"] == "gpt-5-codex"
+
+
+def test_codex_fallback_keeps_the_local_output_guard(monkeypatch):
+    # 備援路線同樣不送輸出上限，本地輸出保護要跟著帶過去。
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    seen = {}
+
+    def codex_route(**kwargs):
+        seen.update(kwargs)
+        return "from-codex"
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+
+    client.call_chatgpt_responses(**_call_kwargs(), output_guard_tokens=4096)
+
+    assert seen["output_guard_tokens"] == 4096
+    assert "max_output_tokens" not in seen
+
+
+def test_other_errors_do_not_fall_back(monkeypatch):
+    def oauth_route(**_kwargs):
+        raise client.ChatGPTAPIError("insufficient_quota", "no", status=429)
+
+    def codex_route(**_kwargs):
+        raise AssertionError("must not be called")
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+
+    with pytest.raises(client.ChatGPTAPIError) as caught:
+        client.call_chatgpt_responses(**_call_kwargs())
+    assert caught.value.code == "insufficient_quota"
+
+
+def test_unusable_codex_login_surfaces_the_original_limit_error(monkeypatch):
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    def codex_route(**_kwargs):
+        raise client.CodexCLIAuthError("expired")
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+
+    with pytest.raises(client.ChatGPTAPIError) as caught:
+        client.call_chatgpt_responses(**_call_kwargs())
+    assert caught.value.code == "subscription_sharing_usage_limit_exceeded"
+
+
+def test_fallback_is_logged(monkeypatch):
+    messages = []
+
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", lambda **_kw: "ok")
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+    monkeypatch.setattr(client, "log_warning", messages.append)
+
+    client.call_chatgpt_responses(**_call_kwargs())
+
+    assert any("改用本機 Codex CLI 登入" in message for message in messages)
+
+
+def _codex_route_kwargs(expected_email):
+    return {
+        "model_name": "gpt-5-codex",
+        "system_prompt": "Translate.",
+        "payload": {"items": []},
+        "timeout": 30,
+        "meta_out": None,
+        "reasoning_effort": None,
+        "conversation_history": None,
+        "response_schema": None,
+        "expected_email": expected_email,
+    }
+
+
+@pytest.mark.parametrize("expected", ["other@example.com", ""])
+def test_codex_login_of_a_different_account_is_never_used(monkeypatch, expected):
+    monkeypatch.setattr(
+        client,
+        "load_codex_cli_credentials",
+        lambda: CodexCLICredentials("tok", "acct", "me@example.com"),
+    )
+
+    def post(*_args, **_kwargs):
+        raise AssertionError("request must not be sent")
+
+    monkeypatch.setattr(client.requests, "post", post)
+
+    with pytest.raises(client.CodexCLIAuthError, match="不同或無法確認"):
+        client._call_codex_login_route(**_codex_route_kwargs(expected))
+
+
+def test_selected_account_email_follows_the_pinned_profile(monkeypatch):
+    monkeypatch.setattr(
+        client,
+        "chatgpt_account_status",
+        lambda: {
+            "email": "Active@Example.com",
+            "accounts": [
+                {"profile_id": "p1", "email": "One@Example.com"},
+                {"profile_id": "p2", "email": ""},
+            ],
+        },
+    )
+
+    assert client._selected_account_email(None) == "active@example.com"
+    assert client._selected_account_email("p1") == "one@example.com"
+    assert client._selected_account_email("p2") == ""
+    assert client._selected_account_email("missing") == ""
+
+
+def test_failed_codex_request_keeps_the_original_limit_error(monkeypatch):
+    messages = []
+
+    def oauth_route(**_kwargs):
+        raise _sharing_limit_error()
+
+    def codex_route(**_kwargs):
+        raise client.ChatGPTAPIError("invalid_token", "revoked", status=401)
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+    monkeypatch.setattr(client, "log_warning", messages.append)
+
+    with pytest.raises(client.ChatGPTAPIError) as caught:
+        client.call_chatgpt_responses(**_call_kwargs())
+
+    assert caught.value.code == "subscription_sharing_usage_limit_exceeded"
+    assert any("invalid_token" in message for message in messages)
+
+
+@pytest.fixture
+def sticky_env(monkeypatch):
+    from translation_tool.utils import ui_mirror
+
+    client._sticky_tasks.clear()
+    calls = {"oauth": 0, "codex": 0}
+    logs = {"info": [], "warning": []}
+
+    def oauth_route(**_kwargs):
+        calls["oauth"] += 1
+        raise _sharing_limit_error()
+
+    def codex_route(**_kwargs):
+        calls["codex"] += 1
+        return "from-codex"
+
+    monkeypatch.setattr(client, "_call_oauth_route", oauth_route)
+    monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+    monkeypatch.setattr(
+        client, "_selected_account_email", lambda _pid: "me@example.com"
+    )
+    monkeypatch.setattr(client, "log_info", logs["info"].append)
+    monkeypatch.setattr(client, "log_warning", logs["warning"].append)
+    yield calls, logs, ui_mirror
+    client._sticky_tasks.clear()
+
+
+def test_successful_fallback_is_logged_and_kept_for_the_task(sticky_env):
+    calls, logs, ui_mirror = sticky_env
+
+    with ui_mirror.task_scope("task-1"):
+        for _ in range(3):
+            assert client.call_chatgpt_responses(**_call_kwargs()) == "from-codex"
+
+    assert calls == {"oauth": 1, "codex": 3}
+    assert sum("已改用本機 Codex CLI 登入完成請求" in m for m in logs["info"]) == 1
+
+
+def test_a_new_task_checks_the_oauth_route_again(sticky_env):
+    calls, _logs, ui_mirror = sticky_env
+
+    with ui_mirror.task_scope("task-1"):
+        client.call_chatgpt_responses(**_call_kwargs())
+        client.call_chatgpt_responses(**_call_kwargs())
+    with ui_mirror.task_scope("task-2"):
+        client.call_chatgpt_responses(**_call_kwargs())
+
+    assert calls["oauth"] == 2
+
+
+def test_without_a_task_every_call_checks_the_oauth_route(sticky_env):
+    calls, _logs, _ui_mirror = sticky_env
+
+    client.call_chatgpt_responses(**_call_kwargs())
+    client.call_chatgpt_responses(**_call_kwargs())
+
+    assert calls["oauth"] == 2
+    assert not client._sticky_tasks
+
+
+def test_sticky_codex_login_failure_returns_to_the_normal_route(
+    sticky_env, monkeypatch
+):
+    calls, logs, ui_mirror = sticky_env
+
+    with ui_mirror.task_scope("task-1"):
+        client.call_chatgpt_responses(**_call_kwargs())
+        assert client._sticky_tasks
+
+        def codex_route(**_kwargs):
+            calls["codex"] += 1
+            raise client.ChatGPTAPIError("invalid_token", "revoked", status=401)
+
+        monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+        monkeypatch.setattr(
+            client,
+            "_call_oauth_route",
+            lambda **_kw: "from-oauth",
+        )
+
+        assert client.call_chatgpt_responses(**_call_kwargs()) == "from-oauth"
+
+    assert not client._sticky_tasks
+    assert any("本任務改回一般登入" in m for m in logs["warning"])
+
+
+def test_sticky_codex_transient_error_propagates_and_stays_sticky(
+    sticky_env, monkeypatch
+):
+    _calls, _logs, ui_mirror = sticky_env
+
+    with ui_mirror.task_scope("task-1"):
+        client.call_chatgpt_responses(**_call_kwargs())
+
+        def codex_route(**_kwargs):
+            raise client.ChatGPTAPIError("server_error", "boom", status=503)
+
+        monkeypatch.setattr(client, "_call_codex_login_route", codex_route)
+
+        with pytest.raises(client.ChatGPTAPIError) as caught:
+            client.call_chatgpt_responses(**_call_kwargs())
+
+        assert caught.value.code == "server_error"
+        assert client._sticky_tasks
