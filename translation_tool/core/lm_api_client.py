@@ -15,7 +15,10 @@ from copy import deepcopy
 import requests
 
 from translation_tool.core.batch_timing import seconds_to_ms
-from translation_tool.utils.cancellation import interruptible_sleep
+from translation_tool.utils.cancellation import (
+    interruptible_sleep,
+    run_cancellable_blocking,
+)
 from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.config_schema import get_schema_default
 from translation_tool.utils.log_unit import log_warning
@@ -147,7 +150,11 @@ def _post_with_retry(
             },
         )
         try:
-            response = requests.post(url, **kwargs)
+            # 取消時不等這次請求回來（read timeout 可長達數分鐘）；晚到的回應直接關閉
+            response = run_cancellable_blocking(
+                lambda: requests.post(url, **kwargs),
+                on_late_result=_close_response,
+            )
         except requests.exceptions.SSLError:
             _emit_network_event(
                 network_event_callback,
@@ -222,6 +229,13 @@ def _post_with_retry(
             )
             return response
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _close_response(response: requests.Response) -> None:
+    """關閉取消後才回來、不會被讀取的 HTTP 回應。"""
+    close = getattr(response, "close", None)
+    if callable(close):
+        close()
 
 
 def _emit_network_event(

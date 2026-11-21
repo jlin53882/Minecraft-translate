@@ -13,10 +13,16 @@ TaskCancelled 繼承 BaseException：翻譯流程中有許多 ``except Exception
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+
+from translation_tool.utils.ui_mirror import run_in_context
+
+_logger = logging.getLogger(__name__)
 
 _cancel_check: ContextVar[Callable[[], bool] | None] = ContextVar(
     "translation_cancel_check", default=None
@@ -62,6 +68,67 @@ def raise_if_cancelled() -> None:
     """已要求取消時拋出 TaskCancelled。"""
     if is_cancelled():
         raise TaskCancelled()
+
+
+def run_cancellable_blocking[T](
+    call: Callable[[], T],
+    *,
+    on_abandon: Callable[[], object] | None = None,
+    on_late_result: Callable[[T], object] | None = None,
+    poll_interval: float = 0.1,
+) -> T:
+    """執行無法中途打斷的阻塞呼叫（例如 HTTP 請求），取消時不必等它返回。
+
+    沒有可取消的任務時直接在目前執行緒呼叫，行為與直接呼叫相同。
+    在 ``cancel_scope`` 內時，呼叫改在 daemon 輔助執行緒執行，目前執行緒每隔
+    ``poll_interval`` 檢查取消；一旦取消就放棄等待並拋出 ``TaskCancelled``：
+    ``on_abandon`` 在目前執行緒呼叫（例如關閉串流連線讓輔助執行緒提早結束），
+    放棄後才回來的結果交給 ``on_late_result``（例如關閉 HTTP 回應）。
+    呼叫本身拋出的例外原樣在目前執行緒重新拋出。
+    """
+    if _cancel_check.get() is None:
+        return call()
+    raise_if_cancelled()
+    done = threading.Event()
+    lock = threading.Lock()
+    box: dict[str, object] = {}
+    abandoned = False
+
+    def run() -> None:
+        try:
+            value = call()
+        except BaseException as exc:  # noqa: BLE001 - 交回呼叫端重新拋出
+            box["error"] = exc
+        else:
+            box["value"] = value
+            with lock:
+                late = abandoned
+            if late and on_late_result is not None:
+                try:
+                    on_late_result(value)
+                except Exception:
+                    _logger.debug("關閉已放棄的阻塞呼叫結果失敗", exc_info=True)
+        finally:
+            done.set()
+
+    threading.Thread(
+        target=run_in_context(run), name="cancellable-blocking", daemon=True
+    ).start()
+    while not done.wait(poll_interval):
+        if is_cancelled():
+            with lock:
+                abandoned = not done.is_set()
+            if abandoned:
+                if on_abandon is not None:
+                    try:
+                        on_abandon()
+                    except Exception:
+                        _logger.debug("取消阻塞呼叫時清理失敗", exc_info=True)
+                raise TaskCancelled()
+            break
+    if "error" in box:
+        raise box["error"]  # type: ignore[misc]
+    return box["value"]  # type: ignore[return-value]
 
 
 def interruptible_sleep(seconds: float, step: float = 0.2) -> None:

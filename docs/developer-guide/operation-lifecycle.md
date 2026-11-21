@@ -65,6 +65,17 @@ updated with both return and retry choices; admission stays closed until the
 user explicitly chooses return. Retrying close never clears a cancellation
 request.
 
+While a cancelled operation is still active after the deadline, the close
+dialog also offers “強制關閉” (`AppShell._show_force_close_confirmation`). A
+second confirmation lists the active operations and warns when one of them is a
+`durable_user_action`. Confirming runs `AppShell._force_close`: the close flush
+runs with a `FORCE_CLOSE_FLUSH_TIMEOUT_SEC` deadline, the shell is disposed, the
+native window is destroyed with a `FORCE_CLOSE_DESTROY_TIMEOUT_SEC` deadline, and
+the process ends with `os._exit(0)` without joining worker threads. Work already
+committed (SQLite transactions, cache shards published by replace) survives; an
+uncommitted SQLite transaction is rolled back on the next open, and the batch a
+worker was still waiting on is lost and must be rerun.
+
 For Flet Web, `on_disconnect` is not terminal: a client may reconnect and the
 session's operation ownership remains. `on_close` is treated as session expiry:
 it begins shutdown, waits up to the configured drain deadline, and then
@@ -180,7 +191,8 @@ promise.
 | ZIP member data (`read_limited`) | Reads decompressed bytes in 64 KiB chunks and checks cancellation between reads. | Cooperative between chunks; an individual filesystem/decompressor read has no strict wall-clock limit. |
 | ZIP creation (`zipfile.write` / `writestr`) | Bundler writes to a temporary archive and publishes by replace after successful close/validation. Bundler is explicitly non-cancellable and drain-only. | A single write/compression call is not interruptible. Existing output remains until atomic publication; temporary output is removed on failure/close. |
 | Filesystem read/write/copy and JSON parse | Checkpoints surround files; some paths still use `read_bytes`, `write_text`, `shutil.copy2`, or a single parser call. | No hard per-call latency bound; current worker ownership/drain policy remains the safety boundary. |
-| Gemini provider request | Explicit Requests timeout tuple: connect is capped at 30 seconds (or the lower configured timeout), read uses the existing configured timeout (default 600 seconds); connection failures retry up to three attempts with interruptible backoff. | Cancellation is observed before/after the request and during retry sleep, not while a request call is blocked. Requests connect/read timeouts are not strict end-to-end wall-clock deadlines, so a request can outlive the app's drain deadline and remain tracked. |
+| Gemini provider request | Explicit Requests timeout tuple: connect is capped at 30 seconds (or the lower configured timeout), read uses the existing configured timeout (default 600 seconds); connection failures retry up to three attempts with interruptible backoff. Inside a cancel scope each `requests.post` runs through `run_cancellable_blocking`. | The worker stops waiting within about 0.1 seconds of cancellation and raises `TaskCancelled`; the abandoned request keeps running on a daemon helper thread until Requests returns, and a late response is closed unread (the provider may still bill it). Without a cancel scope (non-cancellable operations) the call is unchanged. |
+| ChatGPT Responses stream | `_stream_request` waits for response headers through `run_cancellable_blocking`; `_consume_stream_cancellable` reads the event stream on a helper thread. | Cancellation abandons the header wait (late responses are closed) or closes the stream connection so the helper thread ends; the worker raises `TaskCancelled` without waiting for the next output chunk or the read timeout. |
 | SQLite | Connections use `PRAGMA busy_timeout = 5000`; translation queries/transactions are serialized by their connection lock. ModDB old-AI preview additionally installs a 60-second SQLite progress-handler deadline across its read-only SQL and checks the same deadline between Python processing stages. | The preview deadline interrupts SQLite VM execution and becomes a failed/timeout result, not user cancellation. It is not a hard bound on OS/filesystem stalls, connection setup, or arbitrary Python/native work. Other in-flight queries/transactions are not forcibly interrupted; registry ownership/drain timeout remains authoritative. |
 | PIL image decode/resize | Runs in a background operation with cancellation checks between prepared rows/items. | A native decode/resize call is not interruptible mid-call and has no hard time bound. |
 | Cache-history JSON mirror | A process-global single-worker executor remains outside individual operation membership; the authoritative event is synchronously committed to JSONL first, and app close waits through `history_flush(timeout=10)`. | The pretty JSON file is a tested, derived, eventually-consistent projection, not an authoritative cache-history write. If close flush times out it can remain stale; JSONL remains readable and is the source of truth. |

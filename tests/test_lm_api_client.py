@@ -391,3 +391,37 @@ def test_http_200_with_an_unexpected_json_type_raises_the_format_error():
             temperature=0.2,
             meta_out={},
         )
+
+
+def test_post_with_retry_stops_waiting_for_response_when_cancelled():
+    """取消後不等卡住的 HTTP 回應；晚到的回應會被關閉。"""
+    import threading
+    import time
+
+    from translation_tool.core import lm_api_client
+    from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
+
+    release = threading.Event()
+    response = Mock()
+
+    def slow_post(*_args, **_kwargs):
+        release.wait(5)
+        return response
+
+    cancel = threading.Event()
+    threading.Timer(0.1, cancel.set).start()
+    started = time.monotonic()
+    with (
+        patch(
+            "translation_tool.core.lm_api_client.requests.post", side_effect=slow_post
+        ),
+        cancel_scope(cancel.is_set),
+        pytest.raises(TaskCancelled),
+    ):
+        lm_api_client._post_with_retry("https://example.invalid", json={})
+    assert time.monotonic() - started < 2
+    release.set()
+    deadline = time.monotonic() + 2
+    while not response.close.called and time.monotonic() < deadline:
+        time.sleep(0.01)
+    response.close.assert_called_once()

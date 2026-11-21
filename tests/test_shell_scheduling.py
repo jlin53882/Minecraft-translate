@@ -688,7 +688,7 @@ def test_desktop_close_drain_timeout_keeps_admission_closed_until_retry(env, clo
     assert shell.operations.accepting is False
     assert shell.operations.shutdown_state == shell.operations.DRAIN_TIMEOUT
     first.finish()
-    shell.page.dialogs[-1].actions[0].on_click(None)
+    _buttons(shell.page.dialogs[-1], "重新嘗試關閉")[0].on_click(None)
     shell.page.drain()
     assert shell.page.window.destroy_calls == 1
     shell.dispose()
@@ -789,7 +789,7 @@ def test_desktop_close_schedule_failure_keeps_admission_closed(env, clock):
     assert shell.operations.accepting is False
     first.finish()
     shell.page.fail_run_task = False
-    shell.page.dialogs[-1].actions[0].on_click(None)
+    _buttons(shell.page.dialogs[-1], "重新嘗試關閉")[0].on_click(None)
     shell.page.drain()
     assert shell.page.window.destroy_calls == 1
     shell.dispose()
@@ -1003,3 +1003,79 @@ def test_default_close_flush_drains_cache_history_before_log_buffer(monkeypatch)
 
     assert _default_flush_before_close() is True
     assert calls == ["history", "logs"]
+
+
+def test_force_close_exits_when_cancelled_operation_never_stops(
+    env, clock, monkeypatch
+):
+    """背景操作不回應取消時，「強制關閉」落盤、銷毀視窗後直接結束程序。"""
+    flushed = []
+    exits = []
+    monkeypatch.setattr(app_shell, "_hard_exit", exits.append)
+    shell = _make_shell(env, flush_before_close=lambda: flushed.append(True))
+    shell.mount()
+    shell.page.scheduled.clear()
+    stuck = TaskSession(name="卡住的批次機翻")
+    stuck.start()
+
+    asyncio.run(
+        shell.page.window.on_event(SimpleNamespace(type=ft.WindowEventType.CLOSE))
+    )
+    _buttons(shell.page.dialogs[-1], "仍要關閉")[0].on_click(None)
+    shell.page.drain()
+
+    failure = shell.page.dialogs[-1]
+    assert [b.content for b in failure.actions] == ["強制關閉", "重新嘗試關閉"]
+    _buttons(failure, "強制關閉")[0].on_click(None)
+    confirm = shell.page.dialogs[-1]
+    assert "卡住的批次機翻" in confirm.content.value
+    assert exits == []  # 確認前不結束
+
+    _buttons(confirm, "強制關閉")[0].on_click(None)
+    shell.page.drain()
+
+    assert flushed == [True]
+    assert shell.page.window.destroy_calls == 1
+    assert exits == [0]
+    stuck.finish()
+
+
+def test_force_close_confirmation_can_go_back(env, clock, monkeypatch):
+    exits = []
+    monkeypatch.setattr(app_shell, "_hard_exit", exits.append)
+    shell = _make_shell(env)
+    shell.mount()
+    shell.page.scheduled.clear()
+    stuck = TaskSession(name="卡住的任務")
+    stuck.start()
+    shell.operations.begin_shutdown()
+    shell.operations.mark_drain_timeout()
+    shell._show_close_failure()
+
+    _buttons(shell.page.dialogs[-1], "強制關閉")[0].on_click(None)
+    _buttons(shell.page.dialogs[-1], "返回")[0].on_click(None)
+    shell.page.drain()
+
+    assert exits == []
+    assert shell.page.dialogs[-1].title.value == "關閉流程仍未完成"
+    stuck.finish()
+    shell.dispose()
+
+
+def test_force_close_still_exits_when_flush_hangs(env, clock, monkeypatch):
+    exits = []
+    monkeypatch.setattr(app_shell, "_hard_exit", exits.append)
+    monkeypatch.setattr(app_shell, "FORCE_CLOSE_FLUSH_TIMEOUT_SEC", 0.05)
+    release = threading.Event()
+    shell = _make_shell(env, flush_before_close=lambda: release.wait(5))
+    shell.mount()
+    shell.page.scheduled.clear()
+    stuck = TaskSession(name="卡住的任務")
+    stuck.start()
+
+    asyncio.run(shell._force_close())
+
+    assert exits == [0]
+    assert shell.page.window.destroy_calls == 1
+    release.set()
+    stuck.finish()
