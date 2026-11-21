@@ -72,6 +72,7 @@ from translation_tool.translation_db.repair_status import (
 )
 from translation_tool.translation_db.run_progress import format_repair_live
 from translation_tool.translation_db.schema import SRC_AI
+from translation_tool.translation_db.sql_helpers import is_effectively_reviewed
 from translation_tool.utils.cache_manager import (
     add_to_cache_with_receipt,
     initialize_translation_cache,
@@ -146,6 +147,8 @@ class SameSourceAIRepairPreview:
     input_newline_mismatch_with_other_hard_issues: int = 0
     skipped_newline_only_candidates: int = 0
     newline_only_included: bool = False
+    skipped_reviewed_candidates: int = 0
+    reviewed_included: bool = False
 
     @property
     def selected_count(self) -> int:
@@ -166,6 +169,8 @@ class SameSourceAIRepairReport:
     input_newline_mismatch_candidates: int = 0
     input_newline_mismatch_with_other_hard_issues: int = 0
     skipped_newline_only_candidates: int = 0
+    skipped_reviewed_candidates: int = 0
+    include_reviewed: bool = False
     strict_newline: bool = False
     sync_other_versions: bool = False
     synced_other_versions: int = 0
@@ -630,19 +635,49 @@ def _raise_preview_timeout(deadline: float | None) -> None:
         )
 
 
+def _is_reviewed_entry(entry: SameSourceAIEntry) -> bool:
+    return is_effectively_reviewed(entry.source_id, entry.review_status)
+
+
+@dataclass(frozen=True)
+class _RepairSnapshot:
+    eligible: int
+    newline_mismatch: int
+    newline_mismatch_with_hard_issues: int
+    skipped_newline_only: int
+    skipped_reviewed: int
+    entries: list[SameSourceAIEntry]
+
+    def preview_fields(self, options: TranslateOptions) -> dict[str, Any]:
+        """格式修復預覽專有的計數與開關狀態（``SameSourceAIRepairPreview`` 欄位）。"""
+        return {
+            "input_newline_mismatch_candidates": self.newline_mismatch,
+            "input_newline_mismatch_with_other_hard_issues": (
+                self.newline_mismatch_with_hard_issues
+            ),
+            "skipped_newline_only_candidates": self.skipped_newline_only,
+            "newline_only_included": options.repair_newline_only,
+            "skipped_reviewed_candidates": self.skipped_reviewed,
+            "reviewed_included": options.repair_include_reviewed,
+        }
+
+
 def _limited_repair_snapshot(db, options, deadline):
     """Count every eligible effective row; keep only the first ``limit`` for the run."""
     limit = options.limit if options.limit and options.limit > 0 else None
     chosen: list[SameSourceAIEntry] = []
     eligible = newline_mismatch_count = newline_mismatch_with_hard_issues = (
         skipped_newline_only
-    ) = 0
+    ) = skipped_reviewed = 0
     for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
         options.version,
         list(options.mod_ids),
         check=lambda: _raise_preview_timeout(deadline),
     ):
         _raise_preview_timeout(deadline)
+        if not options.repair_include_reviewed and _is_reviewed_entry(entry):
+            skipped_reviewed += 1
+            continue
         newline_mismatch_count += int(newline_mismatch)
         newline_mismatch_with_hard_issues += int(newline_mismatch and mixed)
         if newline_mismatch and not mixed and not options.repair_newline_only:
@@ -665,11 +700,12 @@ def _limited_repair_snapshot(db, options, deadline):
         rows_by_key[(int(item["_entry_id"]), int(item.get("_source_id", SRC_AI)))]
         for item in items
     ]
-    return (
+    return _RepairSnapshot(
         eligible,
         newline_mismatch_count,
         newline_mismatch_with_hard_issues,
         skipped_newline_only,
+        skipped_reviewed,
         selected_entries,
     )
 
@@ -683,15 +719,10 @@ def preview_same_source_ai_retranslation(
 ):
     """Return the exact candidate snapshot; optional monotonic deadline covers SQL and transforms."""
     _raise_preview_timeout(deadline)
-    skipped_newline_only = 0
     if mode == "quality_mismatch":
-        (
-            total,
-            newline_mismatch_count,
-            newline_mismatch_with_hard_issues,
-            skipped_newline_only,
-            entries,
-        ) = _limited_repair_snapshot(db, options, deadline)
+        snapshot = _limited_repair_snapshot(db, options, deadline)
+        total, entries = snapshot.eligible, snapshot.entries
+        mode_fields = snapshot.preview_fields(options)
     elif mode == "same_source_ai":
         total = db.count_same_as_source_ai(options.version, list(options.mod_ids))
         _raise_preview_timeout(deadline)
@@ -700,6 +731,7 @@ def preview_same_source_ai_retranslation(
             list(options.mod_ids),
             limit=options.limit or None,
         )
+        mode_fields = {}
     else:
         raise ValueError(f"未知既有譯文修復條件：{mode}")
     _raise_preview_timeout(deadline)
@@ -737,17 +769,7 @@ def preview_same_source_ai_retranslation(
         estimated_batches,
         mode=mode,
         sources=tuple(sorted({int(entry.source_id or SRC_AI) for entry in entries})),
-        input_newline_mismatch_candidates=(
-            newline_mismatch_count if mode == "quality_mismatch" else 0
-        ),
-        input_newline_mismatch_with_other_hard_issues=(
-            newline_mismatch_with_hard_issues if mode == "quality_mismatch" else 0
-        ),
-        skipped_newline_only_candidates=(
-            skipped_newline_only if mode == "quality_mismatch" else 0
-        ),
-        newline_only_included=mode == "quality_mismatch"
-        and options.repair_newline_only,
+        **mode_fields,
     )
 
 
@@ -1379,6 +1401,7 @@ def _replace_candidate_translation(db, original, text, report):
             expected_revision=original["_expected_revision"],
             strict_newline=report.strict_newline,
             sync_other_versions=report.sync_other_versions,
+            allow_reviewed=report.include_reviewed,
         )
     return db.replace_ai_translation(entry_id, old_text, text, **identity)
 
@@ -1655,6 +1678,7 @@ def _remaining_candidate_count(db, options, mode: str) -> int:
     if mode == "quality_mismatch":
         return sum(
             entry is not None
+            and (options.repair_include_reviewed or not _is_reviewed_entry(entry))
             and (options.repair_newline_only or not (newline_mismatch and not mixed))
             for entry, newline_mismatch, mixed in db.iter_repairable_translation_entries(
                 options.version, list(options.mod_ids)
@@ -2155,6 +2179,12 @@ def _initialize_snapshot_run(db, entries, session, report, options):
                 f"⏭️ 略過 {report.skipped_newline_only_candidates:,} 筆只有實際換行數不同的項目"
                 "｜不佔用 AI 修復名額",
             )
+        if report.skipped_reviewed_candidates:
+            _log(
+                session,
+                f"⏭️ 略過 {report.skipped_reviewed_candidates:,} 筆已審核的項目"
+                "｜未開啟「連已審核的譯文一起修復」",
+            )
         _log(
             session,
             f"📋 修復規劃｜{len(items):,} 筆需由 AI 修復",
@@ -2272,6 +2302,10 @@ def run_moddb_retranslate_service(
         skipped_newline_only_candidates=(
             review_preview.skipped_newline_only_candidates if review_preview else 0
         ),
+        skipped_reviewed_candidates=(
+            review_preview.skipped_reviewed_candidates if review_preview else 0
+        ),
+        include_reviewed=mode == "quality_mismatch" and options.repair_include_reviewed,
     )
     operation_label = "特殊字元修復" if mode == "quality_mismatch" else "舊 AI 重翻"
     started_at = monotonic()

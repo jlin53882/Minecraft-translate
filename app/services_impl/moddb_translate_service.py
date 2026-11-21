@@ -125,6 +125,8 @@ class TranslateOptions:
     repair_newline_only: bool = False
     # 格式修復：原文與舊譯文都相同的其他版本條目一併改成新譯文
     repair_sync_other_versions: bool = False
+    # 格式修復：連已審核（含舊資料人工譯文）的項目也送 AI；預設略過，避免改寫已審核譯文
+    repair_include_reviewed: bool = False
 
 
 @dataclass

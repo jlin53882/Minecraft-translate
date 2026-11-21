@@ -29,6 +29,11 @@ def repair_summary_detail_lines(summary: dict) -> list[str]:
             f"略過 {summary.get('skipped_newline_only_candidates', 0)} 筆只有實際換行數不同的項目"
             "（不送 AI、不佔修復名額）"
         )
+    if summary.get("skipped_reviewed_candidates"):
+        lines.append(
+            f"略過 {summary.get('skipped_reviewed_candidates', 0)} 筆已審核的項目"
+            "（未開啟「連已審核的譯文一起修復」）"
+        )
     if "planned_batches" in summary:
         lines.append(
             f"規劃批次：{summary.get('planned_batches', 0)}；"

@@ -174,6 +174,8 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 「單次上限」欄位逐字輸入時由 `TranslatePanel._limit_debouncer`（`Debouncer`，`LIMIT_TYPING_DELAY`）延遲：停頓或按 Enter 時 `TranslatePanel._commit_limit` 才取消等待中的計時並呼叫 `_on_limit_changed` 重算範圍，數值沒變就不重算；既有的格式修復預覽在輸入當下就作廢（候選集依舊上限產生），只有重算範圍才延遲；欄位不用失焦觸發（避免重繪造成的失焦立刻重算，也保留 `SyncTextField` 的失焦同步）。格式修復預覽（`retranslation_controller.preview`）開始前先 `_commit_limit`，避免等待中的變更之後清掉這次預覽；`will_unmount` 取消等待中的計時。範圍列的模組包版本與模組連動由 `PackModScope` 負責，類型選單由 `KindScopeDropdown`（`kind_scope_dropdown.py`）負責選項與選值；兩者都不查資料庫，清單來自背景快照或 `refresh_scope`。格式修復執行中的進度面板是 `repair_card.RepairProgressPanel`（版面、`show_live` 更新與 `reset`），`TranslatePanel` 只在 `_apply_repair_live` 準備即時資料後交給它。
 
+格式修復卡片（`create_repair_card`）的「只有換行數不同」與「連已審核的譯文一起修復」兩個開關都接到 `TranslatePanel._on_repair_candidate_rule_changed`：候選規則改變時清掉既有預覽、需重新預覽；`TranslatePanel.build_options` 把後者轉成 `TranslateOptions.repair_include_reviewed`。
+
 Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_gate`（`_repair_validation_issues`），翻譯端的品質重試因此使用與寫回驗證相同的規則；重試結果由 `_count_quality_retry` 累計到報告。
 
 `TranslatePanel` 依 `summary["status"]` 顯示結果：`CANCELLED` 為「已取消」、`DONE_WITH_WARNINGS` 為「機翻完成（有警告）」（有品質拒絕、來源回填、MAX_TOKENS、回應格式錯誤或未解決的品質重試時）、其他非 `DONE` 為「未完成（狀態）」。`TaskSession.status` 仍只有 `DONE`／`ERROR`。畫面日誌每批一行，完整品質清單由 `moddb_translate_report` 寫入 `logging.log_dir` 下的報告檔，畫面只顯示數量與路徑。
