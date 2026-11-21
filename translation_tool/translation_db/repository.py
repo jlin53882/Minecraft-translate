@@ -3349,9 +3349,10 @@ class TranslationDB(
                 confirmed_quality_worsening=plan.confirmed_quality_worsening,
                 conn=conn,
                 progress_callback=progress_callback,
-                collect_skipped=plan.skipped_details_loaded,
             )
-            if current != plan:
+            # 只比對預覽要寫入的條目：每筆變更都帶舊譯文與 revision，
+            # 其餘條目（例如背景機翻新增的譯文）變動不影響這批寫入的正確性。
+            if not set(plan.changes) <= set(current.changes):
                 raise ValueError("預覽後條目已變動，請重新產生批次替換預覽")
             if progress_callback is not None:
                 progress_callback("提交中（本階段不可取消）", 0.55)

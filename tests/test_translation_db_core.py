@@ -1166,6 +1166,33 @@ def test_batch_replace_compare_and_set_and_partial_batch_revert(db):
     )
 
 
+def test_batch_replace_ignores_unrelated_entries_added_after_preview(db):
+    db.ingest("1.21.1", [item(key="item.cas.target", tw="before target")])
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "before", "after")
+    # 模擬背景機翻在預覽後寫入：一筆不相關、一筆也含尋找文字但不在預覽內
+    db.ingest(
+        "1.21.1",
+        [
+            item(key="item.cas.unrelated", tw="other text"),
+            item(key="item.cas.late", tw="before late"),
+        ],
+    )
+    result = db.execute_batch_replace(plan)
+    assert result.updated == 1
+    rows = {row.key: row.zh_tw for row in db.list_entries("1.21.1", limit=100)[0]}
+    assert rows["item.cas.target"] == "after target"
+    assert rows["item.cas.late"] == "before late"
+    assert rows["item.cas.unrelated"] == "other text"
+
+
+def test_batch_replace_rejects_when_planned_entry_no_longer_matches(db):
+    db.ingest("1.21.1", [item(key="item.cas.gone", tw="before gone")])
+    plan = db.preview_batch_replace(EntryFilter(version="1.21.1"), "before", "after")
+    db.save_manual(plan.changes[0].entry_id, "rewritten", propagate=False)
+    with pytest.raises(ValueError, match="預覽後條目已變動"):
+        db.execute_batch_replace(plan)
+
+
 def test_batch_replace_requires_explicit_quality_worsening_confirmation(db):
     db.ingest("1.21.1", [item(key="item.quality", en="Token", tw="原本")])
     criteria = EntryFilter(version="1.21.1", quality=QualityFilter())
