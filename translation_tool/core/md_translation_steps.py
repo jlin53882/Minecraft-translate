@@ -393,7 +393,8 @@ def _inject_one_doc(
             log_warning(f"[MD] 略過 {source_md}：{_REASON_TEXT[reason]}（{jp.name}）")
             return reason
 
-    for it in items:
+    # 插入／刪行會讓後面的行號位移：由後往前套用
+    for it in sorted(items, key=lambda x: getattr(x, "start_line", 0), reverse=True):
         apply_item_to_md_lines_fn(md_lines, it)
 
     out_rel, status = map_lang_fn(source_md, src_lang="en_us", dst_lang="zh_tw")

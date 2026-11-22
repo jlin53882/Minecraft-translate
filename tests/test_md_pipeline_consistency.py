@@ -221,3 +221,25 @@ def test_switching_input_folder_warns_and_clears_old_pending(tmp_path, fake_lm, 
 
     assert not _pending(out).exists()
     assert result["step1"]["stale_removed"] == 1
+
+
+def test_longer_translation_is_inserted_not_truncated_end_to_end(
+    tmp_path, monkeypatch, fake_lm
+):
+    src, out, guide = _layout(tmp_path)
+    guide.write_text("# T\n\nOnly one line.\n\nLast block.\n", encoding="utf-8")
+
+    def two_lines(items, *, hooks, **_kwargs):
+        for it in items:
+            hooks.on_translated_item({**it, "text": "譯一\n譯二"})
+        return SimpleNamespace(
+            status="DONE", elapsed_sec=0.0, completed_calls=1, processed=len(items)
+        )
+
+    monkeypatch.setattr(md_lmtranslator, "run_translator_skeleton", two_lines)
+
+    _run(src, out)
+
+    lines = _final(out).read_text(encoding="utf-8").splitlines()
+    # 三個區塊各被譯成兩行；後面的區塊不會因前面插入而錯位
+    assert lines == ["譯一", "譯二", "", "譯一", "譯二", "", "譯一", "譯二"]
