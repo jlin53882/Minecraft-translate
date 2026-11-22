@@ -85,10 +85,14 @@ TranslationView（ft.Column）
 - **Step1 Extract**（`step1_extract_impl`）：掃描 MD 檔，依 `lang_mode` 過濾後抽取區塊，寫入 `pending_dir/<rel_md>.json` + `_manifest.json`（schema `md_pending_manifest_blocks_v1`）
   - `non_cjk_only`：比對同義 `zh_tw` 檔，CJK 已譯區塊（`contains_cjk`）過濾；區塊數不一致則 warn 並保留全部
   - **去重複**：相同 `content_hash` 只留一份（`seen_hashes`，重複計入 `duplicate_blocks`）
+  - **原子寫入與清理**：`write_json_atomic` 寫 pending；全部寫完後 `remove_stale_pending`（`translation_tool/core/md_pipeline_files.py`）清掉本輪沒重寫的 `md_pending_blocks_v1` 檔案，不動其他 JSON（`stale_removed`）
 - **Step2 Translate**（`step2_translate_impl`）：`translate_md_pending_fn` 批次翻譯 pending JSON → translated_dir（dry_run / write_new_cache 透傳）
 - **Step3 Inject**（`step3_inject_impl`）：讀原始 MD + 翻譯 JSON，逐區塊套用（`apply_item_to_md_lines_fn`）→ 寫入 final_dir
   - `map_lang_in_rel_path_allow_zh_fn` 回傳 `status` 只認 `SRC_EN` / `SRC_ZH`，其他狀態跳過（`skipped_lang_status`）
   - 來源 MD 不存在 → `skipped_missing_source`；保留原始結尾換行（`ends_with_nl`）
+  - 只讀譯後 JSON；給了 `pending_dir` 時每檔先過 `verify_translated_doc`（`step2_status`、與現行 pending 的區塊身分、原始檔區塊 `content_hash`），不符則略過並計入 `skipped_incomplete`／`skipped_pending_mismatch`／`skipped_stale_source`，`完成` 內舊檔保留
+  - 路徑不安全（`is_safe_relative_path`／`is_inside`）→ `skipped_unsafe_path`
+  - 區塊由後往前套用（`apply_items_to_md_lines`），多／少行時插入／刪除，不留空白行
 - Markdown 只有 `DONE` 才可執行 Step3；`PARTIAL`、`FAILED`、`CANCELLED` 不使用 pending JSON 產生完成目錄，避免未完成翻譯被當成最終輸出。
 
 ## 重開後續跑

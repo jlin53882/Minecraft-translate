@@ -114,7 +114,8 @@ Minecraft-translate/
 | `plugins/kubejs/kubejs_tooltip_inject.py` | KubeJS tooltip 翻譯注入 | `inject()`, `replace_text_in_text_obj()` |
 | `plugins/md/md_lmtranslator.py` | Markdown 文件翻譯引擎 | `translate_md_pending()`, `PendingItem` |
 | `plugins/md/md_extract_qa.py` | Markdown 翻譯品質萃取 | `extract_blocks()`, `build_pending_json()`, `BlockItem` |
-| `plugins/md/md_inject_qa.py` | Markdown 翻譯注入 | `apply_item_to_md_lines()`, `Item` |
+| `plugins/md/md_inject_qa.py` | Markdown 翻譯注入 | `apply_item_to_md_lines()`, `apply_items_to_md_lines()`, `Item` |
+| `core/md_pipeline_files.py` | Markdown 管線中間檔：原子寫入、過期 pending 清理、注入前驗證、路徑安全 | `verify_translated_doc()`, `remove_stale_pending()`, `is_safe_relative_path()` |
 | `plugins/shared/rich_text_shield.py` | 特殊文字遮蔽（顏色代碼、物品名佔位符） | `shield_text()`, `unshield_text()` |
 | `plugins/shared/lang_path_rules.py` | 語言檔路徑轉換規則 | `should_rename_to_zh_tw()`, `compute_output_path()` |
 | `plugins/shared/lang_text_rules.py` | 語言文字內容規則（已翻譯判斷） | `is_already_zh()` |
