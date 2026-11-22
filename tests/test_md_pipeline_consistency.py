@@ -555,3 +555,19 @@ def test_pair_classification_ignores_a_bom_at_the_start_of_one_file(tmp_path, fa
 
     assert _pending_texts(out) == ["﻿# Title"]  # 未譯標題仍會被送翻
     assert result["step1"]["ambiguous_kept"] == 0
+
+
+def test_moving_zh_tw_out_of_input_lets_english_be_retranslated_from_scratch(
+    tmp_path, fake_lm
+):
+    """文件建議的整份重翻做法：zh_tw 移出輸入資料夾後，譯後資料夾殘留的舊 zh 譯後檔不能擋住英文。"""
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+    _run_non_cjk(src, out)
+    zh_dir = src / "pack" / "zh_tw"
+    (zh_dir / "guide.md").unlink()
+    zh_dir.rmdir()
+
+    result = _run_non_cjk(src, out)
+
+    assert result["step3"]["written_files"] == 1
+    assert _pair_final(out) == "譯:One.\n\n譯:Two.\n"

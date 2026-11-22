@@ -417,7 +417,7 @@ def step3_inject_impl(
         "output_conflict": "skipped_output_conflict",
     }
     json_files = list(iter_json_files_fn(jroot))
-    pre_skips = _plan_inject_skips(json_files, jroot)
+    pre_skips = _plan_inject_skips(json_files, jroot, src_root)
     total = len(json_files)
     for idx, jp in enumerate(json_files, start=1):
         outcome = pre_skips.get(jp) or _inject_one_doc(
@@ -445,10 +445,14 @@ def step3_inject_impl(
     return {**stats, "json_root": str(jroot), "final_root": str(out_done)}
 
 
-def _plan_inject_skips(json_files: list[Path], jroot: Path) -> dict[Path, str]:
+def _plan_inject_skips(
+    json_files: list[Path], jroot: Path, src_root: Path
+) -> dict[Path, str]:
     """決定哪些譯後 JSON 不能寫入：輸出由誰寫，與檔案列舉順序無關。
 
-    - en_us／zh_tw 同名且都有譯後檔（舊版留下）：以 zh_tw 為底稿，en_us 那份略過
+    - en_us／zh_tw 同名且都有譯後檔（舊版留下）：以 zh_tw 為底稿，en_us 那份略過。
+      配對只看輸入資料夾現在還存在的來源：zh_tw 檔已移出輸入資料夾時，譯後資料夾裡
+      殘留的舊 zh_tw 譯後檔不能讓英文那份被略過
     - 同一個 source_md 有多份譯後檔（例如舊雙層資料夾）：只用正規位置
       `<譯後資料夾>/<source_md>.json` 那份，其他略過
     - 同語系重複（輸出會互相覆蓋）：全部略過
@@ -461,7 +465,12 @@ def _plan_inject_skips(json_files: list[Path], jroot: Path) -> dict[Path, str]:
         if isinstance(source_md, str):
             by_source.setdefault(source_md, []).append(jp)
 
-    plan = plan_sources(list(by_source))
+    live_sources = [
+        source_md
+        for source_md in by_source
+        if is_safe_relative_path(source_md) and (src_root / source_md).is_file()
+    ]
+    plan = plan_sources(live_sources)
     skips: dict[Path, str] = {}
     for source_md, paths in by_source.items():
         reason = plan.skip.get(source_md)
