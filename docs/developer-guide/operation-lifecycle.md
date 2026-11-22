@@ -201,3 +201,28 @@ The table is a disposition, not a claim that all calls have a fixed maximum
 latency. In particular, cancellation checkpoints and blocking-call latency are
 separate guarantees. Any future change that makes one of these operations
 terminal must preserve the no-writer-after-terminal rule.
+
+### Stream abort and the urllib3 private attribute
+
+`_abort_stream` (`translation_tool/core/openai_codex_client.py`) reads the
+underlying socket through `response.raw._connection.sock`. `response.raw` is
+urllib3's `HTTPResponse`; `_connection` is a private urllib3 attribute and is not
+covered by its compatibility promise. There is no public requests or urllib3 API
+for the socket of an in-progress stream.
+
+- **Dependency chain.** urllib3 is a transitive dependency of `requests` (a direct
+  project dependency); it is pinned by `uv.lock`. Flet does not depend on it, so
+  upgrading Flet does not affect this. Re-check `_abort_stream` when `requests` or
+  the lock file is upgraded.
+- **Why the socket is needed.** The thread reading the stream holds the reader's
+  lock while blocked in `recv`, so `response.close()` from another thread waits
+  until the read returns (up to the read timeout). `shutdown(SHUT_RDWR)` on the
+  socket does not need that lock and makes the blocked read fail at once.
+- **Fallback.** If the attribute is missing or the socket is already closed
+  (`AttributeError` / `OSError`), `_abort_stream` logs a warning and only closes
+  the response on a background thread. The worker still raises `TaskCancelled`
+  immediately, but the helper thread and connection stay until the read timeout.
+- **Detecting breakage.** `test_consume_stream_cancellable_aborts_stalled_real_stream_on_cancel`
+  (`tests/test_openai_codex_client.py`) uses a real local socket and asserts that
+  the helper thread ends after cancellation, so it fails if the shutdown path
+  stops working after an upgrade.
