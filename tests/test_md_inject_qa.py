@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.md import md_inject_qa  # noqa: E402  先調整 sys.path 才能匯入
+from translation_tool.plugins.md import md_inject_qa  # noqa: E402
 
 
 def test_map_lang_in_rel_path(tmp_path: Path) -> None:
