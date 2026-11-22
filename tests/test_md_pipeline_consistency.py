@@ -487,6 +487,8 @@ def test_step3_does_not_write_the_same_output_twice_in_one_run(tmp_path, fake_lm
 
     assert result["step3"]["written_files"] == 1
     assert result["step3"]["skipped_output_conflict"] == 1
+    # 勝者固定是正規位置那份，與檔案列舉順序無關
+    assert _pair_final(out) == "一。\n\n譯:Two.\n"
 
 
 def test_plan_sources_pairs_by_output_identity_regardless_of_order():
@@ -518,3 +520,38 @@ def test_plan_sources_pairs_by_output_identity_regardless_of_order():
     ]
     assert "e/zh_cn/v.md" not in plan.skip
     assert (plan.pair_en, plan.skip) == (reversed_plan.pair_en, reversed_plan.skip)
+
+
+def test_resume_step3_with_legacy_en_and_zh_pending_keeps_zh_translations(
+    tmp_path, fake_lm
+):
+    """舊版留下 en_us 與 zh_tw 兩份 pending／譯後檔時，只續跑 Step 3 也不能讓英文那份蓋掉繁中。"""
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+    _run_non_cjk(src, out)
+    pending_root = out / "md" / "待翻譯"
+    translated = out / "md" / "LM翻譯後"
+    # 重建舊版狀態：en_us 也有自己的 pending 與譯後檔（整份英文都被翻成「譯:」）
+    for root in (pending_root, translated):
+        en_doc = {
+            "schema": "md_pending_blocks_v1",
+            "source_md": "pack/en_us/guide.md",
+            "items": [],
+        }
+        (root / "pack" / "en_us").mkdir(parents=True, exist_ok=True)
+        (root / "pack" / "en_us" / "guide.md.json").write_text(
+            json.dumps(en_doc), encoding="utf-8"
+        )
+
+    result = _run_non_cjk(src, out, step_extract=False, step_translate=False)
+
+    assert _pair_final(out) == "一。\n\n譯:Two.\n"
+    assert result["step3"]["skipped_output_conflict"] == 1
+
+
+def test_pair_classification_ignores_a_bom_at_the_start_of_one_file(tmp_path, fake_lm):
+    src, out = _pair_layout(tmp_path, "# Title\n\nBody.\n", "﻿# Title\n\n正文。\n")
+
+    result = _run_non_cjk(src, out)
+
+    assert _pending_texts(out) == ["﻿# Title"]  # 未譯標題仍會被送翻
+    assert result["step1"]["ambiguous_kept"] == 0

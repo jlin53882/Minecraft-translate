@@ -16,6 +16,7 @@ from typing import Any
 from translation_tool.plugins.md.md_extract_qa import (
     contains_cjk,
     detect_lang_segment,
+    make_content_hash,
     map_rel_lang_path,
 )
 
@@ -70,6 +71,14 @@ def plan_sources(rels: list[str]) -> SourcePlan:
     return plan
 
 
+def _comparable_hash(item: Any) -> str:
+    """比較用雜湊：檔案開頭的 BOM 會混進第一個區塊，只在比較時忽略它（不改 pending 內的雜湊）。"""
+    text = item.text
+    if text.startswith("\ufeff"):
+        return make_content_hash(text.lstrip("\ufeff"))
+    return item.content_hash
+
+
 def select_untranslated_blocks(
     en_items: list[Any], zh_items: list[Any]
 ) -> tuple[list[Any], int]:
@@ -80,11 +89,11 @@ def select_untranslated_blocks(
     回傳 (要送翻的區塊, 保留下來但沒有 CJK 的區塊數)：後者是舊版英文、符號等無法確定
     的內容，只供回報，不影響寫入。
     """
-    en_hashes = {it.content_hash for it in en_items}
+    en_hashes = {_comparable_hash(it) for it in en_items}
     pending: list[Any] = []
     ambiguous = 0
     for it in zh_items:
-        if it.content_hash in en_hashes:
+        if _comparable_hash(it) in en_hashes:
             pending.append(it)
         elif not contains_cjk(it.text) and any(
             ch.isascii() and ch.isalpha() for ch in it.text

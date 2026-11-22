@@ -123,6 +123,13 @@ def _items_for_paired_zh(
         )
     pending, ambiguous = select_untranslated_blocks(en_items, zh_items)
     report.ambiguous_kept += ambiguous
+    if ambiguous:
+        log_warning(
+            "[MD-抽取] %s 有 %s 個區塊沒有中文、也和英文原文不同（可能是舊版英文或品牌名），"
+            "不會送翻，請人工確認",
+            rel_zh,
+            ambiguous,
+        )
     return pending
 
 
@@ -410,9 +417,10 @@ def step3_inject_impl(
         "output_conflict": "skipped_output_conflict",
     }
     json_files = list(iter_json_files_fn(jroot))
+    pre_skips = _plan_inject_skips(json_files, jroot)
     total = len(json_files)
     for idx, jp in enumerate(json_files, start=1):
-        outcome = _inject_one_doc(
+        outcome = pre_skips.get(jp) or _inject_one_doc(
             jp,
             src_root=src_root,
             out_done=out_done,
@@ -435,6 +443,42 @@ def step3_inject_impl(
             "完成資料夾內對應的檔案仍是上一次的結果，請重跑抽取與翻譯。"
         )
     return {**stats, "json_root": str(jroot), "final_root": str(out_done)}
+
+
+def _plan_inject_skips(json_files: list[Path], jroot: Path) -> dict[Path, str]:
+    """決定哪些譯後 JSON 不能寫入：輸出由誰寫，與檔案列舉順序無關。
+
+    - en_us／zh_tw 同名且都有譯後檔（舊版留下）：以 zh_tw 為底稿，en_us 那份略過
+    - 同一個 source_md 有多份譯後檔（例如舊雙層資料夾）：只用正規位置
+      `<譯後資料夾>/<source_md>.json` 那份，其他略過
+    - 同語系重複（輸出會互相覆蓋）：全部略過
+    被略過的檔案計入 skipped_output_conflict 並警告。
+    """
+    by_source: dict[str, list[Path]] = {}
+    for jp in json_files:
+        doc = read_pending_schema_doc(jp)
+        source_md = doc.get("source_md") if doc else None
+        if isinstance(source_md, str):
+            by_source.setdefault(source_md, []).append(jp)
+
+    plan = plan_sources(list(by_source))
+    skips: dict[Path, str] = {}
+    for source_md, paths in by_source.items():
+        reason = plan.skip.get(source_md)
+        if reason is not None:
+            log_warning(
+                f"[MD] 略過 {source_md} 的譯後檔：輸出由同名的 zh_tw 檔或其他來源負責（{reason}）"
+            )
+            skips.update(dict.fromkeys(paths, "output_conflict"))
+            continue
+        if len(paths) > 1:
+            canonical = jroot / (source_md.replace("\\", "/") + ".json")
+            keep = canonical if canonical in paths else min(paths)
+            for jp in paths:
+                if jp != keep:
+                    log_warning(f"[MD] 略過重複的譯後檔 {jp}（已使用 {keep}）")
+                    skips[jp] = "output_conflict"
+    return skips
 
 
 def _inject_one_doc(
