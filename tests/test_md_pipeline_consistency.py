@@ -285,6 +285,34 @@ def test_legacy_double_nested_translated_files_are_migrated(tmp_path, fake_lm):
     assert result["step3"]["written_files"] == 1
 
 
+def test_failed_step2_keeps_legacy_nested_translated_files(tmp_path, fake_lm):
+    src, out, _ = _layout(tmp_path)
+    _run(src, out, step_inject=False)
+    legacy = out / "md" / "LM翻譯後" / "LM翻譯後" / "pack" / "en_us"
+    legacy.mkdir(parents=True)
+    old = legacy / "guide.md.json"
+    old.write_text(
+        json.dumps({"schema": "md_pending_blocks_v1", "items": []}), encoding="utf-8"
+    )
+
+    fake_lm["status"] = "FAILED"
+    _run(src, out, step_inject=False)
+
+    assert old.exists()  # 新譯文沒完整寫好前，舊檔是唯一可用的譯文
+
+
+def test_dry_run_does_not_remove_stale_pending_files(tmp_path, fake_lm):
+    src, out, _ = _layout(tmp_path)
+    _run(src, out, step_inject=False)
+    other = tmp_path / "other"
+    (other / "pack" / "en_us").mkdir(parents=True)
+    (other / "pack" / "en_us" / "x.md").write_text("Hello world.\n", encoding="utf-8")
+
+    _run(other, out, dry_run=True)
+
+    assert _pending(out).exists()  # 預覽不能清掉原專案的待翻譯檔
+
+
 def test_dry_run_does_not_delete_legacy_nested_translated_files(tmp_path, fake_lm):
     src, out, _ = _layout(tmp_path)
     _run(src, out, step_inject=False)

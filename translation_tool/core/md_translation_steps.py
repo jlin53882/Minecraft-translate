@@ -28,7 +28,11 @@ from translation_tool.utils.log_unit import log_info, log_warning
 
 
 def _finish_pending_dir(
-    pending_root: Path, manifest: dict[str, Any], written: set[Path]
+    pending_root: Path,
+    manifest: dict[str, Any],
+    written: set[Path],
+    *,
+    remove_stale: bool = True,
 ) -> int:
     """寫入 manifest 並清掉本輪沒重寫的過期 pending，回傳清掉的檔案數。
 
@@ -49,7 +53,7 @@ def _finish_pending_dir(
             "上次留下的待翻譯檔與譯文會被視為過期並清除／略過",
             previous_root,
         )
-    removed = remove_stale_pending(pending_root, written)
+    removed = remove_stale_pending(pending_root, written) if remove_stale else 0
     manifest["stale_removed"] = removed
     write_json_atomic(manifest_path, manifest)
     if removed:
@@ -77,6 +81,7 @@ def step1_extract_impl(
     build_pending_json_fn,
     progress_fn: Callable[[Any, float], None],
     log_warning_fn: Callable[..., None],
+    remove_stale: bool = True,
 ) -> dict[str, Any]:
     """
     第一步實作：掃描 Markdown 資料夾，依 lang_mode 過濾並抽取可翻譯區塊，將結果寫入待翻譯 JSON。
@@ -110,7 +115,9 @@ def step1_extract_impl(
             "unique_blocks": 0,
             "duplicate_blocks": 0,
         }
-        stale_removed = _finish_pending_dir(pending_root, manifest, set())
+        stale_removed = _finish_pending_dir(
+            pending_root, manifest, set(), remove_stale=remove_stale
+        )
         progress_fn(session, progress_base + progress_span)
         return {
             "input_root": str(in_root),
@@ -204,7 +211,9 @@ def step1_extract_impl(
         "unique_blocks": unique_blocks,
         "duplicate_blocks": dup_blocks,
     }
-    stale_removed = _finish_pending_dir(pending_root, manifest, written_paths)
+    stale_removed = _finish_pending_dir(
+        pending_root, manifest, written_paths, remove_stale=remove_stale
+    )
 
     return {
         "input_root": str(in_root),
@@ -254,14 +263,7 @@ def step2_translate_impl(
         翻譯結果字典
     """
     translated_root = Path(translated_dir).resolve()
-    # dry-run 只做預覽，不能刪掉使用者現有的譯後檔
-    legacy_removed = 0 if dry_run else remove_legacy_nested_translated(translated_root)
-    if legacy_removed:
-        log_info(
-            "[MD-翻譯] 已清除舊版多一層資料夾內的 %s 個譯後檔（現在直接寫入 %s）",
-            legacy_removed,
-            translated_root.name,
-        )
+    translated_root = Path(translated_dir).resolve()
     proxy = progress_proxy_cls(session, progress_base, progress_span)
     result = translate_md_pending_fn(
         pending_dir=str(Path(pending_dir).resolve()),
@@ -270,6 +272,15 @@ def step2_translate_impl(
         dry_run=bool(dry_run),
         session=proxy,
     )
+    # 舊雙層譯後檔要等新譯文完整寫好才清：翻譯失敗時舊檔仍是唯一可用的譯文；dry-run 不動任何檔案
+    if not dry_run and isinstance(result, dict) and result.get("status") == "DONE":
+        legacy_removed = remove_legacy_nested_translated(translated_root)
+        if legacy_removed:
+            log_info(
+                "[MD-翻譯] 已清除舊版多一層資料夾內的 %s 個譯後檔（現在直接寫入 %s）",
+                legacy_removed,
+                translated_root.name,
+            )
     progress_fn(session, progress_base + progress_span)
     return result
 

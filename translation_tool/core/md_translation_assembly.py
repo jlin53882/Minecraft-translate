@@ -70,6 +70,7 @@ def step1_extract(
     session=None,
     progress_base: float = 0.0,
     progress_span: float = 0.33,
+    remove_stale: bool = True,
 ) -> dict[str, Any]:
     """第一步：掃描 Markdown 資料夾，依語言模式過濾後抽取可翻譯區塊，輸出為待翻譯 JSON 檔案。"""
     return step1_extract_impl(
@@ -88,6 +89,7 @@ def step1_extract(
         build_pending_json_fn=build_pending_json,
         progress_fn=progress,
         log_warning_fn=log_warning,
+        remove_stale=remove_stale,
     )
 
 
@@ -242,6 +244,7 @@ def run_md_pipeline(
             session=session,
             progress_base=0.0,
             progress_span=0.33,
+            remove_stale=not dry_run,  # dry-run 只預覽，不清除既有的待翻譯檔
         )
     else:
         log_info("[MD] [1/3] 已略過抽取")
