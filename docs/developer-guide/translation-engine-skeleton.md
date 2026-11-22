@@ -21,7 +21,7 @@ items
 `translate_items_with_cache_loop()` 維持以下契約：
 
 - 保留輸入順序與 batch prefix slicing。原文為空白字串的項目沒有可翻譯內容，
-  loop 入口先用 `_split_blank_items` 排除（計為未翻譯），不讓它們進入批次。
+  loop 入口先用 `_split_blank_items` 排除（計為未翻譯），不讓它們進入批次。checkpoint 狀態的 `resume_index` 是原清單中尚未處理的起點，續跑清單用它切片，不用 `processed`。
   引擎入口 `translate_batch_smart` 對直接呼叫者也守同一個位置契約：空白項目不送進翻譯流程，
   由 `_merge_blank_items` 標記 `_untranslated` 放回原位；整批都是空白時原樣回傳並給 `AUTO`；
   非空白項目沒有結果時結果停在該位置，不會用空白項目掩蓋失敗。`_validate_batch_items`

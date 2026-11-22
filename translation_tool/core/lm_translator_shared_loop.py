@@ -128,23 +128,28 @@ def _is_valid_result(it: Any) -> bool:
 
 def _split_blank_items(
     items: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], int]:
-    """分出可翻譯項目與「文字為空或只有空白」的項目數。
+) -> tuple[list[dict[str, Any]], int, list[int]]:
+    """分出可翻譯項目、「文字為空或只有空白」的項目數，以及可翻譯項目在原清單的位置。
+
+    位置供 checkpoint 算出「原清單中尚未處理的起點」：略過的空白項目可能夾在待翻譯項目之間，
+    不能拿已處理筆數當原清單的切片位置。
 
     空白判斷與引擎入口 ``_validate_batch_items`` 一致。缺少 ``text`` 欄位的項目是
     資料結構錯誤，不在這裡吞掉，交給後續流程回報失敗。
     """
     translatable: list[dict[str, Any]] = []
+    positions: list[int] = []
     blank = 0
-    for item in items:
+    for index, item in enumerate(items):
         text = item.get("text") if isinstance(item, dict) else None
         if isinstance(text, str) and not text.strip():
             blank += 1
         else:
             translatable.append(item)
+            positions.append(index)
     if blank:
         log_info(f"[SharedLM] 略過 {blank} 筆沒有可翻譯內容（空白原文）的項目")
-    return translatable, blank
+    return translatable, blank, positions
 
 
 def _quality_issues_for_cache(it: dict[str, Any]) -> list[str]:
@@ -241,7 +246,9 @@ def translate_items_with_cache_loop(
     )
     # 沒有可翻譯內容（空白原文）的項目不能送進引擎：引擎會悄悄濾掉它們，
     # 造成結果與批次位置錯位，或整批被濾空而被誤判為失敗。這裡先排除並計為未翻譯。
-    remaining, blank_skipped = _split_blank_items(items_to_translate)
+    remaining, blank_skipped, remaining_positions = _split_blank_items(
+        items_to_translate
+    )
     processed = blank_skipped
     completed_calls = 0
     last_error: str | None = None
@@ -566,6 +573,7 @@ def translate_items_with_cache_loop(
 
         # 切片位置 == 已處理的前綴長度（每筆回傳都已處理或回填），不會錯位。
         remaining = remaining[len(safe_translated) :]
+        remaining_positions = remaining_positions[len(safe_translated) :]
 
         save_ok = True
         save_started = time.monotonic()
@@ -615,6 +623,12 @@ def translate_items_with_cache_loop(
                     {
                         "cache_type": cache_type,
                         "processed": processed,
+                        # 原清單中尚未處理的起點；略過的空白項目夾在中間時與 processed 不同。
+                        "resume_index": (
+                            remaining_positions[0]
+                            if remaining_positions
+                            else len(items_to_translate)
+                        ),
                         "total": total,
                         "completed_calls": completed_calls,
                         "status": status,

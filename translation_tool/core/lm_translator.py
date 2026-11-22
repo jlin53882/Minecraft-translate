@@ -679,11 +679,13 @@ def _run_directory_translation(
             return
         checkpoint_batch_index += 1
         processed = int(state.get("processed") or 0)
+        # 續跑起點用原清單位置：略過的空白項目會讓 processed 大於已完成的前綴長度。
+        resume_index = int(state.get("resume_index", processed) or 0)
         save_checkpoint(
             checkpoint_batch_index,
             cache_hit_count + processed,
             cache_hit_count + total,
-            items_to_translate[processed:],
+            items_to_translate[resume_index:],
             str(out_root),
             input_dir=input_dir,
             fingerprint=checkpoint_fingerprint,

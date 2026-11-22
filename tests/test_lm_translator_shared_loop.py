@@ -593,9 +593,44 @@ class TestBlankItemsSkipped:
         )
 
         keep = {"path": "a", "text": "Hi", "source_text": "Hi"}
-        translatable, blank = _split_blank_items(
+        translatable, blank, positions = _split_blank_items(
             [{"path": "b", "text": ""}, keep, {"path": "c", "text": " \t"}]
         )
 
         assert translatable == [keep]
         assert blank == 2
+        assert positions == [1]
+
+    def test_checkpoint_resume_index_is_position_in_original_list(self):
+        """[A, B, blank, C] 只完成 A 時，續跑起點是 B，而不是 processed(=2) 指到的 blank。"""
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        def item(path, text):
+            return {
+                "path": path,
+                "text": text,
+                "source_text": text,
+                "cache_type": "lang",
+            }
+
+        items = [item("a", "A"), item("b", "B"), item("x", " "), item("c", "C")]
+        states = []
+
+        def one_at_a_time(batch, total, *args, **kwargs):
+            return [{**batch[0], "text": "譯:" + batch[0]["text"]}], "AUTO"
+
+        translate_items_with_cache_loop(
+            items,
+            translate_batch_smart=one_at_a_time,
+            reload_cache=False,
+            sleep_seconds_between_batches=0,
+            on_batch_checkpoint=states.append,
+        )
+
+        assert states[0]["processed"] == 2
+        assert states[0]["resume_index"] == 1
+        assert items[states[0]["resume_index"]]["path"] == "b"
+        assert states[1]["resume_index"] == 3
+        assert states[-1]["resume_index"] == len(items)
