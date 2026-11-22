@@ -2713,6 +2713,40 @@ def test_translate_panel_builds_newline_option_only_for_quality_mode(db_path):
     assert panel.build_options().repair_newline_only is False
 
 
+def test_translate_panel_reviewed_switch_follows_mode_and_clears_preview(db_path):
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+
+    # 預設關閉，只在格式修復模式顯示並傳給 options
+    assert panel.repair_reviewed_row.value is False
+    assert panel.repair_reviewed_row.visible is True
+    assert panel.build_options().repair_include_reviewed is False
+    panel.repair_reviewed_row.value = True
+    assert panel.build_options().repair_include_reviewed is True
+
+    # 切換開關後，舊預覽不再代表實際會送 AI 的項目
+    panel._repair_preview = object()
+    panel._on_repair_candidate_rule_changed()
+    assert not getattr(panel, "_repair_preview", None)
+
+    panel._on_repair_mode_changed(
+        SimpleNamespace(control=SimpleNamespace(value="same_source_ai"))
+    )
+    assert panel.repair_reviewed_row.visible is False
+    assert panel.build_options().repair_include_reviewed is False
+
+
+def test_repair_preview_text_and_summary_report_skipped_reviewed():
+    from app.views.moddb import repair_summary
+
+    lines = repair_summary.repair_summary_detail_lines(
+        {"skipped_reviewed_candidates": 2}
+    )
+    assert any("略過 2 筆已審核的項目" in line for line in lines)
+    assert not any(
+        "已審核" in line for line in repair_summary.repair_summary_detail_lines({})
+    )
+
+
 def _identity(en="Use %s"):
     return {
         "expected_version": "1.21.1",

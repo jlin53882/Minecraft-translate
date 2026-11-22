@@ -2183,7 +2183,7 @@ def _initialize_snapshot_run(db, entries, session, report, options):
             _log(
                 session,
                 f"⏭️ 略過 {report.skipped_reviewed_candidates:,} 筆已審核的項目"
-                "｜未開啟「連已審核的譯文一起修復」",
+                "（未開啟「連已審核的譯文一起修復」）",
             )
         _log(
             session,
