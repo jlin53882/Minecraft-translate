@@ -165,10 +165,8 @@ def classify_member(
     return None
 
 
-def classify_file(
-    file: str | Path, root: str | Path, dir_names: Sequence[str] | None = None
-) -> FileIdentity | None:
-    """已提取到磁碟的檔案身分；路徑以 ``root``（輸入資料夾）為基準。"""
+def _relative_parts(file: str | Path, root: str | Path) -> tuple[str, ...]:
+    """檔案相對於 ``root`` 的路徑片段（不在 root 底下時用原路徑）。"""
     path = Path(file)
     try:
         # 項目的檔案路徑本來就是由 root 往下走出來的：純路徑運算即可，不必為每個項目
@@ -181,7 +179,37 @@ def classify_file(
             rel = path.resolve().relative_to(Path(root).resolve())
         except ValueError:
             rel = path
-    return classify_parts(rel.parts, dir_names)
+    return rel.parts
+
+
+def classify_file(
+    file: str | Path, root: str | Path, dir_names: Sequence[str] | None = None
+) -> FileIdentity | None:
+    """已提取到磁碟的檔案身分；路徑以 ``root``（輸入資料夾）為基準。"""
+    return classify_parts(_relative_parts(file, root), dir_names)
+
+
+def classify_sniffed_book_file(
+    file: str | Path, root: str | Path
+) -> FileIdentity | None:
+    """依內容辨識為手冊（patchouli）的 JSON 檔身分；路徑不含書籍資料夾名稱也適用。
+
+    與 ``translation_db.sniff_groups`` 掃描端的鍵值規則一致：模組為 ``assets|data`` 後第一段，
+    檔案鍵為去掉語系記號後的相對路徑（沒有語系記號的檔案就是英文原文）。
+    內容是否為手冊由呼叫端保證（翻譯項目的 ``cache_type == "patchouli"``）。
+    內嵌 jar 提取時的 ``<名稱>_extracted/`` 前綴不屬於身分。
+    """
+    parts = _relative_parts(file, root)
+    if parts and parts[0].endswith("_extracted"):
+        parts = parts[1:]
+    if len(parts) < 4 or parts[0].lower() not in _ROOT_DIRS:
+        return None
+    if not parts[-1].lower().endswith(".json"):
+        return None
+    locale = split_locale(parts[2:])
+    if locale.other or locale.lang is None:
+        return None
+    return FileIdentity(KIND_PATCHOULI, parts[1], locale.neutral, locale.lang)
 
 
 def split_json_path(path: str) -> list[str]:
