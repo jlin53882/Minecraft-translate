@@ -19,7 +19,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
-from translation_tool.core.text_sniffer import split_locale
+from translation_tool.core.book_formats import BOOK_EXCLUDED_DIRS
+from translation_tool.core.text_sniffer import LocaleSplit, split_locale
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
     KIND_GUIDE,
@@ -165,10 +166,8 @@ def classify_member(
     return None
 
 
-def classify_file(
-    file: str | Path, root: str | Path, dir_names: Sequence[str] | None = None
-) -> FileIdentity | None:
-    """已提取到磁碟的檔案身分；路徑以 ``root``（輸入資料夾）為基準。"""
+def _relative_parts(file: str | Path, root: str | Path) -> tuple[str, ...]:
+    """檔案相對於 ``root`` 的路徑片段（不在 root 底下時用原路徑）。"""
     path = Path(file)
     try:
         # 項目的檔案路徑本來就是由 root 往下走出來的：純路徑運算即可，不必為每個項目
@@ -181,7 +180,58 @@ def classify_file(
             rel = path.resolve().relative_to(Path(root).resolve())
         except ValueError:
             rel = path
-    return classify_parts(rel.parts, dir_names)
+    return rel.parts
+
+
+def classify_file(
+    file: str | Path, root: str | Path, dir_names: Sequence[str] | None = None
+) -> FileIdentity | None:
+    """已提取到磁碟的檔案身分；路徑以 ``root``（輸入資料夾）為基準。"""
+    return classify_parts(_relative_parts(file, root), dir_names)
+
+
+def sniff_candidate_locale(
+    parts: Sequence[str], suffixes: tuple[str, ...]
+) -> tuple[str, LocaleSplit] | None:
+    """內容辨識的候選檔：``(模組, 語系拆分)``；路徑本身就不可能是手冊／指南時回傳 None。
+
+    掃描端（``sniff_groups``）與翻譯端（``classify_sniffed_book_file``）共用這一組路徑規則：
+    ``assets|data/<模組>/…`` 至少四段、副檔名在 ``suffixes`` 內，排除書本根設定
+    ``book.json``、Minecraft 規格資料夾（``BOOK_EXCLUDED_DIRS``）、``lang/`` 語言檔，
+    以及其他語系（``ja_jp`` 等）。沒有語系記號的檔案視為英文原文。
+    """
+    if len(parts) < 4 or parts[0].lower() not in _ROOT_DIRS:
+        return None
+    name = parts[-1].lower()
+    if not name.endswith(suffixes) or name == "book.json":
+        return None
+    if parts[2].lower() in BOOK_EXCLUDED_DIRS:
+        return None
+    if name.endswith(".json") and len(parts) == 4 and parts[2] == "lang":
+        return None
+    locale = split_locale(parts[2:])
+    if locale.other or locale.lang is None:
+        return None
+    return parts[1], locale
+
+
+def classify_sniffed_book_file(
+    file: str | Path, root: str | Path
+) -> FileIdentity | None:
+    """依內容辨識為手冊（patchouli）的 JSON 檔身分；路徑不含書籍資料夾名稱也適用。
+
+    路徑規則與掃描端相同（``sniff_candidate_locale``），鍵值為模組加去掉語系記號的相對路徑。
+    內容是否為手冊由呼叫端保證（翻譯項目的 ``cache_type == "patchouli"``，抽取器依內容確認）；
+    這裡只排除掃描端也不會收的路徑。內嵌 jar 提取時的 ``<名稱>_extracted/`` 前綴不屬於身分。
+    """
+    parts = _relative_parts(file, root)
+    if parts and parts[0].endswith("_extracted"):
+        parts = parts[1:]
+    found = sniff_candidate_locale(parts, (".json",))
+    if found is None:
+        return None
+    mod_id, locale = found
+    return FileIdentity(KIND_PATCHOULI, mod_id, locale.neutral, locale.lang)
 
 
 def split_json_path(path: str) -> list[str]:

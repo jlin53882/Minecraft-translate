@@ -20,7 +20,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from translation_tool.core.book_formats import (
-    BOOK_EXCLUDED_DIRS,
     FORMAT_NEUTRAL_PAGES,
     FORMAT_STANDARD_PATCHOULI,
     UNSUPPORTED_BOOK_FORMATS,
@@ -35,6 +34,7 @@ from translation_tool.core.text_sniffer import (
     sniff_text_file,
     split_locale,
 )
+from translation_tool.translation_db.identity import sniff_candidate_locale
 from translation_tool.translation_db.schema import (
     KIND_ADVANCEMENT,
     KIND_GUIDE,
@@ -71,22 +71,17 @@ def _candidates(names: Sequence[str], claimed: set[str]) -> dict[tuple[str, str]
     """``{(模組, 中性路徑): {語系: 成員}}``；只留文字類副檔名的來源語系檔。"""
     found: dict[tuple[str, str], dict[str, str]] = {}
     for name in names:
-        low = name.lower()
-        if name in claimed or not low.endswith((".json", ".md", ".mdx", ".txt")):
+        if name in claimed:
             continue
-        if low.rsplit("/", 1)[-1] == "book.json":
-            continue  # 書本根設定：資源包能否覆寫尚未確認，不處理
-        parts = name.split("/")
-        if len(parts) < 4 or parts[0].lower() not in ("assets", "data"):
+        candidate = sniff_candidate_locale(
+            name.split("/"), (".json", ".md", ".mdx", ".txt")
+        )
+        if candidate is None:
             continue
-        if parts[2].lower() in BOOK_EXCLUDED_DIRS:
+        mod_id, loc = candidate
+        if loc.lang is None:
             continue
-        if low.endswith(".json") and len(parts) == 4 and parts[2] == "lang":
-            continue
-        loc = split_locale(parts[2:])
-        if loc.other or loc.lang is None:
-            continue
-        found.setdefault((parts[1], loc.neutral), {})[loc.lang] = name
+        found.setdefault((mod_id, loc.neutral), {})[loc.lang] = name
     return found
 
 

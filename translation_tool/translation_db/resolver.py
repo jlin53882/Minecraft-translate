@@ -21,7 +21,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from translation_tool.translation_db.identity import classify_file
+from translation_tool.translation_db.identity import (
+    classify_file,
+    classify_sniffed_book_file,
+)
 from translation_tool.translation_db.models import WriteBackItem, WriteBackStats
 from translation_tool.translation_db.repository import TranslationDB
 
@@ -171,6 +174,10 @@ def item_identity(item: dict[str, Any], root: str | Path):
         en = item.get("source_text") or ""
         return (*hinted, en) if en else None
     ident = classify_file(item.get("file") or "", root)
+    if ident is None and item.get("cache_type") == "patchouli":
+        # 路徑上沒有書籍資料夾／語系資料夾、由內容辨識的手冊（IE manual、herbsandharvest books）：
+        # 套用與掃描端相同的鍵值規則，否則寫入資料庫的譯文翻譯時永遠查不到。
+        ident = classify_sniffed_book_file(item.get("file") or "", root)
     if ident is None or ident.lang != "en_us":
         return None
     en = item.get("source_text") or item.get("text") or ""

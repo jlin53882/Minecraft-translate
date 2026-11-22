@@ -249,6 +249,51 @@ def test_scan_persists_content_issues_without_creating_fake_entries(db, tmp_path
     assert db._q("SELECT key FROM entry")[0][0].endswith("foods.json#pages[0].summary")
 
 
+def test_neutral_book_scanned_from_jar_is_reused_by_directory_translation(db, tmp_path):
+    """無語系資料夾手冊：jar 掃描建立的條目，流水線抽取同一份檔案時要能查到與寫回。"""
+    from translation_tool.core.lm_translator_scan import extract_items_parallel
+    from translation_tool.translation_db import (
+        TranslationResolver,
+        WriteBackBuffer,
+        split_items_by_db,
+    )
+
+    book = {
+        "pages": [
+            {"type": "standard", "summary": "The Pantry Update adds useful food."}
+        ]
+    }
+    jars = tmp_path / "mods"
+    jars.mkdir()
+    with zipfile.ZipFile(jars / "herbs.jar", "w") as archive:
+        archive.writestr(
+            "assets/herbsandharvest/books/chapters/foods.json", json.dumps(book)
+        )
+    list(scan_folder_generator(db, jars, ScanOptions("1.21.1"), workers=1))
+    (key,) = db._q("SELECT key FROM entry WHERE mod_id = 'herbsandharvest'")[0]
+    assert key == "books/chapters/foods.json#pages[0].summary"
+
+    root = tmp_path / "patchouli_output" / "待翻譯"
+    path = root / "assets" / "herbsandharvest" / "books" / "chapters" / "foods.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(book), encoding="utf-8")
+    items = []
+    for _cache, items in extract_items_parallel(
+        files=[path], export_lang=False, work_thread=1
+    ):
+        pass
+    assert len(items) == 1
+
+    buffer = WriteBackBuffer(db, "1.21.1", root)
+    buffer.add(items[0], "儲藏室更新加入實用的食物。")
+    assert buffer.flush().written == 1
+    assert db.count_entries() == 1  # 寫回落在掃描建立的同一個條目，不另建條目
+
+    hits, rest = split_items_by_db(TranslationResolver(db, "1.21.1"), items, root)
+    assert [hit["text"] for hit in hits] == ["儲藏室更新加入實用的食物。"]
+    assert rest == []
+
+
 def test_scan_persists_bad_archive_as_issue_without_partial_entries(db, tmp_path):
     (tmp_path / "broken.jar").write_bytes(b"not a zip")
 
