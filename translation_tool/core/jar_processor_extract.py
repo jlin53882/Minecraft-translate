@@ -752,7 +752,7 @@ def run_extraction_process_impl(
             # 傳入與實際處理相同的清單（含子目錄 JAR），預掃描才不會與提取階段脫節
             scan_results_local[0] = scan_jars(
                 jar_dir=Path(mods_dir),
-                patterns=[target_regex.pattern],
+                patterns=[target_regex],
                 jar_files=jar_files,
                 processed_callback=lambda processed, _total: scan_progress.__setitem__(
                     0, processed
