@@ -20,7 +20,7 @@ from translation_tool.plugins.md.md_extract_qa import (
     map_rel_lang_path,
 )
 
-_PAIRED_LANGS = ("en_us", "zh_tw")
+_PAIRED_LANGS = ("en_us", "zh_tw", "zh_cn")
 
 
 @dataclass
@@ -29,6 +29,9 @@ class SourcePlan:
 
     # zh_tw 檔的相對路徑 -> 與它配對的 en_us 檔相對路徑
     pair_en: dict[str, str] = field(default_factory=dict)
+    # 沒有 zh_tw、有 en_us 與 zh_cn 時：zh_cn 檔 -> en_us 檔。zh_cn 能不能當底稿
+    # 要等 Step 1 比對結構才知道（見 md_pipeline_zh_cn.check_zh_cn_alignment）
+    pair_cn: dict[str, str] = field(default_factory=dict)
     # 不產生 pending 的檔案：相對路徑 -> 原因（"paired_en"／"output_conflict"）
     skip: dict[str, str] = field(default_factory=dict)
     # 會互相覆蓋同一個輸出的檔案群組（每組是一串相對路徑）
@@ -36,16 +39,17 @@ class SourcePlan:
 
 
 def lang_output_key(rel: str) -> str | None:
-    """來源檔對應到的輸出身分；不是 en_us／zh_tw 來源（例如 zh_cn、無語言資料夾）回傳 None。
+    """來源檔對應到的輸出身分；不是 en_us／zh_tw／zh_cn 來源（例如無語言資料夾）回傳 None。
 
-    en_us 與 zh_tw 會映射到同一個鍵（Step 3 都寫到 zh_tw 路徑），並以 casefold 比較，
+    en_us、zh_cn 與 zh_tw 會映射到同一個鍵（Step 3 都寫到 zh_tw 路徑），並以 casefold 比較，
     所以只差大小寫的兩個路徑視為同一個輸出。`en_us` 與 `_zh_tw` 這種底線不一致的組合
     本來就會寫到不同路徑，鍵也不同，不會被配對。
     """
     parts = rel.replace("\\", "/").split("/")
     if detect_lang_segment(parts) not in _PAIRED_LANGS:
         return None
-    return map_rel_lang_path(rel, src_lang="en_us", dst_lang="zh_tw").casefold()
+    mapped = map_rel_lang_path(rel, src_lang="en_us", dst_lang="zh_tw")
+    return map_rel_lang_path(mapped, src_lang="zh_cn", dst_lang="zh_tw").casefold()
 
 
 def is_zh_cn_source(rel: str) -> bool:
@@ -65,11 +69,13 @@ def plan_sources(rels: list[str]) -> SourcePlan:
         if key is None:
             continue
         lang = detect_lang_segment(rel.replace("\\", "/").split("/"))
-        groups.setdefault(key, {"en_us": [], "zh_tw": []})[lang].append(rel)
+        members = groups.setdefault(key, {"en_us": [], "zh_tw": [], "zh_cn": []})
+        members[lang].append(rel)
 
     plan = SourcePlan()
     for members in groups.values():
         en_files, zh_files = members["en_us"], members["zh_tw"]
+        cn_files = members["zh_cn"]
         if len(en_files) > 1 or len(zh_files) > 1:
             everyone = en_files + zh_files
             plan.conflicts.append(everyone)
@@ -77,6 +83,10 @@ def plan_sources(rels: list[str]) -> SourcePlan:
         elif en_files and zh_files:
             plan.pair_en[zh_files[0]] = en_files[0]
             plan.skip[en_files[0]] = "paired_en"
+        elif len(cn_files) > 1:
+            plan.conflicts.append(cn_files)  # 候選底稿不只一份：都不採用，英文照舊
+        elif en_files and cn_files:
+            plan.pair_cn[cn_files[0]] = en_files[0]
     return plan
 
 

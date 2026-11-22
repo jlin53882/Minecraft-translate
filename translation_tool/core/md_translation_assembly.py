@@ -49,12 +49,14 @@ from translation_tool.plugins.md.md_inject_qa import (
 )
 from translation_tool.plugins.md.md_lmtranslator import translate_md_pending
 from translation_tool.utils.cancellation import is_cancelled, raise_if_cancelled
+from translation_tool.utils.config_manager import load_config
 from translation_tool.utils.log_unit import (
     get_formatted_duration,
     log_info,
     log_warning,
     progress,
 )
+from translation_tool.utils.text_processor import convert_text, load_replace_rules
 
 
 def _log_md_step2_stats(step2_res: dict[str, Any]) -> None:
@@ -118,6 +120,20 @@ def step2_translate(
     )
 
 
+def _make_zh_cn_converter():
+    """zh_cn 底稿用的簡轉繁：OpenCC s2twp 後套用替換規則（與語系合併同一個規則檔）。"""
+    try:
+        rules = load_replace_rules(
+            load_config()
+            .get("translator", {})
+            .get("replace_rules_path", "replace_rules.json")
+        )
+    except Exception as exc:  # noqa: BLE001 - 規則檔問題只是略過替換，不該讓注入失敗
+        log_warning(f"[MD] 載入替換規則失敗，簡轉繁略過替換：{exc!r}")
+        rules = []
+    return lambda text: convert_text(text, rules)
+
+
 def step3_inject(
     *,
     input_dir: str,
@@ -135,6 +151,7 @@ def step3_inject(
     return step3_inject_impl(
         pending_dir=pending_dir,
         content_hash_fn=make_content_hash,
+        convert_zh_cn_fn=_make_zh_cn_converter(),
         input_dir=input_dir,
         json_dir=json_dir,
         final_dir=final_dir,

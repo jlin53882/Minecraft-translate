@@ -115,7 +115,8 @@ Minecraft-translate/
 | `plugins/md/md_lmtranslator.py` | Markdown 文件翻譯引擎 | `translate_md_pending()`, `PendingItem` |
 | `plugins/md/md_extract_qa.py` | Markdown 翻譯品質萃取 | `extract_blocks()`, `build_pending_json()`, `BlockItem` |
 | `plugins/md/md_inject_qa.py` | Markdown 翻譯注入 | `apply_item_to_md_lines()`, `apply_items_to_md_lines()`, `Item` |
-| `core/md_pipeline_pairing.py` | Markdown 管線 en_us／zh_tw 配對：輸出身分分組、zh_tw 為底稿、挑出仍是英文原文的區塊 | `plan_sources()`, `select_untranslated_blocks()`, `lang_output_key()`, `is_zh_cn_source()` |
+| `core/md_pipeline_pairing.py` | Markdown 管線 en_us／zh_tw／zh_cn 配對：輸出身分分組、zh_tw 優先為底稿、挑出仍是英文原文的區塊 | `plan_sources()`, `select_untranslated_blocks()`, `lang_output_key()`, `is_zh_cn_source()` |
+| `core/md_pipeline_zh_cn.py` | 沒有 zh_tw 時以 zh_cn 為底稿：骨架對齊檢查、底稿過期判斷、圍欄感知的整檔簡轉繁 | `check_zh_cn_alignment()`, `build_base()`, `base_is_stale()`, `convert_markdown_lines()` |
 | `core/md_pipeline_files.py` | Markdown 管線中間檔：原子寫入、過期 pending 清理、注入前驗證、路徑安全 | `verify_translated_doc()`, `remove_stale_pending()`, `is_safe_relative_path()` |
 | `plugins/shared/rich_text_shield.py` | 特殊文字遮蔽（顏色代碼、物品名佔位符） | `shield_text()`, `unshield_text()` |
 | `plugins/shared/lang_path_rules.py` | 語言檔路徑轉換規則 | `should_rename_to_zh_tw()`, `compute_output_path()` |

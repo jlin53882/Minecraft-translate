@@ -127,6 +127,24 @@ def compute_out_json_path(
     return out_root / rel
 
 
+def _write_passthrough_docs(
+    json_files: list[Path], in_pending_root: Path, out_root: Path
+) -> int:
+    """沒有任何區塊需要翻譯時，原樣寫出 DONE 的譯後檔，回傳寫出的檔案數。"""
+    written = 0
+    for jp in json_files:
+        try:
+            data, _items = load_pending_doc(jp)
+        except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
+            log_warning(f"[MD-LM] 略過讀取失敗：{jp} ({e!r})")
+            continue
+        payload = dict(data)
+        payload["step2_status"] = "DONE"
+        write_json(compute_out_json_path(jp, in_pending_root, out_root), payload)
+        written += 1
+    return written
+
+
 def translate_md_pending(
     *,
     pending_dir: str | Path,
@@ -188,9 +206,16 @@ def translate_md_pending(
         progress(session, 1.0)
         log_info("ℹ️ [MD-LM] 無唯一 blocks（可能全部空白/被過濾），不需翻譯。")
         log_info("總花費時間：%s", get_formatted_duration(start_time))
+        # 沒有區塊要翻也要寫出譯後檔：以 zh_cn 為底稿、殘留區塊為零的文件，
+        # 仍靠這份 DONE 的譯後檔讓 Step 3 整檔轉繁後寫入完成資料夾
+        passthrough = (
+            0
+            if dry_run
+            else _write_passthrough_docs(json_files, in_pending_root, out_root)
+        )
         return {
             "status": "DONE",
-            "written_files": 0,
+            "written_files": passthrough,
             "total_blocks": total_blocks,
             "unique_blocks": 0,
             "duplicate_blocks": dup_blocks,
