@@ -608,9 +608,10 @@ def test_quality_repair_demotes_reviewed_manual_and_revert_restores_it(
     db.save_manual(entry.id, "使用", actor="editor", propagate=False)
     db.review_manual(entry.id, expected_zh_tw="使用", actor="reviewer", propagate=False)
     preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
-        db, _options(), mode="quality_mismatch"
+        db, _options(repair_include_reviewed=True), mode="quality_mismatch"
     )
     assert preview.sources == (SRC_MANUAL,)
+    assert preview.reviewed_included is True
     db.close()
 
     monkeypatch.setattr(
@@ -621,7 +622,7 @@ def test_quality_repair_demotes_reviewed_manual_and_revert_restores_it(
     result = _run(
         db_path,
         preview.entries,
-        options=_options(write_cache=False),
+        options=_options(write_cache=False, repair_include_reviewed=True),
         mode="quality_mismatch",
     )
 
@@ -653,6 +654,146 @@ def test_quality_repair_demotes_reviewed_manual_and_revert_restores_it(
     assert restored.entry.source == SRC_MANUAL
     assert repair_cache == []
     check.close()
+
+
+def _repair_fixture(db):
+    """已審核人工、已審核非人工（AI）與未審核三筆，都含 %s 不一致。"""
+    manual = _ai_entry(db, key="a.manual", en="Use %s")
+    db.save_manual(manual.id, "使用", actor="editor", propagate=False)
+    db.review_manual(
+        manual.id, expected_zh_tw="使用", actor="reviewer", propagate=False
+    )
+    _ingest(db, "1.21.1", "foo", "b.reviewed_ai", SRC_AI, "擊中", en="Hit %s")
+    reviewed_ai = _entry_by_key(db, "1.21.1", "b.reviewed_ai")
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (reviewed_ai.id, SRC_AI),
+    )
+    db._conn.commit()
+    _ingest(db, "1.21.1", "foo", "c.plain", SRC_AI, "執行", en="Run %s")
+    plain = _entry_by_key(db, "1.21.1", "c.plain")
+    return manual, reviewed_ai, plain
+
+
+def _entry_by_key(db, version, key):
+    return next(row for row in db.list_entries(version)[0] if row.key == key)
+
+
+def test_quality_repair_skips_reviewed_entries_by_default(db_path):
+    db = TranslationDB(db_path)
+    manual, reviewed_ai, plain = _repair_fixture(db)
+
+    default = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    included = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(repair_include_reviewed=True), mode="quality_mismatch"
+    )
+
+    assert [e.entry_id for e in default.entries] == [plain.id]
+    assert default.total_candidates == 1
+    assert default.skipped_reviewed_candidates == 2
+    assert default.reviewed_included is False
+    assert {e.entry_id for e in included.entries} == {
+        manual.id,
+        reviewed_ai.id,
+        plain.id,
+    }
+    assert included.skipped_reviewed_candidates == 0
+    # 剩餘候選與預覽用同一個規則
+    assert (
+        moddb_retranslate_service._remaining_candidate_count(
+            db, _options(), "quality_mismatch"
+        )
+        == 1
+    )
+    assert (
+        moddb_retranslate_service._remaining_candidate_count(
+            db, _options(repair_include_reviewed=True), "quality_mismatch"
+        )
+        == 3
+    )
+    db.close()
+
+
+def test_quality_repair_write_keeps_entry_reviewed_after_preview(
+    db_path, monkeypatch, repair_cache
+):
+    db = TranslationDB(db_path)
+    entry = _ai_entry(db, en="Use %s")
+    db.save_manual(entry.id, "使用", actor="editor", propagate=False)
+    preview = moddb_retranslate_service.preview_same_source_ai_retranslation(
+        db, _options(), mode="quality_mismatch"
+    )
+    assert [e.entry_id for e in preview.entries] == [entry.id]
+    # 預覽之後才被審核：寫入時要擋下，不可改寫已審核譯文
+    db.review_manual(entry.id, expected_zh_tw="使用", actor="reviewer", propagate=False)
+    db.close()
+
+    monkeypatch.setattr(
+        moddb_retranslate_service,
+        "translate_batch_smart",
+        lambda batch, _total: ([{**batch[0], "text": "使用 %s"}], "AUTO"),
+    )
+    result = _run(
+        db_path,
+        preview.entries,
+        options=_options(write_cache=False),
+        mode="quality_mismatch",
+    )
+
+    check = TranslationDB(db_path)
+    manual = next(
+        row
+        for row in check.entry_detail(entry.id).translations
+        if row.source == SRC_MANUAL
+    )
+    assert result["summary"]["updated"] == 0
+    assert result["summary"]["skipped_changed"] == 1
+    assert (manual.zh_tw, manual.review_status) == ("使用", "reviewed")
+    check.close()
+
+
+def test_quality_repair_sync_skips_reviewed_sibling_versions(db_path):
+    db = TranslationDB(db_path)
+    _ingest(db, "1.21.1", "foo", "item.name", SRC_AI, "使用", en="Use %s")
+    _ingest(db, "1.20.1", "foo", "item.name", SRC_AI, "使用", en="Use %s")
+    current = _entry_by_key(db, "1.21.1", "item.name")
+    other = _entry_by_key(db, "1.20.1", "item.name")
+    db._conn.execute(
+        "UPDATE translation SET review_status='reviewed' WHERE entry_id=? AND source=?",
+        (other.id, SRC_AI),
+    )
+    db._conn.commit()
+
+    result = db.replace_translation_quality_mismatch(
+        current.id,
+        SRC_AI,
+        current.zh_tw,
+        "使用 %s",
+        **_replace_identity(current),
+        expected_revision=None,
+        sync_other_versions=True,
+        allow_reviewed=False,
+    )
+
+    assert result.status == "updated"
+    assert result.synced_other_versions == 0
+    other_row = next(
+        row for row in db.entry_detail(other.id).translations if row.source == SRC_AI
+    )
+    assert (other_row.zh_tw, other_row.review_status) == (other.zh_tw, "reviewed")
+    db.close()
+
+
+def test_is_effectively_reviewed_matches_shared_review_definition():
+    from translation_tool.translation_db.sql_helpers import is_effectively_reviewed
+
+    assert is_effectively_reviewed(SRC_MANUAL, None) is True  # 舊資料人工譯文
+    assert is_effectively_reviewed(SRC_MANUAL, "legacy_unknown") is True
+    assert is_effectively_reviewed(SRC_MANUAL, "unreviewed") is False
+    assert is_effectively_reviewed(SRC_AI, "reviewed") is True
+    assert is_effectively_reviewed(SRC_AI, None) is False
 
 
 def _seed_fragmented_candidates(db):
@@ -2520,7 +2661,7 @@ def test_repair_card_newline_switch_is_off_by_default_and_follows_mode():
         "on_preview": noop,
         "on_confirm": noop,
         "on_filter_change": noop,
-        "on_newline_change": noop,
+        "on_candidate_rule_change": noop,
         "on_page": noop,
         "page_size": 50,
     }
@@ -2570,6 +2711,40 @@ def test_translate_panel_builds_newline_option_only_for_quality_mode(db_path):
     assert panel.build_options().repair_newline_only is True
     panel._repair_mode = "same_source_ai"
     assert panel.build_options().repair_newline_only is False
+
+
+def test_translate_panel_reviewed_switch_follows_mode_and_clears_preview(db_path):
+    panel = translate_panel.TranslatePanel(mock_page(), lambda: TranslationDB(db_path))
+
+    # 預設關閉，只在格式修復模式顯示並傳給 options
+    assert panel.repair_reviewed_row.value is False
+    assert panel.repair_reviewed_row.visible is True
+    assert panel.build_options().repair_include_reviewed is False
+    panel.repair_reviewed_row.value = True
+    assert panel.build_options().repair_include_reviewed is True
+
+    # 切換開關後，舊預覽不再代表實際會送 AI 的項目
+    panel._repair_preview = object()
+    panel._on_repair_candidate_rule_changed()
+    assert not getattr(panel, "_repair_preview", None)
+
+    panel._on_repair_mode_changed(
+        SimpleNamespace(control=SimpleNamespace(value="same_source_ai"))
+    )
+    assert panel.repair_reviewed_row.visible is False
+    assert panel.build_options().repair_include_reviewed is False
+
+
+def test_repair_preview_text_and_summary_report_skipped_reviewed():
+    from app.views.moddb import repair_summary
+
+    lines = repair_summary.repair_summary_detail_lines(
+        {"skipped_reviewed_candidates": 2}
+    )
+    assert any("略過 2 筆已審核的項目" in line for line in lines)
+    assert not any(
+        "已審核" in line for line in repair_summary.repair_summary_detail_lines({})
+    )
 
 
 def _identity(en="Use %s"):

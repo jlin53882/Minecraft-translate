@@ -39,6 +39,13 @@ def effective_review_sql(
     )
 
 
+def is_effectively_reviewed(source: int | None, review_status: str | None) -> bool:
+    """單一譯文列是否算已審核；與 ``effective_review_sql`` 結果為 reviewed／legacy_unknown 一致。"""
+    if review_status in ("unreviewed", "reviewed", "legacy_unknown"):
+        return review_status != "unreviewed"
+    return source == SRC_MANUAL
+
+
 def translation_review_sql(alias: str, has_review_state: bool) -> str:
     """單一來源譯文列（``translation`` 表）的審核狀態：欄位原值；歷史 schema 只有人工來源有值。"""
     if has_review_state:

@@ -29,6 +29,7 @@ class RepairCardControls:
     preview_count: ft.Text
     pager: kit.Pager
     newline_row: kit.SwitchRow
+    reviewed_row: kit.SwitchRow
     sync_row: kit.SwitchRow
 
 
@@ -50,7 +51,8 @@ def repair_copy(mode: str) -> tuple[str, str]:
             (
                 "會檢查人工、模組自帶、匯入 ZIP、自訂及 AI 等所有來源的資料庫譯文。"
                 "檢查 § 格式碼、換行、佔位符與 Patchouli 標記。AI 修復通過檢查後只更新該來源；"
-                "失敗或仍不一致時保留舊譯文。人工來源會改為未審核。"
+                "失敗或仍不一致時保留舊譯文。預設略過已審核的項目（含舊資料的人工譯文）；"
+                "開啟「連已審核的譯文一起修復」後才會處理，修復後人工來源會改為未審核。"
                 "這只改 Mod 資料庫，不會改寫原始 ZIP。"
             ),
         )
@@ -63,6 +65,35 @@ def repair_copy(mode: str) -> tuple[str, str]:
     )
 
 
+def _quality_option_rows(
+    mode: str, on_candidate_rule_change: Callable
+) -> tuple[kit.SwitchRow, kit.SwitchRow, kit.SwitchRow]:
+    """格式修復專用的開關：換行數、已審核（改變候選，需重新預覽）與同步其他版本。"""
+    newline_row = kit.SwitchRow(
+        "連「只有換行數不同」的項目一起送 AI 修復",
+        "預設略過原文與譯文只差實際換行數的項目。開啟後這類項目也會送 AI，"
+        "且 AI 結果的換行數必須與原文一致才會寫入。",
+        False,
+        on_change=on_candidate_rule_change,
+    )
+    reviewed_row = kit.SwitchRow(
+        "連已審核的譯文一起修復",
+        "預設略過已審核的項目（含舊資料的人工譯文），避免改寫人工確認過的內容。"
+        "開啟後這些項目也會送 AI，修復寫入後會變成未審核。",
+        False,
+        on_change=on_candidate_rule_change,
+    )
+    sync_row = kit.SwitchRow(
+        "修復後同步到其他版本",
+        "同一模組、鍵值與原文的其他版本，若該來源的舊譯文跟這筆完全相同，"
+        "一併改成新譯文（各自記錄歷史）。預設只修目前選的版本。",
+        False,
+    )
+    for row in (newline_row, reviewed_row, sync_row):
+        row.visible = mode == "quality_mismatch"
+    return newline_row, reviewed_row, sync_row
+
+
 def create_repair_card(
     mode: str,
     *,
@@ -70,7 +101,7 @@ def create_repair_card(
     on_preview: Callable,
     on_confirm: Callable,
     on_filter_change: Callable,
-    on_newline_change: Callable,
+    on_candidate_rule_change: Callable,
     on_page: Callable[[int], None],
     page_size: int,
 ) -> RepairCardControls:
@@ -104,21 +135,9 @@ def create_repair_card(
     default_text, explanation = repair_copy(mode)
     preview_text = ft.Text(default_text, size=13, color=C.TEXT, selectable=True)
     explainer = kit.hint_text(explanation)
-    newline_row = kit.SwitchRow(
-        "連「只有換行數不同」的項目一起送 AI 修復",
-        "預設略過原文與譯文只差實際換行數的項目。開啟後這類項目也會送 AI，"
-        "且 AI 結果的換行數必須與原文一致才會寫入。",
-        False,
-        on_change=on_newline_change,
+    newline_row, reviewed_row, sync_row = _quality_option_rows(
+        mode, on_candidate_rule_change
     )
-    newline_row.visible = mode == "quality_mismatch"
-    sync_row = kit.SwitchRow(
-        "修復後同步到其他版本",
-        "同一模組、鍵值與原文的其他版本，若該來源的舊譯文跟這筆完全相同，"
-        "一併改成新譯文（各自記錄歷史）。預設只修目前選的版本。",
-        False,
-    )
-    sync_row.visible = mode == "quality_mismatch"
     preview_search = kit.text_field(
         "搜尋 Key／Mod／原文／譯文",
         icon=ft.Icons.SEARCH,
@@ -162,6 +181,7 @@ def create_repair_card(
                 mode_group,
                 explainer,
                 newline_row,
+                reviewed_row,
                 sync_row,
                 ft.Row([preview_button, start_button], spacing=10, wrap=True),
                 preview_text,
@@ -201,6 +221,7 @@ def create_repair_card(
         preview_count,
         pager,
         newline_row,
+        reviewed_row,
         sync_row,
     )
 

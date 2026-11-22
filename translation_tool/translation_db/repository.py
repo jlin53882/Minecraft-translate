@@ -138,6 +138,7 @@ from translation_tool.translation_db.smart_review import SmartReviewMixin
 from translation_tool.translation_db.source_catalog import SourceCatalog
 from translation_tool.translation_db.sql_helpers import (
     effective_review_sql,
+    is_effectively_reviewed,
     like_pattern,
     reference_locale_sql,
     source_locale_match_sql,
@@ -5271,8 +5272,13 @@ class TranslationDB(
         action: str = "quality_repair",
         strict_newline: bool = False,
         sync_other_versions: bool = False,
+        allow_reviewed: bool = True,
     ) -> AITranslationReplaceResult:
-        """以 CAS 取代一筆不匹配來源資料，但不改變其身分。"""
+        """以 CAS 取代一筆不匹配來源資料，但不改變其身分。
+
+        ``allow_reviewed=False`` 時自動修復不改寫已審核的列（含同步的其他版本），
+        寫入當下已變成已審核的條目回傳 ``skipped_changed``。
+        """
         if action not in {"quality_repair", "quality_repair_review"}:
             raise ValueError("invalid quality repair history action")
         if not isinstance(new_zh_tw, str) or not new_zh_tw.strip():
@@ -5326,6 +5332,10 @@ class TranslationDB(
             def apply_row(target_id, revision, checker, review) -> bool:
                 # 審核狀態跟著文字走：自動修復的新文字還沒人看過，人工確認草稿才算已審核
                 if action == "quality_repair":
+                    if not allow_reviewed and is_effectively_reviewed(
+                        source_id, review
+                    ):
+                        return False  # 使用者沒選擇連已審核一起修，保留原文
                     new_checker = ""
                     new_review = "unreviewed" if source_id == SRC_MANUAL else None
                     if (

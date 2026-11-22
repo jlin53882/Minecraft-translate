@@ -305,6 +305,12 @@ def _display_preview_result(panel, options, db_identity, result):
                 if result.newline_only_included
                 else f"略過只有實際換行數不同：{format_count(result.skipped_newline_only_candidates)} 筆（不佔 AI 名額）。\n"
             )
+            + (
+                "已納入已審核的項目（修復寫入後改為未審核）。\n"
+                if result.reviewed_included
+                else f"略過已審核：{format_count(result.skipped_reviewed_candidates)} 筆"
+                "（開啟「連已審核的譯文一起修復」才會處理）。\n"
+            )
             + f"來源：{sources or '無'}；翻譯類型：{breakdown}；"
             f"規劃批次：{format_count(result.estimated_batches)}（不等於實際 HTTP 請求次數）。"
         )

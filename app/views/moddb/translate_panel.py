@@ -319,7 +319,7 @@ class TranslatePanel(ft.Column):
             on_mode_change=self._on_repair_mode_changed,
             on_preview=self.preview_retranslation,
             on_confirm=self.confirm_retranslation,
-            on_newline_change=lambda _e=None: self._on_repair_newline_changed(),
+            on_candidate_rule_change=self._on_repair_candidate_rule_changed,
             on_filter_change=lambda _e=None: (
                 retranslation_controller.refresh_preview_cards(self)
             ),
@@ -333,6 +333,7 @@ class TranslatePanel(ft.Column):
         self.repair_preview_btn = controls.preview_button
         self.repair_start_btn = controls.start_button
         self.repair_newline_row = controls.newline_row
+        self.repair_reviewed_row = controls.reviewed_row
         self.repair_sync_row = controls.sync_row
         self.repair_preview_text = controls.preview_text
         self.repair_explainer = controls.explainer
@@ -359,14 +360,15 @@ class TranslatePanel(ft.Column):
             return
         self._repair_mode = value
         self.repair_newline_row.visible = value == "quality_mismatch"
+        self.repair_reviewed_row.visible = value == "quality_mismatch"
         self.repair_sync_row.visible = value == "quality_mismatch"
         self.repair_explainer.value = self._repair_explanation()
         self._reset_stats(mode="repair")
         self._clear_repair_preview()
         self._safe_update()
 
-    def _on_repair_newline_changed(self) -> None:
-        """換行數規則變了，既有預覽不再代表實際會送 AI 的項目，需重新預覽。"""
+    def _on_repair_candidate_rule_changed(self, _e=None) -> None:
+        """換行數或已審核規則變了，既有預覽不再代表實際會送 AI 的項目，需重新預覽。"""
         self._reset_stats(mode="repair")
         self._clear_repair_preview()
         self._safe_update()
@@ -601,6 +603,10 @@ class TranslatePanel(ft.Column):
             repair_sync_other_versions=(
                 self._repair_mode == "quality_mismatch"
                 and bool(self.repair_sync_row.value)
+            ),
+            repair_include_reviewed=(
+                self._repair_mode == "quality_mismatch"
+                and bool(self.repair_reviewed_row.value)
             ),
         )
 

@@ -291,6 +291,8 @@ flowchart TD
 
 修復與「1　選擇要機翻的範圍」共用同一組遊戲版本、模組與單次上限（`TranslatePanel.build_options`），AI 修復的快取寫入也遵循「每次寫入新快取分片」；「類型」與「先沿用其他版本的相同譯文」只影響一般機翻（修復在預覽中另有類型篩選）。修復卡片頂端以 `repair_card.SCOPE_HINT` 說明這點。
 
+`quality_mismatch` 預設略過已審核的條目：「已審核」與全庫共用定義一致（`is_effectively_reviewed`，對應 `effective_review_sql` 的 `reviewed`／`legacy_unknown`，所以舊資料的人工譯文也算），任何來源都適用。預覽（`_limited_repair_snapshot`）、執行後的剩餘候選（`_remaining_candidate_count`）用同一條規則，預覽文字與結果摘要列出「略過已審核」筆數（`skipped_reviewed_candidates`）。開啟「連已審核的譯文一起修復」（`TranslateOptions.repair_include_reviewed`）後才把已審核條目送 AI；修復寫入後人工來源改為未審核，非人工來源在退回未審核會讓別的來源取代生效時保留原文。寫入時 `replace_translation_quality_mismatch` 以 `allow_reviewed` 在交易內再確認一次：沒開啟時，預覽後才被審核的條目以 `skipped_changed` 略過，「同步到其他版本」也不改寫其他版本已審核的列。逐筆審查的人工確認（`quality_repair_review`）不受此開關限制。
+
 ```mermaid
 flowchart TD
     A["批次機翻頁籤選擇修復模式，按「預覽候選譯文」"] --> B["retranslation_controller.preview"]
