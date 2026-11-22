@@ -117,9 +117,8 @@ def test_compute_out_json_path(tmp_path: Path) -> None:
 
     result = md_lmtranslator.compute_out_json_path(src_json, in_pending_root, out_root)
 
-    # 應該在 LM翻譯後 目錄下
-    assert "LM翻譯後" in result.parts
-    assert result.name == "test.json"
+    # out_root 就是譯後資料夾本身：直接放在底下，不會再多一層
+    assert result == out_root / "test.json"
 
 
 def test_pending_item_dataclass(tmp_path: Path) -> None:

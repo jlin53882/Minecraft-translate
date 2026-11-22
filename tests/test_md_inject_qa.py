@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 # 測試模組
-from translation_tool.plugins.md import md_inject_qa
+from translation_tool.plugins.md import md_inject_qa  # noqa: E402
 
 
 def test_map_lang_in_rel_path(tmp_path: Path) -> None:
@@ -220,5 +220,65 @@ def test_main_writes_translated_markdown_without_changing_tokens(
     md_inject_qa.main()
 
     output = output_root / "完成" / "guide" / "zh_tw" / "chapter.md"
-    assert output.read_text(encoding="utf-8") == ("繁體標題\n§rule{keep_this}\n\n")
+    # 譯文比原文字行少：多餘的原文行被刪掉（不再留空白行），token 行不動
+    assert output.read_text(encoding="utf-8") == ("繁體標題\n§rule{keep_this}\n")
     assert markdown.read_text(encoding="utf-8").startswith("Original heading\n")
+
+
+def _item(start: int, end: int, text: str) -> md_inject_qa.Item:
+    return md_inject_qa.Item(
+        source_md="t.md", start_line=start, end_line=end, text=text
+    )
+
+
+def test_apply_item_inserts_extra_translated_lines_after_block() -> None:
+    md_lines = ["Intro", "", "One line", "", "Tail"]
+
+    status = md_inject_qa.apply_item_to_md_lines(
+        md_lines, _item(3, 3, "第一行\n第二行")
+    )
+
+    assert md_lines == ["Intro", "", "第一行", "第二行", "", "Tail"]
+    assert status == "line_count_changed"
+
+
+def test_apply_item_removes_leftover_lines_instead_of_blanking() -> None:
+    md_lines = ["Intro", "", "Line A", "Line B", "Line C", "", "Tail"]
+
+    md_inject_qa.apply_item_to_md_lines(md_lines, _item(3, 5, "只有一行"))
+
+    # 不留空白行：空白行在 Markdown 裡會把一個段落切成兩個
+    assert md_lines == ["Intro", "", "只有一行", "", "Tail"]
+
+
+def test_apply_item_keeps_original_when_translation_is_empty() -> None:
+    md_lines = ["Keep me", "and me"]
+
+    status = md_inject_qa.apply_item_to_md_lines(md_lines, _item(1, 2, "  \n "))
+
+    assert md_lines == ["Keep me", "and me"]
+    assert status == "skipped_empty"
+
+
+def test_apply_items_in_reverse_keeps_later_blocks_aligned() -> None:
+    md_lines = ["A1", "A2", "", "B1", "", "C1", "C2"]
+    items = [
+        _item(1, 2, "甲"),
+        _item(4, 4, "乙一\n乙二\n乙三"),
+        _item(6, 7, "丙一\n丙二"),
+    ]
+
+    md_inject_qa.apply_items_to_md_lines(md_lines, items)
+
+    assert md_lines == ["甲", "", "乙一", "乙二", "乙三", "", "丙一", "丙二"]
+
+
+def test_single_word_format_line_counts_as_text_like_the_extractor() -> None:
+    # 抽取器把 §lNote:§r 當文字（整行只有 token 才算 token 行）；注入器必須一致，
+    # 否則區塊內文字行比譯文行少，逐行對位會整個錯開。
+    assert md_inject_qa.is_text_line("§lNote:§r") is True
+    md_lines = ["§lNote:§r", "Body text"]
+
+    md_inject_qa.apply_item_to_md_lines(md_lines, _item(1, 2, "§l註記：§r\n內文"))
+
+    assert md_lines == ["§l註記：§r", "內文"]

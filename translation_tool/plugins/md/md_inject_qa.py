@@ -47,6 +47,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from translation_tool.plugins.md.md_extract_qa import is_translatable_text_line
 from translation_tool.plugins.shared.rich_text_shield import (
     ShieldPiece,
     unshield_text,
@@ -153,24 +154,13 @@ def is_token_line(line: str) -> bool:
 
 def is_text_line(line: str) -> bool:
     """
-    判斷「原始 md」中的某一行是否視為可回寫的文字行：
-      - 非空行
-      - 非 token 行（§...）
-      - 非 Markdown 圖片行：![alt](url)
-      - 非純 component/tag 行：<ItemImage ...>、<ImportStructure ...> 等
+    判斷「原始 md」中的某一行是否視為可回寫的文字行。
+
+    與抽取器共用 is_translatable_text_line：抽取器認定的文字行（含 §lNote:§r 這種夾著文字的
+    單字格式行）才會進區塊，注入端必須用同一把尺，否則區塊內的文字行數與譯文行數對不上，
+    逐行回填會整個錯位。
     """
-    s = line.strip()
-    if not s:
-        return False  # 空行不是文字行（要保留）
-    if is_token_line(line):
-        return False  # token 行不可改
-
-    # Markdown 圖片行：整行不應被替換
-    if re.match(r"^\s*!\[.*?\]\(.*?\)\s*$", line):
-        return False
-
-    # 純 component/tag 行：整行不應被替換
-    return not re.match(r"^\s*<[^>]+>\s*$", line)
+    return bool(line.strip()) and is_translatable_text_line(line)
 
 
 def flatten_for_md(text: str) -> str:
@@ -255,68 +245,71 @@ def load_items_from_json(json_path: Path) -> tuple[str, list[Item]]:
     #    目前先穩定為主。
 
 
-def apply_item_to_md_lines(md_lines: list[str], item: Item) -> None:
+def apply_item_to_md_lines(md_lines: list[str], item: Item) -> str:
     """
-    在 md_lines 上原地套用一個 item（只替換文字行，token/空行不動）
+    在 md_lines 上原地套用一個 item（只改區塊內的文字行，token/空行不動）。
 
-    ✅ 方案 B（推薦給你的 pipeline）：
-      - 抽取是 block（start_line~end_line），翻譯 text 也保留原本的 \n 多行
-      - 因此寫回時也應「保留多行」逐行對齊回填
-      - 另外補一個保護：若翻譯行數少於原文字行數，清空剩餘原文行，避免殘留英文
+    回傳：
+      - "applied"：譯文行數與原文字行數相同，逐行替換
+      - "line_count_changed"：行數不同；多出的譯文插在區塊最後一個文字行後，
+        不足時刪掉多餘的原文字行（不留空白行：空白行會把一個段落切成兩個）
+      - "skipped_empty"：譯文沒有任何內容，保留原文（寧可留英文也不刪內容）
+      - "skipped_range"：行號範圍內沒有可回寫的文字行
 
-    為什麼不再 flatten_for_md？
-      - flatten_for_md 會把段落內多行合併成一行（用空格接）
-      - 一旦原文是多行、翻譯被 flatten 成一行，就只會替換第一行，其餘行會殘留（你遇到的狀況）
+    插入／刪行會讓後面的行號位移，所以多個 item 必須由後往前套用（見
+    apply_items_to_md_lines）。
     """
-    # Python list index：0-based
     a = max(item.start_line - 1, 0)
     b = min(item.end_line - 1, len(md_lines) - 1)
     if a > b:
-        return
-
-    # 1) 找範圍內所有「可翻文字行」的位置（空行與 token 行不動）
-    text_line_indices: list[int] = []
-    for idx in range(a, b + 1):
-        if is_text_line(md_lines[idx]):
-            text_line_indices.append(idx)
-
+        return "skipped_range"
+    text_line_indices = [idx for idx in range(a, b + 1) if is_text_line(md_lines[idx])]
     if not text_line_indices:
-        return
+        return "skipped_range"
 
-    # 2) 直接使用翻譯後文本的換行（保留多行結構）
-    #    - item.text 可能包含 \n（例如 Side note 三行）
-    #    - 我們將其視為「要寫回的文字行序列」
-    new_text_lines = unshield_text(item.text, item._shields).splitlines()
+    # 譯文可能含換行（多行區塊）；空白行代表段落分隔，原 md 的空白行不動，所以不寫回
+    new_text_lines = [
+        x for x in unshield_text(item.text, item._shields).splitlines() if x.strip()
+    ]
+    if not new_text_lines:
+        return "skipped_empty"
 
-    # 3) 去掉空白行（空白行代表段落分隔；原 md 的空白行我們不動）
-    #    這裡只處理要填回「文字行」的內容
-    new_text_lines = [x for x in new_text_lines if x.strip()]
-
-    # 4) 一對一替換：只替換既有文字行數量範圍（不插入、不刪除，保持行結構穩定）
     n = min(len(text_line_indices), len(new_text_lines))
     for i in range(n):
         idx = text_line_indices[i]
-        # 保留原本縮排（如果有的話）
-        lead = re.match(r"^\s*", md_lines[idx]).group(0)
+        lead = re.match(r"^\s*", md_lines[idx]).group(0)  # 保留原本縮排
         md_lines[idx] = lead + new_text_lines[i]
 
-    # 5) ✅ 關鍵修正：若翻譯行數少於原文字行數，清空剩餘原文字行，避免殘留英文
-    #    - 不刪除行（避免行號漂移與破壞原始骨架）
-    #    - 只把內容清成空（保留縮排），讓原文不會「漏在下面」
-    for j in range(n, len(text_line_indices)):
-        idx = text_line_indices[j]
-        lead = re.match(r"^\s*", md_lines[idx]).group(0)
-        md_lines[idx] = lead
+    if len(new_text_lines) > n:
+        last = text_line_indices[-1]
+        lead = re.match(r"^\s*", md_lines[last]).group(0)
+        md_lines[last + 1 : last + 1] = [lead + x for x in new_text_lines[n:]]
+        return "line_count_changed"
+    if len(text_line_indices) > n:
+        for idx in reversed(text_line_indices[n:]):
+            del md_lines[idx]
+        return "line_count_changed"
+    return "applied"
 
-    # 6) 若翻譯行數多於原文字行數：多的先不插入（避免破壞原 md 結構）
-    #    之後若要更進階，可考慮「在該區塊最後一個文字行後插入」，但要非常小心 token/排版。
+
+def apply_items_to_md_lines(md_lines: list[str], items: list[Item]) -> dict[str, int]:
+    """由後往前套用所有 items，回傳各結果代碼的次數。"""
+    counts: dict[str, int] = {}
+    for it in sorted(items, key=lambda x: x.start_line, reverse=True):
+        status = apply_item_to_md_lines(md_lines, it)
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+_NON_BLOCK_JSON_PREFIXES = ("translation_map_md", "_md_dry_run")
 
 
 def iter_json_files(root: Path):
     """處理此 generator 並逐步回報進度（yield update dict）。"""
     for p in root.rglob("*.json"):
-        # translation_map_md.json 是翻譯記錄（list），不是逐檔的 md_pending_blocks
-        if p.is_file() and not p.name.startswith("translation_map_md"):
+        # 翻譯記錄（translation_map_md*）與 dry-run 預覽（_md_dry_run*）寫在同一個資料夾，
+        # 不是逐檔的 md_pending_blocks；混進來會被當成注入錯誤。
+        if p.is_file() and not p.name.startswith(_NON_BLOCK_JSON_PREFIXES):
             yield p
 
 
@@ -385,8 +378,7 @@ def main():
         md_lines = original_text.splitlines(keepends=False)
 
         # 套用所有 items（依行號範圍回填）
-        for it in items:
-            apply_item_to_md_lines(md_lines, it)
+        apply_items_to_md_lines(md_lines, items)
 
         # 寫出到 <輸出>/完成/<相對路徑>
         # out_path = out_done / source_md

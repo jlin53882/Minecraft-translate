@@ -8,7 +8,7 @@
 # ------------------------------------------------------------
 # 讀取 md_extract_qa.py 產生的 pending json（schema=md_pending_blocks_v1）
 # 用 content_hash 做全域去重 + cache_type="md" 接入 cache_manager 分片快取
-# 輸出到：<輸出>/LM翻譯後/<相同子路徑>.json
+# 輸出到：<out_dir>/<相同子路徑>.json（out_dir 就是譯後資料夾本身，不會再多建一層）
 # ------------------------------------------------------------
 
 from __future__ import annotations
@@ -124,7 +124,7 @@ def compute_out_json_path(
 ) -> Path:
     """計算輸出 JSON 檔案的路徑。"""
     rel = src_json.relative_to(in_pending_root)
-    return out_root / "LM翻譯後" / rel
+    return out_root / rel
 
 
 def translate_md_pending(
@@ -142,7 +142,7 @@ def translate_md_pending(
 
     in_pending_root = Path(pending_dir).resolve()
     out_root = Path(out_dir).resolve()
-    (out_root / "LM翻譯後").mkdir(parents=True, exist_ok=True)
+    out_root.mkdir(parents=True, exist_ok=True)
 
     if not in_pending_root.exists() or not in_pending_root.is_dir():
         raise FileNotFoundError(f"pending_dir 不存在或不是資料夾：{in_pending_root}")
@@ -452,6 +452,8 @@ def translate_md_pending(
 
         out_payload = dict(data)
         out_payload["items"] = out_items
+        # Step 3 只注入「完整完成」的譯文；失敗／取消時仍會寫出保留原文的半成品供檢視
+        out_payload["step2_status"] = loop_status
         out_payload.setdefault("stats", {})
         out_payload["stats"].update(
             {
@@ -472,8 +474,8 @@ def translate_md_pending(
 
     # recorder 輸出（可選）
     try:
-        rec.export_json(out_root / "LM翻譯後" / "translation_map_md.json")
-        rec.export_csv(out_root / "LM翻譯後" / "translation_map_md.csv")
+        rec.export_json(out_root / "translation_map_md.json")
+        rec.export_csv(out_root / "translation_map_md.csv")
     except Exception as e:  # noqa: BLE001 - 失敗已記錄，不中斷翻譯批次
         log_warning(f"[MD-LM] 匯出 translation_map 失敗: {e!r}")
 
@@ -484,7 +486,7 @@ def translate_md_pending(
         f"\n✅ [MD-LM] 完成：輸出檔案 {written_files} 個"
         f"\n📊 blocks：總 {total_blocks} | 唯一 {unique_blocks} | 重複 {dup_blocks}"
         f"\n🧠 cache：hit {len(cached_items)} | miss {len(items_to_translate)} | 已中文跳過 {already_zh_skipped} | skip_reason 跳過 {skip_skipped}"
-        f"\n📁 out：{(out_root / 'LM翻譯後').as_posix()}"
+        f"\n📁 out：{out_root.as_posix()}"
     )
 
     return {
@@ -511,7 +513,7 @@ def main():
     log_info("請輸入待翻譯根目錄（pending）")
     pending_dir = input("> ").strip().strip('"').strip("'")
 
-    log_info("請輸入輸出根目錄（LM翻譯後）")
+    log_info("請輸入譯後 JSON 輸出資料夾（例如 <輸出>/md/LM翻譯後）")
     out_dir = input("> ").strip().strip('"').strip("'")
 
     log_info("dry-run? (y/N)")

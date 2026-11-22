@@ -44,7 +44,7 @@ flowchart TD
   E -- 是 --> F["step2_translate 寫入 LM翻譯後 目錄"]
   E -- 否 --> G
   F --> G{"dry_run 或略過注入？"}
-  G -- 否 --> H["step3_inject 以 LM翻譯後 或 待翻譯 為來源寫入 完成 目錄"]
+  G -- 否 --> H["step3_inject 只以 LM翻譯後 為來源，驗證後寫入 完成 目錄"]
   G -- 是 --> I["回傳結果"]
   H --> I
 ```
@@ -52,6 +52,16 @@ flowchart TD
 Markdown 抽取階段已把色碼與物品 ID 換成佔位符並記在待翻譯 JSON 的 `_shields`；翻譯輸出的逐檔 JSON 必須原樣帶回 `_shields`（`PendingItem.shields`），注入階段才能還原。`translation_map_md.json` 是翻譯記錄，注入不會把它當成待注入檔。
 
 Markdown 只有 `DONE` 才能把翻譯結果寫入完成目錄；`PARTIAL`、`FAILED`、`CANCELLED` 不使用 pending JSON 當作完成輸出，也不執行最終注入。
+
+Step 1 與 Step 3 之間靠檔案內容保持一致，所以單獨續跑任一步都安全：
+
+- Step 1 以原子寫入產生 pending JSON，全部寫完後才清掉「本輪沒重寫」的 `md_pending_blocks_v1` 檔案（來源已刪除、改為零區塊、換了輸入資料夾）；只動 schema 符合的檔案，其他 JSON 不碰，結果記在 `stale_removed`。換輸入資料夾時會警告。
+- Step 2 的 `translate_md_pending` 把 `out_dir` 當作譯後資料夾本身：譯後 JSON 與 `translation_map_md.*` 直接寫在 `LM翻譯後/<相同子路徑>.json`。舊版會多建一層同名資料夾（`LM翻譯後/LM翻譯後/`），Step 2 開始時由 `remove_legacy_nested_translated` 清掉那層的 `md_pending_blocks_v1` 與對照表（其他檔案不動）；尚未重跑 Step 2 時，Step 3 仍能讀到舊層的譯後檔。
+- Step 2 寫出的譯後 JSON 帶 `step2_status`；失敗、額度用完、取消時仍會寫出保留原文的半成品供檢視，但狀態不是 `DONE`。
+- Step 3 只讀 `LM翻譯後` 的譯後 JSON，沒有時回報 `no_translated_json` 並略過（不再退回注入 pending 的英文原文）。每個譯後 JSON 注入前由 `verify_translated_doc` 驗證，不符就略過該檔並保留 `完成` 內上一次的結果：`skipped_incomplete`（Step 2 沒有 `DONE`）、`skipped_pending_mismatch`（找不到對應 pending，或區塊身分與現行 pending 不同，例如來源刪除、`lang_mode` 改變、`zh_tw` 對照檔後來已翻好）、`skipped_stale_source`（原始檔對應行範圍重算的 `content_hash` 與抽取時不同）。沒有 `step2_status` 的舊檔視為可用，來源驗證仍會把關。
+- `source_md` 與輸出路徑都要通過 `is_safe_relative_path` 與 `is_inside`（不得是絕對路徑、含 `..` 或越出根目錄），否則計入 `skipped_unsafe_path`。
+- 掃描譯後資料夾時排除 `translation_map_md*` 與 `_md_dry_run*`（翻譯記錄與 dry-run 預覽）。
+- 注入由後往前套用所有區塊（`apply_items_to_md_lines`）：譯文行數比原文多時插入在區塊最後一個文字行之後，比原文少時刪除多餘的原文行（不留空白行）；譯文沒有內容時保留原文。注入端判斷文字行與抽取器共用 `is_translatable_text_line`。
 
 ## 背景任務與 UI 更新
 
