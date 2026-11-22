@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -33,6 +34,7 @@ from app.shell.task_manager import TaskInfo, TaskManager
 from app.shell.topbar import TopBar
 from app.tasks.operation_registry import (
     CancellationPolicy,
+    DurabilityPolicy,
     OperationDescriptor,
     OperationPresentation,
     OperationRegistry,
@@ -63,12 +65,16 @@ REFRESH_INTERVAL_SEC = 0.25  # 任務事件的 UI 更新節流
 KEY_REFRESH_SEC = 5.0  # API Key 健康度輪詢間隔
 CLOSE_WAIT_TIMEOUT_SEC = 2.0
 CLOSE_WAIT_POLL_SEC = 0.05
+FORCE_CLOSE_FLUSH_TIMEOUT_SEC = 3.0  # 強制關閉前盡量落盤的等待上限
+FORCE_CLOSE_DESTROY_TIMEOUT_SEC = 2.0  # 強制關閉時等待視窗銷毀的上限
 # 快取資料夾變更後需要重新整理的頁面
 _CACHE_DEPENDENT_VIEWS = ("dashboard", "cache")
 
 # 時鐘與 sleep 抽成模組層級名稱，測試可以換成假的（不必真的等）
 _monotonic = time.monotonic
 _async_sleep = asyncio.sleep
+# 強制關閉時結束整個程序（不等仍卡在網路／檔案呼叫的背景執行緒）；測試可替換
+_hard_exit = os._exit
 
 # 這些頁面建立後，需要拿到 registry 才能互相切頁 / 通知
 _REGISTRY_SETTERS = ("set_registry", "set_view_registry")
@@ -1027,6 +1033,14 @@ class AppShell:
         actions = [ft.TextButton("重新嘗試關閉", on_click=retry_close)]
         if not draining:
             actions.insert(0, ft.TextButton("返回應用程式", on_click=return_to_app))
+        else:
+            actions.insert(
+                0,
+                ft.TextButton(
+                    "強制關閉",
+                    on_click=lambda _e=None: self._show_force_close_confirmation(),
+                ),
+            )
         if self._close_failure_dialog is not None:
             self._close_failure_dialog.content = ft.Text(content)
             self._close_failure_dialog.actions = actions
@@ -1040,6 +1054,105 @@ class AppShell:
         )
         self._close_failure_dialog = dialog
         show_dialog(dialog)
+
+    def _show_force_close_confirmation(self) -> None:
+        """取消後仍有背景操作不停止時，讓使用者確認直接結束程式。"""
+        show_dialog = getattr(self.page, "show_dialog", None)
+        if not callable(show_dialog):
+            return
+        handles = self.operations.active()
+        names = (
+            "、".join(dict.fromkeys(h.descriptor.name for h in handles)) or "背景操作"
+        )
+        durable = [
+            h.descriptor.name
+            for h in handles
+            if h.descriptor.durability == DurabilityPolicy.USER_ACTION
+        ]
+        lines = [
+            f"仍在執行：{names}。",
+            (
+                "強制關閉會直接結束程式：已寫入資料庫或快取的結果會保留，"
+                "正在等待 AI 回應或處理中的那一批會遺失，下次需要重新執行。"
+            ),
+        ]
+        if durable:
+            lines.append(
+                f"其中「{'、'.join(dict.fromkeys(durable))}」是儲存工作，"
+                "中斷可能留下不完整的檔案。"
+            )
+
+        def back(_event=None) -> None:
+            try:
+                self.page.pop_dialog()
+            except Exception:
+                logger.debug("強制關閉確認 dialog 關閉失敗", exc_info=True)
+
+        def confirm(_event=None) -> None:
+            back()
+            ok, _future = self._submit_ui(self._force_close)
+            if not ok:
+                self._force_close_now()
+
+        show_dialog(
+            ft.AlertDialog(
+                modal=True,
+                title=ft.Text("強制關閉程式？"),
+                content=ft.Text("\n".join(lines)),
+                actions=[
+                    ft.TextButton("返回", on_click=back),
+                    ft.TextButton("強制關閉", on_click=confirm),
+                ],
+            )
+        )
+
+    async def _force_close(self) -> None:
+        """盡量落盤並關閉視窗後結束整個程序，不等仍未停止的背景操作。
+
+        每一步都有時間上限：落盤或視窗銷毀卡住時仍會結束程序。
+        """
+        try:
+            await asyncio.wait_for(
+                self._flush_in_thread(), timeout=FORCE_CLOSE_FLUSH_TIMEOUT_SEC
+            )
+        except Exception:
+            logger.warning("強制關閉前的資料保存未完成", exc_info=True)
+        self._log_force_close()
+        try:
+            self.dispose()
+        except Exception:
+            logger.debug("強制關閉時 dispose 失敗", exc_info=True)
+        destroy = getattr(getattr(self.page, "window", None), "destroy", None)
+        if callable(destroy):
+            try:
+                result = destroy()
+                if inspect.isawaitable(result):
+                    await asyncio.wait_for(
+                        result, timeout=FORCE_CLOSE_DESTROY_TIMEOUT_SEC
+                    )
+            except Exception:
+                logger.debug("強制關閉時無法銷毀 desktop window", exc_info=True)
+        logging.shutdown()
+        _hard_exit(0)
+
+    async def _flush_in_thread(self) -> None:
+        result = await asyncio.to_thread(self._flush_before_close)
+        if inspect.isawaitable(result):
+            await result
+
+    def _log_force_close(self) -> None:
+        names = "、".join(h.descriptor.name for h in self.operations.active()) or "無"
+        logger.warning("使用者強制關閉程式；未完成的背景操作：%s", names)
+
+    def _force_close_now(self) -> None:
+        """無法排程到 UI event loop 時的備援：不落盤，直接結束程序。"""
+        self._log_force_close()
+        try:
+            self.dispose()
+        except Exception:
+            logger.debug("強制關閉時 dispose 失敗", exc_info=True)
+        logging.shutdown()
+        _hard_exit(0)
 
     def dispose(self) -> None:
         """移除 mount 時註冊的全域資源（冪等）。

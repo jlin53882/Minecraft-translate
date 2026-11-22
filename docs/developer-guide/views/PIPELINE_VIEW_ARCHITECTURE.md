@@ -166,6 +166,7 @@ JAR 提取的預覽摘要（一鍵流水線的提取預覽與提取頁的預覽�
 - **`cancel_scope(check)`** 以 thread-local 註冊檢查函式；**巢狀為 OR**：任一層要求取消都算取消，離開時恢復外層。
 - **`TaskCancelled` 繼承 `BaseException`**：流程中有許多 `except Exception` 備援，取消不能被它們吞掉；只在 service、翻譯迴圈、步驟邊界明確攔截。
 - **`interruptible_sleep(sec)`**：有 cancel scope 時以小步 sleep 並檢查取消；沒有 scope 時等同 `time.sleep`。
+- **`run_cancellable_blocking(call)`**：無法中途打斷的阻塞呼叫（AI 的 HTTP 請求與串流）在 cancel scope 內改由 daemon 輔助執行緒執行，取消時不等它返回、直接拋出 `TaskCancelled`；沒有 scope 時直接呼叫。
 - **檢查點**：翻譯在批次之間與等待限流時；抽取在 JAR 之間（`is_cancelled()`）；generator 型 step 在每次 yield 之間。
 - **已完成的輸出保留**：翻譯中途取消會照常寫出已完成的批次；取消只阻止後續工作。
 - **尚未執行的步驟不執行**：`run_step` 開始前檢查 `cancel_event`；取消的步驟回傳失敗，一鍵流程就此停止。
