@@ -55,6 +55,7 @@ Markdown 只有 `DONE` 才能把翻譯結果寫入完成目錄；`PARTIAL`、`FA
 
 Step 1 與 Step 3 之間靠檔案內容保持一致，所以單獨續跑任一步都安全：
 
+- 同一個輸出（`完成/…/zh_tw/…`）只能有一個來源：`en_us` 與 `zh_tw` 同名檔（資料夾名稱不分大小寫，底線前綴要一致）視為一對，以 `zh_tw` 為底稿、`en_us` 檔不產生 pending，所以已翻譯的段落不會退回英文。`non_cjk_only` 只把 `zh_tw` 裡 `content_hash` 與英文原文相同的區塊送翻，不靠 CJK 字元、也不做位置對齊；英文與繁中區塊數不同時只警告（`structure_mismatch`），英文新增的段落不會自動補進繁中。同語系出現多份（例如大小寫不同的兩個 `zh_tw` 資料夾）會寫到同一個輸出，全部略過並記入 `output_conflicts`。想從英文整份重翻，要把 `zh_tw` 檔移出輸入資料夾。Step 3 同一輪內若第二份譯後 JSON 對應到已寫過的輸出，略過並計入 `skipped_output_conflict`。
 - Step 1 以原子寫入產生 pending JSON，全部寫完後才清掉「本輪沒重寫」的 `md_pending_blocks_v1` 檔案（來源已刪除、改為零區塊、換了輸入資料夾）；只動 schema 符合的檔案，其他 JSON 不碰，結果記在 `stale_removed`。換輸入資料夾時會警告。
 - Step 2 的 `translate_md_pending` 把 `out_dir` 當作譯後資料夾本身：譯後 JSON 與 `translation_map_md.*` 直接寫在 `LM翻譯後/<相同子路徑>.json`。舊版會多建一層同名資料夾（`LM翻譯後/LM翻譯後/`），Step 2 開始時由 `remove_legacy_nested_translated` 清掉那層的 `md_pending_blocks_v1` 與對照表（其他檔案不動）；尚未重跑 Step 2 時，Step 3 仍能讀到舊層的譯後檔。
 - Step 2 寫出的譯後 JSON 帶 `step2_status`；失敗、額度用完、取消時仍會寫出保留原文的半成品供檢視，但狀態不是 `DONE`。

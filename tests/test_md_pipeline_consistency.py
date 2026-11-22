@@ -349,3 +349,225 @@ def test_resume_step3_works_with_legacy_nested_layout_before_step2_reruns(
     result = _run(src, out, step_extract=False, step_translate=False)
 
     assert result["step3"]["written_files"] == 1
+
+
+# ---- en_us／zh_tw 配對：有對應 zh_tw 時以 zh_tw 為底稿，只翻仍是英文原文的區塊 ----
+
+
+def _pair_layout(tmp_path: Path, en: str, zh: str):
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    for lang, text in (("en_us", en), ("zh_tw", zh)):
+        path = src / "pack" / lang / "guide.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return src, out
+
+
+def _run_non_cjk(src: Path, out: Path, **kwargs):
+    return run_md_pipeline(
+        str(src), output_dir=str(out), lang_mode="non_cjk_only", **kwargs
+    )
+
+
+def _pair_final(out: Path) -> str:
+    return (out / "md" / "完成" / "pack" / "zh_tw" / "guide.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def _pending_texts(out: Path, lang: str = "zh_tw") -> list[str]:
+    path = out / "md" / "待翻譯" / "pack" / lang / "guide.md.json"
+    if not path.exists():
+        return []
+    return [it["text"] for it in json.loads(path.read_text(encoding="utf-8"))["items"]]
+
+
+def test_pair_keeps_translated_blocks_and_translates_only_english_ones(
+    tmp_path, fake_lm
+):
+    src, out = _pair_layout(
+        tmp_path,
+        "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.\n",
+        "第一段已翻譯。\n\n第二段已翻譯。\n\nThird paragraph.\n",
+    )
+
+    result = _run_non_cjk(src, out)
+
+    assert _pending_texts(out) == ["Third paragraph."]
+    assert _pending_texts(out, "en_us") == []  # 英文檔不再產生 pending
+    assert result["step1"]["paired_docs"] == 1
+    assert (
+        _pair_final(out) == "第一段已翻譯。\n\n第二段已翻譯。\n\n譯:Third paragraph.\n"
+    )
+    assert result["step3"]["written_files"] == 1
+
+
+def test_pair_classification_does_not_depend_on_cjk_characters(tmp_path, fake_lm):
+    src, out = _pair_layout(
+        tmp_path,
+        "# Title\n\nUse the tool now.\n\nBrand Name\n\nOld text.\n",
+        "# 標題\n\nUse the 工具 now.\n\nBrand Name\n\nOutdated english text.\n",
+    )
+
+    result = _run_non_cjk(src, out)
+
+    # 與英文原文完全相同才送翻；混合中英文、已譯標題、不同的舊英文都保留
+    assert _pending_texts(out) == ["Brand Name"]
+    assert result["step1"]["ambiguous_kept"] == 1  # 舊英文只回報、不送翻
+    text = _pair_final(out)
+    assert "# 標題" in text and "Use the 工具 now." in text
+    assert "Outdated english text." in text and "譯:Brand Name" in text
+
+
+def test_pair_block_count_mismatch_is_reported_and_nothing_is_misaligned(
+    tmp_path, fake_lm
+):
+    src, out = _pair_layout(
+        tmp_path,
+        "Alpha.\n\nBeta.\n\nGamma.\n",
+        "甲已翻譯。\n\nGamma.\n",
+    )
+
+    result = _run_non_cjk(src, out)
+
+    assert result["step1"]["structure_mismatch"] == ["pack/zh_tw/guide.md"]
+    assert _pending_texts(out) == ["Gamma."]
+    assert _pair_final(out) == "甲已翻譯。\n\n譯:Gamma.\n"
+
+
+def test_pair_fully_translated_zh_leaves_no_pending(tmp_path, fake_lm):
+    src, out = _pair_layout(tmp_path, "Alpha.\n\nBeta.\n", "甲。\n\n乙。\n")
+    _run_non_cjk(src, out, step_translate=False, step_inject=False)
+    stale = out / "md" / "待翻譯" / "pack" / "en_us" / "guide.md.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(
+        json.dumps({"schema": "md_pending_blocks_v1", "items": []}), encoding="utf-8"
+    )
+
+    result = _run_non_cjk(src, out)
+
+    assert not stale.exists()  # 舊的英文 pending 由過期清理移除
+    assert result["step1"]["json_written"] == 0
+
+
+def test_pair_run_twice_is_idempotent(tmp_path, fake_lm):
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+
+    _run_non_cjk(src, out)
+    first = (_pair_final(out), _pending_texts(out))
+    _run_non_cjk(src, out)
+
+    assert (_pair_final(out), _pending_texts(out)) == first
+
+
+def test_pair_non_cjk_modes_other_than_non_cjk_only_still_prefer_zh_base(
+    tmp_path, fake_lm
+):
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+
+    result = _run(src, out)  # lang_mode="all"
+
+    assert _pending_texts(out, "en_us") == []
+    assert result["step1"]["paired_docs"] == 1
+
+
+def test_step3_does_not_write_the_same_output_twice_in_one_run(tmp_path, fake_lm):
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+    _run_non_cjk(src, out, step_inject=False)
+    translated = out / "md" / "LM翻譯後"
+    copy = translated / "dup" / "pack" / "zh_tw" / "guide.md.json"
+    copy.parent.mkdir(parents=True)
+    copy.write_text(
+        (translated / "pack" / "zh_tw" / "guide.md.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    result = _run_non_cjk(src, out, step_extract=False, step_translate=False)
+
+    assert result["step3"]["written_files"] == 1
+    assert result["step3"]["skipped_output_conflict"] == 1
+    # 勝者固定是正規位置那份，與檔案列舉順序無關
+    assert _pair_final(out) == "一。\n\n譯:Two.\n"
+
+
+def test_plan_sources_pairs_by_output_identity_regardless_of_order():
+    from translation_tool.core.md_pipeline_pairing import plan_sources
+
+    rels = [
+        "a/_en_us/x.md",
+        "a/_zh_tw/x.md",  # 底線一致：配對
+        "b/EN_US/y.md",
+        "b/zh_TW/y.md",  # 大小寫不同：配對
+        "c/en_us/z.md",
+        "c/_zh_tw/z.md",  # 底線不一致：輸出路徑本來就不同，不配對也不衝突
+        "d/zh_tw/w.md",
+        "d/ZH_TW/w.md",  # 兩個 zh 候選：衝突
+        "e/zh_cn/v.md",  # zh_cn 不參與
+    ]
+
+    plan = plan_sources(rels)
+    reversed_plan = plan_sources(list(reversed(rels)))
+
+    assert plan.pair_en == {
+        "a/_zh_tw/x.md": "a/_en_us/x.md",
+        "b/zh_TW/y.md": "b/EN_US/y.md",
+    }
+    assert plan.skip["a/_en_us/x.md"] == "paired_en"
+    assert "c/en_us/z.md" not in plan.skip and "c/_zh_tw/z.md" not in plan.skip
+    assert plan.conflicts == [["d/ZH_TW/w.md", "d/zh_tw/w.md"]] or plan.conflicts == [
+        ["d/zh_tw/w.md", "d/ZH_TW/w.md"]
+    ]
+    assert "e/zh_cn/v.md" not in plan.skip
+    assert (plan.pair_en, plan.skip) == (reversed_plan.pair_en, reversed_plan.skip)
+
+
+def test_resume_step3_with_legacy_en_and_zh_pending_keeps_zh_translations(
+    tmp_path, fake_lm
+):
+    """舊版留下 en_us 與 zh_tw 兩份 pending／譯後檔時，只續跑 Step 3 也不能讓英文那份蓋掉繁中。"""
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+    _run_non_cjk(src, out)
+    pending_root = out / "md" / "待翻譯"
+    translated = out / "md" / "LM翻譯後"
+    # 重建舊版狀態：en_us 也有自己的 pending 與譯後檔（整份英文都被翻成「譯:」）
+    for root in (pending_root, translated):
+        en_doc = {
+            "schema": "md_pending_blocks_v1",
+            "source_md": "pack/en_us/guide.md",
+            "items": [],
+        }
+        (root / "pack" / "en_us").mkdir(parents=True, exist_ok=True)
+        (root / "pack" / "en_us" / "guide.md.json").write_text(
+            json.dumps(en_doc), encoding="utf-8"
+        )
+
+    result = _run_non_cjk(src, out, step_extract=False, step_translate=False)
+
+    assert _pair_final(out) == "一。\n\n譯:Two.\n"
+    assert result["step3"]["skipped_output_conflict"] == 1
+
+
+def test_pair_classification_ignores_a_bom_at_the_start_of_one_file(tmp_path, fake_lm):
+    src, out = _pair_layout(tmp_path, "# Title\n\nBody.\n", "﻿# Title\n\n正文。\n")
+
+    result = _run_non_cjk(src, out)
+
+    assert _pending_texts(out) == ["﻿# Title"]  # 未譯標題仍會被送翻
+    assert result["step1"]["ambiguous_kept"] == 0
+
+
+def test_moving_zh_tw_out_of_input_lets_english_be_retranslated_from_scratch(
+    tmp_path, fake_lm
+):
+    """文件建議的整份重翻做法：zh_tw 移出輸入資料夾後，譯後資料夾殘留的舊 zh 譯後檔不能擋住英文。"""
+    src, out = _pair_layout(tmp_path, "One.\n\nTwo.\n", "一。\n\nTwo.\n")
+    _run_non_cjk(src, out)
+    zh_dir = src / "pack" / "zh_tw"
+    (zh_dir / "guide.md").unlink()
+    zh_dir.rmdir()
+
+    result = _run_non_cjk(src, out)
+
+    assert result["step3"]["written_files"] == 1
+    assert _pair_final(out) == "譯:One.\n\n譯:Two.\n"

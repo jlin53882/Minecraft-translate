@@ -83,7 +83,7 @@ TranslationView（ft.Column）
 
 ## Markdown 核心流程（`translation_tool/core/md_translation_steps.py`，由 `md_translation_assembly.py` 的 `run_md_pipeline` 組裝）
 - **Step1 Extract**（`step1_extract_impl`）：掃描 MD 檔，依 `lang_mode` 過濾後抽取區塊，寫入 `pending_dir/<rel_md>.json` + `_manifest.json`（schema `md_pending_manifest_blocks_v1`）
-  - `non_cjk_only`：比對同義 `zh_tw` 檔，CJK 已譯區塊（`contains_cjk`）過濾；區塊數不一致則 warn 並保留全部
+  - 有對應的 `zh_tw` 檔時（`plan_sources`，`translation_tool/core/md_pipeline_pairing.py`）以 `zh_tw` 為底稿：`en_us` 檔不產生 pending；`non_cjk_only` 只挑 `content_hash` 與英文檔區塊相同的 `zh_tw` 區塊（`select_untranslated_blocks`），不靠 CJK 判斷；區塊數不同記入 `structure_mismatch`、無法確定的舊英文記入 `ambiguous_kept`；同語系重複（輸出會互相覆蓋）記入 `output_conflicts` 並全部略過
   - **去重複**：相同 `content_hash` 只留一份（`seen_hashes`，重複計入 `duplicate_blocks`）
   - **原子寫入與清理**：`write_json_atomic` 寫 pending；全部寫完後 `remove_stale_pending`（`translation_tool/core/md_pipeline_files.py`）清掉本輪沒重寫的 `md_pending_blocks_v1` 檔案，不動其他 JSON（`stale_removed`）
 - **Step2 Translate**（`step2_translate_impl`）：`translate_md_pending_fn` 批次翻譯 pending JSON → translated_dir（dry_run / write_new_cache 透傳）
