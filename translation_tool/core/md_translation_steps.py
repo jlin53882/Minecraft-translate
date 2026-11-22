@@ -27,6 +27,7 @@ from translation_tool.core.md_pipeline_files import (
     write_json_atomic,
 )
 from translation_tool.core.md_pipeline_pairing import (
+    is_zh_cn_source,
     plan_sources,
     select_untranslated_blocks,
 )
@@ -76,12 +77,14 @@ class _PairingReport:
 
     conflicts: list[list[str]] = field(default_factory=list)
     paired_docs: int = 0
+    zh_cn_skipped: int = 0
     ambiguous_kept: int = 0
     structure_mismatch: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "paired_docs": self.paired_docs,
+            "zh_cn_skipped": self.zh_cn_skipped,
             "output_conflicts": self.conflicts,
             "ambiguous_kept": self.ambiguous_kept,
             "structure_mismatch": self.structure_mismatch,
@@ -223,6 +226,13 @@ def step1_extract_impl(
         if rel_md in plan.skip:
             if plan.skip[rel_md] == "paired_en":
                 report.paired_docs += 1
+            progress_fn(
+                session, progress_base + progress_span * (i / max(1, total_files))
+            )
+            continue
+        if is_zh_cn_source(rel_md):
+            # zh_cn 檔不會被寫入完成資料夾：不產生 pending，也就不會送 API
+            report.zh_cn_skipped += 1
             progress_fn(
                 session, progress_base + progress_span * (i / max(1, total_files))
             )
