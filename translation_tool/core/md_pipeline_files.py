@@ -65,6 +65,30 @@ def remove_stale_pending(pending_root: Path, keep: set[Path]) -> int:
     return removed
 
 
+def remove_legacy_nested_translated(translated_dir: Path) -> int:
+    """清掉舊版把譯後檔多寫一層的殘留：<translated_dir>/<同名資料夾>/。
+
+    舊版 Step 2 把譯後資料夾當輸出根，又自己再建一層同名資料夾，檔案落在
+    LM翻譯後/LM翻譯後/。現在 Step 2 直接寫進譯後資料夾，若不清掉，Step 3 會把
+    舊層的同來源譯後檔也掃進來，重複處理且可能用到較舊的譯文。
+    只刪 md_pending_blocks_v1 與譯文對照表（translation_map_md.*），其他檔案不動。
+    """
+    nested = translated_dir / translated_dir.name
+    if not nested.is_dir():
+        return 0
+    removed = remove_stale_pending(nested, set())
+    for name in ("translation_map_md.json", "translation_map_md.csv"):
+        try:
+            (nested / name).unlink()
+        except OSError:
+            pass
+    try:
+        nested.rmdir()
+    except OSError:
+        pass
+    return removed
+
+
 def _remove_empty_parents(directory: Path, stop_at: Path) -> None:
     while directory != stop_at and stop_at in directory.parents:
         try:

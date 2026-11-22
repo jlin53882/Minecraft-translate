@@ -243,3 +243,66 @@ def test_longer_translation_is_inserted_not_truncated_end_to_end(
     lines = _final(out).read_text(encoding="utf-8").splitlines()
     # 三個區塊各被譯成兩行；後面的區塊不會因前面插入而錯位
     assert lines == ["譯一", "譯二", "", "譯一", "譯二", "", "譯一", "譯二"]
+
+
+def test_translated_json_is_written_directly_under_translated_dir(tmp_path, fake_lm):
+    src, out, _ = _layout(tmp_path)
+    _run(src, out, step_inject=False)
+
+    translated = out / "md" / "LM翻譯後"
+    assert (translated / "pack" / "en_us" / "guide.md.json").exists()
+    # 不再多一層同名資料夾
+    assert not (translated / "LM翻譯後").exists()
+    assert (translated / "translation_map_md.json").exists()
+
+
+def test_legacy_double_nested_translated_files_are_migrated(tmp_path, fake_lm):
+    src, out, _ = _layout(tmp_path)
+    _run(src, out, step_inject=False)
+    translated = out / "md" / "LM翻譯後"
+    legacy = translated / "LM翻譯後" / "pack" / "en_us"
+    legacy.mkdir(parents=True)
+    old = json.loads(
+        (translated / "pack" / "en_us" / "guide.md.json").read_text(encoding="utf-8")
+    )
+    for it in old["items"]:
+        it["text"] = "舊版譯文"
+    (legacy / "guide.md.json").write_text(
+        json.dumps(old, ensure_ascii=False), encoding="utf-8"
+    )
+    (translated / "LM翻譯後" / "translation_map_md.json").write_text(
+        "[]", encoding="utf-8"
+    )
+    foreign = translated / "LM翻譯後" / "note.txt"
+    foreign.write_text("keep", encoding="utf-8")
+
+    result = _run(src, out)
+
+    assert not (legacy / "guide.md.json").exists()
+    assert not (translated / "LM翻譯後" / "translation_map_md.json").exists()
+    assert foreign.exists()  # 不是工具產生的檔案不動
+    assert "舊版譯文" not in _final(out).read_text(encoding="utf-8")
+    assert result["step3"]["written_files"] == 1
+
+
+def test_resume_step3_works_with_legacy_nested_layout_before_step2_reruns(
+    tmp_path, fake_lm
+):
+    src, out, _ = _layout(tmp_path)
+    _run(src, out, step_inject=False)
+    translated = out / "md" / "LM翻譯後"
+    nested = translated / "LM翻譯後"
+    nested.mkdir()
+    for p in list(translated.rglob("*.json")):
+        if (
+            p.name.startswith("translation_map")
+            or "LM翻譯後" in p.relative_to(translated).parts
+        ):
+            continue
+        target = nested / p.relative_to(translated)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        p.replace(target)
+
+    result = _run(src, out, step_extract=False, step_translate=False)
+
+    assert result["step3"]["written_files"] == 1

@@ -19,6 +19,7 @@ from translation_tool.core.md_pipeline_files import (
     is_inside,
     is_safe_relative_path,
     read_pending_schema_doc,
+    remove_legacy_nested_translated,
     remove_stale_pending,
     verify_translated_doc,
     write_json_atomic,
@@ -252,6 +253,14 @@ def step2_translate_impl(
     回傳：
         翻譯結果字典
     """
+    translated_root = Path(translated_dir).resolve()
+    legacy_removed = remove_legacy_nested_translated(translated_root)
+    if legacy_removed:
+        log_info(
+            "[MD-翻譯] 已清除舊版多一層資料夾內的 %s 個譯後檔（現在直接寫入 %s）",
+            legacy_removed,
+            translated_root.name,
+        )
     proxy = progress_proxy_cls(session, progress_base, progress_span)
     result = translate_md_pending_fn(
         pending_dir=str(Path(pending_dir).resolve()),
