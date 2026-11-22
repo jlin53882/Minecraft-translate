@@ -48,6 +48,15 @@ def lang_output_key(rel: str) -> str | None:
     return map_rel_lang_path(rel, src_lang="en_us", dst_lang="zh_tw").casefold()
 
 
+def is_zh_cn_source(rel: str) -> bool:
+    """路徑的語言資料夾是 zh_cn。
+
+    Step 3 只寫 en_us／zh_tw 來源（zh_cn 會被判成其他語系而不寫入），所以 zh_cn 檔
+    送去翻譯只是白花 API；Step 1 不為它產生 pending。
+    """
+    return detect_lang_segment(rel.replace("\\", "/").split("/")) == "zh_cn"
+
+
 def plan_sources(rels: list[str]) -> SourcePlan:
     """依輸出身分分組：成對的以 zh_tw 為底稿、同語系重複的視為衝突。結果與列舉順序無關。"""
     groups: dict[str, dict[str, list[str]]] = {}

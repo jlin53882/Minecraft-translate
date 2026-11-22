@@ -571,3 +571,74 @@ def test_moving_zh_tw_out_of_input_lets_english_be_retranslated_from_scratch(
 
     assert result["step3"]["written_files"] == 1
     assert _pair_final(out) == "譯:One.\n\n譯:Two.\n"
+
+
+# ---- zh_cn 檔不產生 pending（Step 3 不會寫入 zh_cn，送翻只是白花 API）----
+
+
+def _zh_cn_layout(tmp_path: Path):
+    src = tmp_path / "in"
+    out = tmp_path / "out"
+    for rel, text in (
+        ("pack/en_us/guide.md", "First.\n\nSecond.\n"),
+        ("pack/zh_cn/guide.md", "第一段。\n\nSecond.\n"),
+        ("only_cn/zh_cn/a.md", "English left.\n"),
+    ):
+        path = src / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    return src, out
+
+
+def test_zh_cn_files_never_produce_pending_or_translation_requests(
+    tmp_path, fake_lm, monkeypatch
+):
+    src, out = _zh_cn_layout(tmp_path)
+    sent: list[str] = []
+    real = md_lmtranslator.run_translator_skeleton
+
+    def spy(items, **kwargs):
+        sent.extend(it["text"] for it in items)
+        return real(items, **kwargs)
+
+    monkeypatch.setattr(md_lmtranslator, "run_translator_skeleton", spy)
+
+    result = _run_non_cjk(src, out)
+
+    pending_root = out / "md" / "待翻譯"
+    assert not list(pending_root.rglob("zh_cn/**/*.json"))
+    assert not (pending_root / "only_cn").exists()
+    assert result["step1"]["zh_cn_skipped"] == 2
+    assert "English left." not in sent  # 只有 zh_cn 的檔不會送 API
+    assert sorted(sent) == ["First.", "Second."]
+    assert result["step3"]["written_files"] == 1  # 只有 en_us 寫出
+
+
+def test_zh_cn_files_are_skipped_in_every_lang_mode(tmp_path, fake_lm):
+    src, out = _zh_cn_layout(tmp_path)
+
+    result = _run(src, out)  # lang_mode="all"
+
+    assert result["step1"]["zh_cn_skipped"] == 2
+    assert not list((out / "md" / "待翻譯").rglob("zh_cn/**/*.json"))
+
+
+def test_stale_zh_cn_pending_from_older_runs_is_cleaned_up(tmp_path, fake_lm):
+    src, out = _zh_cn_layout(tmp_path)
+    stale = out / "md" / "待翻譯" / "pack" / "zh_cn" / "guide.md.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(
+        json.dumps(
+            {
+                "schema": "md_pending_blocks_v1",
+                "source_md": "pack/zh_cn/guide.md",
+                "items": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_non_cjk(src, out)
+
+    assert not stale.exists()  # 舊版留下的 zh_cn pending 由過期清理移除
+    assert result["step1"]["stale_removed"] >= 1
