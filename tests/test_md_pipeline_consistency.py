@@ -285,6 +285,21 @@ def test_legacy_double_nested_translated_files_are_migrated(tmp_path, fake_lm):
     assert result["step3"]["written_files"] == 1
 
 
+def test_dry_run_does_not_delete_legacy_nested_translated_files(tmp_path, fake_lm):
+    src, out, _ = _layout(tmp_path)
+    _run(src, out, step_inject=False)
+    legacy = out / "md" / "LM翻譯後" / "LM翻譯後" / "pack" / "en_us"
+    legacy.mkdir(parents=True)
+    old = legacy / "guide.md.json"
+    old.write_text(
+        json.dumps({"schema": "md_pending_blocks_v1", "items": []}), encoding="utf-8"
+    )
+
+    _run(src, out, dry_run=True)
+
+    assert old.exists()  # dry-run 只預覽，不動現有檔案
+
+
 def test_resume_step3_works_with_legacy_nested_layout_before_step2_reruns(
     tmp_path, fake_lm
 ):

@@ -254,7 +254,8 @@ def step2_translate_impl(
         翻譯結果字典
     """
     translated_root = Path(translated_dir).resolve()
-    legacy_removed = remove_legacy_nested_translated(translated_root)
+    # dry-run 只做預覽，不能刪掉使用者現有的譯後檔
+    legacy_removed = 0 if dry_run else remove_legacy_nested_translated(translated_root)
     if legacy_removed:
         log_info(
             "[MD-翻譯] 已清除舊版多一層資料夾內的 %s 個譯後檔（現在直接寫入 %s）",
