@@ -20,7 +20,15 @@ items
 它透過既有的
 `translate_items_with_cache_loop()` 維持以下契約：
 
-- 保留輸入順序與 batch prefix slicing。
+- 保留輸入順序與 batch prefix slicing。原文為空白字串的項目沒有可翻譯內容，
+  loop 入口先用 `_split_blank_items` 排除（計為未翻譯），不讓它們進入批次。checkpoint 狀態的 `resume_index` 是原清單中尚未處理的起點，續跑清單用它切片，不用 `processed`。
+  引擎入口 `translate_batch_smart` 對直接呼叫者也守同一個位置契約：空白項目不送進翻譯流程，
+  由 `_merge_blank_items` 標記 `_untranslated` 放回原位；整批都是空白時原樣回傳並給 `AUTO`；
+  非空白項目沒有結果時結果停在該位置，不會用空白項目掩蓋失敗。`_validate_batch_items`
+  仍會丟棄缺少 `text` 欄位、`text` 為 `None` 或不是 dict 的項目；這類項目沒有放回原位的處理，
+  會讓結果位置與輸入錯位。呼叫端組項目時必須明確帶字串 `text`（現有的 Mod DB、FTB Quests、
+  KubeJS tooltip、Markdown 呼叫端都是如此），新增呼叫端時不要依賴引擎替你丟掉不合格項目。
+  共用迴圈遇到缺少 `text` 的項目會回報 `FAILED`，不會靜默略過。
 - `prepare_translator_items()` 統一 cache rule、hit validation 與 miss list；plugin
   只提供格式特定的 `is_valid_hit` / cache side effect adapter。
 - 每個 batch 完成後才更新 cache、輸出、checkpoint 與 progress。

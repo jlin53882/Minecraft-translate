@@ -302,8 +302,66 @@ def translate_batch_smart(
         total: 總項目數（可選）
         dry_run: True = 不呼叫API，只模擬流程（測試用）
 
-    職責：協調各子流程，不直接處理細節
+    職責：協調各子流程，不直接處理細節。
+
+    位置契約：回傳第 i 筆對應 ``batch_items[i]``（結果可以只是前綴）。原文為空白字串的項目
+    沒有可翻譯內容，不送進翻譯流程，原樣標記 ``_untranslated`` 放回原位；整批都沒有內容時
+    回傳這些原樣項目與 "AUTO"，不會因為「全被丟掉」而被呼叫端判成 FAILED。
     """
+    blank_positions = _blank_text_positions(batch_items)
+    if not blank_positions:
+        return _translate_non_blank_batch(
+            batch_items, total, dry_run, event_callback=event_callback
+        )
+    translatable = [
+        item for index, item in enumerate(batch_items) if index not in blank_positions
+    ]
+    if not translatable:
+        return [
+            {**item, "_untranslated": True}
+            for index, item in enumerate(batch_items)
+            if index in blank_positions
+        ], "AUTO"
+    results, status = _translate_non_blank_batch(
+        translatable, total, dry_run, event_callback=event_callback
+    )
+    return _merge_blank_items(batch_items, blank_positions, results), status
+
+
+def _blank_text_positions(batch_items) -> set[int]:
+    """原文是空白字串的項目位置。缺 text 欄位或非字串者不算，維持原本由驗證流程處理。"""
+    return {
+        index
+        for index, item in enumerate(batch_items or [])
+        if isinstance(item, dict)
+        and isinstance(item.get("text"), str)
+        and not item["text"].strip()
+    }
+
+
+def _merge_blank_items(batch_items, blank_positions, results) -> list:
+    """把空白原文項目放回原位，維持「第 i 筆結果對應 batch_items[i]」。
+
+    只在非空白項目都有結果時才補尾端空白項目；結果是前綴時停在第一個缺結果的位置，
+    且沒有任何非空白結果時回傳空串列，讓呼叫端仍能看到「這批沒有進度」。
+    """
+    results = list(results or [])
+    merged: list = []
+    consumed = 0
+    for index, item in enumerate(batch_items):
+        if index in blank_positions:
+            merged.append({**item, "_untranslated": True})
+        elif consumed < len(results):
+            merged.append(results[consumed])
+            consumed += 1
+        else:
+            break
+    if not consumed:
+        return []
+    return merged
+
+
+def _translate_non_blank_batch(batch_items, total, dry_run, *, event_callback=None):
     # 1. 驗證與正規化
     items = _validate_batch_items(batch_items)
     if not items:

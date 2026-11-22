@@ -86,7 +86,7 @@ Quests」會透過共用的 pack source scanner 讀取 `kubejs` 與
 `config/ftbquests/quests`，並沿用 `scan_ingest.py` 的預覽／實際匯入分類。腳本只做
 靜態字串辨識，沒有 JavaScript 執行；每筆來源以相對路徑與 selector 保存於
 `entry_origin`，因此同名檔案不會互相覆蓋。動態文字、語言 key 參考與解析失敗會進入
-內容處置紀錄，不會產生假條目。`kubejs_lang`、`ftb_quest_lang`、`ftb_quests` 與
+內容處置紀錄，不會產生假條目。KubeJS 語系（`ClientEvents.lang` 與 `kubejs/assets/<namespace>/lang/*.json`）裡值為空字串或只有空白的字串不是可翻譯條目，不會建立；掃描只把它的精確來源登記到 `stale_origins`，重掃時移除該來源的 origin。`kubejs_lang`、`ftb_quest_lang`、`ftb_quests` 與
 `kubejs_script` 不會被當作一般 Resource Pack lang；回寫分別交給 KubeJS Lang、FTB
 config 與 KubeJS script pipeline。
 匯入選項「沿用其他版本已審核的相同譯文」（`reuse_row`，預設開啟）決定掃描完成後是否執行跨版本沿用，結果顯示在統計卡下方的摘要列（`reuse_row_summary`）。
@@ -139,7 +139,9 @@ flowchart TD
 
 一般檢查檔不列入、也不會刪除有譯文、生效譯文或歷史紀錄的條目。這些「符合規則但已有譯文或歷史」的條目（總覽顯示的「另有 N 筆」）由「匯出已有譯文的項目」按鈕另外處理：`_export` 帶 `with_translation` 時呼叫 `export_protected_report`。每筆標記 `has_translation`，列出所有來源的譯文（來源代碼與 `source_catalog` 的名稱、`zh_tw`、`zh_cn`、checker、審核狀態、是否為生效來源、是否被截斷）和最近幾筆歷史，並帶 `_translation_states` 算出的完整狀態指紋（條目、所有來源譯文、生效譯文與歷史每個欄位的 SHA-256）。`apply_cleanup` 對這類項目要求指紋與匯出時一致（否則略過為「譯文或歷史已變動」）；`has_translation` 只在 `protected` 類型的檢查檔有效，一般檢查檔裡標這個旗標的項目會略過。
 
-**預設 `delete`**：類別在 `STRONG_CATEGORIES`（`multiblock`、`meta_key`、`placeholder`、`lang_key`，看結構就能確定）時，只有人工來源的譯文或歷史含中文才預設 `false`；其他類別（包含指南的 `license`、`name_list`、`key_value`、`code`、`data` 與形狀推測的 `not_text`、`code_value`、`no_letters`、`field_name`）只要任何來源的譯文或歷史含中文就預設 `false` 並加上 `review` 說明，由使用者確認後再改成 `true`。`CleanupReport` 區分 `exported_total`（檢查檔列出的筆數）、`default_selected`（預設刪除）與 `review_required`（待人工確認），畫面三者並列顯示。
+**預設 `delete`**：類別在 `STRONG_CATEGORIES`（`multiblock`、`meta_key`、`placeholder`、`lang_key`，看結構就能確定）時，只有人工來源的譯文或歷史含中文才預設 `false`；其他類別（包含指南的 `license`、`name_list`、`key_value`、`code`、`data`、形狀推測的 `not_text`、`code_value`、`no_letters`、`field_name`，以及語言檔的 `blank_source`）只要任何來源的譯文或歷史含中文就預設 `false` 並加上 `review` 說明，由使用者確認後再改成 `true`。`CleanupReport` 區分 `exported_total`（檢查檔列出的筆數）、`default_selected`（預設刪除）與 `review_required`（待人工確認），畫面三者並列顯示。
+
+`blank_source` 是語言檔裡原文為空字串或只有空白、且生效繁中譯文為空的條目；只匯入翻譯 ZIP、已有繁中譯文的「原文未知」條目不算。條目可能仍有簡中或其他來源的譯文，所以它不是強類別。清理候選清單依資料世代與 `CLEANUP_RULES_VERSION` 快取在資料庫內；判定規則（`entry_cleanup_category` 與它使用的 `text_sniffer` 規則）改變時要遞增該版本，舊清單才會失效。
 
 刪除（`apply_cleanup`）在單一交易內把整批存進 `cleanup_batch`（含譯文、生效譯文、歷史與沒有外鍵的 `src_change` 原文變更紀錄）再刪除。還原（`_revert`）呼叫 `revert_cleanup`，回傳 `RevertResult`：原編號還沒被用掉就沿用，被用掉就改用新編號並重新對應子表的 `entry_id`；譯文的 `revision` 還原成快照當時的值；生效譯文依目前優先序重算；原位置已有同一條目（重新掃描出來）的項目不覆蓋，保留為待還原並列在 `RevertResult.conflicts`，批次要全部還原才設定 `reverted_at`，進度記在 `meta` 的 `cleanup_restored:<批次>`，可以重試。`CleanupDialog._load_batch_info` 用 `cleanup_batches` 列出所有尚未完全還原的批次（新的在前），`batch_dd` 選哪一批就還原哪一批。
 
@@ -279,7 +281,7 @@ flowchart TD
     N --> O["EntriesPanel.show_flagged：只列異常條目並預填 AI 譯文"]
 ```
 
-相同原文只送 AI 一次（`app/services_impl/moddb_translate_merge.py`）：類型相同、內容模組識別相同（`content_mod_value`，KubeJS／FTB 語系不分模組包版本）、原文完全相同，且來源語系的批次身分相同（預設語系與無法確認的語系同一組，其他語系各自一組）的條目併成一組。每組依查詢順序的第一筆是代表條目，只有它送 AI；代表的譯文通過品質檢查後，同組條目以相同譯文一起寫回（`_write_back_items`），代表被品質檢查拒絕或回填原文時整組都不寫入；被品質檢查拒絕時同組條目也列進待人工確認，預填同一個譯文，計入 `flagged`。翻譯快取只記錄代表條目。單次上限算的是組數：沒有上限、或前綴會讀到範圍四分之一以上時，`_load_merged_selection` 讀出整個範圍再分組；其他情況先依查詢順序讀一段前綴（組數不足上限就加倍），再重讀這些組所屬命名空間（含所有模組包版本）的全部待翻列，結果與讀出整個範圍再分組相同，上限之內的組別即使同組條目排在後面也一併納入。`_select_rows` 與範圍估算 `estimate_scope_plan` 共用這個讀取。
+相同原文只送 AI 一次（`app/services_impl/moddb_translate_merge.py`）：類型相同、內容模組識別相同（`content_mod_value`，KubeJS／FTB 語系不分模組包版本）、原文完全相同，且來源語系的批次身分相同（預設語系與無法確認的語系同一組，其他語系各自一組）的條目併成一組。原文為空或只有空白的條目沒有可送 AI 的內容，`select_merged_rows` 不納入分組（不計入 `candidates`、`ai_items`）。每組依查詢順序的第一筆是代表條目，只有它送 AI；代表的譯文通過品質檢查後，同組條目以相同譯文一起寫回（`_write_back_items`），代表被品質檢查拒絕或回填原文時整組都不寫入；被品質檢查拒絕時同組條目也列進待人工確認，預填同一個譯文，計入 `flagged`。翻譯快取只記錄代表條目。單次上限算的是組數：沒有上限、或前綴會讀到範圍四分之一以上時，`_load_merged_selection` 讀出整個範圍再分組；其他情況先依查詢順序讀一段前綴（組數不足上限就加倍），再重讀這些組所屬命名空間（含所有模組包版本）的全部待翻列，結果與讀出整個範圍再分組相同，上限之內的組別即使同組條目排在後面也一併納入。`_select_rows` 與範圍估算 `estimate_scope_plan` 共用這個讀取。
 
 `TranslateReport` 的 `candidates` 是涵蓋的條目數，`ai_items` 是實際送 AI 的筆數，`merged` 是合併掉的條目數；`written` 與 `remaining` 以條目計，AI 回傳、品質拒絕、回填原文與批次進度（「總進度」的分母是 `ai_items`）以送 AI 筆數計。有合併時，預覽日誌、開始時的 🔗 日誌、結束摘要（畫面與後台）、後台多行摘要都會寫出「相同原文合併」的筆數；預覽的「將送 AI 翻譯」卡片顯示 `ai_items`，「此範圍仍未翻譯」卡片的說明列出條目數與送 AI 筆數（`translation_preview_target_text`），實際機翻的「已寫入」卡片說明附上合併筆數（`translation_written_delta`）。背景範圍快照不建立項目，而是以 `TranslationDB.count_untranslated_merged`（依類型、內容模組識別、原文 `GROUP BY` 的組數）估算合併後的筆數，範圍說明在預覽前寫「相同原文合併後約 N 筆要送 AI」，並用它限制本次送 AI 的估算筆數（`translation_scope_text` 的 `merged_groups`）；這個估算不分來源語系、也不扣除可沿用的條目。同範圍預覽後改用預覽的送 AI 筆數與涵蓋條目數（`translation_scope_text` 的 `preview_counts`）。
 

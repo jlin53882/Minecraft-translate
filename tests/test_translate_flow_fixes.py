@@ -798,3 +798,28 @@ def test_shared_loop_skips_quality_gate_for_source_fallback(monkeypatch):
     assert result.quality_rejected == 0
     assert result.source_fallback == 1
     assert added == []
+
+
+def test_shared_loop_skips_blank_items_and_translates_the_rest(monkeypatch):
+    _patch_loop(monkeypatch)
+    sent: list[list[str]] = []
+    delivered: list[str] = []
+
+    def fake_translate(batch, _total):
+        sent.append([it["path"] for it in batch])
+        return [{**it, "text": "譯"} for it in batch], "AUTO"
+
+    items = _items(3)
+    items[1]["text"] = items[1]["source_text"] = "  "
+    res = loop_mod.translate_items_with_cache_loop(
+        items,
+        translate_batch_smart=fake_translate,
+        batch_size_by_type={"kubejs": 10},
+        sleep_seconds_between_batches=0,
+        on_translated_item=lambda it: delivered.append(it["path"]),
+    )
+    assert sent == [["k0", "k2"]]  # 空白項目不送進引擎，其餘位置對應不變
+    assert delivered == ["k0", "k2"]
+    assert res.status == "DONE"
+    assert res.processed == res.total == 3
+    assert res.untranslated == 1

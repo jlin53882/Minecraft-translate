@@ -1068,6 +1068,21 @@ def _append_kubejs_lang_items(
             for key, value in values.items():
                 if not isinstance(key, str) or not isinstance(value, str):
                     continue
+                if not value.strip():
+                    # 空白值不是可翻譯條目（與 ClientEvents.lang 的處理一致）；
+                    # 留下精確來源，讓重掃描清除舊版曾寫入的空白條目 origin。
+                    result.stale_origins.append(
+                        EntryOrigin(
+                            pack_scope=scope,
+                            source_kind=KIND_KUBEJS_LANG,
+                            source_path=rel,
+                            selector=f"lang:{locale}:{key}",
+                            source_hash=digest,
+                            format_profile="lang-json",
+                            source_locale=normalize_source_locale(locale),
+                        )
+                    )
+                    continue
                 item = _make_item(
                     kind=KIND_KUBEJS_LANG,
                     # pack_scope 必須進入 entry 的模組身分；entry 的既有唯一鍵

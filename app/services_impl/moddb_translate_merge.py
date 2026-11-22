@@ -66,11 +66,18 @@ def select_merged_rows(
     *,
     check: Callable[[], None] | None = None,
 ) -> MergedSelection:
-    """依查詢順序分組；``limit`` > 0 時只保留前 ``limit`` 組（同組條目不受上限影響）。"""
+    """依查詢順序分組；``limit`` > 0 時只保留前 ``limit`` 組（同組條目不受上限影響）。
+
+    原文只有空白的條目不納入（沒有可送 AI 的內容）。
+    """
     groups: dict[tuple[str, str, str, str], list[EntryRow]] = {}
     for row in rows:
         if check is not None:
             check()
+        if not str(row[4] or "").strip():
+            # 只有空白的原文沒有可翻譯內容；資料庫只擋空字串，這裡擋空白字串，
+            # 否則引擎會把整批濾空而中止任務。
+            continue
         key = merge_key(row, source_locales.get(int(row[0])))
         members = groups.get(key)
         if members is not None:

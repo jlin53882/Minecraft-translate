@@ -434,3 +434,31 @@ def test_finish_guide_item_keeps_source_when_tags_or_links_change():
     bad["_shielded"].shields.clear()
     finish_guide_item(bad)
     assert bad["text"] == source and bad["_untranslated"] is True
+
+
+def test_placeholder_marker_does_not_match_ordinary_words():
+    from translation_tool.core.text_sniffer import is_placeholder_text
+
+    # 開發者標記
+    for text in ("TODO", "[TODO: photo goes here]", "todo: translate", "FIXME later"):
+        assert is_placeholder_text(text), text
+    # 葡萄牙文／西班牙文的 Todo（每個、全部）是一般字詞
+    for text in (
+        "Todo jogador deve poder interagir com este bloco?",
+        "Todo o poder de um dragão em um único giz",
+        "Todo",
+        "The todo list is on the board.",
+    ):
+        assert not is_placeholder_text(text), text
+
+
+def test_lang_slash_words_are_text_but_lowercase_paths_are_not():
+    from translation_tool.core.text_sniffer import lang_non_text_reason
+
+    for value in ("Rec/Ext", "Item/Marcador", "EXECUTAR/PARAR", "Inacabado/Obsoleto"):
+        assert lang_non_text_reason("info.m.mode", value) is None, value
+    assert lang_non_text_reason("misc.m.icon", "block/stone") == "code_value"
+    assert lang_non_text_reason("misc.m.icon", "textures/gui/x.png") == "code_value"
+    assert lang_non_text_reason("misc.m.icon", "minecraft:block/stone") == "code_value"
+    # 有顯示語意的鍵上，全小寫的 on/off 是文字
+    assert lang_non_text_reason("gui.m.button.tooltip", "on/off") is None

@@ -110,6 +110,7 @@ flowchart TD
 - 共用迴圈（`lm_translator_shared_loop.py`）的終態：
   - `ALL_KEYS_EXHAUSTED`：停止，訊息為「翻譯中斷」。
   - `FAILED`（含快取寫入失敗、checkpoint 寫入失敗、整批無任何成果）：停止並在畫面顯示一行摘要，堆疊寫入後台。
+  - 迴圈入口先以 `_split_blank_items` 排除 `text` 為空字串或只有空白的項目：不送引擎、不寫快取，計入 `processed`、`source_fallback` 與 `untranslated`，後台記一行略過筆數；因此全是空白原文的批次不會被判成「整批無任何成果」。缺少 `text` 欄位的項目不在此排除，仍依資料結構錯誤回報 `FAILED`。 每批 checkpoint 的狀態另帶 `resume_index`（原清單中尚未處理的起點），目錄翻譯器以它切出續跑清單；略過的空白項目夾在待翻譯項目之間時，`processed` 會大於已完成的前綴長度，不能當切片位置。
   - `CANCELLED`：訊息為「翻譯已取消，完成 x/y 筆」。
 - 損毀的 checkpoint 會被改名為 `.corrupt` 隔離，並記錄警告，視為沒有 checkpoint。
 - 後台 log 使用 `translation_tool/utils/log_unit.py` 的 `log_info`、`log_warning`、`log_error`。畫面日誌透過 `UI_LOG_HANDLER` 轉入任務 session。

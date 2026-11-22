@@ -449,6 +449,21 @@ def test_kubejs_lang_skips_blank_values_but_keeps_occurrence_alignment(tmp_path)
     assert result.stale_origins[0].selector.endswith("event.add[1]|item.demo.empty")
 
 
+def test_kubejs_lang_json_skips_blank_values(tmp_path):
+    lang = tmp_path / "kubejs" / "assets" / "demo" / "lang"
+    lang.mkdir(parents=True)
+    (lang / "en_us.json").write_text(
+        json.dumps({"item.demo.space": " ", "item.demo.machine": "Machine"}),
+        encoding="utf-8",
+    )
+
+    result = scan_pack_sources(tmp_path, "1.21.1")
+
+    items = [item for item in result.items if item.kind == "kubejs_lang"]
+    assert [item.key for item in items] == ["item.demo.machine"]
+    assert [o.selector for o in result.stale_origins] == ["lang:en_us:item.demo.space"]
+
+
 def test_skipping_zh_cn_keeps_later_kubejs_selector_occurrence(tmp_path):
     script = tmp_path / "kubejs" / "client_scripts" / "lang.js"
     script.parent.mkdir(parents=True)

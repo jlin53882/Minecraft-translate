@@ -558,3 +558,79 @@ class TestTranslateItemsWithCacheLoop:
 
         assert result.status == "DONE"
         mock_sleep.assert_called_once_with(4.0)
+
+
+class TestBlankItemsSkipped:
+    """空白原文不得送進引擎，也不得讓任務被誤判為失敗。"""
+
+    def test_blank_only_batch_does_not_fail_loop(self):
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        calls = []
+
+        def fake_translate(batch, total, *args, **kwargs):
+            calls.append(batch)
+            return [], "AUTO"
+
+        items = [{"path": "k", "text": "  ", "source_text": "  ", "cache_type": "lang"}]
+        result = translate_items_with_cache_loop(
+            items,
+            translate_batch_smart=fake_translate,
+            reload_cache=False,
+            sleep_seconds_between_batches=0,
+        )
+
+        assert calls == []
+        assert result.status == "DONE"
+        assert result.processed == result.total == 1
+        assert result.untranslated == 1
+
+    def test_blank_items_are_removed_from_mixed_batch(self):
+        from translation_tool.core.lm_translator_shared_loop import (
+            _split_blank_items,
+        )
+
+        keep = {"path": "a", "text": "Hi", "source_text": "Hi"}
+        translatable, blank, positions = _split_blank_items(
+            [{"path": "b", "text": ""}, keep, {"path": "c", "text": " \t"}]
+        )
+
+        assert translatable == [keep]
+        assert blank == 2
+        assert positions == [1]
+
+    def test_checkpoint_resume_index_is_position_in_original_list(self):
+        """[A, B, blank, C] 只完成 A 時，續跑起點是 B，而不是 processed(=2) 指到的 blank。"""
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        def item(path, text):
+            return {
+                "path": path,
+                "text": text,
+                "source_text": text,
+                "cache_type": "lang",
+            }
+
+        items = [item("a", "A"), item("b", "B"), item("x", " "), item("c", "C")]
+        states = []
+
+        def one_at_a_time(batch, total, *args, **kwargs):
+            return [{**batch[0], "text": "譯:" + batch[0]["text"]}], "AUTO"
+
+        translate_items_with_cache_loop(
+            items,
+            translate_batch_smart=one_at_a_time,
+            reload_cache=False,
+            sleep_seconds_between_batches=0,
+            on_batch_checkpoint=states.append,
+        )
+
+        assert states[0]["processed"] == 2
+        assert states[0]["resume_index"] == 1
+        assert items[states[0]["resume_index"]]["path"] == "b"
+        assert states[1]["resume_index"] == 3
+        assert states[-1]["resume_index"] == len(items)

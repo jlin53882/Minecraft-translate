@@ -512,3 +512,64 @@ def test_display_fields_are_text_even_when_they_look_like_identifiers():
     }
     for key, (value, expected) in pairs.items():
         assert entry_cleanup_category("patchouli", key, value) == expected, key
+
+
+def test_blank_source_without_translation_is_cleanup_candidate():
+    # 原文只有空白：沒有可翻譯內容，列為清理候選
+    assert entry_cleanup_category("kubejs_lang", "misc.space", " ") == "blank_source"
+    assert entry_cleanup_category("lang", "misc.nl", " \n") == "blank_source"
+    # 原文為空字串且沒有譯文：沒有任何可用內容，同樣列為候選
+    assert entry_cleanup_category("lang", "item.m.a", "") == "blank_source"
+    # 原文為空字串但已有譯文（只匯入翻譯 ZIP 的「原文未知」）：不能被清掉
+    assert entry_cleanup_category("lang", "item.m.a", "", "鋼") is None
+    # 空白原文但已有譯文：依譯文內容判斷，不歸為空白原文
+    assert entry_cleanup_category("lang", "item.m.a", " ", "鋼") is None
+    # 非語言檔類型沒有原文就沒有可判斷的內容
+    assert entry_cleanup_category("patchouli", "b/e.json#text", " ") is None
+
+
+def test_blank_source_entries_are_listed_by_cleanup_candidates(tmp_path):
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(
+        VERSION,
+        [
+            ScanItem("kubejs_lang", "m@pack", "misc.space", " "),
+            ScanItem("kubejs_lang", "m@pack", "misc.ok", "Hello"),
+            ScanItem("kubejs_lang", "m@pack", "misc.empty", ""),
+            # 只匯入翻譯 ZIP、已有譯文的「原文未知」不可被清掉
+            ScanItem("lang", "m", "item.m.unknown", "", zh_tw="鋼"),
+        ],
+    )
+    candidates, _protected = db.cleanup_candidates(VERSION)
+    assert [(c.key, c.category) for c in candidates] == [
+        ("misc.empty", "blank_source"),
+        ("misc.space", "blank_source"),
+    ]
+
+
+def test_cleanup_candidate_cache_is_invalidated_by_rules_version(tmp_path, monkeypatch):
+    from translation_tool.translation_db import cleanup as cleanup_mod
+
+    db = TranslationDB(tmp_path / "t.db")
+    db.ingest(VERSION, [ScanItem("kubejs_lang", "m@pack", "misc.space", " ")])
+    first, _ = db.cleanup_candidates(VERSION)
+    assert [c.category for c in first] == ["blank_source"]
+
+    # 資料沒變，但判定規則換了：沒有遞增規則版本就會讀到舊規則算出的快取清單
+    monkeypatch.setattr(cleanup_mod, "entry_cleanup_category", lambda *a, **k: None)
+    monkeypatch.setattr(cleanup_mod, "CLEANUP_RULES_VERSION", "cleanup-rules-test")
+    second, _ = db.cleanup_candidates(VERSION)
+    assert second == []
+
+
+def test_blank_source_is_not_a_strong_category():
+    from translation_tool.translation_db.cleanup import (
+        STRONG_CATEGORIES,
+        _EntryDetail,
+    )
+
+    # 原文空白但條目另有中文歷史或其他來源的譯文：只有人工來源才擋不住強類別，
+    # 所以 blank_source 走一般類別，任何來源含中文就預設不刪
+    assert "blank_source" not in STRONG_CATEGORIES
+    assert _EntryDetail(any_cjk=True).default_delete("blank_source") is False
+    assert _EntryDetail(any_cjk=False).default_delete("blank_source") is True
