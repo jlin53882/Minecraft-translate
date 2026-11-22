@@ -1522,31 +1522,77 @@ def test_sticky_codex_transient_error_propagates_and_stays_sticky(
         assert client._sticky_tasks
 
 
-def test_consume_stream_cancellable_closes_stalled_stream_on_cancel():
-    """串流卡住等下一段輸出時，取消會關閉連線並立即拋出取消。"""
+def test_consume_stream_cancellable_aborts_stalled_real_stream_on_cancel():
+    """送出標頭後就不再送資料的真實連線：取消要立即拋出取消，且讀取執行緒會結束。
+
+    用真實 socket 驗證：讀取中的執行緒持有串流 reader 的鎖，直接 close() 會被它卡住，
+    所以這裡不能用假的 response。
+    """
+    import socket
     import threading
     import time
 
     from translation_tool.utils.cancellation import TaskCancelled, cancel_scope
 
-    class _StalledResponse(_FakeStreamResponse):
-        def __init__(self):
-            super().__init__([])
-            self.unblock = threading.Event()
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    accepted = []
 
-        def iter_lines(self, decode_unicode=True):
-            self.unblock.wait(5)
-            raise requests.ConnectionError("closed")
+    def serve():
+        conn, _ = server.accept()
+        accepted.append(conn)  # 保留連線，避免對方關閉
+        conn.recv(65536)
+        conn.sendall(
+            b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+            b"Transfer-Encoding: chunked\r\n\r\n"
+        )
 
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        with requests.Session() as session:
+            session.trust_env = False  # 不經過環境的 proxy
+            response = session.post(
+                f"http://127.0.0.1:{server.getsockname()[1]}/",
+                stream=True,
+                timeout=(5, 60),
+            )
+            cancel = threading.Event()
+            threading.Timer(0.1, cancel.set).start()
+            started = time.monotonic()
+            with cancel_scope(cancel.is_set), pytest.raises(TaskCancelled):
+                client._consume_stream_cancellable(response, None, None)
+            assert time.monotonic() - started < 3
+
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline and any(
+                t.name == "cancellable-blocking" for t in threading.enumerate()
+            ):
+                time.sleep(0.02)
+            assert not any(
+                t.name == "cancellable-blocking" for t in threading.enumerate()
+            )
+    finally:
+        server.close()
+        for conn in accepted:
+            conn.close()
+
+
+def test_abort_stream_does_not_block_when_socket_unavailable():
+    """拿不到底層 socket 時仍不卡住呼叫端，close 在背景執行緒進行。"""
+    import threading
+    import time
+
+    closed = threading.Event()
+    release = threading.Event()
+
+    class _Response:
         def close(self):
-            self.closed = True
-            self.unblock.set()
+            release.wait(5)  # 模擬 close 被讀取中的執行緒卡住
+            closed.set()
 
-    response = _StalledResponse()
-    cancel = threading.Event()
-    threading.Timer(0.1, cancel.set).start()
     started = time.monotonic()
-    with cancel_scope(cancel.is_set), pytest.raises(TaskCancelled):
-        client._consume_stream_cancellable(response, None, None)
-    assert time.monotonic() - started < 2
-    assert response.closed is True
+    client._abort_stream(_Response())
+    assert time.monotonic() - started < 1
+    release.set()
+    assert closed.wait(2)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import socket
 import threading
 from collections import OrderedDict
 from typing import Any
@@ -23,7 +24,7 @@ from translation_tool.core.retry_after import parse_retry_after_header_value
 from translation_tool.utils.cancellation import run_cancellable_blocking
 from translation_tool.utils.log_unit import log_info, log_warning
 from translation_tool.utils.redaction import redact_text
-from translation_tool.utils.ui_mirror import current_task
+from translation_tool.utils.ui_mirror import current_task, run_in_context
 
 _RESPONSES_URL = "https://api.openai.com/v1/responses"
 _CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
@@ -415,11 +416,30 @@ def _consume_stream_cancellable(
     meta_out: dict | None,
     output_guard_tokens: int | None,
 ) -> str:
-    """讀取串流；任務取消時關閉連線並立即拋出取消，不等下一段輸出或 read timeout。"""
+    """讀取串流；任務取消時中斷連線並立即拋出取消，不等下一段輸出或 read timeout。"""
     return run_cancellable_blocking(
         lambda: _consume_stream(response, meta_out, output_guard_tokens),
-        on_abandon=lambda: response.close(),
+        on_abandon=lambda: _abort_stream(response),
     )
+
+
+def _abort_stream(response: requests.Response) -> None:
+    """中斷正被另一個執行緒讀取的串流，且不等那個讀取返回。
+
+    讀取中的執行緒持有串流 reader 的內部鎖，直接 ``response.close()`` 會等到讀取返回
+    （最久一個 read timeout）。所以先 shutdown 底層 socket 讓阻塞的讀取立刻失敗，
+    再把 ``close()`` 交給背景執行緒。
+    """
+    try:
+        sock = response.raw._connection.sock  # type: ignore[union-attr]
+        sock.shutdown(socket.SHUT_RDWR)
+    except (AttributeError, OSError):
+        log_warning("無法中斷串流 socket；讀取會一直等到 read timeout")
+    threading.Thread(
+        target=run_in_context(response.close),
+        name="abort-stream-close",
+        daemon=True,
+    ).start()
 
 
 def _call_oauth_route(

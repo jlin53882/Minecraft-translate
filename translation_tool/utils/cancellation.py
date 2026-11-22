@@ -82,8 +82,10 @@ def run_cancellable_blocking[T](
     沒有可取消的任務時直接在目前執行緒呼叫，行為與直接呼叫相同。
     在 ``cancel_scope`` 內時，呼叫改在 daemon 輔助執行緒執行，目前執行緒每隔
     ``poll_interval`` 檢查取消；一旦取消就放棄等待並拋出 ``TaskCancelled``：
-    ``on_abandon`` 在目前執行緒呼叫（例如關閉串流連線讓輔助執行緒提早結束），
-    放棄後才回來的結果交給 ``on_late_result``（例如關閉 HTTP 回應）。
+    ``on_abandon`` 在目前執行緒呼叫（例如中斷串流連線讓輔助執行緒提早結束），
+    此時輔助執行緒仍卡在呼叫內，所以 ``on_abandon`` 不可做會等待它的事（例如
+    直接關閉正被讀取的串流，會等到讀取返回）；放棄後才回來的結果交給
+    ``on_late_result``（例如關閉 HTTP 回應）。
     呼叫本身拋出的例外原樣在目前執行緒重新拋出。
     """
     if _cancel_check.get() is None:
@@ -101,15 +103,16 @@ def run_cancellable_blocking[T](
             box["error"] = exc
         else:
             box["value"] = value
-            with lock:
-                late = abandoned
-            if late and on_late_result is not None:
-                try:
-                    on_late_result(value)
-                except Exception:
-                    _logger.debug("關閉已放棄的阻塞呼叫結果失敗", exc_info=True)
-        finally:
+        # 「讀取是否已被放棄」與「標記完成」在同一把鎖內：呼叫端放棄時若看到尚未完成，
+        # 這裡一定會讀到 abandoned，晚到的結果才不會漏掉清理。
+        with lock:
+            late = abandoned
             done.set()
+        if late and "value" in box and on_late_result is not None:
+            try:
+                on_late_result(box["value"])  # type: ignore[arg-type]
+            except Exception:
+                _logger.debug("關閉已放棄的阻塞呼叫結果失敗", exc_info=True)
 
     threading.Thread(
         target=run_in_context(run), name="cancellable-blocking", daemon=True
