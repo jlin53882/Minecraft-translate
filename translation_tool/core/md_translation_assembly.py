@@ -37,6 +37,7 @@ from translation_tool.plugins.md.md_extract_qa import (
     detect_lang_segment,
     extract_blocks,
     iter_md_files,
+    make_content_hash,
     map_rel_lang_path,
     safe_relpath,
 )
@@ -123,9 +124,15 @@ def step3_inject(
     session=None,
     progress_base: float = 0.66,
     progress_span: float = 0.33,
+    pending_dir: str | None = None,
 ) -> dict[str, Any]:
-    """第三步：將翻譯 JSON 的內容注入回原始 Markdown，輸出翻譯完成的 Markdown 檔案。"""
+    """第三步：將翻譯 JSON 的內容注入回原始 Markdown，輸出翻譯完成的 Markdown 檔案。
+
+    給了 pending_dir 時會先驗證譯文仍對應現行待翻譯內容與原始檔（見 step3_inject_impl）。
+    """
     return step3_inject_impl(
+        pending_dir=pending_dir,
+        content_hash_fn=make_content_hash,
         input_dir=input_dir,
         json_dir=json_dir,
         final_dir=final_dir,
@@ -165,21 +172,21 @@ def _run_step3(
         log_info("[MD] [3/3] 已略過回寫")
         return {"skipped": True, "reason": "step_inject_disabled"}, False
 
-    translated_json_count = _count_md_pending_docs(translated_dir)
-    inject_json_root = translated_dir if translated_json_count > 0 else pending_dir
-    if _count_md_pending_docs(inject_json_root) == 0:
-        log_info("[MD] [3/3] 已略過回寫：沒有可用來源 JSON")
-        return {"skipped": True, "reason": "no_inject_source_json"}, False
+    # 只用譯後 JSON：沒有譯文時不能退回注入 pending（那是英文原文，寫出去等於把未翻譯當完成）
+    if _count_md_pending_docs(translated_dir) == 0:
+        log_info("[MD] [3/3] 已略過回寫：沒有可用的譯後 JSON（請先執行翻譯步驟）")
+        return {"skipped": True, "reason": "no_translated_json"}, False
 
     log_info("[MD] [3/3] 開始回寫 md 檔案")
     return (
         step3_inject(
             input_dir=str(base),
-            json_dir=str(inject_json_root),
+            json_dir=str(translated_dir),
             final_dir=str(final_dir),
             session=session,
             progress_base=0.66,
             progress_span=0.33,
+            pending_dir=str(pending_dir),
         ),
         False,
     )

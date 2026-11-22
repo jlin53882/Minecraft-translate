@@ -312,11 +312,15 @@ def apply_item_to_md_lines(md_lines: list[str], item: Item) -> None:
     #    之後若要更進階，可考慮「在該區塊最後一個文字行後插入」，但要非常小心 token/排版。
 
 
+_NON_BLOCK_JSON_PREFIXES = ("translation_map_md", "_md_dry_run")
+
+
 def iter_json_files(root: Path):
     """處理此 generator 並逐步回報進度（yield update dict）。"""
     for p in root.rglob("*.json"):
-        # translation_map_md.json 是翻譯記錄（list），不是逐檔的 md_pending_blocks
-        if p.is_file() and not p.name.startswith("translation_map_md"):
+        # 翻譯記錄（translation_map_md*）與 dry-run 預覽（_md_dry_run*）寫在同一個資料夾，
+        # 不是逐檔的 md_pending_blocks；混進來會被當成注入錯誤。
+        if p.is_file() and not p.name.startswith(_NON_BLOCK_JSON_PREFIXES):
             yield p
 
 

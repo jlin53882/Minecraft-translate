@@ -452,6 +452,8 @@ def translate_md_pending(
 
         out_payload = dict(data)
         out_payload["items"] = out_items
+        # Step 3 只注入「完整完成」的譯文；失敗／取消時仍會寫出保留原文的半成品供檢視
+        out_payload["step2_status"] = loop_status
         out_payload.setdefault("stats", {})
         out_payload["stats"].update(
             {
