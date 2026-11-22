@@ -10,6 +10,7 @@ from translation_tool.core.lm_translator_scan import (
     extract_items_parallel,
     scan_translatable_files,
 )
+from translation_tool.translation_db import TranslationDB, WriteBackBuffer
 from translation_tool.translation_db.identity import classify_sniffed_book_file
 from translation_tool.translation_db.resolver import item_identity
 from translation_tool.translation_db.scanner import ScanOptions, scan_jar
@@ -78,3 +79,85 @@ def test_other_language_or_non_json_is_not_identified(tmp_path: Path):
         classify_sniffed_book_file(tmp_path / "assets/demo/books/a/b.md", tmp_path)
         is None
     )
+
+
+_STD = json.dumps(
+    {
+        "name": "Book Name Here",
+        "landing_text": "A long landing text for the book.",
+        "pages": [{"type": "patchouli:text", "text": "Welcome to the demo manual."}],
+    }
+)
+
+
+def _item(path: Path) -> dict:
+    return {
+        "file": str(path),
+        "path": "name",
+        "source_text": "Hello World",
+        "cache_type": "patchouli",
+    }
+
+
+def test_scan_excluded_paths_are_not_identified(tmp_path: Path):
+    """掃描端不收的路徑（book.json、規格資料夾、lang）翻譯端也不算身分。"""
+    for rel in (
+        "assets/m/patchouli_books/b/book.json",
+        "assets/m/books/book.json",
+        "assets/m/textures/book/x.json",
+        "assets/m/models/foo/x.json",
+    ):
+        assert classify_sniffed_book_file(tmp_path / rel, tmp_path) is None, rel
+        assert item_identity(_item(tmp_path / rel), tmp_path) is None, rel
+
+
+def test_extracted_data_book_resolves_like_scan(tmp_path: Path):
+    """內嵌 jar 的 ``_extracted/data/.../patchouli_books/.../en_us/...`` 也要有身分。"""
+    path = tmp_path / "x_extracted/data/m/patchouli_books/b/en_us/entries/a.json"
+    assert item_identity(_item(path), tmp_path) == (
+        KIND_PATCHOULI,
+        "m",
+        "patchouli_books/b/entries/a.json#name",
+        "Hello World",
+    )
+
+
+def test_writeback_matches_scan_and_skips_book_json(tmp_path: Path):
+    """jar 內的 book.json 掃描不收；翻譯端寫回也不能多出 book.json 的條目。"""
+    members = {
+        "assets/m/patchouli_books/b/book.json": _STD,
+        "assets/m/patchouli_books/b/en_us/entries/a.json": _STD,
+    }
+    jar = tmp_path / "m.jar"
+    with zipfile.ZipFile(jar, "w") as zf:
+        for name, text in members.items():
+            zf.writestr(name, text)
+    scanned = {
+        (i.kind, i.mod_id, i.key)
+        for i in scan_jar(jar, ScanOptions(version="1.21.1")).items
+    }
+    assert scanned
+
+    root = tmp_path / "out"
+    for name, text in members.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    db = TranslationDB(tmp_path / "t.db")
+    try:
+        buffer = WriteBackBuffer(db, "1.21.1", root)
+        for item in _lm_items(root):
+            buffer.add(item, "譯文")
+        buffer.flush()
+        written = {tuple(r[:3]) for r in db._q("SELECT kind, mod_id, key FROM entry")}
+    finally:
+        db.close()
+    assert written == scanned
+    assert not any("book.json" in key for _k, _m, key in written)
+
+
+def test_lang_file_is_not_a_sniffed_book(tmp_path: Path):
+    """語言檔走 lang 身分，不會被當成內容辨識的手冊。"""
+    path = tmp_path / "assets/m/lang/en_us.json"
+    assert classify_sniffed_book_file(path, tmp_path) is None
+    assert item_identity(_item(path), tmp_path)[0] == "lang"
