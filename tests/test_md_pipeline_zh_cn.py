@@ -287,3 +287,41 @@ def test_convert_markdown_lines_keeps_line_count_and_code_fences():
         "~~~",
         "軟體",
     ]
+
+
+def test_alignment_ignores_bom_on_one_side_only():
+    en = "---\ntitle: A\n---\n\n# Head\n\nText.\n"
+    cn = "\ufeff---\ntitle: 甲\n---\n\n# 标题\n\n文字。\n"
+
+    assert check_zh_cn_alignment(en, cn) is None
+    assert check_zh_cn_alignment(en, cn.replace("---", "", 0).lstrip("\ufeff")) is None
+
+
+def test_legacy_zh_cn_pending_without_base_does_not_block_english_output(
+    tmp_path, fake_lm
+):
+    """舊版替 zh_cn 檔產生的 pending（沒有 base）不是底稿：英文的譯後檔照常寫出。"""
+    bad_cn = CN + "\n多出來的段落。\n"  # 不對齊：Step 1 退回英文
+    src, out = _layout(
+        tmp_path, {"pack/en_us/guide.md": EN, "pack/zh_cn/guide.md": bad_cn}
+    )
+    _run(src, out, step_inject=False)
+    pending = out / "md" / "待翻譯"
+    translated = out / "md" / "LM翻譯後"
+    legacy_pending = pending / "pack" / "zh_cn" / "guide.md.json"
+    legacy_pending.parent.mkdir(parents=True, exist_ok=True)
+    legacy_pending.write_text(
+        (pending / "pack" / "en_us" / "guide.md.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    legacy_done = translated / "pack" / "zh_cn" / "guide.md.json"
+    legacy_done.parent.mkdir(parents=True, exist_ok=True)
+    legacy_done.write_text(
+        (translated / "pack" / "en_us" / "guide.md.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    result = _run(src, out, step_extract=False, step_translate=False)
+
+    assert result["step3"]["written_files"] >= 1
+    assert "譯:First." in _final(out)

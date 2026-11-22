@@ -106,6 +106,7 @@ def _frontmatter_range(lines: list[str]) -> tuple[int, int] | None:
 
 def document_skeleton(md_text: str) -> list[tuple[Any, ...]]:
     """整份文件的結構骨架：翻譯過的文字被遮掉，剩下的結構與不可翻譯內容必須對得上。"""
+    md_text = md_text.lstrip("\ufeff")  # BOM 不算內容；只有一邊有時不能因此判為不對齊
     lines = md_text.splitlines()
     blocks = {b.start_line - 1: b for b in extract_blocks(md_text, "x", "all")}
     frontmatter = _frontmatter_range(lines)

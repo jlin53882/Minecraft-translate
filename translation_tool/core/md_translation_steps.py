@@ -553,11 +553,29 @@ def step3_inject_impl(
     return {**stats, "json_root": str(jroot), "final_root": str(out_done)}
 
 
+def _zh_cn_base_of(doc: dict[str, Any] | None, source_md: str) -> dict[str, Any] | None:
+    """譯後檔／pending 若是以 zh_cn 為底稿，回傳其 ``base``；否則 None（來源路徑也必須是 zh_cn）。"""
+    base = doc.get("base") if doc else None
+    if (
+        isinstance(base, dict)
+        and base.get("lang") == "zh_cn"
+        and is_zh_cn_source(source_md)
+    ):
+        return base
+    return None
+
+
 def _zh_cn_doc_is_current(source_md: str, pending_root: Path | None) -> bool:
-    """zh_cn 來源要有現行 pending 才算數；其他來源不受影響（沒給 pending 資料夾時一律算數）。"""
+    """zh_cn 來源要有現行的 zh_cn 底稿 pending 才算數；其他來源不受影響（沒給 pending 資料夾時一律算數）。
+
+    舊版會替 zh_cn 檔產生沒有 ``base`` 的 pending，那種不是底稿，不能讓它擋掉英文的譯後檔。
+    """
     if pending_root is None or not is_zh_cn_source(source_md):
         return True
-    return (pending_root / (source_md.replace("\\", "/") + ".json")).is_file()
+    doc = read_pending_schema_doc(
+        pending_root / (source_md.replace("\\", "/") + ".json")
+    )
+    return _zh_cn_base_of(doc, source_md) is not None
 
 
 def _plan_inject_skips(
@@ -653,8 +671,8 @@ def _inject_one_doc(
     md_lines = original_text.splitlines(keepends=False)
 
     doc = read_pending_schema_doc(jp)
-    base = doc.get("base") if doc else None
-    from_zh_cn = isinstance(base, dict) and base.get("lang") == "zh_cn"
+    base = _zh_cn_base_of(doc, source_md)
+    from_zh_cn = base is not None
     if from_zh_cn and base_is_stale(base, src_root, source_md):
         log_warning(
             f"[MD] 略過 {source_md}：{_REASON_TEXT[REASON_STALE_SOURCE]}（{jp.name}）"
