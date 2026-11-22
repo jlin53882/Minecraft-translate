@@ -249,9 +249,24 @@ _LANG_DISPLAY_ROOTS = frozenset(
         "subtitles",
     }
 )
-_LANG_STRUCTURAL_VALUE = re.compile(
-    r"^(?:#?[a-z0-9_.-]+:[a-z0-9_./-]+|[\w.-]+(?:/[\w.-]+)+)$", re.IGNORECASE
-)
+# 資源 ID（``namespace:path``，不分大小寫）與資源路徑（``block/stone``）。
+# Minecraft 資源路徑依規格只能是小寫 ASCII，所以 ``Rec/Ext``、``EXECUTAR/PARAR``
+# 這種有大寫的「字詞/字詞」是玩家看得到的文字，不是路徑。
+_LANG_RESOURCE_ID = re.compile(r"(?i:#?[a-z0-9_.-]+:[a-z0-9_./-]+)")
+_LANG_RESOURCE_PATH = re.compile(r"[a-z0-9_.-]+(?:/[a-z0-9_.-]+)+")
+
+
+def _is_lang_structural_value(key: str, text: str) -> bool:
+    """語言檔的值是資源 ID 或資源路徑（不是文字）。
+
+    全小寫的 ``on/off`` 形狀上無法和路徑區分，所以路徑形狀和常數形狀一樣，
+    只在鍵沒有顯示語意（``is_lang_display_key``）時才採信。
+    """
+    if _LANG_RESOURCE_ID.fullmatch(text):
+        return True
+    return bool(_LANG_RESOURCE_PATH.fullmatch(text)) and not is_lang_display_key(key)
+
+
 _LANG_NUMBER_VALUE = re.compile(r"^[-+]?\d+(?:\.\d+)?[a-zA-Z]?$")
 
 
@@ -289,7 +304,7 @@ def lang_non_text_reason(key: str, value: str) -> str | None:
         text
     ):
         return "code_value"
-    if _URL_VALUE.fullmatch(text) or _LANG_STRUCTURAL_VALUE.fullmatch(text):
+    if _URL_VALUE.fullmatch(text) or _is_lang_structural_value(key, text):
         return "code_value"
     if _LANG_NUMBER_VALUE.fullmatch(text) or _TRANSLATION_KEY.fullmatch(text):
         return "code_value"
@@ -400,14 +415,20 @@ _WHITESPACE = re.compile("[ \t\r\n]")
 _ASCII_LETTER = re.compile(r"[A-Za-z]")
 
 
+# 大寫的 TODO／TBD／FIXME 是開發者標記；其他大小寫要後面緊接冒號才算。
+# ``Todo jogador``（葡萄牙文「每個玩家」）、西班牙文 ``Todo`` 是一般字詞，不能當佔位字。
+_PLACEHOLDER_MARKER = re.compile(r"^\W*(?:TODO|TBD|FIXME)\b")
 _PLACEHOLDER_TEXT = re.compile(
-    r"^\W*(?:(?:todo|tbd|fixme)\b|lorem\s+ipsum)", re.IGNORECASE
+    r"^\W*(?:(?:todo|tbd|fixme)\s*:|lorem\s+ipsum)", re.IGNORECASE
 )
 
 
 def is_placeholder_text(text: str) -> bool:
     """開發者留下的佔位字（``TODO``、``[TODO: … goes here]``、Lorem ipsum）。"""
-    return _PLACEHOLDER_TEXT.search(text) is not None
+    return (
+        _PLACEHOLDER_MARKER.search(text) is not None
+        or _PLACEHOLDER_TEXT.search(text) is not None
+    )
 
 
 _FORMAT_TOKEN = re.compile(

@@ -558,3 +558,44 @@ class TestTranslateItemsWithCacheLoop:
 
         assert result.status == "DONE"
         mock_sleep.assert_called_once_with(4.0)
+
+
+class TestBlankItemsSkipped:
+    """空白原文不得送進引擎，也不得讓任務被誤判為失敗。"""
+
+    def test_blank_only_batch_does_not_fail_loop(self):
+        from translation_tool.core.lm_translator_shared_loop import (
+            translate_items_with_cache_loop,
+        )
+
+        calls = []
+
+        def fake_translate(batch, total, *args, **kwargs):
+            calls.append(batch)
+            return [], "AUTO"
+
+        items = [{"path": "k", "text": "  ", "source_text": "  ", "cache_type": "lang"}]
+        result = translate_items_with_cache_loop(
+            items,
+            translate_batch_smart=fake_translate,
+            reload_cache=False,
+            sleep_seconds_between_batches=0,
+        )
+
+        assert calls == []
+        assert result.status == "DONE"
+        assert result.processed == result.total == 1
+        assert result.untranslated == 1
+
+    def test_blank_items_are_removed_from_mixed_batch(self):
+        from translation_tool.core.lm_translator_shared_loop import (
+            _split_blank_items,
+        )
+
+        keep = {"path": "a", "text": "Hi", "source_text": "Hi"}
+        translatable, blank = _split_blank_items(
+            [{"path": "b", "text": ""}, keep, {"path": "c", "text": " \t"}]
+        )
+
+        assert translatable == [keep]
+        assert blank == 2

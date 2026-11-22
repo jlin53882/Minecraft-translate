@@ -99,11 +99,15 @@ CLEANUP_CATEGORIES: dict[str, str] = {
     "no_letters": "沒有文字的字串（只有符號或數字，不含格式碼）",
     "field_name": "內容就是欄位名稱（佔位字）",
     "meta_key": "語言檔的翻譯者備註、語言代碼",
+    "blank_source": "語言檔裡原文為空白、也沒有譯文的條目",
     "code_value": "語言檔裡的色碼、識別字、常數或網址",
 }
 # 看結構就能確定不是文字的類別：已有 jar／第三方中文譯文時仍預設刪除；
 # 其他類別是看內容形狀推測的，只要有中文譯文或中文歷史就預設不刪，要人工確認
 STRONG_CATEGORIES = frozenset({"multiblock", "meta_key", "placeholder", "lang_key"})
+# 清理候選依資料世代快取在資料庫內；判定規則（``entry_cleanup_category`` 與其使用的
+# ``text_sniffer`` 規則）改變時必須遞增，否則資料沒變就會一直讀到舊規則算出的清單。
+CLEANUP_RULES_VERSION = "cleanup-rules-v2"
 _LANGUAGE_KINDS = (KIND_LANG, KIND_KUBEJS_LANG)
 _CLEANUP_KINDS = (KIND_GUIDE, KIND_PATCHOULI, KIND_ADVANCEMENT, *_LANGUAGE_KINDS)
 
@@ -122,11 +126,9 @@ def entry_cleanup_category(
     語言檔條目沒有原文（翻譯 ZIP 先建立的）時，改用鍵與 ``zh_text``（目前譯文）判斷。
     """
     if not en_us or not en_us.strip():
-        if kind not in _LANGUAGE_KINDS:
-            return None  # 其他類型沒有原文就沒有可判斷的內容
-        en_us = zh_text
-        if not en_us.strip():
-            return "meta_key" if lang_non_text_reason(key, "") == "meta_key" else None
+        verdict, en_us = _blank_source_verdict(kind, key, en_us, zh_text)
+        if verdict is not None or not en_us:
+            return verdict
     if kind == KIND_GUIDE:
         return non_text_reason(en_us)
     if kind == KIND_PATCHOULI:
@@ -155,6 +157,25 @@ def entry_cleanup_category(
             if verdict != "text":
                 return "lang_key" if verdict == "lang_key" else "not_text"
     return None
+
+
+def _blank_source_verdict(
+    kind: str, key: str, en_us: str, zh_text: str
+) -> tuple[str | None, str]:
+    """原文為空或只有空白的條目：回傳 ``(直接結論, 後續要判斷的文字)``。
+
+    直接結論非 ``None`` 或後續文字為空時，呼叫端不再做內容判斷。
+    語言檔以目前譯文代替原文判斷（只匯入翻譯 ZIP 的「原文未知」條目有譯文，不會被清）；
+    原文與譯文都是空的語言檔條目沒有任何可用內容，歸為 ``blank_source``。
+    其他類型沒有原文就沒有可判斷的內容。
+    """
+    if kind not in _LANGUAGE_KINDS:
+        return None, ""
+    if zh_text.strip():
+        return None, zh_text
+    if lang_non_text_reason(key, "") == "meta_key":
+        return "meta_key", ""
+    return "blank_source", ""
 
 
 def _patchouli_semantic_category(
@@ -583,7 +604,7 @@ class CleanupMixin:
         只有真的重掃時才回報掃描進度（命中快取沒有工作可報）。
         """
         rows = self._cached(
-            f"cleanup_flagged:{PATCHOULI_CLASSIFIER_VERSION}:{version}",
+            f"cleanup_flagged:{CLEANUP_RULES_VERSION}:{PATCHOULI_CLASSIFIER_VERSION}:{version}",
             lambda: self._scan_flagged(version, progress),
         )
         # 快取以 JSON 保存，tuple 欄位讀回時是 list

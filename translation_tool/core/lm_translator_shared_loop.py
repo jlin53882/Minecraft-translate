@@ -126,6 +126,27 @@ def _is_valid_result(it: Any) -> bool:
     )
 
 
+def _split_blank_items(
+    items: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int]:
+    """分出可翻譯項目與「文字為空或只有空白」的項目數。
+
+    空白判斷與引擎入口 ``_validate_batch_items`` 一致。缺少 ``text`` 欄位的項目是
+    資料結構錯誤，不在這裡吞掉，交給後續流程回報失敗。
+    """
+    translatable: list[dict[str, Any]] = []
+    blank = 0
+    for item in items:
+        text = item.get("text") if isinstance(item, dict) else None
+        if isinstance(text, str) and not text.strip():
+            blank += 1
+        else:
+            translatable.append(item)
+    if blank:
+        log_info(f"[SharedLM] 略過 {blank} 筆沒有可翻譯內容（空白原文）的項目")
+    return translatable, blank
+
+
 def _quality_issues_for_cache(it: dict[str, Any]) -> list[str]:
     """Run the shared quality gate before any plugin can write translation cache."""
     return cache_quality_issues(it, str(it.get("text") or ""))
@@ -218,17 +239,19 @@ def translate_items_with_cache_loop(
         if isinstance(total_for_smart, int) and total_for_smart > 0
         else len(items_to_translate)
     )
-    remaining: list[dict[str, Any]] = list(items_to_translate)
-    processed = 0
+    # 沒有可翻譯內容（空白原文）的項目不能送進引擎：引擎會悄悄濾掉它們，
+    # 造成結果與批次位置錯位，或整批被濾空而被誤判為失敗。這裡先排除並計為未翻譯。
+    remaining, blank_skipped = _split_blank_items(items_to_translate)
+    processed = blank_skipped
     completed_calls = 0
     last_error: str | None = None
     exhausted = False
 
     ai_response = 0
     cache_written_count = 0
-    source_fallback = 0
+    source_fallback = blank_skipped
     quality_rejected = 0
-    untranslated = 0
+    untranslated = blank_skipped
     max_tokens_items = 0
     contract_failed_items = 0
     oversized_items = 0

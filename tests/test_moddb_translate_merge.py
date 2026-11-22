@@ -328,3 +328,14 @@ def test_kpi_deltas_mention_merge_only_when_it_happened():
     )
     assert translation_written_delta(4, 0) == "AI 回傳 4 筆"
     assert translation_written_delta(4, 2) == "AI 回傳 4 筆（相同原文合併 2 筆）"
+
+
+def test_select_merged_rows_skips_whitespace_only_source():
+    rows = [
+        (1, KIND_LANG, "foo", "a", "  \n"),
+        (2, KIND_LANG, "foo", "b", "Gear"),
+        (3, KIND_LANG, "foo", "c", " "),
+    ]
+    selection = select_merged_rows(rows, {}, limit=0)
+    assert [row[0] for row in selection.rows] == [2]
+    assert selection.entry_count == 1

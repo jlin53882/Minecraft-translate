@@ -20,7 +20,9 @@ items
 它透過既有的
 `translate_items_with_cache_loop()` 維持以下契約：
 
-- 保留輸入順序與 batch prefix slicing。
+- 保留輸入順序與 batch prefix slicing。引擎入口 `_validate_batch_items` 會丟棄空白
+  文字的項目，會破壞「第 i 筆結果對應 `batch[i]`」的位置契約，所以 loop 入口先用
+  `_split_blank_items` 排除這類項目（計為未翻譯），不讓它們進入批次。
 - `prepare_translator_items()` 統一 cache rule、hit validation 與 miss list；plugin
   只提供格式特定的 `is_valid_hit` / cache side effect adapter。
 - 每個 batch 完成後才更新 cache、輸出、checkpoint 與 progress。
