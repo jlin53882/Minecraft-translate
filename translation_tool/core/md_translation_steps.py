@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,10 @@ from translation_tool.core.md_pipeline_files import (
     remove_stale_pending,
     verify_translated_doc,
     write_json_atomic,
+)
+from translation_tool.core.md_pipeline_pairing import (
+    plan_sources,
+    select_untranslated_blocks,
 )
 from translation_tool.utils.log_unit import log_info, log_warning
 
@@ -62,6 +68,62 @@ def _finish_pending_dir(
             removed,
         )
     return removed
+
+
+@dataclass
+class _PairingReport:
+    """Step 1 配對結果的統計，寫進 manifest 與回傳值。"""
+
+    conflicts: list[list[str]] = field(default_factory=list)
+    paired_docs: int = 0
+    ambiguous_kept: int = 0
+    structure_mismatch: list[str] = field(default_factory=list)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "paired_docs": self.paired_docs,
+            "output_conflicts": self.conflicts,
+            "ambiguous_kept": self.ambiguous_kept,
+            "structure_mismatch": self.structure_mismatch,
+        }
+
+
+def _read_text_lenient(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _items_for_paired_zh(
+    rel_zh: str,
+    rel_en: str,
+    zh_text: str,
+    *,
+    in_root: Path,
+    lang_mode: str,
+    extract_blocks_fn,
+    report: _PairingReport,
+) -> list[Any]:
+    """成對的 zh_tw 檔以自己為底稿；non_cjk_only 時只挑出仍與英文原文相同的區塊。"""
+    if lang_mode != "non_cjk_only":
+        return extract_blocks_fn(zh_text, rel_zh, lang_mode=lang_mode)
+    en_items = extract_blocks_fn(
+        _read_text_lenient(in_root / rel_en), rel_en, lang_mode="all"
+    )
+    zh_items = extract_blocks_fn(zh_text, rel_zh, lang_mode="all")
+    if len(en_items) != len(zh_items):
+        report.structure_mismatch.append(rel_zh)
+        log_warning(
+            "[MD-抽取] 英文與繁中的區塊數不同（en=%s zh=%s），只翻繁中裡仍是英文原文的區塊，"
+            "英文新增的段落不會自動補進去，請人工比對：%s",
+            len(en_items),
+            len(zh_items),
+            rel_zh,
+        )
+    pending, ambiguous = select_untranslated_blocks(en_items, zh_items)
+    report.ambiguous_kept += ambiguous
+    return pending
 
 
 def step1_extract_impl(
@@ -140,9 +202,24 @@ def step1_extract_impl(
     dup_blocks = 0
     unique_blocks = 0
 
+    plan = plan_sources([safe_relpath_fn(p, in_root) for p in md_files])
+    report = _PairingReport(conflicts=plan.conflicts)
+    for group in plan.conflicts:
+        log_warning_fn(
+            "[MD-抽取] 這些檔案會寫到同一個輸出，全部略過（請只留一份）：%s",
+            " | ".join(group),
+        )
+
     total_files = len(md_files)
     for i, md_path in enumerate(md_files, start=1):
         rel_md = safe_relpath_fn(md_path, in_root)
+        if rel_md in plan.skip:
+            if plan.skip[rel_md] == "paired_en":
+                report.paired_docs += 1
+            progress_fn(
+                session, progress_base + progress_span * (i / max(1, total_files))
+            )
+            continue
         try:
             md_text = md_path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -150,34 +227,16 @@ def step1_extract_impl(
 
         items = extract_blocks_fn(md_text, rel_md, lang_mode=lang_mode)
 
-        if lang_mode == "non_cjk_only":
-            rel_parts = rel_md.replace("\\", "/").split("/")
-            lang = detect_lang_segment_fn(rel_parts)
-            if lang == "en_us":
-                rel_zh = map_rel_lang_path_fn(
-                    rel_md, src_lang="en_us", dst_lang="zh_tw"
-                )
-                zh_path = in_root / rel_zh
-                if zh_path.exists() and zh_path.is_file():
-                    try:
-                        zh_text = zh_path.read_text(encoding="utf-8")
-                    except UnicodeDecodeError:
-                        zh_text = zh_path.read_text(encoding="utf-8", errors="replace")
-                    zh_items = extract_blocks_fn(zh_text, rel_zh, lang_mode="all")
-                    if len(items) == len(zh_items):
-                        filtered = []
-                        for en_it, zh_it in zip(items, zh_items):
-                            if contains_cjk_fn(zh_it.text):
-                                continue
-                            filtered.append(en_it)
-                        items = filtered
-                    else:
-                        log_warning_fn(
-                            "[MD-抽取] 區塊數不一致，保留全部：%s (en=%s zh=%s)",
-                            rel_md,
-                            len(items),
-                            len(zh_items),
-                        )
+        if rel_md in plan.pair_en:
+            items = _items_for_paired_zh(
+                rel_md,
+                plan.pair_en[rel_md],
+                md_text,
+                in_root=in_root,
+                lang_mode=lang_mode,
+                extract_blocks_fn=extract_blocks_fn,
+                report=report,
+            )
 
         total_blocks += len(items)
         for it in items:
@@ -210,6 +269,7 @@ def step1_extract_impl(
         "total_blocks": total_blocks,
         "unique_blocks": unique_blocks,
         "duplicate_blocks": dup_blocks,
+        **report.as_dict(),
     }
     stale_removed = _finish_pending_dir(
         pending_root, manifest, written_paths, remove_stale=remove_stale
@@ -226,6 +286,7 @@ def step1_extract_impl(
         "duplicate_blocks": dup_blocks,
         "stale_removed": stale_removed,
         "manifest_path": str(manifest_path),
+        **report.as_dict(),
     }
 
 
@@ -334,7 +395,9 @@ def step3_inject_impl(
         "skipped_incomplete": 0,
         "skipped_pending_mismatch": 0,
         "skipped_stale_source": 0,
+        "skipped_output_conflict": 0,
     }
+    written_outputs: set[str] = set()
     outcome_counter = {
         "written": "written_files",
         "error": "error_files",
@@ -344,6 +407,7 @@ def step3_inject_impl(
         REASON_INCOMPLETE: "skipped_incomplete",
         REASON_PENDING_MISMATCH: "skipped_pending_mismatch",
         REASON_STALE_SOURCE: "skipped_stale_source",
+        "output_conflict": "skipped_output_conflict",
     }
     json_files = list(iter_json_files_fn(jroot))
     total = len(json_files)
@@ -357,6 +421,7 @@ def step3_inject_impl(
             load_items_from_json_fn=load_items_from_json_fn,
             apply_item_to_md_lines_fn=apply_item_to_md_lines_fn,
             map_lang_fn=map_lang_in_rel_path_allow_zh_fn,
+            written_outputs=written_outputs,
         )
         stats[outcome_counter[outcome]] += 1
         if outcome != "written":
@@ -382,6 +447,7 @@ def _inject_one_doc(
     load_items_from_json_fn,
     apply_item_to_md_lines_fn,
     map_lang_fn,
+    written_outputs: set[str],
 ) -> str:
     """處理單一譯後 JSON，回傳結果代碼（written／error／各種略過原因）。"""
     try:
@@ -425,11 +491,19 @@ def _inject_one_doc(
     if not is_safe_relative_path(out_rel) or not is_inside(out_done, out_path):
         log_warning(f"[MD] 略過超出輸出資料夾的輸出路徑：{out_rel!r} ({jp})")
         return "unsafe_path"
+    # 同一輪內已有別的來源寫過這個輸出（Windows 不分大小寫）：不覆蓋，留給使用者處理
+    out_key = os.path.normcase(os.path.abspath(out_path))
+    if out_key in written_outputs:
+        log_warning(
+            f"[MD] 略過 {source_md}：輸出 {out_rel} 已由另一個來源寫入（{jp.name}）"
+        )
+        return "output_conflict"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ends_with_nl = original_text.endswith("\n")
     out_path.write_text(
         "\n".join(md_lines) + ("\n" if ends_with_nl else ""), encoding="utf-8"
     )
+    written_outputs.add(out_key)
     return "written"
 
 
