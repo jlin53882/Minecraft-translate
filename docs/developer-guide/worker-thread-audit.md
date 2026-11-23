@@ -94,7 +94,6 @@ Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecyc
 | `PipelineActions._step_merge` | composite outer owner | `finally`；內部以 `finish_session=False` 呼叫 |
 | `PipelineActions._step_translate` | composite outer owner | `finally`；內部以 `manage_session=False` 呼叫 |
 | `PipelineActions._step_bundle` | composite outer owner | `finally`；內部 `bundle(manage_session=False)` |
-| `_task_runner.run_callable_task`（Markdown） | single owner | `finally` |
 | `MergeView`、翻譯頁（Markdown）的 `session.start()` | UI owner（View 啟動，service 結案；worker 例外邊界補 `set_error()`→`finish()`） | service；View 例外邊界 |
 | `LMView` | 不呼叫 `session.start()`（由 `lm_service` 負責；重複 start 會清掉已寫入的日誌） | `lm_service` |
 

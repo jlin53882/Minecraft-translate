@@ -43,7 +43,6 @@ Ruff 報出的 BLE001、S110、S112、print 與 legacy comment 不等於同一�
 | UI 日誌（`UI_LOG_HANDLER` → `TaskSession`） | 已遮蔽 | handler 內遮蔽；formatter 也是 `RedactingFormatter` | `test_ui_log_handler_masks_before_reaching_the_session` |
 | `TaskSession.add_log()`（不經 logger 的直接呼叫） | 已遮蔽 | 總出口處遮蔽 | `test_task_session_add_log_masks_direct_calls` |
 | 提示訊息 `show_snack()` | 已遮蔽 | 總出口處遮蔽 | `test_snackbar_message_is_masked` |
-| 錯誤記錄 `errors_*.log` | 已遮蔽 | 訊息、context、traceback 寫入前遮蔽 | `test_error_log_file_is_masked` |
 | 金鑰格式錯誤訊息（`validate_api_keys*`） | 已遮蔽 | 輸出時改用 `mask_key()`，不輸出完整原始金鑰 | `test_api_key_redaction_in_errors.py` |
 | 儲存設定失敗的 traceback | 已遮蔽 | 經 `redact_text()` 後寫入 log | 同上 |
 | LM API 的 HTTP 錯誤內容 | 已遮蔽 | 擲出前 `redact_text()` | `test_pr45_safety_and_config_contracts.py` |
@@ -90,7 +89,7 @@ Ruff 報出的 BLE001、S110、S112、print 與 legacy comment 不等於同一�
 | 項目 | 分類 | 處理 |
 |---|---|---|
 | `get_current_key_index()`、`reset_key_index()` | 舊 API，只剩測試呼叫 | 保留 |
-| `app/services.py`、`services_impl/*`、`lang_merge_content`、`md_translation_assembly`、`lm_translator_shared`、`jar_processor` 的「相容 façade／re-export」 | 刻意的相容層 | 保留；移除需同時遷移呼叫端，不在此範圍 |
+| `app/services.py`、`services_impl/*`、`lang_merge_content`、`lm_translator_shared`、`jar_processor` 的「相容 façade／re-export」 | 刻意的相容層 | 保留；移除需同時遷移呼叫端，不在此範圍 |
 | `extractor.target_language`、`translator.cjk_ratio_threshold` | 歷史相容欄位 | 保留讀取相容；設定頁只以說明文字標示（`app/views/config/settings_schema.py`），schema 內標示原因 |
 | 其餘「相容舊測試／舊呼叫」的註解（`cache_view`、`config_actions`、`task_session` 等） | 仍有測試或呼叫端依賴 | 保留 |
 

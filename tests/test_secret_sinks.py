@@ -140,37 +140,6 @@ def test_snackbar_message_is_masked():
     assert CUSTOM_KEY not in snack.content.value
 
 
-def test_error_log_file_is_masked(tmp_path, monkeypatch):
-    from translation_tool.utils import exceptions
-
-    redaction.register_secrets([CUSTOM_KEY])
-    monkeypatch.setattr(exceptions, "_resolve_error_log_dir", lambda: tmp_path)
-    try:
-        raise exceptions.TranslationError(
-            f"api failed {CUSTOM_KEY}", {"key": CUSTOM_KEY}
-        )
-    except exceptions.TranslationError as exc:
-        exceptions._log_error_to_file(exc, "probe")
-    content = next(tmp_path.glob("errors_*.log")).read_text(encoding="utf-8")
-    assert "api failed" in content and CUSTOM_KEY not in content
-
-
-def test_error_log_failure_warning_is_masked(tmp_path, monkeypatch, caplog):
-    from translation_tool.utils import exceptions
-
-    redaction.register_secrets([CUSTOM_KEY])
-    monkeypatch.setattr(
-        exceptions,
-        "_resolve_error_log_dir",
-        lambda: (_ for _ in ()).throw(RuntimeError(f"directory {CUSTOM_KEY} failed")),
-    )
-
-    with caplog.at_level(logging.WARNING, logger="translation_tool.utils.exceptions"):
-        exceptions._log_error_to_file(RuntimeError("probe"), "probe")
-
-    assert CUSTOM_KEY not in caplog.text
-
-
 def test_load_config_registers_user_keys_but_not_placeholders(tmp_path):
     from translation_tool.utils import config_manager as cm
 

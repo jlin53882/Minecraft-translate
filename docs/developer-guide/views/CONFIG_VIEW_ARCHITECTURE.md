@@ -165,6 +165,6 @@ JSON 損毀的結果以 `(mtime_ns, size)` 快取，同一個壞檔只解析、�
 ## 設定鍵的 runtime 接線狀態
 
 - `extractor.skip_zh_cn_extract`：設定頁提供預設值；ExtractorView 建立時載入，提取/預覽仍保留每次操作的手動覆寫，最後由 regex/generator 實際套用。
-- `translator.custom_translator_folder`：設定頁提供 round-trip；FTB translator 每次任務讀取並傳給 `load_custom_translations`。
+- `translator.custom_translator_folder`：設定頁提供 round-trip；目前沒有流程讀取它（原本的 FTB 三步驟流程已不存在）。
 - `logging.log_format`：設定頁提供 round-trip；`update_logger_config` 的 formatter 在下一次流水線啟動時套用。
 - `extractor.target_language`、`translator.cjk_ratio_threshold`：仍由三層合併保留讀取，但目前沒有可證明的 runtime caller 與規則；列為 `DEPRECATED_CONFIG_KEYS`（`translation_tool/utils/config_manager.py`），不在 UI 提供可調整控制項。

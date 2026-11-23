@@ -379,13 +379,6 @@ class SmartReviewRunPlanningMixin:
         if hasattr(self, "estimate_text"):
             self._update_estimate_text(update=False)
 
-    def _invalidate_plan_preview(self) -> None:
-        """保留舊呼叫端名稱，僅使 plan preview 失效。"""
-        self._invalidate_scope_queries(
-            candidate_scope_changed=False,
-            reason="校對規劃",
-        )
-
     def _query_changed(self, _e=None) -> None:
         """搜尋條件變更時先撤銷舊規劃，停筆後才重新計算（輸入中沒有畫面變更）。"""
         suppress_auto_update()

@@ -1,13 +1,11 @@
 """translation_tool/core/ftb_translator_export.py 模組。
 
-用途：FTB Quests 翻譯結果的匯出功能。
+用途：解析 FTB Quests 設定檔根目錄（``config/ftbquests/quests``）。
 維護注意：本檔案的函式 docstring 用於維護說明，不代表行為變更。
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Callable
 from pathlib import Path
 
 
@@ -36,46 +34,3 @@ def resolve_ftbquests_quests_root_impl(base_dir: str) -> str:
 
     candidates.sort(key=lambda p: (len(p.parts), str(p)))
     return str(candidates[0])
-
-
-def export_ftbquests_raw_json_impl(
-    base_dir: str,
-    *,
-    output_dir: str | None = None,
-    resolve_ftbquests_quests_root_fn: Callable[[str], str],
-    process_quest_folder_fn: Callable[[str], dict],
-    orjson_dump_file_fn: Callable[[object, object], None],
-    log_info_fn: Callable[..., None],
-) -> dict:
-    """抽取 FTB raw JSON 到 Output/ftbquests/raw/...。"""
-    quests_root = resolve_ftbquests_quests_root_fn(base_dir)
-    extracted = process_quest_folder_fn(quests_root)
-
-    out_root = output_dir or os.path.join(base_dir, "Output")
-    raw_root = os.path.join(
-        out_root, "ftbquests", "raw", "config", "ftbquests", "quests", "lang"
-    )
-    os.makedirs(raw_root, exist_ok=True)
-
-    written_langs: list[str] = []
-    for lang, data in extracted.items():
-        if not data.get("lang") and not data.get("quests"):
-            continue
-
-        lang_dir = os.path.join(raw_root, lang)
-        os.makedirs(lang_dir, exist_ok=True)
-
-        with open(os.path.join(lang_dir, "ftb_lang.json"), "wb") as f:
-            orjson_dump_file_fn(data.get("lang", {}), f)
-        with open(os.path.join(lang_dir, "ftb_quests.json"), "wb") as f:
-            orjson_dump_file_fn(data.get("quests", {}), f)
-
-        written_langs.append(lang)
-
-    log_info_fn("FTB raw 輸出語言：%s", written_langs)
-    return {
-        "raw_root": raw_root,
-        "out_root": out_root,
-        "quests_root": quests_root,
-        "written_langs": written_langs,
-    }

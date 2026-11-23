@@ -85,7 +85,7 @@ JAR 提取頁的 Lang、Book、Lang + Book 三種模式也必須使用 `build_pi
 ### 工作台（workbench_view）
 ```
 [填路徑] input_path_text / output_path_text（kit.text_field，旁邊的 kit.pick_button 以 file_picker 選資料夾）
-  → 「流水線步驟」卡片四列（`_step_row`，各有「執行」按鈕）：抽取資源 / 語系比對合併 / 啟動翻譯 / 打包資源
+  → 「流水線步驟」卡片四列（`build_pipeline_step_row`，各有「執行」按鈕）：抽取資源 / 語系比對合併 / 啟動翻譯 / 打包資源
   → 各 _on_*_click()：驗證路徑非空 → 開啟對應 dialog → 回呼到 _run_*()（_run_extraction / _run_merge / _run_translate / _run_bundle）
   → _start_single_step()
 ```
@@ -209,7 +209,7 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 
 ## 維護注意
 
-1. `_set_buttons_disabled` 只停用 `_run_buttons`（`_step_row` 建立的「執行」按鈕）與 `_one_click_button`；新增會觸發任務的按鈕要自行加入其中。
+1. `_set_buttons_disabled` 只停用 `_run_buttons`（`build_pipeline_step_row` 建立的「執行」按鈕）與 `_one_click_button`；新增會觸發任務的按鈕要自行加入其中。
 2. 背景執行緒中不可直接修改 control 或呼叫 `page.update()`；一律經 `PipelineRunner.ui()` 或寫入 TaskSession。
 3. 新 service 若以 generator 回傳，`run_step` 會負責迭代；若自行判斷失敗，請寫入 `session.set_error()` 或 summary 的 `failed_*`，不要只輸出含「錯誤」的日誌字串。
 4. 一鍵流程中資料夾型輸入一律走 folder batch service，不可包成 `zip_paths`。
@@ -222,7 +222,7 @@ core generator 與 service 以 dict 回報進度，欄位皆為選用：
 - `app/views/pipeline/pipeline_session.py`：`PipelineRunner`（session／worker／輪詢／取消／生命週期）。
 - `app/views/pipeline/pipeline_config.py`：`PipelineConfig`，由輸入／輸出根目錄推算各步驟的資料夾。
 - `app/views/pipeline/pipeline_progress.py`：`PipelineStepChip`（舊相容介面）、`PipelineProgressPanel`（使用共用步驟列的進度面板）。
-- `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片、`_step_row`）。
+- `app/views/pipeline/pipeline_widgets.py`：`PipelineWidgetsMixin`，控制項與版面組裝（`_build_ui`、各 `_build_*` 卡片）。
 - 五個設定對話框：`pipeline_translate_dialog.py`、`pipeline_bundle_dialog.py`、`pipeline_extract_dialog.py`、`pipeline_merge_dialog.py`、`pipeline_one_click_dialog.py`（皆在 `app/views/pipeline/`）。每個對話框用一個 `ctx`（`types.SimpleNamespace`）共享狀態與控制項，handler 是以 `ctx` 為第一個參數的模組層級函式（例如 `_extract_start_extraction`），畫面建構拆成 `_<對話框>_build_*` 函式；測試以 `open_*_dialog` 公開入口驅動（對應的 `tests/test_pipeline_*_dialog_behavior.py`）。
 
 ## 提取對話框的預覽（pipeline_extract_dialog）執行緒契約

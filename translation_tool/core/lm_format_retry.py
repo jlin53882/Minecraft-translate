@@ -52,14 +52,6 @@ class QualityRetryBatch:
     id_to_item: dict[str, dict]
 
 
-def _item_kind(item: dict) -> str | None:
-    kind = item.get("_kind")
-    if not kind:
-        ident = item.get("db_ident")
-        kind = ident[0] if ident else None
-    return str(kind) if kind else None
-
-
 def quality_issues(source_item: dict, translated_text: str) -> list[str]:
     """LM 結果的品質判斷：佔位符空間的數量標記，加上還原後的指南結構標記。
 

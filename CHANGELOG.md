@@ -11,6 +11,12 @@
 
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
+### 移除沒有使用者的舊流水線與死碼
+- 刪除 Markdown、KubeJS、FTB Quests 的舊三步驟流程（`md_translation_*`、`md_pipeline_files／pairing／zh_cn`、`kubejs_translator*`、`ftb_translator*`，以及三個 `*_lmtranslator`）、`utils/exceptions.py` 與 `_task_runner.py`：目前的 Markdown 走 ModDB 流水線、KubeJS／FTB 走 `pack_pipeline`，這些模組沒有任何正式程式引用。
+- 一併刪除只被它們使用的函式（例如 `inject_ftbquests_zh_tw_from_jsons`、`load_custom_translations`、`get_formatted_duration`），以及零呼叫的 `sniffed_groups`、`guide_mark_issues`、`_retry_same_source_translations` 等。
+- `tools/test_all_features.py` 移除 KubeJS／FTB 舊流程的兩個煙霧測試。
+- `translator.output_dir_name`、`ftb_translator.output_dir_name`、`translator.custom_translator_folder` 設定項目前沒有任何流程讀取，暫時保留以相容既有 `config.json`。
+
 ### Mod 資料庫掃描：新增「模組包資料夾」匯入來源
 - 掃描頁的匯入來源分成「mods 資料夾（jar）」「模組包資料夾」「翻譯 ZIP（已翻譯）」。mods 資料夾只掃 jar，不再讀 KubeJS／FTB Quests，也不產生模組包版本；KubeJS／FTB Quests 改由模組包資料夾（或翻譯 ZIP）匯入。
 - 修正：掃描時會往上找最多 4 層父目錄當模組包根目錄，所選資料夾放在某個有 `kubejs`／`config/ftbquests` 的目錄底下時，會匯入所選資料夾以外的內容，並以上層資料夾名稱當模組包版本。現在只看所選路徑本身與底下；KubeJS／FTB 流水線頁不受影響。

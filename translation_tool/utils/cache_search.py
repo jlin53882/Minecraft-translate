@@ -144,47 +144,6 @@ class CacheSearchEngine:
         """)
         self.conn.commit()
 
-    def index_cache_entry(self, entry: dict):
-        """將快取條目加入索引
-
-        Args:
-            entry: 快取條目字典，包含：
-                - key: cache key（必要！）
-                - src: 原文
-                - dst: 譯文
-                - mod: 模組名稱（可選）
-                - path: 檔案路徑（可選）
-                - type: 快取類型（lang/patchouli/ftbquests 等，可選）
-        """
-        key = entry.get("key", "")
-        src = entry.get("src", "")
-        dst = entry.get("dst", "")
-        mod = entry.get("mod", "")
-        path = entry.get("path", "")
-        cache_type = entry.get("type", "lang")
-
-        with self._lock:
-            try:
-                # 嘗試插入 FTS5 表
-                self.conn.execute(
-                    """
-                    INSERT INTO cache_fts (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (key, src, dst, mod, path, cache_type),
-                )
-            except sqlite3.OperationalError:
-                # FTS5 不可用，使用基本表
-                self.conn.execute(
-                    """
-                    INSERT INTO cache_basic (cache_key, source_text, translated_text, mod_name, file_path, cache_type)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                    (key, src, dst, mod, path, cache_type),
-                )
-
-            self.conn.commit()
-
     def index_batch(self, entries: list[dict], batch_size: int = 20000):
         """批次加入索引（效能更好）
 

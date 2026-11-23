@@ -302,11 +302,6 @@ class PatchouliContext:
     resolution_error: str = ""
     book_format: str = FORMAT_STANDARD_PATCHOULI
 
-    @property
-    def has_template_context(self) -> bool:
-        return bool(self.template_fields)
-
-
 def context_from_metadata(
     file_path: str | Path,
     *,

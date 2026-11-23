@@ -932,42 +932,6 @@ def _count_planned_batches(
     )
 
 
-def _count_planned_batches_by_profile(
-    items: Sequence[dict[str, Any]],
-    lm_cfg: dict[str, Any],
-    *,
-    deadline: float | None = None,
-    check=None,
-) -> dict[str, int]:
-    """Plan contiguous profile ranges with bounded slices and repeated checks."""
-    counts: dict[str, int] = {}
-    offset = 0
-    total = len(items)
-    while offset < total:
-        _check_batch_planning(deadline, check)
-        cache_type = _retranslation_cache_type(items[offset])
-        profile_end = offset + 1
-        while profile_end < total:
-            if profile_end % 128 == 0:
-                _check_batch_planning(deadline, check)
-            if _retranslation_cache_type(items[profile_end]) != cache_type:
-                break
-            profile_end += 1
-        profile_batches, _first_size = _plan_profile_range(
-            items,
-            cache_type,
-            offset,
-            profile_end,
-            lm_cfg,
-            deadline=deadline,
-            check=check,
-        )
-        counts[cache_type] = counts.get(cache_type, 0) + profile_batches
-        offset = profile_end
-    _check_batch_planning(deadline, check)
-    return counts
-
-
 def _plan_profile_range(
     items, cache_type, start, end, lm_cfg, *, deadline=None, check=None
 ) -> tuple[int, int]:

@@ -4,13 +4,13 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **381** 項；其中 **90** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **339** 項；其中 **84** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 344 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 307 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 17 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
-| 盡力而為（靜默） | 20 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
+| 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
 |---|---|---|---|
@@ -35,6 +35,7 @@
 | `app/services_impl/cache/cache_services.py:cache_save_all_service` | BLE001 | 已記錄／回報 | preserve the original save failure |
 | `app/services_impl/cache/cache_services.py:cache_search_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/md_pipeline_service.py:_zh_cn_converter` | BLE001 | 已記錄／回報 | 規則檔問題只是略過替換，不該讓注入失敗 |
 | `app/services_impl/md_pipeline_service.py:run_md_pipeline_service` | BLE001 | 已記錄／回報 | 任務邊界必須回報並終止 |
 | `app/services_impl/moddb_batch_operation.py:_run_batch_job` | BLE001 | 已記錄／回報 | worker boundary must publish unexpected failures |
 | `app/services_impl/moddb_retranslate_service.py:_cache_finalized_translation` | BLE001 | 已記錄／回報 | cache is best-effort after DB commit |
@@ -47,7 +48,6 @@
 | `app/services_impl/moddb_translate_service.py:_flush_buffer` | BLE001 | 已記錄／回報 | 持久化失敗需重試並回報 |
 | `app/services_impl/moddb_translate_service.py:run_moddb_translate_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session |
 | `app/services_impl/pack_pipeline_service.py:run_kubejs_ftb_pipeline_service` | BLE001 | 已記錄／回報 | 任務邊界必須回報並終止 |
-| `app/services_impl/pipelines/_task_runner.py:run_callable_task` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/bundle_service.py:run_bundling_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/extract_service.py:run_lang_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/pipelines/extract_service.py:run_book_extraction_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -82,7 +82,6 @@
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_history_store.py:_append_mirror` | BLE001 | 已記錄／回報 | 鏡像是衍生資料，失敗只記錄 |
 | `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._copy_logs` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._load_overview` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_overview.py:CacheOverviewMixin._on_rebuild_index.work` | BLE001 | UI／畫面保護 | 錯誤顯示在 UI |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_jump` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/views/cache_manager/cache_view_query.py:CacheQueryMixin._on_page_size_change` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -233,10 +232,6 @@
 | `translation_tool/checkers/variant_comparator_tsv.py:compare_variants_tsv_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/variant_comparator_tsv.py:compare_variants_tsv_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/variant_comparator_tsv.py:compare_variants_tsv_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
-| `translation_tool/core/ftb_translator.py:_translate_single_file` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/ftb_translator.py:translate_directory_generator` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/ftb_translator.py:run_ftb_pipeline` | BLE001 | 已記錄／回報 | 預估批次數只是顯示資訊，失敗不影響翻譯 |
-| `translation_tool/core/ftb_translator.py:run_ftb_pipeline` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/jar_processor.py:_sniff_book_phase` | BLE001 | 已記錄／回報 | 補充階段失敗不影響已提取的檔案 |
 | `translation_tool/core/jar_processor.py:extract_dual_files_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/jar_processor.py:extract_dual_files_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
@@ -244,9 +239,6 @@
 | `translation_tool/core/jar_processor_extract.py:run_extraction_process_impl._scan_in_background` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/jar_processor_extract.py:run_extraction_process_impl` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/jar_processor_preview.py:preview_extraction_generator_impl` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷批次流程 |
-| `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/core/kubejs_translator.py:step2_translate_lm._ProgressProxy.set_status` | BLE001/S110 | 盡力而為（靜默） | UI 狀態回報失敗不可中斷翻譯 |
-| `translation_tool/core/kubejs_translator.py:step2_translate_lm` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
 | `translation_tool/core/lang_merge_content_copy.py:_patchouli_compare` | BLE001 | 盡力而為（靜默） | 讀不出來就無從比對，維持原本流程 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 解析失敗的檔案不計入有效翻譯，已留 debug 紀錄 |
 | `translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness` | BLE001 | 已記錄／回報 | 單一檔案失敗不中斷整批統計，已留 debug 紀錄 |
@@ -297,7 +289,6 @@
 | `translation_tool/core/lm_translator_main.py:_remote_error_detail` | BLE001 | 已記錄／回報 | 回應不是 JSON 時改用原始文字 |
 | `translation_tool/core/lm_translator_main.py:_handle_service_unavailable_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_main.py:_handle_batch_error` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/lm_translator_main.py:_retry_same_source_translations` | BLE001 | 已記錄／回報 | optional quality retry must not fail the valid batch |
 | `translation_tool/core/lm_translator_main.py:_run_quality_retry_round` | BLE001 | 已記錄／回報 | optional quality retry must not fail a valid batch |
 | `translation_tool/core/lm_translator_main.py:_run_quality_retry_round` | BLE001 | 已記錄／回報 | health is best effort |
 | `translation_tool/core/lm_translator_main.py:_attempt_batch` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
@@ -310,48 +301,18 @@
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/core/lm_translator_shared_loop.py:translate_items_with_cache_loop` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/core/md_translation_assembly.py:_make_zh_cn_converter` | BLE001 | 已記錄／回報 | 規則檔問題只是略過替換，不該讓注入失敗 |
-| `translation_tool/core/md_translation_progress.py:_ProgressProxy.set_progress` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/core/md_translation_stats.py:count_md_pending_docs` | BLE001 | 已記錄／回報 | 統計僅計入可解析的待翻譯檔，壞檔略過但要記錄是哪個檔 |
-| `translation_tool/core/md_translation_steps.py:_inject_one_doc` | BLE001 | 已記錄／回報 | 單一待注入檔讀取失敗：計入錯誤並繼續，但要留下是哪個檔 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/output_bundler.py:bundle_outputs_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/core/patchouli_semantics.py:_configured_book_dirs` | BLE001 | 已記錄／回報 | 上下文解析失敗時仍採用預設目錄 |
 | `translation_tool/core/plugin_resume.py:compute_source_fingerprint` | BLE001 | 已記錄／回報 | 失敗代表不提供續跑，流程本身會自己回報輸入問題 |
 | `translation_tool/core/plugin_resume.py:read_marker` | BLE001 | 已記錄／回報 | 損毀的標記視為沒有，但要留下紀錄並隔離 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:_make_on_translated_item.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:_make_on_translated_item.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:_make_on_batch_flushed.on_batch_flushed` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw.set_prog` | BLE001/S110 | 盡力而為（靜默） | UI 進度回報失敗不可中斷翻譯 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw._count_one` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:walk_snbt_file` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:_loads_or_none` | BLE001 | 盡力而為（靜默） | 容錯嘗試：解析失敗代表這個候選不成立 |
 | `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:walk_snbt_file_tolerant` | BLE001 | 已記錄／回報 | 先嚴格解析，失敗才嘗試容錯 |
 | `translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:walk_snbt_file_tolerant` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/plugins/kubejs/kubejs_tooltip_extract.py:extract` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw._count_one` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw.on_batch_flushed` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/plugins/md/md_inject_qa.py:main` | BLE001 | 已記錄／回報 | 單一 JSON 損壞時略過該檔，繼續處理其餘檔案 |
-| `translation_tool/plugins/md/md_lmtranslator.py:_write_passthrough_docs` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending.on_translated_item` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending.on_batch_flushed` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
-| `translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending` | BLE001 | 已記錄／回報 | 失敗已記錄，不中斷翻譯批次 |
 | `translation_tool/translation_db/identity.py:patchouli_dir_names` | BLE001 | 已記錄／回報 | 設定不可用時退回預設，不影響身分計算 |
 | `translation_tool/translation_db/operation_progress.py:OperationProgress._emit` | BLE001 | 已記錄／回報 | 進度回呼出錯不可讓寫入交易回滾 |
 | `translation_tool/translation_db/scan_pool.py:scan_executor` | BLE001 | 已記錄／回報 | 行程池無法啟動（打包、權限等）時退回執行緒 |
@@ -377,8 +338,6 @@
 | `translation_tool/utils/cancellation.py:is_cancelled` | BLE001 | 盡力而為（靜默） | 檢查函式出錯時視為未取消 |
 | `translation_tool/utils/cancellation.py:run_cancellable_blocking.run` | BLE001 | 已記錄／回報 | 交回呼叫端重新拋出 |
 | `translation_tool/utils/config_manager.py:save_config` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `translation_tool/utils/exceptions.py:_resolve_error_log_dir` | BLE001 | 已記錄／回報 | 設定讀不到不可讓錯誤記錄本身失敗 |
-| `translation_tool/utils/exceptions.py:_log_error_to_file` | BLE001 | 已記錄／回報 | 記錄失敗不可中斷主流程 |
 | `translation_tool/utils/jar_browser.py:_get_default_workers` | BLE001/S110 | 盡力而為（靜默） | config 讀取失敗時不 blocking，直接用 fallback |
 | `translation_tool/utils/jar_browser.py:_scan_single_jar_detailed` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/log_unit.py:_get_caller_logger_name` | BLE001/S110 | 盡力而為（靜默） | logging 自身失敗不可再記錄（會遞迴），退回預設 logger 名稱 |
@@ -390,7 +349,6 @@
 | `translation_tool/utils/species_cache.py:_fetch_and_cache` | BLE001 | 已記錄／回報 | 外部 API 與回應解析錯誤需分類回報 |
 | `translation_tool/utils/text_processor.py:_load_rules_uncached` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:ReplaceRulesStore._notify` | BLE001 | 已記錄／回報 | 訂閱者失敗不可阻斷規則寫入 |
-| `translation_tool/utils/text_processor.py:load_custom_translations` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/text_processor.py:convert_snbt_file_inplace` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `translation_tool/utils/ui_logging_handler.py:UISessionLogHandler.emit` | BLE001/S110 | 盡力而為（靜默） | 在 handler 內記錄錯誤會遞迴 |
 | `translation_tool/utils/ui_mirror.py:_BackendSeenTracker.emit` | BLE001 | 盡力而為（靜默） | handler 內不可再丟例外 |

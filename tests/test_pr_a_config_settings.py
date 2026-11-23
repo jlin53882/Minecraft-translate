@@ -316,35 +316,6 @@ def test_invalid_runtime_log_format_falls_back_before_pipeline_start():
     assert UI_LOG_HANDLER.formatter._fmt == "%(task_tag)s%(message)s"
 
 
-def test_ftb_consumer_reads_saved_custom_translator_folder(tmp_path):
-    from translation_tool.core import ftb_translator
-
-    input_dir = tmp_path / "input"
-    input_dir.mkdir()
-    loaded_paths = []
-    config = {
-        "ftb_translator": {"output_dir_name": "out"},
-        "translator": {
-            "custom_translator_folder": "configured_translations",
-            "replace_rules_path": "replace_rules.json",
-            "parallel_execution_workers": 1,
-        },
-    }
-
-    with (
-        patch.object(ftb_translator, "load_config", return_value=config),
-        patch.object(ftb_translator, "load_replace_rules", return_value={}),
-        patch.object(
-            ftb_translator,
-            "load_custom_translations",
-            side_effect=lambda path: loaded_paths.append(path) or {},
-        ),
-    ):
-        list(ftb_translator.translate_directory_generator(str(input_dir)))
-
-    assert loaded_paths == ["configured_translations"]
-
-
 def test_pr_a_legacy_settings_are_explicitly_compatibility_only():
     from translation_tool.utils.config_manager import DEPRECATED_CONFIG_KEYS
 

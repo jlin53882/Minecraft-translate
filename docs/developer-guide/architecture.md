@@ -70,8 +70,8 @@ Minecraft-translate/
 │   │   ├── lang_merge_*.py           # 合併相關（pipeline/content/content_copy/pending/zip_io）
 │   │   ├── lang_processing_format.py  # 處理格式
 │   │   ├── lang_codec.py             # 編碼處理
-│   │   ├── md_translation_*.py       # MD 翻譯（assembly/progress/stats/steps）
-│   │   ├── ftb_translator*.py        # FTB 翻譯（clean/export/template）
+│   │   ├── ftb_translator_export.py  # FTB Quests 設定根目錄解析
+│   │   ├── kubejs_translator_*.py    # KubeJS 路徑解析與輸出狀態（paths/state）
 │   │   ├── jar_processor*.py         # JAR 處理（discovery/extract/preview）
 │   │   ├── icon_*.py                 # 圖示處理（classifer/preview_cache/reason/resolver）
 │   │   ├── translatable_extractor.py  # 可翻譯文字抽取
@@ -80,17 +80,15 @@ Minecraft-translate/
 │   │
 │   ├── plugins/              # 各檔案格式的翻譯插件
 │   │   ├── kubejs/                  # KubeJS tooltip 翻譯
-│   │   │   ├── kubejs_translator*.py   # KubeJS 主翻譯器（clean/io/paths）
-│   │   │   ├── kubejs_tooltip_*.py    # Tooltip 專用（extract/inject/lmtranslator）
+│   │   │   ├── kubejs_lang_selection.py # KubeJS 語言檔選擇
+│   │   │   ├── kubejs_tooltip_*.py    # Tooltip 專用（extract/inject）
 │   │   │   └── __init__.py
 │   │   ├── md/                      # Markdown 翻譯
 │   │   │   ├── md_extract_qa.py       # 抽取 QA
 │   │   │   ├── md_inject_qa.py        # 注入 QA
-│   │   │   ├── md_lmtranslator.py     # LM 翻譯器
 │   │   │   └── __init__.py
 │   │   ├── ftbquests/               # FTB Quests SNBT 翻譯
 │   │   │   ├── ftbquests_snbt_*.py     # 抽取/注入
-│   │   │   ├── ftbquests_lmtranslator.py
 │   │   │   └── __init__.py
 │   │   └── shared/                  # 插件共用工具
 │   │       ├── json_io.py
@@ -149,8 +147,15 @@ Minecraft-translate/
 
 ## 3. 翻譯 Pipeline 對照表
 
-| 格式 | Step 1（抽取） | Step 2（翻譯） | Step 3（注入） | 設定檔 |
+| 格式 | Step 1（抽取） | Step 2（翻譯） | Step 3（輸出） | 流程入口 |
 |------|---------------|---------------|---------------|--------|
+| **KubeJS** | `pack_sources.py`（用 `kubejs_tooltip_extract.py`） | ModDB 共用翻譯（`moddb_translate_service.py`） | `pack_output.py`（用 `kubejs_tooltip_inject.py`） | `pack_pipeline.py` |
+| **FTB Quests** | `pack_sources.py`（用 `ftbquests_snbt_extractor.py`） | ModDB 共用翻譯（`moddb_translate_service.py`） | `pack_output.py`（用 `ftbquests_snbt_inject.py`） | `pack_pipeline.py` |
+| **Patchouli** | `jar_processor_extract.py` | `lm_translator.py` | `lang_merge_content_copy.py` | `lang_merge_pipeline.py` |
+| **Markdown** | `md_pipeline.py`（`translation_db/`，用 `md_extract_qa.py`） | ModDB 共用翻譯（`moddb_translate_service.py`） | `md_pipeline.py`（輸出資源包 overlay） | `md_pipeline_service.py` |
+| **Lang 檔** | `lang_merge_pending.py` | `lm_translator.py` | `lang_merge_pipeline.py` | `lang_codec.py` |
+
+------|---------------|---------------|---------------|--------|
 | **KubeJS** | `kubejs_translator.py` | `kubejs_tooltip_lmtranslator.py` | `kubejs_tooltip_inject.py` | `kubejs_translator_clean.py` |
 | **FTB Quests** | `ftbquests_snbt_extractor.py` | `ftbquests_lmtranslator.py` | `ftbquests_snbt_inject.py` | `ftb_translator_clean.py` |
 | **Patchouli** | `jar_processor_extract.py` | `lm_translator.py` | `lang_merge_content_copy.py` | `lang_merge_pipeline.py` |
@@ -193,7 +198,6 @@ Minecraft-translate/
 | `lang_merge_pending.py` | 待翻譯清單處理 |
 | `jar_processor*.py` | JAR 檔案解析與預覽 |
 | `icon_*.py` | 道具圖示分類與快取 |
-| `md_translation_steps.py` | MD 三步驟（extract/translate/inject） |
 
 ### 4.3 Utils（`translation_tool/utils/`）
 
@@ -209,29 +213,15 @@ Minecraft-translate/
 ## 5. 資料流向（以 KubeJS 為例）
 
 ```
-JAR 檔案
-  └── jar_processor_discovery.py     # 發現 KubeJS JS 檔
-        └── jar_processor_extract.py # 抽出原始 JS
-              └── kubejs_translator_clean.py
-                    ├── step1_extract_and_clean()
-                    │     ├── extraction（抽出可翻譯區塊）
-                    │     ├── OpenCC 簡→繁轉換
-                    │     ├── 三語合併（tw > cn→tw > en）
-                    │     └── 輸出：raw/ + pending/ + final/
-                    │
-                    └── step2_translate_lm()
-                          ├── kubejs_tooltip_lmtranslator.py
-                          │     ├── _is_valid_hit()     # cache 命中判斷
-                          │     ├── _is_tw_text()       # 繁體跳過
-                          │     ├── _split_off_tw_items() # 繁體 items 分流
-                          │     └── translate_kubejs_pending_to_zh_tw()
-                          │           ├── fast_split_items_by_cache()
-                          │           ├── translate_items_with_cache_loop()
-                          │           └── 輸出：LM翻譯後/
-                          │
-                          └── step3_inject()
+模組包資料夾
+  └── pack_sources.py                 # 掃描 kubejs/：語言檔、tooltip 腳本
+        └── kubejs_tooltip_extract.py # 抽出可翻譯字串
+              └── scan_ingest.py      # 寫入 TranslationDB（預覽時只讀）
+                    └── moddb_translate_service.py
+                          │           # 缺譯條目 → LM 翻譯（共用 cache 與批次迴圈）
+                          └── pack_output.py
                                 └── kubejs_tooltip_inject.py  # 寫回 JS
-                                      └── 輸出：最終翻譯後 JS
+                                      └── 輸出：資源包 overlay
 ```
 
 ---

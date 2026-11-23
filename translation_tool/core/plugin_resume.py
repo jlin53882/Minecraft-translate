@@ -74,9 +74,11 @@ def list_source_files(
     base = Path(input_dir).resolve()
     files: list[Path]
     if kind == "ftbquests":
-        from translation_tool.core.ftb_translator import resolve_ftbquests_quests_root
+        from translation_tool.core.ftb_translator_export import (
+            resolve_ftbquests_quests_root_impl,
+        )
 
-        base = Path(resolve_ftbquests_quests_root(input_dir))
+        base = Path(resolve_ftbquests_quests_root_impl(input_dir))
         files = [
             p
             for p in base.rglob("*")

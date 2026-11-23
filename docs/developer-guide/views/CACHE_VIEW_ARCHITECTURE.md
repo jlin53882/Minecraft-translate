@@ -40,7 +40,7 @@ app/views/cache_manager/
 
 ```
 CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已卸載或舊掛載的總覽、冷歷史與冷分片結果）
-  ├─ 總覽：_load_overview() → cache_get_overview_service() → _render_type_list()
+  ├─ 總覽：_fetch_overview()（背景執行）→ cache_get_overview_service() → _render_type_list()
   │        動作：_run_action() → run_cache_action(view, reason, work_fn, ...)
   │              ├─ mounted App 先向 OperationRegistry admission，再由 owner worker 執行 work_fn（`show_progress` 時顯示 SnackBar 進度）
   │              └─ _on_reload_all / _on_save_one_new / _on_rotate_one ... 各自組 work_fn

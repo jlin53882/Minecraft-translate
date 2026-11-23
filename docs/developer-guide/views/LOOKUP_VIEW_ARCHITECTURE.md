@@ -75,7 +75,7 @@ batch_lookup_clicked(e)
 ### lookup_species_name(name) 決策鏈
 1. 未初始化 → `initialize_species_cache()`（失敗回 None）
 2. **快取命中**（`name in _species_cache_data`）→ 回傳快取值；空值代表已確定查無，回 None 且不再連線
-3. 未命中且格式合法 → `query_wikipedia_and_update_cache(name)` 線上查詢
+3. 未命中且格式合法 → `_fetch_and_cache(name)` 線上查詢
 4. 格式不合法 → None（不發請求）
 
 ### 線上查詢（MediaWiki Action API）

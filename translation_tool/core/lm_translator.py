@@ -230,32 +230,6 @@ def clear_checkpoint():
         os.remove(CHECKPOINT_FILE)
 
 
-def get_formatted_duration(start_tick: float) -> str:
-    """將開始時間轉換為人類可讀的格式。
-
-    Args:
-        start_tick: 開始時間（由 time.perf_counter() 取得）
-
-    Returns:
-        人類可讀的時間字串，如 "1 小時 30 分 45 秒" 或 "30 分 45 秒"
-    """
-    # 使用 perf_counter 計算目前時間（高精度、單調遞增）
-    current_tick = time.perf_counter()
-
-    # 計算經過的秒數（轉為整數秒）
-    duration = int(current_tick - start_tick)
-
-    # 拆解為 小時 / 分 / 秒
-    hours, remainder = divmod(duration, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    # 超過 1 小時才顯示「小時」欄位
-    if hours > 0:
-        return f"{hours} 小時 {minutes} 分 {seconds} 秒"
-    else:
-        return f"{minutes} 分 {seconds} 秒"
-
-
 # 剩餘時間
 def format_duration_seconds(seconds: int) -> str:
     """

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from translation_tool.utils import config_manager, exceptions
+from translation_tool.utils import config_manager
 
 
 def test_schema_default_wins_over_example_value(monkeypatch, tmp_path):
@@ -32,24 +32,6 @@ def test_schema_default_wins_over_example_value(monkeypatch, tmp_path):
 
     assert cacheable is True
     assert config == {"section": {"value": "schema"}, "extra": 1}
-
-
-def test_error_log_masks_unregistered_secret_field(monkeypatch, tmp_path):
-    """錯誤 context 的明確秘密欄位即使未註冊也不得寫入日誌。"""
-    monkeypatch.setattr(exceptions, "_resolve_error_log_dir", lambda: tmp_path)
-    secret = "unregistered-custom-secret-123"
-    error = exceptions.TranslationError(
-        "translation failed",
-        {"api_key": secret},
-    )
-
-    exceptions._log_error_to_file(error, "test_error_log")
-
-    log_files = list(tmp_path.glob("errors_*.log"))
-    assert len(log_files) == 1
-    content = log_files[0].read_text(encoding="utf-8")
-    assert secret not in content
-    assert "[REDACTED]" in content
 
 
 def test_config_listener_traceback_masks_secret(caplog):

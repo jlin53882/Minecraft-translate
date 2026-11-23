@@ -8,9 +8,7 @@ from pathlib import Path
 import ftb_snbt_lib as snbt
 from ftb_snbt_lib.tag import List as SnbtList
 
-from translation_tool.core import ftb_translator
 from translation_tool.plugins.ftbquests import (
-    ftbquests_lmtranslator,
     ftbquests_snbt_extractor,
     ftbquests_snbt_inject,
 )
@@ -147,42 +145,3 @@ def test_quest_extractor_preserves_description_slot_identity():
         "chapters/a.snbt|id:AB|description[0]": "First",
         "chapters/a.snbt|id:AB|description[3]": "Fourth",
     }
-
-
-def test_inject_only_run_reports_duration_without_export_step(
-    tmp_path: Path, monkeypatch
-):
-    quests = tmp_path / "config" / "ftbquests" / "quests"
-    (quests / "lang").mkdir(parents=True)
-    (quests / "lang" / "en_us.snbt").write_text(
-        '{ q.title: "Hello" }', encoding="utf-8"
-    )
-    out = tmp_path / "Output"
-    zh_dir = (
-        out
-        / "ftbquests"
-        / "LM翻譯輸出"
-        / "config"
-        / "ftbquests"
-        / "quests"
-        / "lang"
-        / "zh_tw"
-    )
-    zh_dir.mkdir(parents=True)
-    (zh_dir / "ftb_lang.json").write_text(
-        json.dumps({"en_us.snbt|q.title": "你好"}, ensure_ascii=False), encoding="utf-8"
-    )
-    monkeypatch.setattr(
-        ftbquests_lmtranslator, "translate_ftb_pending_to_zh_tw", lambda **k: {}
-    )
-
-    result = ftb_translator.run_ftb_pipeline(
-        directory_path=str(tmp_path),
-        output_dir=str(out),
-        step_export=False,
-        step_clean=False,
-        step_translate=False,
-        step_inject=True,
-    )
-
-    assert result["inject"]["lang"]["patched_keys_changed"] == 1

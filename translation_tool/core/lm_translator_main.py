@@ -59,7 +59,6 @@ from translation_tool.core.lm_key_health import (
 from translation_tool.core.lm_response_parser import safe_json_loads
 from translation_tool.core.lm_same_source_retry import (
     SAME_SOURCE_RETRY_INSTRUCTION,
-    build_same_source_retry_batch,
     merge_same_source_retry_results,
 )
 from translation_tool.core.lm_session import (
@@ -717,13 +716,6 @@ class _BatchPromptContext:
     retry_fixed_input_tokens: float
     quality_retry_fixed_input_tokens: float
     retry_same_as_source: bool
-
-
-@dataclass
-class _BatchRetryBudget:
-    """Allow at most one application-level translation retry per batch."""
-
-    used: bool = False
 
 
 @dataclass(frozen=True)
@@ -2004,139 +1996,6 @@ def _record_quality_retry_failure(
         # A failed optional retry must not leave a probe lease alive for a request
         # that will never be retried in this path.
         quota.release(model_name, runtime.quota_owner)
-
-
-def _retry_same_source_translations(
-    runtime: _BatchRuntime,
-    round_data: _BatchRound,
-    result: list[dict],
-    *,
-    prompt: str,
-    model_name: str,
-    api_key: str,
-    output_cap: int | None,
-    conversation_history: list[dict[str, str]],
-    retry_budget: _BatchRetryBudget,
-) -> list[dict]:
-    """只重新確認與來源相同的候選，失敗時保留第一個有效結果。"""
-    candidates = build_same_source_retry_batch(
-        round_data.current_batch, result, list(round_data.id_to_item)
-    )
-    if not candidates.positions:
-        return result
-    if not runtime.retry_same_as_source:
-        log_info(
-            f"[📊 本批次翻譯與原文相同 "
-            f"{len(candidates.positions)}/{len(round_data.current_batch)}]"
-        )
-        return result
-    if retry_budget.used:
-        log_info(
-            "[翻譯重試] 本批次已用完重試額度（每批最多 1 次），略過相同譯文的重新確認"
-        )
-        return result
-    retry_budget.used = True
-
-    retry_prompt = f"{prompt.rstrip()}\n\n{SAME_SOURCE_RETRY_INSTRUCTION}"
-    retry_estimate = runtime.budget_tracker.estimate(
-        candidates.items,
-        runtime.budget_cfg,
-        runtime.retry_fixed_input_tokens
-        + _estimate_conversation_history_tokens(
-            conversation_history,
-            estimator=runtime.budget_cfg.token_estimator,
-        ),
-        item_ids=candidates.item_ids,
-    )
-    retry_round = _BatchRound(
-        current_batch=list(candidates.items),
-        fit_count=len(candidates.items),
-        estimate=retry_estimate,
-        payload=candidates.payload,
-        id_to_item=candidates.id_to_item,
-    )
-    candidate_count = len(candidates.positions)
-    log_info(
-        f"[🔁 本批次翻譯與原文相同 {candidate_count}/{len(round_data.current_batch)}，"
-        f"重新確認一次；預估輸入≈{round(retry_estimate.input_tokens)} tokens]"
-    )
-    try:
-        raise_if_cancelled()
-        retry_meta: dict = {}
-        request_kwargs = _provider_request_kwargs(
-            runtime,
-            model_name,
-            retry_prompt,
-            retry_round.payload,
-            output_cap,
-            retry_meta,
-            api_key,
-            conversation_history=conversation_history,
-        )
-        _wait_for_request_slot(runtime, model_name)
-        retry_text = call_gemini_requests(**request_kwargs).strip()
-        raise_if_cancelled()
-        if (
-            not retry_text
-            or retry_meta.get("finish_reason") == "MAX_TOKENS"
-            or _is_truncated_response(retry_text)
-        ):
-            log_warning(
-                f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
-            )
-            return result
-        retried, invalid = _merge_batch_response(
-            runtime, retry_round, retry_text, retry_meta, optional_retry=True
-        )
-        if invalid or retried is None:
-            log_warning(
-                f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
-            )
-            return result
-        conversation_history.extend(
-            [
-                {
-                    "role": "user",
-                    "text": json.dumps(retry_round.payload, ensure_ascii=False),
-                },
-                {"role": "model", "text": retry_text},
-            ]
-        )
-    except Exception:  # noqa: BLE001 - optional quality retry must not fail the valid batch
-        log_warning(
-            f"[⚠️ 相同譯文重新確認失敗，保留第一次翻譯結果：{candidate_count} 筆]"
-        )
-        return result
-
-    accepted_positions: list[int] = []
-    accepted_results: list[dict] = []
-    blank_count = 0
-    for position, retry_item in zip(candidates.positions, retried, strict=True):
-        retry_text = retry_item.get("text")
-        if not isinstance(retry_text, str) or not retry_text.strip():
-            blank_count += 1
-            continue
-        accepted_positions.append(position)
-        accepted_results.append(retry_item)
-    if blank_count:
-        log_warning(
-            f"[⚠️ 相同譯文重新確認回傳空白，保留第一次翻譯結果：{blank_count} 筆]"
-        )
-
-    merged = merge_same_source_retry_results(
-        result, tuple(accepted_positions), accepted_results
-    )
-    updated = sum(
-        retry_item["text"] != result[position]["text"]
-        for position, retry_item in zip(
-            accepted_positions, accepted_results, strict=True
-        )
-    )
-    log_info(
-        f"[✅ 相同譯文重新確認完成：{candidate_count} 筆，其中 {updated} 筆更新、"
-        f"{candidate_count - updated} 筆維持原文]"
-    )
-    return merged
 
 
 def _mark_quality_retry_result(

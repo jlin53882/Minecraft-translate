@@ -73,9 +73,19 @@ def _translation_runner(target_version: str, use_translation_db: bool):
 
 def _zh_cn_converter():
     """zh_cn 轉繁中：OpenCC s2twp 後套用替換規則（與 Markdown 輸出同一個規則檔）。"""
-    from translation_tool.core.md_translation_assembly import _make_zh_cn_converter
+    from translation_tool.utils.log_unit import log_warning
+    from translation_tool.utils.text_processor import convert_text, load_replace_rules
 
-    return _make_zh_cn_converter()
+    try:
+        rules = load_replace_rules(
+            load_config()
+            .get("translator", {})
+            .get("replace_rules_path", "replace_rules.json")
+        )
+    except Exception as exc:  # noqa: BLE001 - 規則檔問題只是略過替換，不該讓注入失敗
+        log_warning(f"[MD] 載入替換規則失敗，簡轉繁略過替換：{exc!r}")
+        rules = []
+    return lambda text: convert_text(text, rules)
 
 
 _TRANSLATION_SEVERITY = ("DONE", "DONE_WITH_WARNINGS", "SKIPPED")
