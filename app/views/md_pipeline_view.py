@@ -124,6 +124,14 @@ class MarkdownPipelineView(ft.Column):
         self.output_summary = ft.Text(
             "尚未產生輸出預覽。", size=12, color=C.MUTED, selectable=True
         )
+        self.result_text = ft.Text("", size=12, color=C.TEXT, selectable=True)
+        self.result_card = kit.section_card(
+            "執行結果",
+            self.result_text,
+            icon=ft.Icons.FACT_CHECK_OUTLINED,
+            tone="ench",
+        )
+        self.result_card.visible = False
         self.progress_panel = PipelineProgressPanel(
             page,
             on_cancel=self._cancel,
@@ -165,7 +173,11 @@ class MarkdownPipelineView(ft.Column):
                 self._build_options_card(),
                 self._build_steps_card(),
             ],
-            right_controls=[status_panel, self.progress_panel.container],
+            right_controls=[
+                status_panel,
+                self.progress_panel.container,
+                self.result_card,
+            ],
             actions=[self._one_click_button],
         )
         self.controls = [self.workbench_view]
@@ -221,7 +233,7 @@ class MarkdownPipelineView(ft.Column):
                     self.version_hint,
                     self.read_zh_cn,
                     self.translate_missing,
-                    self.lm_db_options,
+                    self.lm_db_options.card,
                 ],
                 spacing=10,
             ),
@@ -457,6 +469,7 @@ class MarkdownPipelineView(ft.Column):
         self._current_publish = publish
         self._set_running(True)
         self.progress_panel.start()
+        self.result_card.visible = False
         self.progress.value = 0
         self.progress_panel.clear_logs()
         self.run_summary.value = "執行中…"
@@ -585,6 +598,10 @@ class MarkdownPipelineView(ft.Column):
             f"尚無譯文 {summary.get('blocks_missing', 0):,} 段、"
             f"人工修改略過 {summary.get('skipped_manual_edit', 0):,} 檔"
         )
+        self.result_text.value = (
+            f"{self.run_summary.value}\n{self.output_summary.value}"
+        )
+        self.result_card.visible = True
 
     # ------------------------------------------------------------ 發布確認
 

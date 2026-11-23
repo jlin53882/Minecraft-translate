@@ -150,3 +150,27 @@ def test_translation_runner_translates_only_guides_of_scanned_mods(monkeypatch):
         object(), scan, SimpleNamespace(dry_run=False), object()
     )
     assert off["candidates"] == 0
+
+
+def _non_controls(node, path="view"):
+    """控制項樹中不是 ft.Control 的子項（Flet 序列化時會失敗）。"""
+    bad = []
+    for name in ("controls", "content"):
+        child = getattr(node, name, None)
+        children = child if isinstance(child, list) else [child]
+        for item in children:
+            if item is None:
+                continue
+            if isinstance(item, str):
+                continue
+            if not isinstance(item, ft.Control):
+                bad.append(f"{path}.{name}: {type(item).__name__}")
+            else:
+                bad += _non_controls(item, f"{path}.{name}")
+    return bad
+
+
+def test_control_tree_contains_only_flet_controls(monkeypatch):
+    view = mv.MarkdownPipelineView(mock_page(), mock_filepicker())
+
+    assert _non_controls(view) == []
