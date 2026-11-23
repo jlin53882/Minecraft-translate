@@ -614,6 +614,10 @@ def _orphaned_zh_cn_base_outputs(
             and not _zh_cn_doc_is_current(source_md, pending_root)
         ):
             continue
+        if pending_root is not None:
+            pending_path = pending_root / (source_md.replace("\\", "/") + ".json")
+            if pending_path.exists() and read_pending_schema_doc(pending_path) is None:
+                continue  # pending 毀損：維持原本的警告，不當成使用者關掉開關
         for jp in paths:
             if _zh_cn_base_of(read_pending_schema_doc(jp), source_md) is not None:
                 orphaned[jp] = "superseded"

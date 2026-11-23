@@ -378,3 +378,25 @@ def test_zh_cn_translated_files_left_after_switching_off_are_superseded(
     finally:
         md_translation_steps.log_warning = real
     assert not any("沒有更新" in w for w in warnings)
+
+
+def test_corrupted_zh_cn_pending_is_still_reported_not_hidden_as_superseded(
+    tmp_path, fake_lm
+):
+    """zh_cn 的 pending 毀損（不是使用者關掉開關）：維持「不一致」略過，不當成被取代。"""
+    src, out = _md_layout(tmp_path)
+    run_md_pipeline(str(src), output_dir=str(out), lang_mode="non_cjk_only")
+    pending = out / "md" / "待翻譯" / "pack" / "zh_cn" / "guide.md.json"
+    assert pending.exists()
+    pending.write_text("{壞掉", encoding="utf-8")
+
+    result = run_md_pipeline(
+        str(src),
+        output_dir=str(out),
+        lang_mode="non_cjk_only",
+        step_extract=False,
+        step_translate=False,
+    )
+
+    assert result["step3"]["skipped_pending_mismatch"] == 1
+    assert result["step3"]["skipped_superseded"] == 0
