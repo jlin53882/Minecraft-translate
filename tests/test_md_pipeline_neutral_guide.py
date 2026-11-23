@@ -88,6 +88,10 @@ def _run(src: Path, out: Path):
         # 太泛的資料夾名稱不算指南；一般章節名稱不被誤擋
         ("docs/CHANGELOG.md", None),
         ("some/manual/notes.md", None),
+        # 已知取捨：兩字母章節名稱寧可略過；不帶底線的三字母語言碼目前辨識不出
+        ("ae2guide/ui/x.md", None),
+        ("ae2guide/me/x.md", None),
+        ("ae2guide/lzh/x.md", 0),
         ("ae2guide/items-blocks-machines/sky_dust.md", 0),
         ("ae2guide/items-blocks-machines/io_port.md", 0),
     ],
