@@ -127,6 +127,7 @@ def _decide_zh_cn_bases(
     lang_mode: str,
     extract_blocks_fn,
     report: _PairingReport,
+    use_zh_cn: bool = True,
 ) -> dict[str, _CnBase]:
     """沒有 zh_tw、有 en_us 與 zh_cn 時，決定 zh_cn 能不能整份當底稿（只在 non_cjk_only）。
 
@@ -134,8 +135,8 @@ def _decide_zh_cn_bases(
     只有與英文原文完全相同的殘留區塊會送 LM，其餘 zh_cn 內容於 Step 3 整檔簡轉繁。
     """
     bases: dict[str, _CnBase] = {}
-    if lang_mode != "non_cjk_only":
-        return bases
+    if lang_mode != "non_cjk_only" or not use_zh_cn:
+        return bases  # 使用者關閉 zh_cn 底稿：zh_cn 檔照舊不產生 pending，英文照常送翻
     for rel_cn, rel_en in sorted(plan.pair_cn.items()):
         en_text = _read_text_lenient(in_root / rel_en)
         cn_text = _read_text_lenient(in_root / rel_cn)
@@ -243,6 +244,7 @@ def step1_extract_impl(
     progress_fn: Callable[[Any, float], None],
     log_warning_fn: Callable[..., None],
     remove_stale: bool = True,
+    use_zh_cn: bool = True,
 ) -> dict[str, Any]:
     """
     第一步實作：掃描 Markdown 資料夾，依 lang_mode 過濾並抽取可翻譯區塊，將結果寫入待翻譯 JSON。
@@ -310,6 +312,7 @@ def step1_extract_impl(
         lang_mode=lang_mode,
         extract_blocks_fn=extract_blocks_fn,
         report=report,
+        use_zh_cn=use_zh_cn,
     )
     en_covered_by_cn = {base.rel_en for base in cn_bases.values()}
     for group in plan.conflicts:
@@ -598,6 +601,29 @@ def _zh_cn_doc_is_current(source_md: str, pending_root: Path | None) -> bool:
     return _zh_cn_base_of(doc, source_md) is not None
 
 
+def _orphaned_zh_cn_base_outputs(
+    by_source: dict[str, list[Path]], src_root: Path, pending_root: Path | None
+) -> dict[Path, str]:
+    """zh_cn 底稿的譯後檔已沒有現行 pending（使用者關掉 zh_cn 底稿，Step 1 清掉了它）：
+    這些譯後檔不再使用，是預期的略過（superseded），不能算「沒有更新」。"""
+    orphaned: dict[Path, str] = {}
+    for source_md, paths in by_source.items():
+        if not (
+            is_safe_relative_path(source_md)
+            and (src_root / source_md).is_file()
+            and not _zh_cn_doc_is_current(source_md, pending_root)
+        ):
+            continue
+        if pending_root is not None:
+            pending_path = pending_root / (source_md.replace("\\", "/") + ".json")
+            if pending_path.exists() and read_pending_schema_doc(pending_path) is None:
+                continue  # pending 毀損：維持原本的警告，不當成使用者關掉開關
+        for jp in paths:
+            if _zh_cn_base_of(read_pending_schema_doc(jp), source_md) is not None:
+                orphaned[jp] = "superseded"
+    return orphaned
+
+
 def _plan_inject_skips(
     json_files: list[Path],
     jroot: Path,
@@ -632,6 +658,7 @@ def _plan_inject_skips(
     ]
     plan = plan_sources(live_sources)
     skips: dict[Path, str] = {}
+    skips.update(_orphaned_zh_cn_base_outputs(by_source, src_root, pending_root))
     for rel_cn, rel_en in plan.pair_cn.items():
         if rel_cn in by_source and rel_en in by_source:
             log_warning(f"[MD] 略過 {rel_en} 的譯後檔：輸出由 zh_cn 底稿 {rel_cn} 負責")

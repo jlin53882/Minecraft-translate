@@ -81,7 +81,7 @@ Step 1 與 Step 3 之間靠檔案內容保持一致，所以單獨續跑任一�
 ## 狀態與資料
 
 - 頁面狀態：`session`、`_ui_timer_running`、`_poller`（`PollerHandle`）、`_step_cards`（Markdown 步驟卡，reset 後用於刷新外觀）。
-- Markdown 控制項：`md_in_dir`、`md_out_dir`、`md_step_extract`、`md_step_translate`、`md_step_inject`、`md_write_new_cache`、`md_lang_mode`（預設 `non_cjk_only`）。
+- Markdown 控制項：`md_in_dir`、`md_out_dir`、`md_step_extract`、`md_step_translate`、`md_step_inject`、`md_write_new_cache`、`md_lang_mode`（預設 `non_cjk_only`）、`md_use_zh_cn`（「使用 zh_cn 當底稿」開關，預設值取自設定 `translator.md_use_zh_cn_base`，預設開）。關閉時 `zh_cn` 檔照舊不產生 pending、不當底稿，英文一律整份送翻；只在 `non_cjk_only` 模式有作用。開關只在 Step 1 抽取時生效：關閉後要重跑抽取，舊的 zh_cn 底稿 pending 才會被清掉；先前遺留的 zh_cn 底稿譯後檔不再使用，Step 3 計為略過（被取代），不會警告「沒有更新」。
 - 續跑類型與分頁：`app/shell/app_shell.py` 的 `_RESUME_VIEW_BY_KIND` 將 `md` 導向本頁。
 - 續跑標記：`translation_tool/core/plugin_resume.py` 的 `resume_task` 在任務開始時寫入初始標記，之後由 adapter 逐批更新。只有正常結束、沒有錯誤或取消、且每個翻譯迴圈都 `DONE` 時才會清除。
 - 產出資料夾：`<輸出>/md/` 下的 `待翻譯`、`LM翻譯後`、`完成`。未指定輸出時，預設為輸入資料夾下的 `Output`。

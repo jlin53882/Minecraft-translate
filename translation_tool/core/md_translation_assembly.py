@@ -73,6 +73,7 @@ def step1_extract(
     progress_base: float = 0.0,
     progress_span: float = 0.33,
     remove_stale: bool = True,
+    use_zh_cn: bool = True,
 ) -> dict[str, Any]:
     """第一步：掃描 Markdown 資料夾，依語言模式過濾後抽取可翻譯區塊，輸出為待翻譯 JSON 檔案。"""
     return step1_extract_impl(
@@ -92,6 +93,7 @@ def step1_extract(
         progress_fn=progress,
         log_warning_fn=log_warning,
         remove_stale=remove_stale,
+        use_zh_cn=use_zh_cn,
     )
 
 
@@ -221,6 +223,7 @@ def run_md_pipeline(
     step_inject: bool = True,
     write_new_cache: bool = True,
     lang_mode: str = "non_cjk_only",
+    use_zh_cn: bool = True,
 ) -> dict[str, Any]:
     """Markdown 翻譯完整管線：依序執行抽取→翻譯→注入三步（各步可单独啟用或略過）。"""
     start_tick = time.perf_counter()
@@ -262,6 +265,7 @@ def run_md_pipeline(
             progress_base=0.0,
             progress_span=0.33,
             remove_stale=not dry_run,  # dry-run 只預覽，不清除既有的待翻譯檔
+            use_zh_cn=use_zh_cn,
         )
     else:
         log_info("[MD] [1/3] 已略過抽取")

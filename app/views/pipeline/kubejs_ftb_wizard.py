@@ -126,6 +126,10 @@ class KubejsFtbWizard:
                 kit.hint_text(
                     "開啟後，同步 ModDB 之後會翻譯待處理條目；預覽不會翻譯。"
                 ),
+                view.read_zh_cn,
+                kit.hint_text(
+                    "關閉後掃描來源時不讀 zh_cn 語系檔，只用 en_us 與 zh_tw；預設值在設定頁「翻譯與處理設定」。"
+                ),
                 view.lm_db_options.card,
             ],
             spacing=12,
@@ -162,6 +166,7 @@ class KubejsFtbWizard:
             ("同步模式", "完整掃描" if view.scan_mode.value == "full" else "增量同步"),
             ("來源類型", _source_label(view)),
             ("LM 翻譯待處理", "開啟" if view.translate_missing.value else "未啟用"),
+            ("讀取 zh_cn", "開啟" if view.read_zh_cn.value else "關閉"),
             ("翻譯資料庫", _db_label(view)),
             ("Overlay 輸出目錄", view.output_field.value or "—"),
         ]
