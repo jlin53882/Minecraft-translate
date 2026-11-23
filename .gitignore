@@ -17,6 +17,7 @@ config - *.json
 
 # === Logs & Backups ===
 logs/
+pipeline_runs/
 backups/
 
 # === App cache ===
