@@ -154,8 +154,6 @@ def translate_md_pending(
     session=None,
 ) -> dict[str, Any]:
     """Translate extracted Markdown blocks and write only quality-approved results."""
-    if not dry_run:
-        validate_api_keys()
     start_time = time.perf_counter()
 
     in_pending_root = Path(pending_dir).resolve()
@@ -327,6 +325,10 @@ def translate_md_pending(
             "cache_hit": len(cached_items),
             "cache_miss": len(items_to_translate),
         }
+
+    # 只有真的要呼叫 API 才需要金鑰：沒有區塊要翻（含零區塊直通）與 dry-run 都不檢查
+    if items_to_translate:
+        validate_api_keys()
 
     # -------------------------
     # 3) 翻譯：建立 hash -> dst（先塞 cache hit，再跑 shared loop 補 miss）
