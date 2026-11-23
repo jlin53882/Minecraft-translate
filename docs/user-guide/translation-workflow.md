@@ -51,7 +51,7 @@ LMView 的 UI／session 邊界見 [`../developer-guide/views/LM_VIEW_ARCHITECTUR
 「任務翻譯」頁不是 JAR 提取後必經的下一步，而是針對既有輸入資料的專用流程，分成三個分頁：
 
 - FTB Quests 與 KubeJS Tooltip：與側欄「KubeJS / FTB 流水線」頁使用同一套流程（先預覽同步計畫，確認後才發布 overlay），說明見 `docs/page_flows/kubejs_ftb_pipeline.md`。
-- Markdown：服務為 `app/services_impl/pipelines/md_service.py`，格式與續跑資訊見 `translation_tool/plugins/md/`。
+- Markdown：同樣是流水線（來源分析、預覽、同步 ModDB、輸出資源包），服務為 `app/services_impl/md_pipeline_service.py`，說明見 `docs/developer-guide/md-moddb-pipeline.md`。
 
 這些服務各自保存步驟選項和續跑資訊；不要用 LMView 或一鍵流水線的輸出路徑推測它們的資料格式。
 

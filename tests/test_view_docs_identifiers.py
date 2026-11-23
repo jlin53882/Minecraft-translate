@@ -43,6 +43,7 @@ SHARED_SCOPE = (
 
 # 文件 → 該 View 自己的程式碼範圍
 DOC_SCOPES: dict[str, tuple[str, ...]] = {
+    "MD_PIPELINE_VIEW_ARCHITECTURE.md": ("app/views/md_pipeline_view.py",),
     "BUNDLER_VIEW_ARCHITECTURE.md": (
         "app/views/bundler_view.py",
         "app/views/bundler/**/*.py",
@@ -96,10 +97,7 @@ DOC_SCOPES: dict[str, tuple[str, ...]] = {
         "app/views/rules_view.py",
         "app/views/rules/**/*.py",
     ),
-    "TRANSLATION_VIEW_ARCHITECTURE.md": (
-        "app/views/translation_view.py",
-        "app/views/translation/**/*.py",
-    ),
+    "TRANSLATION_VIEW_ARCHITECTURE.md": ("app/views/translation_view.py",),
     "KUBEJS_FTB_PIPELINE_VIEW_ARCHITECTURE.md": (
         "app/views/kubejs_ftb_pipeline_view.py",
     ),
@@ -178,9 +176,9 @@ def test_scope_is_stricter_than_the_global_identifier_set():
     """防止退化回全域比對：另一個 View 的私有識別字不能讓本 View 的文件通過。"""
     lm_scope = _identifiers(DOC_SCOPES["LM_VIEW_ARCHITECTURE.md"])
     shared = _identifiers(SHARED_SCOPE)
-    # TranslationView 專屬的方法不在 LM 範圍，也不在共用層
-    private = "_on_cancel"
-    assert private in _identifiers(DOC_SCOPES["TRANSLATION_VIEW_ARCHITECTURE.md"])
+    # MarkdownPipelineView 專屬的方法不在 LM 範圍，也不在共用層
+    private = "_render_summary"
+    assert private in _identifiers(DOC_SCOPES["MD_PIPELINE_VIEW_ARCHITECTURE.md"])
     assert private not in lm_scope and private not in shared
 
 

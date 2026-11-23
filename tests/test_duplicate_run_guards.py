@@ -4,8 +4,6 @@ import asyncio
 
 from app.tasks import operation_registry
 from app.views import bundler_view as bv
-from app.views import translation_view as tv
-from app.views.translation import translation_actions as ta
 from tests.conftest import mock_filepicker, mock_page
 
 
@@ -16,33 +14,6 @@ class _FakeThreadFactory:
     def __call__(self, **kwargs):
         self.started.append(kwargs)
         return type("T", (), {"start": lambda _self: None})()
-
-
-def test_translation_run_is_ignored_while_task_running(monkeypatch):
-    page = mock_page()
-    view = tv.TranslationView(page, mock_filepicker())
-    started = []
-    monkeypatch.setattr(
-        operation_registry.threading, "Thread", _FakeThreadFactory(started)
-    )
-    view.md_in_dir.value = "C:/pack"
-    view._ui_timer_running = True
-
-    ta.run_md(view, dry_run=False)
-
-    assert started == []
-    assert "執行中" in page.overlay[-1].content.value
-
-
-def test_translation_ui_timer_uses_event_loop_task():
-    page = mock_page()
-    view = tv.TranslationView(page, mock_filepicker())
-
-    ta.start_ui_timer(view)
-    ta.start_ui_timer(view)
-
-    assert view._ui_timer_running is True
-    assert len(page._tasks) == 1  # 只排入一個 async poller，且不另開執行緒
 
 
 def test_bundler_start_is_ignored_while_running(monkeypatch):
@@ -86,25 +57,3 @@ def test_bundler_worker_restores_button_and_batches_ui(monkeypatch):
     assert view.progress_bar.value == 1.0
     assert view.start_button.disabled is False
     assert view.progress_bar.visible is False
-
-
-def test_translation_cancel_button_requests_cancel_and_shows_cancelled():
-    from app.tasks.task_session import TaskSession
-
-    page = mock_page()
-    view = tv.TranslationView(page, mock_filepicker())
-    assert view.cancel_button.disabled is True
-
-    view.session = TaskSession()
-    view.session.start()
-    view._start_ui_timer()
-    assert view.cancel_button.disabled is False
-
-    view._on_cancel()
-    assert view.session.cancel_requested is True
-    assert view.cancel_button.disabled is True
-
-    view.session.finish()
-    ta._sync_from_session(view)
-    assert view.status_chip.label.value == "已取消"
-    assert view._ui_timer_running is False

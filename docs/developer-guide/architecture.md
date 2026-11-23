@@ -47,7 +47,6 @@ Minecraft-translate/
 │   │   ├── config/                # 設定視圖子模組（config_actions/config_form）
 │   │   ├── extractor/             # 擷取視圖子模組（dialog/panels/state）
 │   │   ├── rules/                 # 規則視圖子模組（rules_actions/filter/state/table/validation/widgets）
-│   │   ├── translation/           # 翻譯視圖子模組（translation_actions/panels/state）
 │   │   ├── qc_base.py             # QC 基礎
 │   │   ├── qc_view.py             # QC 檢查頁
 │   │   ├── rules_view.py          # 規則頁
@@ -331,7 +330,7 @@ app/
 | `docs/developer-guide/views/PIPELINE_VIEW_ARCHITECTURE.md` | PipelineView（`app/views/pipeline/`） |
 | `docs/developer-guide/views/QC_VIEW_ARCHITECTURE.md` | QCView（`app/views/qc_view.py` + `qc_base.py`） |
 | `docs/developer-guide/views/RULES_VIEW_ARCHITECTURE.md` | RulesView（`app/views/rules/`） |
-| `docs/developer-guide/views/TRANSLATION_VIEW_ARCHITECTURE.md` | TranslationView（`app/views/translation/`） |
+| `docs/developer-guide/views/TRANSLATION_VIEW_ARCHITECTURE.md` | TranslationView（`app/views/translation_view.py`） |
 | `docs/developer-guide/views/UNTRANSLATED_CHECKER_ARCHITECTURE.md` | UntranslatedChecker（`app/views/untranslated_checker.py`） |
 
 相關系統文件：`docs/developer-guide/jar-pipeline.md`（抽取流程）、`docs/developer-guide/cache.md`（快取資料結構）、`docs/user-guide/translation-workflow.md`（翻譯流程）、`docs/contributing/docstrings.md`（docstring 規範）、`docs/contributing/pr-workflow.md`（GitHub／PR 操作流程）、`docs/contributing/release.md`（Release 操作流程）、`docs/contributing/testing.md`（測試策略）。

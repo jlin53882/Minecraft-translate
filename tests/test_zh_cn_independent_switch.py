@@ -11,12 +11,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.services_impl import md_pipeline_service as md_service
 from app.services_impl import pack_pipeline_service
-from app.services_impl.pipelines import md_service
 from app.tasks.task_session import TaskSession
 from app.views import kubejs_ftb_pipeline_view as kfv
-from app.views import translation_view as tv
-from app.views.translation import translation_actions as ta
 from tests.conftest import mock_filepicker, mock_page
 from translation_tool.core.md_translation_assembly import run_md_pipeline
 from translation_tool.plugins.md import md_lmtranslator
@@ -109,38 +107,6 @@ def test_switching_zh_cn_off_after_a_zh_cn_run_rebuilds_from_english(tmp_path, f
 
 
 # ---------------------------------------------------------------- 服務層與設定
-
-
-def test_md_service_passes_use_zh_cn_to_pipeline_and_resume_options(monkeypatch):
-    captured: dict = {}
-
-    def fake_run(**kwargs):
-        captured["kwargs"] = kwargs
-        return {}
-
-    import translation_tool.core.md_translation_assembly as assembly
-    import translation_tool.core.plugin_resume as resume
-
-    monkeypatch.setattr(assembly, "run_md_pipeline", fake_run)
-
-    class _Ctx:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    def fake_resume(kind, **kwargs):
-        captured["options"] = kwargs["options"]
-        return _Ctx()
-
-    monkeypatch.setattr(resume, "resume_task", fake_resume)
-    session = TaskSession(max_logs=10)
-
-    md_service.run_md_translation_service("C:/pack", session, use_zh_cn=False)
-
-    assert captured["kwargs"]["use_zh_cn"] is False
-    assert captured["options"]["use_zh_cn"] is False
 
 
 @pytest.mark.parametrize(
@@ -238,68 +204,6 @@ def test_pack_service_passes_read_zh_cn_into_options(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------- UI
-
-
-def test_markdown_tab_has_zh_cn_switch_that_follows_config(monkeypatch):
-    monkeypatch.setattr(md_service, "load_config", lambda: {"translator": {}})
-    view = tv.TranslationView(mock_page(), mock_filepicker())
-    assert view.md_use_zh_cn.value is True
-
-    monkeypatch.setattr(tv, "get_md_use_zh_cn_default", lambda: False)  # 設定頁預設關閉
-    view.md_use_zh_cn.value = True
-    view._reset_md_inputs()
-
-    assert view.md_use_zh_cn.value is False
-
-
-def test_markdown_run_forwards_the_switch_to_the_service():
-    page = mock_page()
-    page.run_thread = lambda target: target()
-    view = tv.TranslationView(page, mock_filepicker())
-    view.md_in_dir.value = "C:/pack"
-    calls: list[dict] = []
-
-    def fake_service(*args, **kwargs):
-        calls.append(kwargs)
-        session = kwargs["session"]
-        session.start()
-        session.finish()
-
-    view.run_md_translation_service = fake_service
-    view.md_use_zh_cn.value = False
-
-    ta.run_md(view, dry_run=False)
-
-    assert calls and calls[0]["use_zh_cn"] is False
-
-
-def test_markdown_resume_restores_the_switch(monkeypatch):
-    view = tv.TranslationView(mock_page(), mock_filepicker())
-    task = SimpleNamespace(
-        kind="md",
-        input_dir="C:/pack",
-        output_dir=None,
-        options={"use_zh_cn": False},
-    )
-    ran: list[bool] = []
-    monkeypatch.setattr(view, "_run_md", lambda dry_run: ran.append(dry_run))
-
-    view.resume_interrupted(task)
-
-    assert ran == [False]
-    assert view.md_use_zh_cn.value is False
-
-
-def test_markdown_resume_of_an_old_task_uses_the_config_default(monkeypatch):
-    """舊版續跑資料沒有 use_zh_cn：沿用設定頁的預設。"""
-    monkeypatch.setattr(tv, "get_md_use_zh_cn_default", lambda: False)
-    view = tv.TranslationView(mock_page(), mock_filepicker())
-    task = SimpleNamespace(kind="md", input_dir="C:/pack", output_dir=None, options={})
-    monkeypatch.setattr(view, "_run_md", lambda dry_run: None)
-
-    view.resume_interrupted(task)
-
-    assert view.md_use_zh_cn.value is False
 
 
 def test_pipeline_view_checkbox_follows_config_and_wizard_shows_it(monkeypatch):

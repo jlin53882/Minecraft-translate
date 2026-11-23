@@ -256,29 +256,6 @@ def test_step_card_follows_checkbox_and_notifies():
     assert card._status.value == "將執行"
 
 
-def test_translation_steps_stay_in_sync_after_reset(monkeypatch):
-    from app.views import translation_view as tv
-
-    monkeypatch.setattr(tv, "TaskSession", None)
-    view = tv.TranslationView(mock_page(), mock_filepicker())
-    assert len(view._step_cards) == 3
-    view.md_step_inject.value = False
-    view._refresh_steps()
-    inject_card = next(c for c in view._step_cards if c.checkbox is view.md_step_inject)
-    assert inject_card._status.value == "略過"
-    view._reset_md_inputs()
-    assert view.md_step_inject.value is True and inject_card._status.value == "將執行"
-
-
-def test_translation_progress_bar_has_shared_progress_interface(monkeypatch):
-    from app.views import translation_view as tv
-
-    monkeypatch.setattr(tv, "TaskSession", None)
-    view = tv.TranslationView(mock_page(), mock_filepicker())
-    view.progress.value = 0.5
-    assert view.progress.value == 0.5
-
-
 # -- 工作台 -------------------------------------------------------------------
 
 

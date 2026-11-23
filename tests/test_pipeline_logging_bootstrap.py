@@ -4,7 +4,6 @@ from app.services_impl.pipelines import (
     _pipeline_logging,
     extract_service,
     lm_service,
-    md_service,
     merge_service,
 )
 
@@ -49,24 +48,6 @@ def _make_logger_patch(events: list[str]):
         events.append("logger")
 
     return _fake_apply
-
-
-def test_md_pipeline_bootstrap_order(monkeypatch):
-    import translation_tool.core.md_translation_assembly as md_core
-
-    events: list[str] = []
-    monkeypatch.setattr(
-        _pipeline_logging, "apply_logger_config", _make_logger_patch(events)
-    )
-    monkeypatch.setattr(md_service, "UI_LOG_HANDLER", DummyHandler())
-
-    def _fake_run_md_pipeline(*_args, **_kwargs):
-        events.append("first-step")
-
-    monkeypatch.setattr(md_core, "run_md_pipeline", _fake_run_md_pipeline)
-
-    md_service.run_md_translation_service("in", DummySession(), output_dir=None)
-    _assert_logger_before_first_step(events)
 
 
 def test_lm_pipeline_bootstrap_order(monkeypatch):
