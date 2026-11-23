@@ -384,3 +384,16 @@ def test_discovery_skips_previous_output_packs(tmp_path, db):
     found = discover_md_source_folders(root)
 
     assert [Path(p).name for p in found] == ["kubejs"]
+
+
+def test_any_unfinished_lm_status_is_a_warning(tmp_path, db):
+    src = tmp_path / "in"
+    _write(src / "pack" / "en_us" / "a.md", EN)
+    for status in ("ERROR", "ABORTED", "ALL_KEYS_EXHAUSTED"):
+        report = run_md_pipeline(
+            db,
+            src,
+            MdPipelineOptions(version="1.21.1", dry_run=False, translate_missing=True),
+            translation_runner=lambda *_a, s=status: {"status": s},
+        )
+        assert report.as_dict()["status"] == "DONE_WITH_WARNINGS"

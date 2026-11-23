@@ -26,11 +26,11 @@
 - 完成檔的人工修改保護沿用 `OutputGuard`（`.md_output_hashes.json`）：輸出檔在上次寫入後被改過就不覆蓋，計入 `skipped_manual_edit` 並提醒。
 - 輸出資料夾不可放在來源資料夾內（`MdPipelineError`）。
 - 只有發布（`publish`）才寫輸出資料夾；同步 DB 步驟即使填了輸出資料夾也只計算輸出計畫。`pack.mcmeta` 依遊戲版本換算 `pack_format`（`resolve_version_input`、`build_pack_mcmeta`），已存在時不覆寫。
-- 掃描提醒中的 `output_conflict`、`read_failed`、`source_missing` 會讓 LM 翻譯整段跳過（`translation.status` 為 `SKIPPED`，摘要為完成但有警告）；`misaligned` 只代表該譯文檔不採用，不阻擋翻譯。LM 翻譯失敗時摘要同樣是完成但有警告。
+- 掃描提醒中的 `output_conflict`、`read_failed`、`source_missing` 會讓 LM 翻譯整段跳過（`translation.status` 為 `SKIPPED`，摘要為完成但有警告）；`misaligned` 只代表該譯文檔不採用，不阻擋翻譯。LM 翻譯狀態不是完成（失敗、中止、金鑰耗盡、跳過）時摘要同樣是完成但有警告，跳過的原因寫入任務日誌並顯示在執行結果。
 
 ## 服務層與頁面
 
-- `app/services_impl/md_pipeline_service.py` 的 `run_md_pipeline_service` 接受一個或多個來源資料夾，每個先經 `discover_md_source_folders` 展開（沒按「分析來源」直接輸入模組包根目錄也能得到資源包結構），並排除輸出資料夾本身，再依序各跑一次並合併摘要（數字相加、提醒串接、LM 翻譯狀態取最嚴重者）；預覽以唯讀 SQLite 連線開啟 DB。
+- `app/services_impl/md_pipeline_service.py` 的 `run_md_pipeline_service` 接受一個或多個來源資料夾，每個先經 `discover_md_source_folders` 展開（沒按「分析來源」直接輸入模組包根目錄也能得到資源包結構），並排除與輸出資料夾相同的來源（記錄日誌），再依序各跑一次並合併摘要（數字相加、提醒串接、LM 翻譯狀態取最嚴重者）；預覽以唯讀 SQLite 連線開啟 DB。
 - 頁面見 [MD_PIPELINE_VIEW_ARCHITECTURE.md](views/MD_PIPELINE_VIEW_ARCHITECTURE.md)。
 - 設定 `translator.md_use_zh_cn_base` 只決定頁面上「讀取 zh_cn 檔」勾選的初始值。
 

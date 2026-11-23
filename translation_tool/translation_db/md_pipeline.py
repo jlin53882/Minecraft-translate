@@ -146,7 +146,8 @@ class MdPipelineReport:
 
     @property
     def _translation_failed(self) -> bool:
-        return self.translation.get("status") in ("FAILED", "SKIPPED")
+        status = self.translation.get("status")
+        return bool(status) and status not in ("DONE", "DONE_WITH_WARNINGS")
 
     def as_dict(self) -> dict[str, Any]:
         out = self.output

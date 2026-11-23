@@ -259,3 +259,40 @@ def test_merge_keeps_the_worst_translation_status():
     )
 
     assert merged["translation"] == {"status": "FAILED", "written": 3}
+
+
+def test_service_keeps_sources_that_sit_inside_the_output_folder(monkeypatch, tmp_path):
+    (tmp_path / "kubejs" / "assets").mkdir(parents=True)
+    calls: list[str] = []
+
+    class _Report:
+        def as_dict(self):
+            return {"status": "DONE"}
+
+    monkeypatch.setattr(
+        svc,
+        "run_md_pipeline",
+        lambda db, folder, *_a, **_k: calls.append(folder) or _Report(),
+    )
+    monkeypatch.setattr(svc, "open_database", lambda **_k: None)
+
+    svc.run_md_pipeline_service(
+        [str(tmp_path / "kubejs")],
+        "1.21.1",
+        TaskSession(max_logs=10),
+        output_root=str(tmp_path),
+        dry_run=True,
+    )
+
+    assert [Path(c).name for c in calls] == ["kubejs"]
+
+
+def test_merge_treats_unknown_translation_statuses_as_worst():
+    for bad in ("ERROR", "ABORTED", "ALL_KEYS_EXHAUSTED"):
+        merged = svc._merge_summaries(
+            [
+                {"status": "DONE", "translation": {"status": "DONE"}},
+                {"status": "DONE", "translation": {"status": bad}},
+            ]
+        )
+        assert merged["translation"]["status"] == bad

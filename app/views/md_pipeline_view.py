@@ -581,6 +581,11 @@ class MarkdownPipelineView(ft.Column):
                 f"\nLM 翻譯：{translation.get('status', '—')}　"
                 f"候選 {translation.get('candidates', 0):,}　"
                 f"寫入 {translation.get('written', 0):,}"
+                + (
+                    f"　（{translation['reason']}）"
+                    if translation.get("reason")
+                    else ""
+                )
             )
         self.run_summary.value = (
             f"狀態={summary.get('status', '—')}　"

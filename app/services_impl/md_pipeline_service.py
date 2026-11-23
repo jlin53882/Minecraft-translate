@@ -78,7 +78,7 @@ def _zh_cn_converter():
     return _make_zh_cn_converter()
 
 
-_TRANSLATION_SEVERITY = ("DONE", "SKIPPED", "FAILED")
+_TRANSLATION_SEVERITY = ("DONE", "DONE_WITH_WARNINGS", "SKIPPED")
 
 
 def _worse_translation(
@@ -96,7 +96,10 @@ def _worse_translation(
 
     def rank(status: Any) -> int:
         text = str(status or "DONE")
-        return _TRANSLATION_SEVERITY.index(text) if text in _TRANSLATION_SEVERITY else 0
+        # 未知狀態（FAILED、ERROR、ABORTED…）一律視為最嚴重
+        if text in _TRANSLATION_SEVERITY:
+            return _TRANSLATION_SEVERITY.index(text)
+        return len(_TRANSLATION_SEVERITY)
 
     worst = max((current or {}).get("status"), other.get("status"), key=rank)
     if worst is not None:
@@ -104,16 +107,20 @@ def _worse_translation(
     return merged
 
 
-def _expand_sources(sources: list[str], output_root: str | None) -> list[str]:
+def _expand_sources(
+    sources: list[str], output_root: str | None, session=None
+) -> list[str]:
     """每個來源先做模組包探索（沒按「分析來源」也能得到資源包結構），並排除輸出資料夾本身。"""
     output = Path(output_root).expanduser().resolve() if output_root else None
     expanded: list[str] = []
     for source in sources:
         for folder in discover_md_source_folders(source) or [source]:
             resolved = Path(folder).resolve()
-            if output is not None and (
-                resolved == output or output in resolved.parents
-            ):
+            if output is not None and resolved == output:
+                if session is not None:
+                    add_log_unmirrored(
+                        session, f"輸出資料夾本身不是來源，已略過：{folder}", "warning"
+                    )
                 continue
             if folder not in expanded:
                 expanded.append(folder)
@@ -187,10 +194,12 @@ def run_md_pipeline_service(
             else None
         )
         sources = _expand_sources(
-            [source] if isinstance(source, str) else list(source), output_root
+            [source] if isinstance(source, str) else list(source),
+            output_root,
+            session,
         )
         if not sources:
-            raise ValueError("沒有可處理的來源資料夾")
+            raise ValueError("沒有可處理的來源資料夾（來源不可與輸出資料夾相同）")
         convert = _zh_cn_converter() if read_zh_cn else None
         reports = [
             run_md_pipeline(
@@ -203,6 +212,10 @@ def run_md_pipeline_service(
             )
             for folder in sources
         ]
+        for report in reports:
+            reason = (getattr(report, "translation", None) or {}).get("reason")
+            if reason:
+                add_log_unmirrored(session, f"LM 翻譯已跳過：{reason}", "warning")
         session.set_summary(_merge_summaries([r.as_dict() for r in reports]))
         return reports
     except TaskCancelled:
