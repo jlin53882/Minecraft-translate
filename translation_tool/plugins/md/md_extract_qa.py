@@ -400,9 +400,22 @@ def _non_latin_share(text: str) -> float:
     non_latin = sum(
         1
         for ch in letters
-        if not ch.isascii() and not unicodedata.name(ch, "").startswith("LATIN")
+        if not ch.isascii()
+        and not unicodedata.name(ch, "").startswith(
+            ("LATIN", "GREEK")
+        )  # μ、Δ、Ω 是英文指南常見的單位與符號
     )
     return non_latin / len(letters) if non_latin >= 3 else 0.0  # 零星符號（μ）不算
+
+
+def _has_accented_latin(text: str) -> bool:
+    """有沒有帶重音或變音符號的拉丁字母（法、葡、土、德文短檔的特徵）。"""
+    return any(
+        ch.isalpha()
+        and not ch.isascii()
+        and unicodedata.name(ch, "").startswith("LATIN")
+        for ch in text
+    )
 
 
 def _is_guide_prose(path: Path, rel_parts: list[str]) -> bool:
@@ -419,7 +432,10 @@ def _is_guide_prose(path: Path, rel_parts: list[str]) -> bool:
     if _non_latin_share(text) >= _MAX_NON_LATIN_SHARE:
         return False  # 日、韓、俄、中文等非拉丁字母（含 front matter 的標題）：不是英文原文
     ratio, words = english_stopword_ratio(text)
-    return words < _MIN_WORDS_TO_JUDGE or ratio >= _MIN_ENGLISH_RATIO
+    if words < _MIN_WORDS_TO_JUDGE:
+        # 英文單字太少無從用停用字判斷：只要出現帶重音的拉丁字母（é、ç、ã、ş）就不是英文
+        return not _has_accented_latin(text)
+    return ratio >= _MIN_ENGLISH_RATIO
 
 
 def has_allowed_lang_segment(path: Path, root: Path | None = None) -> bool:

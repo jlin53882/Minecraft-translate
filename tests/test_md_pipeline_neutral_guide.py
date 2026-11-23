@@ -167,6 +167,12 @@ RUSSIAN = "# Введение\n\nЭтот мод позволяет хранит
 JAPANESE = (
     "---\nnavigation:\n  title: ME能動形成プレーン\n---\n\n# ME能動形成プレーン\n"
 )
+SHORT_ENGLISH = "---\nnavigation:\n  title: Storage Cells\n---\n\n# Storage Cells\n\nCells hold items.\n"
+SHORT_FRENCH = (
+    "---\nnavigation:\n  title: Cellules\n---\n\n# Cellules de stockage\n\nÉléments.\n"
+)
+SHORT_GREEK = "# Resistance\n\nThe value is shown in Ω and Δ units, so check it.\n"
+ITEM_LIST = "# Cables\n\n- White Cable\n- Orange Cable\n- Magenta Cable\n- Light Blue Cable\n- Yellow Cable\n- Lime Cable\n- Pink Cable\n- Gray Cable\n"
 ENGLISH_WITH_SYMBOL = (
     f"# Profiler\n\n{SENTENCE} A tick takes about 50 μs on average, and the profiler "
     "shows how long each machine in the network needs to finish its work. Values "
@@ -190,10 +196,14 @@ def test_iter_md_files_rejects_non_english_content_without_locale_marker(tmp_pat
             f"{P}/guide/japanese.md": JAPANESE,
             f"{P}/guide/english.md": EN,
             f"{P}/guide/symbol.md": ENGLISH_WITH_SYMBOL,  # 零星的 μ 不是其他語言
+            f"{P}/guide/short_en.md": SHORT_ENGLISH,
+            f"{P}/guide/short_fr.md": SHORT_FRENCH,  # 英文單字太少，靠重音字母判斷
+            f"{P}/guide/short_greek.md": SHORT_GREEK,  # 希臘字母單位不算非拉丁文
+            f"{P}/guide/item_list.md": ITEM_LIST,  # 已知取捨：沒有停用字的物品清單頁會被略過
         },
     )
     found = sorted(p.name for p in iter_md_files(src))
-    assert found == ["english.md", "symbol.md"]
+    assert found == ["english.md", "short_en.md", "short_greek.md", "symbol.md"]
 
 
 def test_boundary_is_relative_to_input_root(tmp_path):
