@@ -31,7 +31,15 @@ from translation_tool.core.md_pipeline_pairing import (
     plan_sources,
     select_untranslated_blocks,
 )
+from translation_tool.core.md_pipeline_zh_cn import (
+    base_is_stale,
+    build_base,
+    check_zh_cn_alignment,
+    convert_markdown_lines,
+)
+from translation_tool.plugins.md.md_extract_qa import map_rel_lang_path
 from translation_tool.utils.log_unit import log_info, log_warning
+from translation_tool.utils.text_processor import convert_text
 
 
 def _finish_pending_dir(
@@ -78,6 +86,8 @@ class _PairingReport:
     conflicts: list[list[str]] = field(default_factory=list)
     paired_docs: int = 0
     zh_cn_skipped: int = 0
+    zh_cn_based_docs: list[str] = field(default_factory=list)
+    zh_cn_unaligned: list[dict[str, str]] = field(default_factory=list)
     ambiguous_kept: int = 0
     structure_mismatch: list[str] = field(default_factory=list)
 
@@ -85,6 +95,8 @@ class _PairingReport:
         return {
             "paired_docs": self.paired_docs,
             "zh_cn_skipped": self.zh_cn_skipped,
+            "zh_cn_based_docs": self.zh_cn_based_docs,
+            "zh_cn_unaligned": self.zh_cn_unaligned,
             "output_conflicts": self.conflicts,
             "ambiguous_kept": self.ambiguous_kept,
             "structure_mismatch": self.structure_mismatch,
@@ -96,6 +108,82 @@ def _read_text_lenient(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return path.read_text(encoding="utf-8", errors="replace")
+
+
+@dataclass
+class _CnBase:
+    """以 zh_cn 為底稿的一份文件：要送翻的殘留區塊與 pending 的 base 欄位。"""
+
+    items: list[Any]
+    base: dict[str, Any]
+    rel_en: str
+
+
+def _decide_zh_cn_bases(
+    plan,
+    *,
+    in_root: Path,
+    lang_mode: str,
+    extract_blocks_fn,
+    report: _PairingReport,
+) -> dict[str, _CnBase]:
+    """沒有 zh_tw、有 en_us 與 zh_cn 時，決定 zh_cn 能不能整份當底稿（只在 non_cjk_only）。
+
+    結構對得上才採用（見 check_zh_cn_alignment）；對不上整份退回英文送 LM，並記錄原因。
+    只有與英文原文完全相同的殘留區塊會送 LM，其餘 zh_cn 內容於 Step 3 整檔簡轉繁。
+    """
+    bases: dict[str, _CnBase] = {}
+    if lang_mode != "non_cjk_only":
+        return bases
+    for rel_cn, rel_en in sorted(plan.pair_cn.items()):
+        en_text = _read_text_lenient(in_root / rel_en)
+        cn_text = _read_text_lenient(in_root / rel_cn)
+        reason = check_zh_cn_alignment(en_text, cn_text)
+        if reason is not None:
+            report.zh_cn_unaligned.append({"zh_cn": rel_cn, "reason": reason})
+            log_warning(
+                "[MD-抽取] zh_cn 與英文結構對不上，不採用它補譯，改用英文送翻：%s（%s）",
+                rel_cn,
+                reason,
+            )
+            continue
+        en_items = extract_blocks_fn(en_text, rel_en, lang_mode="all")
+        cn_items = extract_blocks_fn(cn_text, rel_cn, lang_mode="all")
+        pending, ambiguous = select_untranslated_blocks(en_items, cn_items)
+        report.ambiguous_kept += ambiguous
+        bases[rel_cn] = _CnBase(
+            items=pending,
+            base=build_base(rel_en, in_root / rel_en, in_root / rel_cn),
+            rel_en=rel_en,
+        )
+        report.zh_cn_based_docs.append(rel_cn)
+    return bases
+
+
+def _is_skipped_source(
+    rel_md: str,
+    plan,
+    cn_base: _CnBase | None,
+    en_covered_by_cn: set[str],
+    report: _PairingReport,
+) -> bool:
+    """這個來源檔 Step 1 不產生 pending 嗎？同時更新統計。
+
+    - 與 zh_tw／zh_cn 底稿配對的英文檔：輸出由底稿負責
+    - 同語系重複（輸出會互相覆蓋）：全部略過
+    - 沒被採用為底稿的 zh_cn 檔：Step 3 不會寫入它，送翻只是白花 API
+    """
+    if rel_md in plan.skip:
+        if plan.skip[rel_md] == "paired_en":
+            report.paired_docs += 1
+        return True
+    if rel_md in en_covered_by_cn:
+        report.paired_docs += 1
+        return True
+    if cn_base is None and is_zh_cn_source(rel_md):
+        report.zh_cn_skipped += 1
+        return True
+    return False
 
 
 def _items_for_paired_zh(
@@ -214,6 +302,14 @@ def step1_extract_impl(
 
     plan = plan_sources([safe_relpath_fn(p, in_root) for p in md_files])
     report = _PairingReport(conflicts=plan.conflicts)
+    cn_bases = _decide_zh_cn_bases(
+        plan,
+        in_root=in_root,
+        lang_mode=lang_mode,
+        extract_blocks_fn=extract_blocks_fn,
+        report=report,
+    )
+    en_covered_by_cn = {base.rel_en for base in cn_bases.values()}
     for group in plan.conflicts:
         log_warning_fn(
             "[MD-抽取] 這些檔案會寫到同一個輸出，全部略過（請只留一份）：%s",
@@ -223,16 +319,8 @@ def step1_extract_impl(
     total_files = len(md_files)
     for i, md_path in enumerate(md_files, start=1):
         rel_md = safe_relpath_fn(md_path, in_root)
-        if rel_md in plan.skip:
-            if plan.skip[rel_md] == "paired_en":
-                report.paired_docs += 1
-            progress_fn(
-                session, progress_base + progress_span * (i / max(1, total_files))
-            )
-            continue
-        if is_zh_cn_source(rel_md):
-            # zh_cn 檔不會被寫入完成資料夾：不產生 pending，也就不會送 API
-            report.zh_cn_skipped += 1
+        cn_base = cn_bases.get(rel_md)
+        if _is_skipped_source(rel_md, plan, cn_base, en_covered_by_cn, report):
             progress_fn(
                 session, progress_base + progress_span * (i / max(1, total_files))
             )
@@ -244,7 +332,9 @@ def step1_extract_impl(
 
         items = extract_blocks_fn(md_text, rel_md, lang_mode=lang_mode)
 
-        if rel_md in plan.pair_en:
+        if cn_base is not None:
+            items = cn_base.items
+        elif rel_md in plan.pair_en:
             items = _items_for_paired_zh(
                 rel_md,
                 plan.pair_en[rel_md],
@@ -263,11 +353,13 @@ def step1_extract_impl(
                 seen_hashes.add(it.content_hash)
                 unique_blocks += 1
 
-        if not items:
+        if not items and cn_base is None:
             skipped_empty += 1
         else:
             out_json_path = pending_root / (rel_md + ".json")
             payload = build_pending_json_fn(rel_md, md_path, items, lang_mode)
+            if cn_base is not None:
+                payload["base"] = cn_base.base  # 零殘留也要寫：Step 3 靠它整檔轉繁
             write_json_atomic(out_json_path, payload)
             written_paths.add(out_json_path)
             json_written += 1
@@ -378,6 +470,7 @@ def step3_inject_impl(
     progress_fn,
     pending_dir: str | None = None,
     content_hash_fn: Callable[[str], str] | None = None,
+    convert_zh_cn_fn: Callable[[str], str] | None = None,
 ) -> dict[str, Any]:
     """
     Step 3：將翻譯結果注入回 Markdown 檔案。
@@ -413,10 +506,12 @@ def step3_inject_impl(
         "skipped_pending_mismatch": 0,
         "skipped_stale_source": 0,
         "skipped_output_conflict": 0,
+        "written_from_zh_cn": 0,
     }
     written_outputs: set[str] = set()
     outcome_counter = {
         "written": "written_files",
+        "written_zh_cn": "written_files",
         "error": "error_files",
         "missing_source": "skipped_missing_source",
         "lang_status": "skipped_lang_status",
@@ -427,7 +522,7 @@ def step3_inject_impl(
         "output_conflict": "skipped_output_conflict",
     }
     json_files = list(iter_json_files_fn(jroot))
-    pre_skips = _plan_inject_skips(json_files, jroot, src_root)
+    pre_skips = _plan_inject_skips(json_files, jroot, src_root, pending_root)
     total = len(json_files)
     for idx, jp in enumerate(json_files, start=1):
         outcome = pre_skips.get(jp) or _inject_one_doc(
@@ -440,9 +535,12 @@ def step3_inject_impl(
             apply_item_to_md_lines_fn=apply_item_to_md_lines_fn,
             map_lang_fn=map_lang_in_rel_path_allow_zh_fn,
             written_outputs=written_outputs,
+            convert_zh_cn_fn=convert_zh_cn_fn or (lambda s: convert_text(s, None)),
         )
         stats[outcome_counter[outcome]] += 1
-        if outcome != "written":
+        if outcome == "written_zh_cn":
+            stats["written_from_zh_cn"] += 1
+        if outcome not in ("written", "written_zh_cn"):
             stats["skipped_files"] += 1
         progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
 
@@ -455,8 +553,36 @@ def step3_inject_impl(
     return {**stats, "json_root": str(jroot), "final_root": str(out_done)}
 
 
+def _zh_cn_base_of(doc: dict[str, Any] | None, source_md: str) -> dict[str, Any] | None:
+    """譯後檔／pending 若是以 zh_cn 為底稿，回傳其 ``base``；否則 None（來源路徑也必須是 zh_cn）。"""
+    base = doc.get("base") if doc else None
+    if (
+        isinstance(base, dict)
+        and base.get("lang") == "zh_cn"
+        and is_zh_cn_source(source_md)
+    ):
+        return base
+    return None
+
+
+def _zh_cn_doc_is_current(source_md: str, pending_root: Path | None) -> bool:
+    """zh_cn 來源要有現行的 zh_cn 底稿 pending 才算數；其他來源不受影響（沒給 pending 資料夾時一律算數）。
+
+    舊版會替 zh_cn 檔產生沒有 ``base`` 的 pending，那種不是底稿，不能讓它擋掉英文的譯後檔。
+    """
+    if pending_root is None or not is_zh_cn_source(source_md):
+        return True
+    doc = read_pending_schema_doc(
+        pending_root / (source_md.replace("\\", "/") + ".json")
+    )
+    return _zh_cn_base_of(doc, source_md) is not None
+
+
 def _plan_inject_skips(
-    json_files: list[Path], jroot: Path, src_root: Path
+    json_files: list[Path],
+    jroot: Path,
+    src_root: Path,
+    pending_root: Path | None = None,
 ) -> dict[Path, str]:
     """決定哪些譯後 JSON 不能寫入：輸出由誰寫，與檔案列舉順序無關。
 
@@ -465,6 +591,8 @@ def _plan_inject_skips(
       殘留的舊 zh_tw 譯後檔不能讓英文那份被略過
     - 同一個 source_md 有多份譯後檔（例如舊雙層資料夾）：只用正規位置
       `<譯後資料夾>/<source_md>.json` 那份，其他略過
+    - 沒有 zh_tw 時，英文與 zh_cn 都有譯後檔：以 zh_cn 為底稿，英文那份略過。zh_cn 譯後檔
+      只有在現行 pending 還在時才算數（Step 1 退回英文時不會有 zh_cn pending）
     - 同語系重複（輸出會互相覆蓋）：全部略過
     被略過的檔案計入 skipped_output_conflict 並警告。
     """
@@ -478,10 +606,16 @@ def _plan_inject_skips(
     live_sources = [
         source_md
         for source_md in by_source
-        if is_safe_relative_path(source_md) and (src_root / source_md).is_file()
+        if is_safe_relative_path(source_md)
+        and (src_root / source_md).is_file()
+        and _zh_cn_doc_is_current(source_md, pending_root)
     ]
     plan = plan_sources(live_sources)
     skips: dict[Path, str] = {}
+    for rel_cn, rel_en in plan.pair_cn.items():
+        if rel_cn in by_source and rel_en in by_source:
+            log_warning(f"[MD] 略過 {rel_en} 的譯後檔：輸出由 zh_cn 底稿 {rel_cn} 負責")
+            skips.update(dict.fromkeys(by_source[rel_en], "output_conflict"))
     for source_md, paths in by_source.items():
         reason = plan.skip.get(source_md)
         if reason is not None:
@@ -511,6 +645,7 @@ def _inject_one_doc(
     apply_item_to_md_lines_fn,
     map_lang_fn,
     written_outputs: set[str],
+    convert_zh_cn_fn: Callable[[str], str],
 ) -> str:
     """處理單一譯後 JSON，回傳結果代碼（written／error／各種略過原因）。"""
     try:
@@ -535,6 +670,14 @@ def _inject_one_doc(
     original_text = raw.decode("utf-8", errors="replace")
     md_lines = original_text.splitlines(keepends=False)
 
+    doc = read_pending_schema_doc(jp)
+    base = _zh_cn_base_of(doc, source_md)
+    from_zh_cn = base is not None
+    if from_zh_cn and base_is_stale(base, src_root, source_md):
+        log_warning(
+            f"[MD] 略過 {source_md}：{_REASON_TEXT[REASON_STALE_SOURCE]}（{jp.name}）"
+        )
+        return REASON_STALE_SOURCE
     if pending_root is not None:
         reason = _verify_against_pending(
             jp, source_md, pending_root, md_lines, content_hash_fn
@@ -543,11 +686,17 @@ def _inject_one_doc(
             log_warning(f"[MD] 略過 {source_md}：{_REASON_TEXT[reason]}（{jp.name}）")
             return reason
 
+    if from_zh_cn:
+        # 先整檔轉繁（行數不變），再填入 LM 的譯文：避免把 LM 已產生的繁體再轉一次
+        md_lines = convert_markdown_lines(md_lines, convert_zh_cn_fn)
     # 插入／刪行會讓後面的行號位移：由後往前套用
     for it in sorted(items, key=lambda x: getattr(x, "start_line", 0), reverse=True):
         apply_item_to_md_lines_fn(md_lines, it)
 
-    out_rel, status = map_lang_fn(source_md, src_lang="en_us", dst_lang="zh_tw")
+    if from_zh_cn:
+        out_rel, status = map_rel_lang_path(source_md, "zh_cn", "zh_tw"), "SRC_ZH"
+    else:
+        out_rel, status = map_lang_fn(source_md, src_lang="en_us", dst_lang="zh_tw")
     if status not in ("SRC_EN", "SRC_ZH"):
         return "lang_status"
     out_path = out_done / out_rel
@@ -567,7 +716,7 @@ def _inject_one_doc(
         "\n".join(md_lines) + ("\n" if ends_with_nl else ""), encoding="utf-8"
     )
     written_outputs.add(out_key)
-    return "written"
+    return "written_zh_cn" if from_zh_cn else "written"
 
 
 _REASON_TEXT = {
@@ -594,6 +743,8 @@ def _verify_against_pending(
         if is_inside(pending_root, pending_path)
         else None
     )
+    if pending_doc is not None and doc.get("base") != pending_doc.get("base"):
+        return REASON_PENDING_MISMATCH  # 底稿來源（zh_cn／英文）與現行 pending 不同
     return verify_translated_doc(
         doc,
         pending_doc=pending_doc,

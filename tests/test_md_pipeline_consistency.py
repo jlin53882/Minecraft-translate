@@ -581,7 +581,10 @@ def _zh_cn_layout(tmp_path: Path):
     out = tmp_path / "out"
     for rel, text in (
         ("pack/en_us/guide.md", "First.\n\nSecond.\n"),
-        ("pack/zh_cn/guide.md", "第一段。\n\nSecond.\n"),
+        (
+            "pack/zh_cn/guide.md",
+            "第一段。\n\n第二段。\n\n多出來的段落。\n",
+        ),  # 結構對不上
         ("only_cn/zh_cn/a.md", "English left.\n"),
     ):
         path = src / rel
