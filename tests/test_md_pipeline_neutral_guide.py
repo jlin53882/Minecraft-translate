@@ -66,6 +66,9 @@ def _run(src: Path, out: Path):
         ("ae2guide/aae_intro/x.md", 0),
         ("assets/advancedae/ae2guide/aae_intro/x.md", 2),
         ("guide/index.md", 0),
+        ("assets/powah/guides/powah/book/generators/x.md", 4),  # GuideME 預設結構
+        ("assets/lbr/guides/lbr/guide/_ru_ru/x.md", None),
+        ("assets/powah/guides/powah/x.md", None),  # 還沒走到內容根目錄
         ("ae2guide/_es_es/aae_intro/x.md", None),  # 底線語言資料夾：其他語言
         ("ae2guide/aae_intro/_ja_jp/x.md", None),
         ("ae2guide/de_de/x.md", None),  # 第一層像語言碼：寧可略過
@@ -94,6 +97,14 @@ def test_path_mapping_inserts_zh_tw_below_guide_dir():
     assert map_lang_in_rel_path_allow_zh("ae2guide/en_us/x.md") == (
         "ae2guide/zh_tw/x.md",
         "SRC_EN",
+    )
+
+
+def test_guideme_default_layout_puts_zh_tw_beside_other_locales():
+    rel = "assets/powah/guides/powah/book/generators/x.md"
+    assert (
+        map_rel_lang_path(rel, "en_us", "zh_tw")
+        == "assets/powah/guides/powah/book/_zh_tw/generators/x.md"
     )
 
 

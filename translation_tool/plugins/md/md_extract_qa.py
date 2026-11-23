@@ -336,13 +336,15 @@ _RE_LOCALE_LIKE = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
 
 
 def neutral_guide_index(parts: list[str]) -> int | None:
-    """無語言資料夾的指南（``ae2guide/aae_intro/x.md``）：回傳指南資料夾在 ``parts`` 的位置。
+    """無語言資料夾的指南（``ae2guide/aae_intro/x.md``）：回傳語言資料夾要放在哪個資料夾底下（``parts`` 的位置）。
 
-    這種結構的英文沒有語言資料夾，其他語言放在指南資料夾下以底線開頭的資料夾
+    這種結構的英文沒有語言資料夾，其他語言放在內容根目錄下以底線開頭的資料夾
     （``ae2guide/_es_es/aae_intro/x.md``），繁中輸出要放在同一層的 ``_zh_tw``。
+    內容根目錄是第一個指南資料夾；若那個資料夾叫 ``guides``（GuideME 預設的
+    ``guides/<模組>/<指南 id>/``），內容根目錄是它往下兩層（``guides/powah/book/_fr_fr/``）。
     不是這種結構時回傳 None：路徑已有 en_us／zh_cn／zh_tw 資料夾、沒有指南資料夾，
     或路徑裡出現底線開頭的語言資料夾（那是其他語言，不是英文原文）。
-    指南資料夾正下方的資料夾若長得像語言碼，寧可略過也不當英文送翻。
+    內容根目錄正下方的資料夾若長得像語言碼，寧可略過也不當英文送翻。
     """
     dirs = parts[:-1]
     if any(RE_LANG_SEG.match(seg) for seg in parts):
@@ -354,6 +356,10 @@ def neutral_guide_index(parts: list[str]) -> int | None:
     )
     if guide is None:
         return None
+    if dirs[guide].casefold() == "guides":
+        guide += 2
+        if guide >= len(dirs):
+            return None  # guides/<模組>/<指南 id> 還沒走完，找不到內容根目錄
     slot = guide + 1
     if slot < len(dirs) and _RE_LOCALE_LIKE.match(dirs[slot]):
         return None
