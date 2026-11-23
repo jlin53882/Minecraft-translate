@@ -1,6 +1,8 @@
-"""Markdown 管線：無語言資料夾的指南（``ae2guide/aae_intro/x.md``）當英文來源（issue #185）。
+"""Markdown 管線：無語言資料夾的指南（``assets/<模組>/ae2guide/aae_intro/x.md``）當英文來源（issue #185）。
 
-其他語言放在指南資料夾下以底線開頭的資料夾（``ae2guide/_es_es/``），繁中輸出放在同一層的 ``_zh_tw``。
+位置只看資源包結構（``assets|data/<模組>/<資料夾>/``，``guides`` 往下兩層），不靠資料夾名稱清單；
+檔案是不是指南敘述文字靠內容判斷。其他語言放在內容根目錄下以底線開頭的資料夾
+（``ae2guide/_es_es/``），繁中輸出放在同一層的 ``_zh_tw``。
 用真正的 Step 1／Step 2／Step 3，只把 LM 呼叫換成固定回覆。
 """
 
@@ -22,7 +24,11 @@ from translation_tool.plugins.md.md_extract_qa import (
 )
 from translation_tool.plugins.md.md_inject_qa import map_lang_in_rel_path_allow_zh
 
-EN = "# Intro\n\nStore items in cells.\n\nOpen the terminal.\n"
+P = "assets/m"  # 資源包路徑前綴：assets/<模組>
+SENTENCE = "You can store items in the cells and open the terminal to view them."
+EN = (
+    f"# Intro\n\n{SENTENCE}\n\nRight click the controller to open the terminal today.\n"
+)
 
 
 @pytest.fixture
@@ -63,56 +69,56 @@ def _run(src: Path, out: Path):
 @pytest.mark.parametrize(
     ("rel", "expected"),
     [
-        ("ae2guide/aae_intro/x.md", 0),
-        ("assets/advancedae/ae2guide/aae_intro/x.md", 2),
-        ("guide/index.md", 0),
-        ("assets/powah/guides/powah/book/generators/x.md", 4),  # GuideME 預設結構
-        ("assets/lbr/guides/lbr/guide/_ru_ru/x.md", None),
-        ("assets/powah/guides/powah/x.md", None),  # 還沒走到內容根目錄
-        ("ae2guide/_es_es/aae_intro/x.md", None),  # 底線語言資料夾：其他語言
-        ("ae2guide/aae_intro/_ja_jp/x.md", None),
-        ("ae2guide/de_de/x.md", None),  # 第一層像語言碼：寧可略過
-        ("ae2guide/to_do/x.md", None),  # 同上（略過比誤送翻安全）
-        ("ae2guide/en_us/x.md", None),  # 已有明確語言資料夾：走原本的規則
-        ("notes/x.md", None),  # 沒有指南資料夾
-        # 更深層、不同形狀的其他語言都不當英文
-        ("ae2guide/intro/de_de/y.md", None),
-        ("ae2guide/intro/es-es/z.md", None),
-        ("ae2guide/intro/ja/z.md", None),
-        ("ae2guide/_fil_ph/w.md", None),
-        ("ae2guide/_lzh/w.md", None),
-        ("ae2guide/_nds_de/w.md", None),
-        ("ae2guide/de_de.md", None),  # 檔名主幹就是語言碼
-        ("ae2guide/a/x_de_de.md", None),  # 檔名以語言碼結尾
-        ("docs/guide/de_de/x.md", None),
-        # 太泛的資料夾名稱不算指南；一般章節名稱不被誤擋
+        (f"{P}/ae2guide/aae_intro/x.md", 2),
+        (f"{P}/mi_guidebook/index.md", 2),  # 內容根目錄是模組底下第一層，不看名稱
+        (f"{P}/auroral/decorations/log.md", 2),
+        ("data/m/guide/x.md", 2),
+        (f"{P}/guides/powah/book/generators/x.md", 4),  # GuideME 預設結構
+        (f"{P}/guides/lbr/guide/_ru_ru/x.md", None),
+        (f"{P}/guides/powah/x.md", None),  # 還沒走到內容根目錄
+        ("ae2guide/aae_intro/x.md", None),  # 不在 assets／data 之下
         ("docs/CHANGELOG.md", None),
-        ("some/manual/notes.md", None),
+        (f"{P}/x.md", None),  # 模組底下沒有資料夾
+        (f"{P}/ae2guide/_es_es/aae_intro/x.md", None),  # 底線語言資料夾：其他語言
+        (f"{P}/ae2guide/aae_intro/_ja_jp/x.md", None),
+        (f"{P}/ae2guide/en_us/x.md", None),  # 已有明確語言資料夾：走原本的規則
+        # 更深層、不同形狀的其他語言都不當英文
+        (f"{P}/ae2guide/de_de/x.md", None),
+        (f"{P}/ae2guide/intro/de_de/y.md", None),
+        (f"{P}/ae2guide/intro/es-es/z.md", None),
+        (f"{P}/ae2guide/intro/ja/z.md", None),
+        (f"{P}/ae2guide/_fil_ph/w.md", None),
+        (f"{P}/ae2guide/_lzh/w.md", None),
+        (f"{P}/ae2guide/_nds_de/w.md", None),
+        (f"{P}/ae2guide/de_de.md", None),  # 檔名主幹就是語言碼
+        (f"{P}/ae2guide/a/x_de_de.md", None),  # 檔名以語言碼結尾
         # 已知取捨：兩字母章節名稱寧可略過；不帶底線的三字母語言碼目前辨識不出
-        ("ae2guide/ui/x.md", None),
-        ("ae2guide/me/x.md", None),
-        ("ae2guide/lzh/x.md", 0),
-        ("ae2guide/items-blocks-machines/sky_dust.md", 0),
-        ("ae2guide/items-blocks-machines/io_port.md", 0),
+        (f"{P}/ae2guide/ui/x.md", None),
+        (f"{P}/ae2guide/me/x.md", None),
+        (f"{P}/ae2guide/lzh/x.md", 2),
+        (f"{P}/ae2guide/items-blocks-machines/sky_dust.md", 2),
+        (f"{P}/ae2guide/items-blocks-machines/io_port.md", 2),
     ],
 )
 def test_neutral_guide_index(rel, expected):
     assert neutral_guide_index(rel.split("/")) == expected
 
 
-def test_path_mapping_inserts_zh_tw_below_guide_dir():
-    rel = "assets/advancedae/ae2guide/aae_intro/x.md"
+def test_path_mapping_inserts_zh_tw_below_content_root():
+    rel = f"{P}/ae2guide/aae_intro/x.md"
     assert (
         map_rel_lang_path(rel, "en_us", "zh_tw")
-        == "assets/advancedae/ae2guide/_zh_tw/aae_intro/x.md"
+        == f"{P}/ae2guide/_zh_tw/aae_intro/x.md"
     )
     assert detect_lang_segment(rel.split("/")) == "en_us"
     assert map_lang_in_rel_path_allow_zh(rel) == (
-        "assets/advancedae/ae2guide/_zh_tw/aae_intro/x.md",
+        f"{P}/ae2guide/_zh_tw/aae_intro/x.md",
         "SRC_EN",
     )
     # 其他語言與既有明確語言資料夾不受影響
-    assert map_lang_in_rel_path_allow_zh("ae2guide/_es_es/a/x.md")[1] == "OTHER_LANG"
+    assert (
+        map_lang_in_rel_path_allow_zh(f"{P}/ae2guide/_es_es/a/x.md")[1] == "OTHER_LANG"
+    )
     assert map_lang_in_rel_path_allow_zh("ae2guide/en_us/x.md") == (
         "ae2guide/zh_tw/x.md",
         "SRC_EN",
@@ -120,51 +126,53 @@ def test_path_mapping_inserts_zh_tw_below_guide_dir():
 
 
 def test_guideme_default_layout_puts_zh_tw_beside_other_locales():
-    rel = "assets/powah/guides/powah/book/generators/x.md"
+    rel = f"{P}/guides/powah/book/generators/x.md"
     assert (
         map_rel_lang_path(rel, "en_us", "zh_tw")
-        == "assets/powah/guides/powah/book/_zh_tw/generators/x.md"
+        == f"{P}/guides/powah/book/_zh_tw/generators/x.md"
     )
 
 
-def test_iter_md_files_picks_neutral_english_but_not_other_locales(tmp_path):
+def test_iter_md_files_uses_content_not_folder_names(tmp_path):
+    """資料夾叫什麼都行，靠內容判斷；授權、更新紀錄、非敘述文字不收。"""
     src, _ = _layout(
         tmp_path,
         {
-            "ae2guide/aae_intro/a.md": EN,
-            "ae2guide/_es_es/aae_intro/a.md": EN,
-            "ae2guide/_zh_tw/aae_intro/a.md": "# 簡介\n",
-            "notes/readme_extra.md": EN,
+            f"{P}/ae2guide/aae_intro/a.md": EN,
+            f"{P}/whatever_name/page.md": EN,  # 資料夾名稱不在任何清單
+            f"{P}/ae2guide/_es_es/aae_intro/a.md": EN,
+            f"{P}/ae2guide/_zh_tw/aae_intro/a.md": "# 簡介\n",
+            f"{P}/docs/CHANGELOG.md": EN,  # 專案文件名稱
+            f"{P}/data_tables/table.md": "| a | b |\n| - | - |\n| 1 | 2 |\n",
+            "notes/readme_extra.md": EN,  # 不在 assets／data 之下
         },
     )
     found = sorted(p.relative_to(src).as_posix() for p in iter_md_files(src))
     assert found == [
-        "ae2guide/_zh_tw/aae_intro/a.md",
-        "ae2guide/aae_intro/a.md",
+        f"{P}/ae2guide/_zh_tw/aae_intro/a.md",
+        f"{P}/ae2guide/aae_intro/a.md",
+        f"{P}/whatever_name/page.md",
     ]
 
 
-def test_guide_boundary_is_relative_to_input_root(tmp_path):
-    """輸入資料夾本身或上層叫 ae2guide／docs 時，不能因為絕對路徑含這一段就算指南。"""
-    inside = tmp_path / "ae2guide"
+def test_boundary_is_relative_to_input_root(tmp_path):
+    """輸入資料夾上層剛好有 assets／ae2guide 時，只看相對於輸入資料夾的路徑。"""
+    inside = tmp_path / "assets" / "m" / "ae2guide"
     (inside / "chapter").mkdir(parents=True)
     (inside / "chapter" / "a.md").write_text(EN, encoding="utf-8")
-    assert list(iter_md_files(inside)) == []
-
-    docs_parent = tmp_path / "docs" / "project"
-    docs_parent.mkdir(parents=True)
-    (docs_parent / "notes.md").write_text(EN, encoding="utf-8")
-    assert list(iter_md_files(docs_parent)) == []
+    assert (
+        list(iter_md_files(inside)) == []
+    )  # 輸入資料夾本身就是內容根目錄：請選它的上層
 
 
 def test_pipeline_skips_non_guide_docs_and_nested_locales(tmp_path, fake_lm):
-    """docs／manual 的一般文件、巢狀其他語言都不送翻，也不寫輸出。"""
+    """一般文件、巢狀其他語言都不送翻，也不寫輸出。"""
     src, out = _layout(
         tmp_path,
         {
-            "docs/pack/CHANGELOG.md": EN,
-            "ae2guide/intro/de_de/y.md": "# Titel\n\nHallo Welt.\n",
-            "ae2guide/intro/ok.md": EN,
+            f"{P}/docs/CHANGELOG.md": EN,
+            f"{P}/ae2guide/intro/de_de/y.md": "# Titel\n\nHallo Welt, das ist ein längerer Satz.\n",
+            f"{P}/ae2guide/intro/ok.md": EN,
         },
     )
 
@@ -176,22 +184,23 @@ def test_pipeline_skips_non_guide_docs_and_nested_locales(tmp_path, fake_lm):
         p.relative_to(out / "md" / "完成").as_posix()
         for p in (out / "md" / "完成").rglob("*.md")
     )
-    assert finals == ["ae2guide/_zh_tw/intro/ok.md"]
+    assert finals == [f"{P}/ae2guide/_zh_tw/intro/ok.md"]
 
 
 def test_neutral_with_zh_cn_sibling_uses_zh_cn_base():
-    en, cn = "ae2guide/a/x.md", "ae2guide/_zh_cn/a/x.md"
+    en, cn = f"{P}/ae2guide/a/x.md", f"{P}/ae2guide/_zh_cn/a/x.md"
     plan = plan_sources([en, cn])
     assert plan.pair_cn == {cn: en}
 
 
 def test_neutral_and_en_us_folder_conflict():
-    plan = plan_sources(["ae2guide/a/x.md", "ae2guide/_en_us/a/x.md"])
+    plan = plan_sources([f"{P}/ae2guide/a/x.md", f"{P}/ae2guide/_en_us/a/x.md"])
     assert sorted(plan.skip.values()) == ["output_conflict", "output_conflict"]
 
 
 def test_neutral_english_and_existing_zh_tw_share_one_output():
-    en, zh = "ae2guide/aae_intro/a.md", "ae2guide/_zh_tw/aae_intro/a.md"
+    en = f"{P}/ae2guide/aae_intro/a.md"
+    zh = f"{P}/ae2guide/_zh_tw/aae_intro/a.md"
     assert lang_output_key(en) == lang_output_key(zh)
     plan = plan_sources([en, zh])
     assert plan.pair_en == {zh: en}
@@ -202,36 +211,46 @@ def test_end_to_end_neutral_guide_translates_into_zh_tw_dir(tmp_path, fake_lm):
     src, out = _layout(
         tmp_path,
         {
-            "ae2guide/aae_intro/a.md": EN,
-            "ae2guide/_es_es/aae_intro/a.md": "# Introducción\n\nGuarda objetos.\n",
+            f"{P}/ae2guide/aae_intro/a.md": EN,
+            f"{P}/ae2guide/_es_es/aae_intro/a.md": "# Introducción\n\nGuarda objetos.\n",
         },
     )
 
     result = _run(src, out)
 
-    done = out / "md" / "完成" / "ae2guide" / "_zh_tw" / "aae_intro" / "a.md"
+    root = out / "md" / "完成" / "assets" / "m" / "ae2guide"
+    done = root / "_zh_tw" / "aae_intro" / "a.md"
     assert done.is_file()
-    text = done.read_text(encoding="utf-8")
-    assert "譯:Store items in cells." in text
+    assert f"譯:{SENTENCE}" in done.read_text(encoding="utf-8")
     # 西班牙文來源不會被送翻，也不會產生輸出
     assert all("Guarda" not in sent for sent in fake_lm["sent"])
     assert result["step1"]["md_files_found"] == 1
-    assert not (out / "md" / "完成" / "ae2guide" / "_es_es").exists()
+    assert not (root / "_es_es").exists()
 
 
 def test_existing_zh_tw_sibling_keeps_translated_blocks(tmp_path, fake_lm):
-    zh = "# 簡介\n\n把物品存放在元件中。\n\nOpen the terminal.\n"
+    zh = f"# 簡介\n\n把物品存放在元件中。\n\n{SENTENCE.replace('store', 'hold')}\n"
+    en = f"# Intro\n\n{SENTENCE}\n\n{SENTENCE.replace('store', 'hold')}\n"
     src, out = _layout(
         tmp_path,
         {
-            "ae2guide/aae_intro/a.md": EN,
-            "ae2guide/_zh_tw/aae_intro/a.md": zh,
+            f"{P}/ae2guide/aae_intro/a.md": en,
+            f"{P}/ae2guide/_zh_tw/aae_intro/a.md": zh,
         },
     )
 
     _run(src, out)
 
-    done = out / "md" / "完成" / "ae2guide" / "_zh_tw" / "aae_intro" / "a.md"
-    text = done.read_text(encoding="utf-8")
-    assert "把物品存放在元件中。" in text
-    assert fake_lm["sent"] == ["Open the terminal."]
+    done = (
+        out
+        / "md"
+        / "完成"
+        / "assets"
+        / "m"
+        / "ae2guide"
+        / "_zh_tw"
+        / "aae_intro"
+        / "a.md"
+    )
+    assert "把物品存放在元件中。" in done.read_text(encoding="utf-8")
+    assert fake_lm["sent"] == [SENTENCE.replace("store", "hold")]

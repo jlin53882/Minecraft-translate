@@ -27,7 +27,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from translation_tool.core.book_dirs import is_guide_directory_segment
+from translation_tool.core.text_sniffer import sniff_text_file
 from translation_tool.plugins.shared.rich_text_shield import shield_text
 
 
@@ -344,44 +344,52 @@ _RE_LOCALE_STEM = re.compile(
 )
 # 檔名主幹以 ``_xx_yy`` 結尾（``x_de_de.md``）
 _RE_LOCALE_SUFFIX = re.compile(r"_[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
-# 太泛的資料夾名稱：``docs``、``manual`` 底下多半是一般文件，不是會被遊戲讀取的指南
-_GENERIC_DOC_DIRS = frozenset({"docs", "documentation", "manual", "manuals"})
-
-
-def _is_neutral_guide_dir(seg: str) -> bool:
-    return seg.casefold() not in _GENERIC_DOC_DIRS and is_guide_directory_segment(seg)
 
 
 def neutral_guide_index(parts: list[str]) -> int | None:
-    """無語言資料夾的指南（``ae2guide/aae_intro/x.md``）：回傳語言資料夾要放在哪個資料夾底下（``parts`` 的位置）。
+    """無語言資料夾的指南（``assets/<模組>/ae2guide/aae_intro/x.md``）：回傳語言資料夾要放在哪個資料夾底下。
 
-    這種結構的英文沒有語言資料夾，其他語言放在內容根目錄下以底線開頭的資料夾
-    （``ae2guide/_es_es/aae_intro/x.md``），繁中輸出要放在同一層的 ``_zh_tw``。
-    內容根目錄是第一個指南資料夾；若那個資料夾叫 ``guides``（GuideME 預設的
-    ``guides/<模組>/<指南 id>/``），內容根目錄是它往下兩層（``guides/powah/book/_fr_fr/``）。
-    ``docs``、``manual`` 這類太泛的名稱不算指南資料夾。
-    不是這種結構時回傳 None：路徑已有 en_us／zh_cn／zh_tw 資料夾、沒有指南資料夾，
+    只看資源包結構，不看資料夾名稱清單：路徑必須是 ``assets|data/<模組>/<資料夾>/…``，
+    內容根目錄是模組底下第一層資料夾；叫 ``guides`` 的話（GuideME 預設的
+    ``guides/<模組>/<指南 id>/``，遊戲固定的註冊路徑）是往下兩層（``guides/powah/book/_fr_fr/``）。
+    英文沒有語言資料夾，其他語言放在內容根目錄下以底線開頭的資料夾，繁中輸出放同一層的 ``_zh_tw``。
+    這個函式只判斷路徑位置；檔案內容是不是指南敘述文字由 ``iter_md_files`` 用內容判斷。
+    不是這種結構時回傳 None：路徑已有 en_us／zh_cn／zh_tw 資料夾、不在 assets／data 之下，
     或路徑裡出現底線開頭的語言資料夾（那是其他語言，不是英文原文）。
     內容根目錄之下任何一層（含檔名）長得像語言碼，寧可略過也不當英文送翻。
     """
     dirs = parts[:-1]
+    if len(dirs) < 3 or parts[0].casefold() not in ("assets", "data"):
+        return None
     if any(RE_LANG_SEG.match(seg) for seg in parts):
         return None
     if any(_RE_UNDERSCORE_LOCALE.match(seg) for seg in dirs):
         return None
-    guide = next((i for i, seg in enumerate(dirs) if _is_neutral_guide_dir(seg)), None)
-    if guide is None:
-        return None
-    if dirs[guide].casefold() == "guides":
-        guide += 2
-        if guide >= len(dirs):
+    anchor = 2
+    if dirs[anchor].casefold() == "guides":
+        anchor += 2
+        if anchor >= len(dirs):
             return None  # guides/<模組>/<指南 id> 還沒走完，找不到內容根目錄
-    if any(_RE_LOCALE_LIKE.match(seg) for seg in dirs[guide + 1 :]):
+    if any(_RE_LOCALE_LIKE.match(seg) for seg in dirs[anchor + 1 :]):
         return None
     stem = parts[-1].rpartition(".")[0] or parts[-1]
     if _RE_LOCALE_STEM.match(stem) or _RE_LOCALE_SUFFIX.search(stem):
         return None
-    return guide
+    return anchor
+
+
+_MAX_GUIDE_BYTES = 1024 * 1024
+
+
+def _is_guide_prose(path: Path, rel_parts: list[str]) -> bool:
+    """內容像不像遊戲內顯示的指南敘述文字（不是授權、更新紀錄、設定檔）。"""
+    try:
+        if path.stat().st_size > _MAX_GUIDE_BYTES:
+            return False
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return sniff_text_file(text, path.suffix, "/".join(rel_parts)) is not None
 
 
 def has_allowed_lang_segment(path: Path, root: Path | None = None) -> bool:
@@ -444,7 +452,7 @@ def iter_md_files(root: Path):
     """
     遞迴列出所有 .md（大小寫不敏感），排除 README.md（不分大小寫、任何層級）
     ✅ 額外限制：只處理路徑中含 en_us／zh_cn／zh_tw 資料夾（含 _ 前綴、大小寫不拘）的檔案，
-    或相對於 root 位在指南資料夾下、沒有語言資料夾的英文指南（見 neutral_guide_index）
+    或相對於 root 位在 assets|data/<模組>/ 之下、沒有語言資料夾、內容像指南敘述文字的英文指南（見 neutral_guide_index）
     """
     for p in root.rglob("*"):
         if not p.is_file():
@@ -456,6 +464,11 @@ def iter_md_files(root: Path):
 
         # ✅ 只允許 en_us / zh_tw（例如：.../en_us/... 或 .../structure/en_us/...）
         if not has_allowed_lang_segment(p, root):
+            continue
+        # 沒有語言資料夾的檔案靠內容判斷：授權、更新紀錄、非敘述文字的 .md 不當指南
+        if not any(RE_LANG_SEG.match(seg) for seg in p.parts) and not _is_guide_prose(
+            p, list(p.relative_to(root).parts)
+        ):
             continue
 
         yield p

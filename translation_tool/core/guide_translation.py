@@ -19,10 +19,6 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from translation_tool.core.book_dirs import (  # noqa: F401 - 舊匯入位置
-    GUIDE_DIR_NAMES,
-    is_guide_directory_segment,
-)
 from translation_tool.core.book_formats import (
     UNSUPPORTED_BOOK_FORMATS,
     resolve_book_format,
@@ -82,6 +78,18 @@ _SRC_ATTRIBUTE_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\(([^)\s]+)")
+GUIDE_DIR_NAMES = frozenset(
+    {
+        "ae2guide",
+        "guide",
+        "guides",
+        "guidebook",
+        "manual",
+        "manuals",
+        "documentation",
+        "docs",
+    }
+)
 
 
 class GuidePath(type(Path())):
@@ -132,6 +140,13 @@ def resolve_guide_support_reference(member: str, reference: str) -> str | None:
     if target in (".", "..") or target.startswith(("../", "/")):
         return None
     return target
+
+
+def is_guide_directory_segment(segment: str) -> bool:
+    """Return whether a path segment denotes a guide/documentation tree."""
+
+    lowered = segment.casefold()
+    return lowered in GUIDE_DIR_NAMES or lowered.endswith(("guide", "guidebook"))
 
 
 _GUIDEME_LOCALE_SEGMENTS = frozenset(
