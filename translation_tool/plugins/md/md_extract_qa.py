@@ -24,9 +24,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from translation_tool.core.text_sniffer import english_stopword_ratio, sniff_text_file
 from translation_tool.plugins.shared.rich_text_shield import shield_text
 
 
@@ -328,22 +330,138 @@ def build_pending_json(
 RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 
-def has_allowed_lang_segment(path: Path) -> bool:
+# 語言碼的形狀：``de``、``de_de``、``pt-br``、``fil_ph``、``nds_de``（兩到三個字母，可帶區域）
+_LOCALE_SHAPE = r"[a-z]{2,3}(?:[_-][a-z]{2,4})?"
+# GuideME／AE2 指南的其他語言資料夾以底線開頭（``_es_es``）
+_RE_UNDERSCORE_LOCALE = re.compile(rf"^_{_LOCALE_SHAPE}$", re.IGNORECASE)
+# 內容根目錄之下任何一層長得像語言碼（``de_de``、``es-es``、``ja``、``_fil_ph``）的資料夾，或整個檔名主幹就是語言碼
+# 不帶底線時只認 ``de``、``de_de``、``es-es`` 這種兩字母形狀：更寬會把 ``io_port``、``sky_dust`` 這類章節名稱誤擋
+_RE_LOCALE_LIKE = re.compile(
+    rf"^(?:_{_LOCALE_SHAPE}|[a-z]{{2}}(?:[_-][a-z]{{2}})?)$", re.IGNORECASE
+)
+# 檔名主幹整個就是語言碼：只認帶區域或底線開頭的形狀（``de_de``、``_ja``），不擋 ``ok``、``id`` 這種短檔名
+_RE_LOCALE_STEM = re.compile(
+    rf"^(?:_{_LOCALE_SHAPE}|[a-z]{{2}}[_-][a-z]{{2}})$", re.IGNORECASE
+)
+# 檔名主幹以 ``_xx_yy`` 結尾（``x_de_de.md``）
+_RE_LOCALE_SUFFIX = re.compile(r"_[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
+
+
+def neutral_guide_index(parts: list[str]) -> int | None:
+    """無語言資料夾的指南（``assets/<模組>/ae2guide/aae_intro/x.md``）：回傳語言資料夾要放在哪個資料夾底下。
+
+    只看資源包結構，不看資料夾名稱清單：路徑必須是 ``assets|data/<模組>/<資料夾>/…``，
+    內容根目錄是模組底下第一層資料夾；叫 ``guides`` 的話（GuideME 預設的
+    ``guides/<模組>/<指南 id>/``，遊戲固定的註冊路徑）是往下兩層（``guides/powah/book/_fr_fr/``）。
+    英文沒有語言資料夾，其他語言放在內容根目錄下以底線開頭的資料夾，繁中輸出放同一層的 ``_zh_tw``。
+    這個函式只判斷路徑位置；檔案內容是不是指南敘述文字由 ``iter_md_files`` 用內容判斷。
+    不是這種結構時回傳 None：路徑已有 en_us／zh_cn／zh_tw 資料夾、不在 assets／data 之下，
+    或路徑裡出現底線開頭的語言資料夾（那是其他語言，不是英文原文）。
+    內容根目錄之下任何一層（含檔名）長得像語言碼，寧可略過也不當英文送翻。
+    """
+    dirs = parts[:-1]
+    if len(dirs) < 3 or parts[0].casefold() not in ("assets", "data"):
+        return None
+    if any(RE_LANG_SEG.match(seg) for seg in parts):
+        return None
+    if any(_RE_UNDERSCORE_LOCALE.match(seg) for seg in dirs):
+        return None
+    anchor = 2
+    first_checked = anchor  # 內容根目錄本身也可能是語言碼（assets/<模組>/de_de/…）
+    if dirs[anchor].casefold() == "guides":
+        anchor += 2
+        if anchor >= len(dirs):
+            return None  # guides/<模組>/<指南 id> 還沒走完，找不到內容根目錄
+        first_checked = anchor + 1  # guides/<模組>/<id> 是註冊路徑，不檢查
+    elif dirs[anchor].casefold() == "lang":
+        return None  # 原版規格的語言檔資料夾，不是指南
+    if any(_RE_LOCALE_LIKE.match(seg) for seg in dirs[first_checked:]):
+        return None
+    stem = parts[-1].rpartition(".")[0] or parts[-1]
+    if _RE_LOCALE_STEM.match(stem) or _RE_LOCALE_SUFFIX.search(stem):
+        return None
+    return anchor
+
+
+_MAX_GUIDE_BYTES = 1024 * 1024
+# 英文停用字比例下限：英文指南中位數約 0.28，西／法／葡／俄等其他語言幾乎是 0、最高約 0.14
+_MIN_ENGLISH_RATIO = 0.12
+# 內文英文單字少於這個數量時（只有標題、連結、元件）無從判斷語言，也沒有多少文字會被送翻，不擋
+_MIN_WORDS_TO_JUDGE = 8
+# 非拉丁字母（中日韓、西里爾、阿拉伯等）佔字母的比例達到這個值就不是英文；拉丁字母的重音字母由停用字比例判斷
+_MAX_NON_LATIN_SHARE = 0.01
+
+
+def _non_latin_share(text: str) -> float:
+    """非拉丁字母（中日韓、西里爾等）佔所有字母的比例；英文裡零星的 μ、° 等符號不影響。"""
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    non_latin = sum(
+        1
+        for ch in letters
+        if not ch.isascii()
+        and not unicodedata.name(ch, "").startswith(
+            ("LATIN", "GREEK")
+        )  # μ、Δ、Ω 是英文指南常見的單位與符號
+    )
+    return non_latin / len(letters) if non_latin >= 3 else 0.0  # 零星符號（μ）不算
+
+
+def _has_accented_latin(text: str) -> bool:
+    """有沒有帶重音或變音符號的拉丁字母（法、葡、土、德文短檔的特徵）。"""
+    return any(
+        ch.isalpha()
+        and not ch.isascii()
+        and unicodedata.name(ch, "").startswith("LATIN")
+        for ch in text
+    )
+
+
+def _is_guide_prose(path: Path, rel_parts: list[str]) -> bool:
+    """內容像不像遊戲內顯示的指南敘述文字（不是授權、更新紀錄、設定檔）。"""
+    try:
+        if path.stat().st_size > _MAX_GUIDE_BYTES:
+            return False
+        text = path.read_text(encoding="utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if sniff_text_file(text, path.suffix, "/".join(rel_parts)) is None:
+        return False
+    # sniff_text_file 不分語言（西、德、法文長句也算敘述文字）：沒有語言標記的檔案要確認是英文原文
+    if _non_latin_share(text) >= _MAX_NON_LATIN_SHARE:
+        return False  # 日、韓、俄、中文等非拉丁字母（含 front matter 的標題）：不是英文原文
+    ratio, words = english_stopword_ratio(text)
+    if words < _MIN_WORDS_TO_JUDGE:
+        # 英文單字太少無從用停用字判斷：只要出現帶重音的拉丁字母（é、ç、ã、ş）就不是英文
+        return not _has_accented_latin(text)
+    return ratio >= _MIN_ENGLISH_RATIO
+
+
+def has_allowed_lang_segment(path: Path, root: Path | None = None) -> bool:
+    """路徑是否屬於管線處理的 Markdown：有 en_us／zh_cn／zh_tw 資料夾，或是無語言資料夾的指南。
+
+    無語言資料夾的指南只看相對於 ``root`` 的路徑：輸入資料夾本身或它的上層剛好叫
+    ``ae2guide``、``docs`` 時，Step 1／Step 3 用的相對路徑沒有這一段，不能在這裡就算數。
+    """
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構，且大小寫不拘
-    return any(RE_LANG_SEG.match(seg) for seg in path.parts)
+    if any(RE_LANG_SEG.match(seg) for seg in path.parts):
+        return True
+    rel = path.relative_to(root) if root is not None else path
+    return neutral_guide_index(list(rel.parts)) is not None
 
 
 def detect_lang_segment(parts: list[str]) -> str | None:
     """
     從路徑 segments 判斷語言資料夾（支援 _en_us/_zh_tw、大小寫）
-    回傳: "en_us" / "zh_tw" / "zh_cn" / None
+    回傳: "en_us" / "zh_tw" / "zh_cn" / None（無語言資料夾的指南視為 "en_us"）
     """
     for seg in parts:
         m = RE_LANG_SEG.match(seg)
         if m:
             # m.group(0) 可能是 _EN_US 這種，把前綴 _ 去掉再 lower
             return seg.lstrip("_").lower()
-    return None
+    return "en_us" if neutral_guide_index(parts) is not None else None
 
 
 def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
@@ -356,6 +474,12 @@ def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
     parts = rel_path.replace("\\", "/").split("/")
     src_norm = src_lang.lower()
     dst_norm = dst_lang.lower()
+
+    guide = neutral_guide_index(parts)
+    if guide is not None:
+        if src_norm != "en_us":
+            return "/".join(parts)
+        return "/".join([*parts[: guide + 1], f"_{dst_norm}", *parts[guide + 1 :]])
 
     for i, seg in enumerate(parts):
         m = RE_LANG_SEG.match(seg)
@@ -373,7 +497,8 @@ def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
 def iter_md_files(root: Path):
     """
     遞迴列出所有 .md（大小寫不敏感），排除 README.md（不分大小寫、任何層級）
-    ✅ 額外限制：只處理路徑中包含 en_us / zh_tw（含 _ 前綴、大小寫不拘）的檔案
+    ✅ 額外限制：只處理路徑中含 en_us／zh_cn／zh_tw 資料夾（含 _ 前綴、大小寫不拘）的檔案，
+    或相對於 root 位在 assets|data/<模組>/ 之下、沒有語言資料夾、內容像指南敘述文字的英文指南（見 neutral_guide_index）
     """
     for p in root.rglob("*"):
         if not p.is_file():
@@ -384,7 +509,12 @@ def iter_md_files(root: Path):
             continue
 
         # ✅ 只允許 en_us / zh_tw（例如：.../en_us/... 或 .../structure/en_us/...）
-        if not has_allowed_lang_segment(p):
+        if not has_allowed_lang_segment(p, root):
+            continue
+        # 沒有語言資料夾的檔案靠內容判斷：授權、更新紀錄、非敘述文字的 .md 不當指南
+        if not any(RE_LANG_SEG.match(seg) for seg in p.parts) and not _is_guide_prose(
+            p, list(p.relative_to(root).parts)
+        ):
             continue
 
         yield p

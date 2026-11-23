@@ -139,6 +139,28 @@ def is_prose(text: str) -> bool:
     return any(w.lower() in _STOPWORDS for w in words) or len(words) >= 4
 
 
+def english_stopword_ratio(text: str) -> tuple[float, int]:
+    """Markdown 內文的英文停用字比例與英文單字數。
+
+    ``is_prose`` 只要求「有停用字或至少四個字」，西、德、法文的長句也會通過；
+    要確認是英文原文時用這個比例（英文指南約 0.1～0.4，其他拉丁字母語言幾乎是 0）。
+    只算內文：front matter、圍欄程式碼、表格與元件標籤不算，避免被資料欄位稀釋。
+    """
+    _meta, body = markdown_front_matter(text)
+    lines: list[str] = []
+    in_fence = False
+    for line in body.splitlines():
+        if line.lstrip().startswith("```"):
+            in_fence = not in_fence
+            continue
+        if not in_fence and not line.lstrip().startswith("|"):
+            lines.append(line)
+    words = _WORD.findall(_MARKUP.sub(" ", " ".join(lines)))
+    if not words:
+        return 0.0, 0
+    return sum(w.lower() in _STOPWORDS for w in words) / len(words), len(words)
+
+
 def is_title_like(text: str) -> bool:
     """短標題（一到三個英文字，首字大寫），用於 ``title``／``name`` 這種位置。"""
     value = text.strip()
