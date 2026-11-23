@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.md_output_guard import OutputGuard
 from translation_tool.core.md_pipeline_files import (
     MANIFEST_NAME,
     REASON_INCOMPLETE,
@@ -507,6 +508,8 @@ def step3_inject_impl(
         "skipped_pending_mismatch": 0,
         "skipped_stale_source": 0,
         "skipped_output_conflict": 0,
+        "skipped_superseded": 0,
+        "skipped_manual_edit": 0,
         "written_from_zh_cn": 0,
     }
     written_outputs: set[str] = set()
@@ -521,31 +524,47 @@ def step3_inject_impl(
         REASON_PENDING_MISMATCH: "skipped_pending_mismatch",
         REASON_STALE_SOURCE: "skipped_stale_source",
         "output_conflict": "skipped_output_conflict",
+        "superseded": "skipped_superseded",
+        "manual_edit": "skipped_manual_edit",
     }
+    guard = OutputGuard(out_done)
     json_files = list(iter_json_files_fn(jroot))
     pre_skips = _plan_inject_skips(json_files, jroot, src_root, pending_root)
     total = len(json_files)
-    for idx, jp in enumerate(json_files, start=1):
-        outcome = pre_skips.get(jp) or _inject_one_doc(
-            jp,
-            src_root=src_root,
-            out_done=out_done,
-            pending_root=pending_root,
-            content_hash_fn=content_hash_fn,
-            load_items_from_json_fn=load_items_from_json_fn,
-            apply_item_to_md_lines_fn=apply_item_to_md_lines_fn,
-            map_lang_fn=map_lang_in_rel_path_allow_zh_fn,
-            written_outputs=written_outputs,
-            convert_zh_cn_fn=convert_zh_cn_fn or (lambda s: convert_text(s, None)),
-        )
-        stats[outcome_counter[outcome]] += 1
-        if outcome == "written_zh_cn":
-            stats["written_from_zh_cn"] += 1
-        if outcome not in ("written", "written_zh_cn"):
-            stats["skipped_files"] += 1
-        progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
-
-    not_updated = stats["skipped_files"] - stats["skipped_lang_status"]
+    try:
+        for idx, jp in enumerate(json_files, start=1):
+            outcome = pre_skips.get(jp) or _inject_one_doc(
+                jp,
+                src_root=src_root,
+                out_done=out_done,
+                pending_root=pending_root,
+                content_hash_fn=content_hash_fn,
+                load_items_from_json_fn=load_items_from_json_fn,
+                apply_item_to_md_lines_fn=apply_item_to_md_lines_fn,
+                map_lang_fn=map_lang_in_rel_path_allow_zh_fn,
+                written_outputs=written_outputs,
+                convert_zh_cn_fn=convert_zh_cn_fn or (lambda s: convert_text(s, None)),
+                guard=guard,
+            )
+            stats[outcome_counter[outcome]] += 1
+            if outcome == "written_zh_cn":
+                stats["written_from_zh_cn"] += 1
+            if outcome not in ("written", "written_zh_cn"):
+                stats["skipped_files"] += 1
+            progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
+    finally:
+        # 中途失敗也要存下已寫出的檔案紀錄，否則下一輪會把工具自己寫的檔誤判為手動修改
+        try:
+            guard.save()
+        except OSError as exc:  # 不能蓋掉迴圈裡原本的例外
+            log_warning(f"[MD] 無法儲存完成檔紀錄（下次可能誤判為手動修改）：{exc!r}")
+    # 被 zh_tw／zh_cn 底稿取代的舊英文譯後檔是預期的略過，不算「沒更新」
+    not_updated = (
+        stats["skipped_files"]
+        - stats["skipped_lang_status"]
+        - stats["skipped_superseded"]
+        - stats["skipped_manual_edit"]  # 已有專屬警告，重跑抽取與翻譯也不會改變結果
+    )
     if not_updated > 0:
         log_warning(
             f"[MD] 有 {not_updated} 個檔案沒有更新（來源已變更、譯文未完成或路徑不安全等）；"
@@ -595,7 +614,7 @@ def _plan_inject_skips(
     - 沒有 zh_tw 時，英文與 zh_cn 都有譯後檔：以 zh_cn 為底稿，英文那份略過。zh_cn 譯後檔
       只有在現行 pending 還在時才算數（Step 1 退回英文時不會有 zh_cn pending）
     - 同語系重複（輸出會互相覆蓋）：全部略過
-    被略過的檔案計入 skipped_output_conflict 並警告。
+    被底稿取代的英文譯後檔計入 skipped_superseded，其餘被略過的檔案計入 skipped_output_conflict 並警告。
     """
     by_source: dict[str, list[Path]] = {}
     for jp in json_files:
@@ -616,14 +635,15 @@ def _plan_inject_skips(
     for rel_cn, rel_en in plan.pair_cn.items():
         if rel_cn in by_source and rel_en in by_source:
             log_warning(f"[MD] 略過 {rel_en} 的譯後檔：輸出由 zh_cn 底稿 {rel_cn} 負責")
-            skips.update(dict.fromkeys(by_source[rel_en], "output_conflict"))
+            skips.update(dict.fromkeys(by_source[rel_en], "superseded"))
     for source_md, paths in by_source.items():
         reason = plan.skip.get(source_md)
         if reason is not None:
             log_warning(
                 f"[MD] 略過 {source_md} 的譯後檔：輸出由同名的 zh_tw 檔或其他來源負責（{reason}）"
             )
-            skips.update(dict.fromkeys(paths, "output_conflict"))
+            outcome = "superseded" if reason == "paired_en" else "output_conflict"
+            skips.update(dict.fromkeys(paths, outcome))
             continue
         if len(paths) > 1:
             canonical = jroot / (source_md.replace("\\", "/") + ".json")
@@ -647,6 +667,7 @@ def _inject_one_doc(
     map_lang_fn,
     written_outputs: set[str],
     convert_zh_cn_fn: Callable[[str], str],
+    guard: OutputGuard,
 ) -> str:
     """處理單一譯後 JSON，回傳結果代碼（written／error／各種略過原因）。"""
     try:
@@ -711,12 +732,19 @@ def _inject_one_doc(
             f"[MD] 略過 {source_md}：輸出 {out_rel} 已由另一個來源寫入（{jp.name}）"
         )
         return "output_conflict"
+    if guard.is_manually_edited(out_rel, out_path):
+        log_warning(
+            f"[MD] 略過 {source_md}：完成檔 {out_rel} 在上次寫入後被手動修改過，不覆蓋；"
+            "要重新產生請先刪除或移走該檔"
+        )
+        return "manual_edit"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     ends_with_nl = original_text.endswith("\n")
     out_path.write_text(
         "\n".join(md_lines) + ("\n" if ends_with_nl else ""), encoding="utf-8"
     )
     written_outputs.add(out_key)
+    guard.record(out_rel, out_path)
     return "written_zh_cn" if from_zh_cn else "written"
 
 
