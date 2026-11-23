@@ -212,5 +212,3 @@ def sync_managed_tree(
                 conflict(relative, "legacy_unowned_stale_file")
 
     return now_owned, conflicts, removed
-
-

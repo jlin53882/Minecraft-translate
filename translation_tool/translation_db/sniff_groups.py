@@ -229,5 +229,3 @@ def sniffed_groups_detailed(
         budget_exhausted=bool(budget_error),
         budget_error=budget_error,
     )
-
-

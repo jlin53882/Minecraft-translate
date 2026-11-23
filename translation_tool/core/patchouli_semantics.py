@@ -302,6 +302,7 @@ class PatchouliContext:
     resolution_error: str = ""
     book_format: str = FORMAT_STANDARD_PATCHOULI
 
+
 def context_from_metadata(
     file_path: str | Path,
     *,
