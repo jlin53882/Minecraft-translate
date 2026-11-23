@@ -419,7 +419,7 @@ def export_md_overlay(
             report.files_planned += 1
             if not write_files or guard is None:
                 continue
-            if _write_output(output, source, current, guard, report):
+            if _write_output(output, source, current, guard, report, source_root):
                 wrote_resource_pack |= (
                     source.out_rel.split("/")[0].casefold() in _RESOURCE_ROOTS
                 )
@@ -445,9 +445,14 @@ def _write_output(
     blocks: list[str],
     guard: OutputGuard,
     report: MdOutputReport,
+    source_root: Path,
 ) -> bool:
     target = output / source.out_rel
-    if not _inside(target.resolve(), output.resolve()):
+    resolved = target.resolve()
+    # 輸出必須在輸出資料夾內，且不可落在來源資料夾內（輸出在來源上層時路徑可能剛好重疊）
+    if not _inside(resolved, output.resolve()) or _inside(
+        resolved, source_root.resolve()
+    ):
         report.issues.append(
             {"path": source.rel, "reason": "unsafe_path", "detail": source.out_rel}
         )

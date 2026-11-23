@@ -397,3 +397,22 @@ def test_any_unfinished_lm_status_is_a_warning(tmp_path, db):
             translation_runner=lambda *_a, s=status: {"status": s},
         )
         assert report.as_dict()["status"] == "DONE_WITH_WARNINGS"
+
+
+def test_output_above_the_source_never_writes_into_the_source(tmp_path, db):
+    parent = tmp_path / "P"
+    src = parent / "a"
+    _write(src / "a" / "en_us" / "x.md", EN)
+    _seed_translation(db, src)
+
+    report = run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(
+            version="1.21.1", dry_run=False, publish=True, output_root=str(parent)
+        ),
+    )
+
+    assert report.output.files_written == 0
+    assert not (src / "zh_tw").exists()
+    assert any(i["reason"] == "unsafe_path" for i in report.output.issues)
