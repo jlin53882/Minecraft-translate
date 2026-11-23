@@ -1,7 +1,7 @@
 """KubeJS／FTB 一鍵執行精靈：與模組包一鍵製作相同的 1/4 → 4/4 對話框。
 
-精靈持有所有執行設定（候選根目錄、遊戲版本、同步模式、來源類型、LM 翻譯、overlay 輸出目錄），
-頁面保留來源路徑、輸出目的地與步驟按鈕。第 3 步「確認並執行」列出所有設定，確認後直接執行並發布 overlay。
+精靈持有所有執行設定（候選根目錄、同步模式、來源類型、LM 翻譯、overlay 輸出目錄），
+遊戲版本在第 2 步與 Mod 資料庫一起選擇；頁面保留來源路徑、輸出目的地與步驟按鈕。第 3 步「確認並執行」列出所有設定，確認後直接執行並發布 overlay。
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ if TYPE_CHECKING:  # pragma: no cover - 僅供型別標註
     from app.views.kubejs_ftb_pipeline_view import KubejsFtbPipelineView
 
 STEP_COUNT = 3
-_STEP_TITLES = ("來源與版本", "翻譯設定", "確認並執行")
+_STEP_TITLES = ("來源與來源類型", "翻譯設定", "確認並執行")
 
 
 class KubejsFtbWizard:
@@ -107,8 +107,7 @@ class KubejsFtbWizard:
                 kit.hint_text(
                     "多個候選時必須明確選擇；尚未分析來源時請先在主頁面按「分析來源」。"
                 ),
-                ft.Row([view.version_field, view.scan_mode], spacing=12, wrap=True),
-                view.version_hint,
+                view.scan_mode,
                 ft.Row([view.include_kubejs, view.include_ftb], spacing=16, wrap=True),
             ],
             spacing=12,
@@ -138,7 +137,7 @@ class KubejsFtbWizard:
         rows = [
             ("來源", view.source_field.value or "—"),
             ("有效來源根目錄", view.root_dropdown.value or "—"),
-            ("遊戲版本", view.version_field.value or "—"),
+            ("遊戲版本", view.game_version() or "—"),
             ("同步模式", "完整掃描" if view.scan_mode.value == "full" else "增量同步"),
             ("來源類型", _source_label(view)),
             ("LM 翻譯待處理", "開啟" if view.translate_missing.value else "未啟用"),
@@ -191,18 +190,14 @@ class KubejsFtbWizard:
                 return "來源有多個候選，請先選擇有效來源根目錄", C.GOLD
             if not (view.include_kubejs.value or view.include_ftb.value):
                 return "至少選擇 KubeJS 或 FTB Quests", C.RED
-            if not (view.version_field.value or "").strip():
-                return "請先選擇或輸入遊戲版本", C.RED
+        if step == 2 and not view.game_version():
+            return "請先選擇遊戲版本", C.RED
         return None
 
 
 def _db_label(view: KubejsFtbPipelineView) -> str:
-    use_db, version = view.translation_db_choice()
-    if not use_db:
-        return "未使用（LM 翻譯會略過）"
-    return f"使用；目標版本：{version or view.version_field.value or '—'}" + (
-        "" if version else "（未指定，沿用遊戲版本）"
-    )
+    use_db, _version = view.translation_db_choice()
+    return "使用" if use_db else "未使用（LM 翻譯會略過）"
 
 
 def _source_label(view: KubejsFtbPipelineView) -> str:

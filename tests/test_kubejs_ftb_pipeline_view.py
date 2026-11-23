@@ -117,9 +117,43 @@ def test_wizard_blocks_next_until_sources_are_analyzed_and_selected():
     view.include_ftb.value = False
     assert wizard._step_problem(1) is not None  # 來源類型都未選
     view.include_kubejs.value = True
-    assert wizard._step_problem(1) is not None  # 版本未填
-    view.version_field.value = "1.21"
     assert wizard._step_problem(1) is None
+    assert not hasattr(view, "version_field")  # 遊戲版本不在第 1 步
+
+
+def test_game_version_is_chosen_once_in_step_two(monkeypatch):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    options = view.lm_db_options
+    monkeypatch.setattr(options, "_refresh_database_state", lambda _s: None)
+    options._versions = ["1.20.1", "1.21.1"]
+    options.version_field.options = [
+        ft.dropdown.Option(v, v) for v in options._versions
+    ]
+
+    assert view._wizard._step_problem(2) is not None  # 尚未選版本
+    assert view._run_blocker(publish=False) is not None
+
+    view._apply_detected_version("1.21.1")  # 分析來源偵測到的版本預選
+    assert view.game_version() == "1.21.1"
+    assert view._wizard._step_problem(2) is None
+    assert view.translation_db_choice()[1] == "1.21.1"  # LM 目標版本與遊戲版本相同
+
+    options._on_version_changed()  # 使用者自選後，不會被之後的偵測覆蓋
+    options.version_field.value = "1.20.1"
+    view._apply_detected_version("1.21.1")
+    assert view.game_version() == "1.20.1"
+
+
+def test_detected_version_missing_from_database_is_not_preselected(monkeypatch):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    options = view.lm_db_options
+    monkeypatch.setattr(options, "_refresh_database_state", lambda _s: None)
+    options._versions = ["1.20.1"]
+
+    view._apply_detected_version("1.21.1")
+
+    assert view.game_version() == ""
+    assert "資料庫沒有這個版本" in options.info.value
 
 
 def test_one_click_requires_output_destination_before_opening_wizard(monkeypatch):
