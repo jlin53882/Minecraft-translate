@@ -320,20 +320,17 @@ class KubejsFtbPipelineView(ft.Column):
             button.disabled = disabled
 
     def _one_click_clicked(self, _e=None) -> None:
-        """一鍵執行：開啟設定精靈；第 4 步確認設定後直接執行並發布 overlay。"""
+        """一鍵執行：開啟設定精靈；第 3 步確認設定後直接執行並發布 overlay。"""
         if self._running:
             show_snack(self._page, "已有 KubeJS／FTB 流水線執行中", C.GOLD)
             return
         if not (self.source_field.value or "").strip():
             show_snack(self._page, "請先輸入來源路徑", C.RED)
             return
-        if not (self.output_field.value or "").strip():
-            show_snack(self._page, "一鍵執行會發布 overlay，請先選擇輸出目的地", C.RED)
-            return
         self._wizard.open()
 
     def _begin_one_click_publish(self) -> None:
-        """精靈第 4 步「確認並執行」：直接掃描、同步並發布 overlay（不另外預覽）。"""
+        """精靈第 3 步「確認並執行」：直接掃描、同步並發布 overlay（不另外預覽）。"""
         self._page.run_task(self._run_one_click_publish)
 
     async def _run_one_click_publish(self) -> None:

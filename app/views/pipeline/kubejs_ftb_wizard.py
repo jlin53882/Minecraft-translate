@@ -1,7 +1,7 @@
-"""KubeJS／FTB 一鍵執行精靈：與模組包一鍵製作相同的 1/4 → 4/4 對話框。
+"""KubeJS／FTB 一鍵執行精靈：三步對話框（1/3 → 3/3）。
 
 精靈持有所有執行設定（候選根目錄、同步模式、來源類型、LM 翻譯、overlay 輸出目錄），
-遊戲版本在第 2 步與 Mod 資料庫一起選擇；頁面保留來源路徑、輸出目的地與步驟按鈕。第 3 步「確認並執行」列出所有設定，確認後直接執行並發布 overlay。
+遊戲版本在第 2 步與 Mod 資料庫一起選擇；頁面保留來源路徑、輸出目的地與步驟按鈕。第 3 步「確認並執行」列出所有設定；輸出目的地未填時擋在這一步，確認後直接執行並發布 overlay。
 """
 
 from __future__ import annotations
@@ -178,6 +178,12 @@ class KubejsFtbWizard:
         self._show()
 
     def _finish(self, _e=None) -> None:
+        problem = self._step_problem(STEP_COUNT)
+        if problem is not None:
+            set_dialog_feedback(
+                self._view._page, self._feedback, f"⚠️ {problem[0]}", problem[1]
+            )
+            return
         self._close()
         self._view._begin_one_click_publish()
 
@@ -192,6 +198,8 @@ class KubejsFtbWizard:
                 return "至少選擇 KubeJS 或 FTB Quests", C.RED
         if step == 2 and not view.game_version():
             return "請先選擇遊戲版本", C.RED
+        if step == STEP_COUNT and not (view.output_field.value or "").strip():
+            return "一鍵執行會發布 overlay，請先在主頁面填寫輸出目的地", C.RED
         return None
 
 

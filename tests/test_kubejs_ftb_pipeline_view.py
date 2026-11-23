@@ -144,31 +144,39 @@ def test_game_version_is_chosen_once_in_step_two(monkeypatch):
     assert view.game_version() == "1.20.1"
 
 
-def test_detected_version_missing_from_database_is_not_preselected(monkeypatch):
+def test_detected_version_missing_from_database_is_selectable(monkeypatch):
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
     options = view.lm_db_options
-    monkeypatch.setattr(options, "_refresh_database_state", lambda _s: None)
     options._versions = ["1.20.1"]
+    monkeypatch.setattr(
+        "app.views.moddb.lm_db_options.database_version_choices",
+        lambda _settings: ["1.20.1"],
+    )
 
     view._apply_detected_version("1.21.1")
 
-    assert view.game_version() == ""
-    assert "資料庫沒有這個版本" in options.info.value
+    # 同步 ModDB 就是建立這個版本的步驟，所以偵測到的新版本必須能選。
+    assert view.game_version() == "1.21.1"
+    assert "1.21.1" in [option.key for option in options.version_field.options]
+    assert "資料庫尚無此版本" in options.info.value
 
 
-def test_one_click_requires_output_destination_before_opening_wizard(monkeypatch):
+def test_one_click_opens_wizard_and_output_is_required_only_at_the_final_step(
+    monkeypatch,
+):
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
     opened: list[bool] = []
     monkeypatch.setattr(view._wizard, "open", lambda: opened.append(True))
     view.source_field.value = "/pack"
 
+    # 手動預覽／同步不需要輸出目錄，但版本只能在精靈裡選，所以精靈不能先擋輸出目的地。
     view.output_field.value = ""
     view._one_click_clicked()
-    assert opened == []
+    assert opened == [True]
+    assert view._wizard._step_problem(3) is not None  # 最後一步才擋
 
     view.output_field.value = "/overlay"
-    view._one_click_clicked()
-    assert opened == [True]
+    assert view._wizard._step_problem(3) is None
 
 
 def test_wizard_final_step_runs_publish_directly_without_preview(monkeypatch):

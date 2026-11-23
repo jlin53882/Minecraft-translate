@@ -160,16 +160,14 @@ class LmDbOptions:
     def suggest_version(self, version: str | None) -> None:
         """依來源偵測結果預選版本；使用者已自行選擇的值不會被覆蓋。
 
-        偵測到的版本不在資料庫時不預選，資訊列會說明，使用者需另選資料庫已有的版本。
+        偵測到的版本即使資料庫還沒有也會預選並列入選項（同步時才會建立）。
         """
         self._detected = version
         if self._picked:
             self.refresh_info()
             return
         self._refresh_database_state(self._settings)
-        set_target_version(
-            self.version_field, version if version in self._versions else None
-        )
+        set_target_version(self.version_field, version)
         self.refresh_info()
         self._update()
 
@@ -178,6 +176,7 @@ class LmDbOptions:
         self._detected = None
         if not self._picked:
             set_target_version(self.version_field, None)
+        self._refresh_database_state(self._settings)
         self.refresh_info()
 
     def _on_version_changed(self, _event=None) -> None:
@@ -220,7 +219,11 @@ class LmDbOptions:
             log_warning(f"讀取 LM 資料庫版本失敗：{exc!r}")
             self._versions = []
         if self._existing_versions_only:
-            refresh_existing_version_options(self.version_field, self._versions)
+            choices = list(self._versions)
+            # 來源偵測到、但資料庫還沒有的版本也要能選：同步 ModDB 就是建立這個版本的步驟。
+            if self._standalone_version and self._detected not in (None, *choices):
+                choices.insert(0, self._detected)
+            refresh_existing_version_options(self.version_field, choices)
         try:
             self._summary = summarize_database(settings)
         except Exception as exc:  # noqa: BLE001 - keep the page usable and expose warning
@@ -372,9 +375,9 @@ class LmDbOptions:
             and self._detected
             and self._detected not in self._versions
         ):
-            text += f"\n⚠ 來源偵測到 {self._detected}，但資料庫沒有這個版本。"
+            text += f"\n來源偵測到 {self._detected}，資料庫尚無此版本；同步時會建立。"
         if not target and self._standalone_version:
-            text += "\n⚠ 請選擇遊戲版本；未選擇時無法執行。"
+            text += "\n⚠ 請選擇遊戲版本；資料庫沒有任何版本時，請先在主頁面按「分析來源」偵測版本。"
         elif not target:
             text += "\n⚠ 尚未指定目標版本；不會回退到其他版本。"
         elif target not in self._versions:

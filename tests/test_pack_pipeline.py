@@ -24,6 +24,14 @@ from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 
 
+@pytest.fixture(autouse=True)
+def _isolated_run_records(tmp_path, monkeypatch):
+    """沒有指定 run_workspace 的測試，執行紀錄也不能寫進真實的 app 資料根目錄。"""
+    monkeypatch.setattr(
+        pack_pipeline_module, "get_data_root", lambda: tmp_path / "app-data"
+    )
+
+
 def test_service_preview_opens_a_sqlite_readonly_connection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

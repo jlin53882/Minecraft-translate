@@ -243,10 +243,10 @@ def _make_plan(
             continue
         key = (target.casefold(), _target_selector(item))
         previous = seen.get(key)
-        if previous is not None and previous != item.zh_tw:
+        value = _plan_value(item)
+        if previous is not None and previous != value:
             report.conflicts.append(f"目標碰撞：{target} [{_target_selector(item)}]")
             continue
-        value = _plan_value(item)
         seen[key] = value
         plans.append(_PlannedTranslation(item, target, value))
     return plans
@@ -479,8 +479,7 @@ def _write_plan(
             # 既有 zh_tw 檔案可能含有沒有進入本次 ModDB 計畫的鍵；若一律
             # 由 en_us 建立 stage，部署 overlay 時會靜默刪掉那些既有內容。
             # 以目標語系檔作為基底，只覆蓋明確命中的 selector。
-            existing_target = _safe_join(quests_root, target_path)
-            shutil.copy2(existing_target if existing_target.is_file() else src, dst)
+            shutil.copy2(_ftb_lang_base(quests_root, target_path, src), dst)
         _changed, _candidates, details = patch_lang_snbt_file(
             str(src), str(dst), updates, return_details=True
         )
@@ -880,6 +879,29 @@ def _ftb_lang_update_key(selector: str) -> str | None:
         return parts[1]
     # 舊版資料庫的 FTB selector 沒有 locale；保留讀取相容性。
     return value
+
+
+def _ftb_lang_base(quests_root: Path, target_path: str, src: Path) -> Path:
+    """zh_tw 目標檔的基底：既有 zh_tw → 同位置的 en_us → 目前處理的來源。
+
+    多個來源共用一個目標時，第一個處理的來源不一定是 en_us；若直接拿它當基底，
+    它獨有而未翻譯的外語 key 會以原文寫進 zh_tw。
+    """
+    existing = _safe_join(quests_root, target_path)
+    if existing.is_file():
+        return existing
+    parts = list(PurePosixPath(target_path).parts)
+    if len(parts) >= 2 and parts[0].lower() == "lang":
+        if parts[1].lower() == "zh_tw":
+            parts[1] = "en_us"
+        elif Path(parts[1]).stem.lower() == "zh_tw":
+            parts[1] = "en_us" + Path(parts[1]).suffix
+        else:
+            return src
+        english = _safe_join(quests_root, "/".join(parts))
+        if english.is_file():
+            return english
+    return src
 
 
 def _ftb_lang_target(source_path: str) -> str:
