@@ -53,7 +53,6 @@ Minecraft-translate/
 |------|------|
 | `untranslated_checker.py` | 偵測仍未未翻譯的條目 |
 | `english_residue_checker.py` | 偵測翻譯結果中殘留的英文字詞 |
-| `color_char_checker.py` | 偵測顏色代碼（§）或特殊字元異常 |
 | `variant_comparator.py` | 比較同鍵在 en_us / zh_cn / zh_tw 的 variant 差異 |
 | `variant_comparator_tsv.py` | TSV 格式的 variant 比較工具 |
 | `utils/` | 工具：快取、config、text_processing、logging、例外處理 |
@@ -103,7 +102,7 @@ Minecraft-translate/
 | `core/lm_response_parser.py` | AI 回應 JSON 解析，處理截斷與 chunked 回應 | `safe_json_loads()`, `_extract_json_blocks()` |
 | `core/lm_translator_shared_loop.py` | 批次翻譯迴圈（含 cache 查詢、WAR 記錄） | `translate_items_with_cache_loop()`, `_get_default_batch_size()` |
 | `core/lm_translator_shared_cache.py` | 翻譯 cache 查詢與匹配邏輯 | `fast_split_items_by_cache()`, `get_default_cache_rules()`, `_is_valid_hit()` |
-| `core/lm_translator_skeleton.py` | FTB / KubeJS / Markdown 共用 cache、batch、flush、checkpoint 與 progress contract | `prepare_translator_items()`, `run_translator_skeleton()`, `make_checkpoint_adapter()` |
+| `core/lm_translator_skeleton.py` | 目錄翻譯與 Mod DB 翻譯共用 cache、batch、flush、checkpoint 與 progress contract | `prepare_translator_items()`, `run_translator_skeleton()` |
 | `core/lang_merge_pipeline.py` | 合併流程管線（ZIP → 解壓 → 合併 → 寫出） | （內部用於 `lang_merger`） |
 | `plugins/ftbquests/ftbquests_snbt_extractor.py` | FTB Quests SBNT 解析與欄位提取 | `extract_lang_file()`, `extract_quest_file()`, `process_quest_folder()` |
 | `plugins/ftbquests/ftbquests_snbt_inject.py` | FTB Quests SBNT 翻譯注入 | `patch_lang_snbt_file()`, `patch_quest_snbt_file()` |
@@ -117,7 +116,6 @@ Minecraft-translate/
 | `plugins/shared/json_io.py` | 通用 JSON 讀寫工具 | `read_json_dict()`, `write_json_dict()`, `collect_json_files()` |
 | `checkers/untranslated_checker.py` | 偵測未翻譯條目 | `check_untranslated_generator()` |
 | `checkers/english_residue_checker.py` | 偵測英文殘留 | `check_english_residue_generator()`, `find_json_files()` |
-| `checkers/color_char_checker.py` | 偵測色彩字元殘留 | `check_color_chars()`, `ColorCharError` |
 | `utils/cache_manager.py` | SQLite 分片快取、全文搜尋、WAL 優化 | module-level façade（無 class） |
 | `utils/config_manager.py` | 設定載入與驗證、Logging 初始化 | `load_config()`, `setup_logging()` |
 | `app/views/translation_view.py` | 任務翻譯工具主視圖（FTB / KubeJS / Markdown） | `TranslationView` |

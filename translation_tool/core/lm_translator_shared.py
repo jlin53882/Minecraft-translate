@@ -31,11 +31,9 @@ from translation_tool.core.lm_translator_shared_loop import (
     translate_items_with_cache_loop,
 )
 from translation_tool.core.lm_translator_skeleton import (
-    JsonCheckpointAdapter,
     TranslatorHooks,
     TranslatorSkeleton,
     format_eta,
-    make_checkpoint_adapter,
     make_progress_hook,
     prepare_translator_items,
     run_translator_skeleton,
@@ -49,7 +47,6 @@ __all__ = [
     "BatchPolicy",
     "CacheRule",
     "CommonBatchExecutor",
-    "JsonCheckpointAdapter",
     "TranslateLoopResult",
     "TranslatorHooks",
     "TranslatorSkeleton",
@@ -63,7 +60,6 @@ __all__ = [
     "format_eta",
     "get_default_cache_rules",
     "invoke_translation_batch",
-    "make_checkpoint_adapter",
     "make_progress_hook",
     "prepare_translator_items",
     "restore_cache_hit_text",

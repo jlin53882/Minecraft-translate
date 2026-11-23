@@ -40,10 +40,8 @@ items
 
 `on_batch_checkpoint(state)` 會在 shared loop 完成 cache flush 與 format flush
 之後、progress 之前呼叫。`state` 至少包含 `cache_type`、`processed`、`total`、
-`completed_calls` 與該批次的 API `status`。`make_checkpoint_adapter()` 是這個 hook 的 JSON adapter 工廠，保存 fingerprint、target、
-completed/total 與最後 durable batch metadata；checkpoint 寫入失敗會使 shared loop 回傳
-`FAILED`，不會把未持久化的 boundary 當成成功。目前正式流程沒有使用這個工廠：目錄翻譯
-以 `lm_translator.save_checkpoint` 掛接 `on_batch_checkpoint`，Mod DB 翻譯的進度存在資料庫本身。
+`completed_calls` 與該批次的 API `status`。checkpoint 寫入失敗會使 shared loop 回傳 `FAILED`，不會把未持久化的 boundary 當成成功。
+目錄翻譯以 `lm_translator.save_checkpoint` 掛接 `on_batch_checkpoint`；Mod DB 翻譯的進度存在資料庫本身。
 
 目錄入口 `translate_directory_generator()` 只負責 phase 編排：驗證與掃描、抽取、
 cache split／輸出、dry-run 預覽，以及呼叫 shared translation phase。抽取、cache-hit
