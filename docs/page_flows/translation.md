@@ -33,7 +33,7 @@ flowchart TD
 - 每次執行建立新的 `TaskSession`，以 `launch_page_operation` 啟動；應用程式關閉中時不啟動並提示。
 - 服務層 `run_md_pipeline_service` 是 `session.start()` 的 owner，`finally` 一定呼叫 `session.finish()`；例外寫入任務日誌並 `set_error()`。
 - 畫面定時讀 `session.snapshot()` 更新進度、日誌與狀態晶片；`DONE`／`ERROR` 時停止輪詢。
-- 取消：`session.request_cancel()`，服務在階段之間與掃描迴圈檢查取消，取消後不輸出檔案。
+- 取消：`session.request_cancel()`，服務在階段之間、掃描迴圈與輸出迴圈（每 50 檔）檢查取消；輸出階段取消時，已寫出的檔案會保留，但不會補寫 `pack.mcmeta`。
 
 ## 狀態與資料
 

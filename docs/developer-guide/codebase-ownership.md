@@ -28,7 +28,7 @@ Minecraft-translate/
 | `views/cache_manager/` | 快取視圖子模組（overview / log panel + actions / state / controller / presenter） |
 | `views/dashboard/` | 工作台資料彙整（`dashboard_data.py`，與畫面分離，可單獨測試） |
 | `views/pipeline/` | 一鍵批次翻譯子模組（pipeline_view + 5 個 dialog：extract/merge/translate/bundle/one_click） |
-| `views/config/`、`views/extractor/`、`views/rules/`、`views/translation/` | 各主視圖的 panels/actions/state 子模組 |
+| `views/config/`、`views/extractor/`、`views/rules/` | 各主視圖的 panels/actions/state 子模組 |
 | `services_impl/` | 服務實作（pipeline 業務邏輯），不含 QC/checkers |
 | `services.py` | façade：僅保留 QC/checkers 暂緩線的 re-export |
 | `ui/` | `design.py`（設計 token / 主題）、`kit/`（新共用元件）、snack.py、status_chip.py、view_wrapper.py、keyboard_shortcuts.py。詳見 `docs/developer-guide/ui-design-system.md` |

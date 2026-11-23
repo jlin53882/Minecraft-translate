@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import traceback
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 from app.services_impl.moddb_service import open_database
@@ -77,6 +78,48 @@ def _zh_cn_converter():
     return _make_zh_cn_converter()
 
 
+_TRANSLATION_SEVERITY = ("DONE", "SKIPPED", "FAILED")
+
+
+def _worse_translation(
+    current: dict[str, Any] | None, other: dict[str, Any]
+) -> dict[str, Any]:
+    """多個來源的 LM 翻譯摘要合併：數字相加，狀態取最嚴重者。"""
+    merged = dict(current or {})
+    for name, number in other.items():
+        if name == "status":
+            continue
+        if isinstance(number, (int, float)) and not isinstance(number, bool):
+            merged[name] = merged.get(name, 0) + number
+        else:
+            merged.setdefault(name, number)
+
+    def rank(status: Any) -> int:
+        text = str(status or "DONE")
+        return _TRANSLATION_SEVERITY.index(text) if text in _TRANSLATION_SEVERITY else 0
+
+    worst = max((current or {}).get("status"), other.get("status"), key=rank)
+    if worst is not None:
+        merged["status"] = worst
+    return merged
+
+
+def _expand_sources(sources: list[str], output_root: str | None) -> list[str]:
+    """每個來源先做模組包探索（沒按「分析來源」也能得到資源包結構），並排除輸出資料夾本身。"""
+    output = Path(output_root).expanduser().resolve() if output_root else None
+    expanded: list[str] = []
+    for source in sources:
+        for folder in discover_md_source_folders(source) or [source]:
+            resolved = Path(folder).resolve()
+            if output is not None and (
+                resolved == output or output in resolved.parents
+            ):
+                continue
+            if folder not in expanded:
+                expanded.append(folder)
+    return expanded
+
+
 def _merge_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
     """多個來源資料夾各跑一次後合併成一份摘要：數字相加、提醒串接、狀態取最嚴重者。"""
     if len(summaries) == 1:
@@ -90,6 +133,8 @@ def _merge_summaries(summaries: list[dict[str, Any]]) -> dict[str, Any]:
                 merged[key] = merged.get(key, 0) + value
             elif isinstance(value, list):
                 merged[key] = [*merged.get(key, []), *value][:200]
+            elif key == "translation" and isinstance(value, dict):
+                merged[key] = _worse_translation(merged.get(key), value)
             elif isinstance(value, dict):
                 inner = merged.setdefault(key, {})
                 for name, number in value.items():
@@ -141,7 +186,9 @@ def run_md_pipeline_service(
             if translate_missing
             else None
         )
-        sources = [source] if isinstance(source, str) else list(source)
+        sources = _expand_sources(
+            [source] if isinstance(source, str) else list(source), output_root
+        )
         if not sources:
             raise ValueError("沒有可處理的來源資料夾")
         convert = _zh_cn_converter() if read_zh_cn else None

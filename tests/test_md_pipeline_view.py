@@ -174,3 +174,88 @@ def test_control_tree_contains_only_flet_controls(monkeypatch):
     view = mv.MarkdownPipelineView(mock_page(), mock_filepicker())
 
     assert _non_controls(view) == []
+
+
+def test_service_expands_a_pack_root_without_a_prior_analysis(monkeypatch, tmp_path):
+    (tmp_path / "kubejs" / "assets").mkdir(parents=True)
+    (tmp_path / "resourcepacks" / "rp" / "assets").mkdir(parents=True)
+    calls: list[str] = []
+
+    class _Report:
+        def as_dict(self):
+            return {"status": "DONE"}
+
+    monkeypatch.setattr(
+        svc,
+        "run_md_pipeline",
+        lambda db, folder, *_a, **_k: calls.append(folder) or _Report(),
+    )
+    monkeypatch.setattr(svc, "open_database", lambda **_k: None)
+
+    svc.run_md_pipeline_service(
+        str(tmp_path), "1.21.1", TaskSession(max_logs=10), dry_run=True
+    )
+
+    assert [Path(c).relative_to(tmp_path.resolve()).as_posix() for c in calls] == [
+        "kubejs",
+        "resourcepacks/rp",
+    ]
+
+
+def test_service_never_scans_the_output_folder(monkeypatch, tmp_path):
+    (tmp_path / "kubejs" / "assets").mkdir(parents=True)
+    out = tmp_path / "resourcepacks" / "out"
+    (out / "assets").mkdir(parents=True)
+    calls: list[str] = []
+
+    class _Report:
+        def as_dict(self):
+            return {"status": "DONE"}
+
+    monkeypatch.setattr(
+        svc,
+        "run_md_pipeline",
+        lambda db, folder, *_a, **_k: calls.append(folder) or _Report(),
+    )
+    monkeypatch.setattr(svc, "open_database", lambda **_k: None)
+
+    svc.run_md_pipeline_service(
+        [str(tmp_path / "kubejs"), str(out)],
+        "1.21.1",
+        TaskSession(max_logs=10),
+        output_root=str(out),
+        dry_run=True,
+    )
+
+    assert [Path(c).name for c in calls] == ["kubejs"]
+
+
+def test_dry_run_opens_the_database_read_only(monkeypatch, tmp_path):
+    seen: dict = {}
+
+    def fake_open(**kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(svc, "open_database", fake_open)
+    monkeypatch.setattr(
+        svc,
+        "run_md_pipeline",
+        lambda *_a, **_k: SimpleNamespace(as_dict=lambda: {"status": "DONE"}),
+    )
+
+    svc.run_md_pipeline_service(
+        str(tmp_path), "1.21.1", TaskSession(max_logs=10), dry_run=True
+    )
+
+    assert seen == {"create": False, "readonly": True}
+
+
+def test_merge_keeps_the_worst_translation_status():
+    merged = svc._merge_summaries(
+        [
+            {"status": "DONE", "translation": {"status": "DONE", "written": 2}},
+            {"status": "DONE", "translation": {"status": "FAILED", "written": 1}},
+        ]
+    )
+
+    assert merged["translation"] == {"status": "FAILED", "written": 3}

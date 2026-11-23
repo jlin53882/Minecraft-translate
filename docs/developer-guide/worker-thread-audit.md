@@ -64,7 +64,7 @@ Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecyc
 
 | 輪詢 | owner | teardown | 驗證 |
 |---|---|---|---|
-| Markdown 流水線 `_poll` | `MarkdownPipelineView._poller`（`app/ui/poller.PollerHandle`） | `will_unmount()` → `stop_ui_timer`；`did_mount()` → `resume_ui_timer` | `tests/test_md_pipeline_view.py` 與 `tests/test_view_lifecycle_contracts.py` |
+| Markdown 流水線 `_poll` | `MarkdownPipelineView._poller`（`app/ui/poller.PollerHandle`） | `will_unmount()` → `_poller.stop()`；`did_mount()` → 重新 `_poller.start()` | `tests/test_md_pipeline_view.py` |
 | LM 頁 `_poll_session` | `LMView._poller` | `will_unmount()`／`did_mount()` | `test_lm_*`（同上） |
 | 合併頁 `_poll_merge`（event loop 輪詢，不另開執行緒） | `MergeView._poller` | `will_unmount()`／`did_mount()`；DONE／ERROR 設 `_ui_stop` | `test_merge_*`：不另開執行緒、卸載停止、重 mount、卸載期間完成只顯示一次摘要 |
 | 流水線步驟 `_watch_loop` | `PipelineRunner.poller`（`PollerHandle`） | `will_unmount()` → `runner.on_unmount()`；`did_mount()` → `runner.on_mount()`；worker `finally` 設定 `done` 並補 `_final_sync` | `test_pipeline_runner_behavior`（卸載停止、重掛載單一 poller、卸載期間完成補日誌、取消）、`test_pipeline_step_watcher_always_ends_with_the_step` |

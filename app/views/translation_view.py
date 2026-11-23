@@ -7,6 +7,7 @@ FTB／KubeJS 使用 ``KubejsFtbPipelineView``，Markdown 使用 ``MarkdownPipeli
 
 import flet as ft
 
+from app.services_impl.resume_service import discard_interrupted
 from app.ui import kit
 from app.ui.design import C
 from app.ui.snack import show_snack
@@ -83,6 +84,9 @@ class TranslationView(ft.Column):
         kind = getattr(task, "kind", "")
         log_warning(f"[Resume] 任務翻譯頁不支援續跑類型：{kind!r}")
         if kind == "md":
+            discard_interrupted(
+                task
+            )  # 舊流程的續跑標記不再使用，清掉以免每次啟動都詢問
             self.tabs.selected_index = _MD_TAB_INDEX
             show_snack(
                 self._page,

@@ -24,7 +24,9 @@ from translation_tool.core.guide_blocks import (
     has_translatable_text,
 )
 from translation_tool.core.guide_translation import render_guide
-from translation_tool.core.md_output_guard import OutputGuard
+from translation_tool.core.md_output_guard import MANIFEST_NAME, OutputGuard
+from translation_tool.core.pack_format_lookup import resolve_version_input
+from translation_tool.core.pack_mcmeta import build_pack_mcmeta
 from translation_tool.core.text_sniffer import split_locale
 from translation_tool.plugins.md.md_extract_qa import (
     contains_cjk,
@@ -41,11 +43,14 @@ from translation_tool.utils.cancellation import TaskCancelled
 from translation_tool.utils.cancellation import (
     raise_if_cancelled as _raise_op_cancelled,
 )
+from translation_tool.utils.log_unit import log_warning
 
 PACK_MCMETA_NAME = "pack.mcmeta"
 _RESOURCE_ROOTS = ("assets", "data")
 _SCOPE_SAFE = re.compile(r"[^a-z0-9_.-]+")
 _MAX_ISSUES = 200
+# 這些掃描問題代表來源本身不可靠，LM 翻譯會跳過；段落數對不上的譯文檔（misaligned）只是不採用該檔
+_BLOCKING_ISSUES = frozenset({"output_conflict", "read_failed", "source_missing"})
 
 
 class MdPipelineError(RuntimeError):
@@ -139,10 +144,16 @@ class MdPipelineReport:
     def issues(self) -> list[dict[str, str]]:
         return [*self.scan.issues, *(self.output.issues if self.output else [])]
 
+    @property
+    def _translation_failed(self) -> bool:
+        return self.translation.get("status") in ("FAILED", "SKIPPED")
+
     def as_dict(self) -> dict[str, Any]:
         out = self.output
         return {
-            "status": "DONE_WITH_WARNINGS" if self.issues else "DONE",
+            "status": "DONE_WITH_WARNINGS"
+            if self.issues or self._translation_failed
+            else "DONE",
             "dry_run": self.options.dry_run,
             "publish": self.options.publish,
             "files_seen": self.scan.files_seen,
@@ -184,7 +195,9 @@ def discover_md_source_folders(path: str | Path) -> list[str]:
         found.extend(
             str(child.resolve())
             for child in sorted(packs.iterdir())
-            if child.is_dir() and (child / "assets").is_dir()
+            if child.is_dir()
+            and (child / "assets").is_dir()
+            and not (child / MANIFEST_NAME).is_file()  # 本工具先前輸出的資源包不是來源
         )
     return found or [str(root.resolve())]
 
@@ -289,7 +302,7 @@ def _scan_group(
     tw_blocks = _aligned(blocks, tw_files, paths, rel, result)
     cn_blocks = (
         _aligned(blocks, cn_files, paths, rel, result)
-        if read_zh_cn and not tw_blocks
+        if read_zh_cn and not tw_files
         else None
     )
     result.zh_tw_used_files += bool(tw_blocks)
@@ -367,7 +380,9 @@ def export_md_overlay(
     from translation_tool.translation_db.quality import guide_structure_issues
 
     output = Path(str(options.output_root or "")).expanduser()
-    report = MdOutputReport(str(output), options.dry_run)
+    # 只有發布才寫輸出資料夾；同步 DB 步驟即使填了輸出資料夾也只計算輸出計畫
+    write_files = options.publish and not options.dry_run
+    report = MdOutputReport(str(output), not write_files)
     source_root = Path(scan.root)
     if options.output_root and _inside(output.resolve(), source_root):
         raise MdPipelineError("輸出資料夾不可放在來源資料夾內")
@@ -401,17 +416,17 @@ def export_md_overlay(
                 report.skipped_untranslated += 1
                 continue
             report.files_planned += 1
-            if options.dry_run or guard is None:
+            if not write_files or guard is None:
                 continue
             if _write_output(output, source, current, guard, report):
                 wrote_resource_pack |= (
                     source.out_rel.split("/")[0].casefold() in _RESOURCE_ROOTS
                 )
     finally:
-        if guard is not None and not options.dry_run:
+        if guard is not None and write_files:
             guard.save()
     if wrote_resource_pack:
-        _ensure_pack_mcmeta(output)
+        _ensure_pack_mcmeta(output, options.version)
     return report
 
 
@@ -460,18 +475,18 @@ def _write_output(
     return True
 
 
-def _ensure_pack_mcmeta(output: Path) -> None:
+def _ensure_pack_mcmeta(output: Path, version: str) -> None:
+    """輸出資料夾還沒有 pack.mcmeta 時，依遊戲版本寫入對應的 pack_format。"""
     meta = output / PACK_MCMETA_NAME
     if meta.exists():
         return
+    try:
+        pack_format = resolve_version_input(version).pack_format
+    except ValueError:
+        pack_format = resolve_version_input("").pack_format
     meta.write_text(
         json.dumps(
-            {
-                "pack": {
-                    "pack_format": 15,
-                    "description": "Minecraft-translate 指南繁中翻譯",
-                }
-            },
+            build_pack_mcmeta("Minecraft-translate 指南繁中翻譯", pack_format),
             ensure_ascii=False,
             indent=2,
         ),
@@ -502,20 +517,35 @@ def run_md_pipeline(
     report = MdPipelineReport(options, scan)
     report.timing_sec["scan"] = time.perf_counter() - started
     _raise_if_cancelled(session)
+    _set_progress(session, 0.35)
 
     if db is not None:
         phase = time.perf_counter()
         report.ingest = sync_database(db, scan, options, convert)
         report.timing_sec["db_sync"] = time.perf_counter() - phase
     _raise_if_cancelled(session)
+    _set_progress(session, 0.65)
 
-    if options.translate_missing and db is not None and not scan.issues:
+    if options.translate_missing and db is not None:
+        blocking = [i for i in scan.issues if i["reason"] in _BLOCKING_ISSUES]
         phase = time.perf_counter()
-        if translation_runner is None:
-            raise MdPipelineError("LM 翻譯已啟用，但未提供共用翻譯服務入口")
-        report.translation = _summary(translation_runner(db, scan, options, session))
+        if blocking:
+            log_warning(
+                f"[Markdown 流水線] 來源有 {len(blocking)} 項阻擋性問題，跳過 LM 翻譯"
+            )
+            report.translation = {
+                "status": "SKIPPED",
+                "reason": "來源有阻擋性問題（輸出衝突或讀取失敗）",
+            }
+        else:
+            if translation_runner is None:
+                raise MdPipelineError("LM 翻譯已啟用，但未提供共用翻譯服務入口")
+            report.translation = _summary(
+                translation_runner(db, scan, options, session)
+            )
         report.timing_sec["translation"] = time.perf_counter() - phase
     _raise_if_cancelled(session)
+    _set_progress(session, 0.95)
 
     if db is not None and options.output_root:
         phase = time.perf_counter()
@@ -530,6 +560,12 @@ def _summary(value: Any) -> dict[str, Any]:
     if callable(as_dict):
         return dict(as_dict())
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _set_progress(session, value: float) -> None:
+    setter = getattr(session, "set_progress", None)
+    if callable(setter):
+        setter(value)
 
 
 def _raise_if_cancelled(session) -> None:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from translation_tool.translation_db import md_pipeline
 from translation_tool.translation_db.md_pipeline import (
     MdPipelineError,
     MdPipelineOptions,
@@ -220,3 +221,166 @@ def test_discover_lists_pack_resource_folders(tmp_path):
     plain = tmp_path / "plain"
     plain.mkdir()
     assert discover_md_source_folders(plain) == [str(plain.resolve())]
+
+
+def _count(db) -> int:
+    return db._conn.execute("SELECT COUNT(*) FROM translation").fetchone()[0]
+
+
+def _seed_translation(db, src):
+    for item in scan_md_sources(src).items:
+        db.write_back(
+            "1.21.1", [_wb(item, "庫:" + item.en_us)], fill_other_versions=False
+        )
+
+
+def test_sync_without_publish_does_not_write_output_files(tmp_path, db):
+    src = tmp_path / "in"
+    _write(src / "assets" / "demo" / "guide" / "intro.md", EN)
+    _seed_translation(db, src)
+    out = tmp_path / "out"
+
+    report = run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(
+            version="1.21.1", dry_run=False, publish=False, output_root=str(out)
+        ),
+    )
+
+    assert report.output.files_planned == 1 and report.output.files_written == 0
+    assert not out.exists()
+
+
+def test_dry_run_with_existing_translations_writes_neither_db_nor_output(tmp_path, db):
+    src = tmp_path / "in"
+    _write(src / "assets" / "demo" / "guide" / "intro.md", EN)
+    _seed_translation(db, src)
+    before = _count(db)
+    _write(src / "assets" / "demo" / "guide" / "extra.md", EN)
+    out = tmp_path / "out"
+
+    report = run_md_pipeline(
+        db, src, MdPipelineOptions(version="1.21.1", output_root=str(out))
+    )
+
+    assert report.ingest.new_entries > 0
+    assert _count(db) == before
+    assert not out.exists()
+
+
+def test_misaligned_zh_cn_does_not_block_lm_translation(tmp_path, db):
+    src = tmp_path / "in"
+    _write(src / "pack" / "en_us" / "a.md", EN)
+    _write(src / "pack" / "en_us" / "b.md", EN)
+    _write(src / "pack" / "zh_cn" / "b.md", "# 标题\n\n只有一段。\n")
+    called: list[bool] = []
+
+    def runner(*_a):
+        called.append(True)
+        return {"status": "DONE"}
+
+    report = run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(version="1.21.1", dry_run=False, translate_missing=True),
+        translation_runner=runner,
+    )
+
+    assert called and report.translation["status"] == "DONE"
+    assert report.as_dict()["status"] == "DONE_WITH_WARNINGS"  # 仍回報 misaligned
+
+
+def test_blocking_scan_issue_skips_lm_and_says_so(tmp_path, db, monkeypatch):
+    src = tmp_path / "in"
+    _write(src / "pack" / "en_us" / "a.md", EN)
+    real_scan = md_pipeline.scan_md_sources
+
+    def scan_with_issue(*args, **kwargs):
+        result = real_scan(*args, **kwargs)
+        result.issue("pack/en_us/b.md", "read_failed", "無法以 UTF-8 讀取")
+        return result
+
+    monkeypatch.setattr(md_pipeline, "scan_md_sources", scan_with_issue)
+    called: list[bool] = []
+
+    report = run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(version="1.21.1", dry_run=False, translate_missing=True),
+        translation_runner=lambda *_a: called.append(True) or {"status": "DONE"},
+    )
+
+    assert not called
+    assert report.translation["status"] == "SKIPPED"
+    assert report.as_dict()["status"] == "DONE_WITH_WARNINGS"
+
+
+def test_failed_lm_translation_makes_the_summary_a_warning(tmp_path, db):
+    src = tmp_path / "in"
+    _write(src / "pack" / "en_us" / "a.md", EN)
+
+    report = run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(version="1.21.1", dry_run=False, translate_missing=True),
+        translation_runner=lambda *_a: {"status": "FAILED"},
+    )
+
+    assert report.as_dict()["status"] == "DONE_WITH_WARNINGS"
+
+
+def test_pack_mcmeta_follows_the_game_version(tmp_path, db):
+    import json
+
+    from translation_tool.core.pack_format_lookup import resolve_version_input
+    from translation_tool.core.pack_mcmeta import build_pack_mcmeta
+
+    src = tmp_path / "in"
+    _write(src / "assets" / "demo" / "guide" / "intro.md", EN)
+    _seed_translation(db, src)
+    out = tmp_path / "out"
+
+    run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(
+            version="1.21.1", dry_run=False, publish=True, output_root=str(out)
+        ),
+    )
+
+    meta = json.loads((out / "pack.mcmeta").read_text(encoding="utf-8"))
+    expected = build_pack_mcmeta(
+        "Minecraft-translate 指南繁中翻譯", resolve_version_input("1.21.1").pack_format
+    )
+    assert meta == expected and meta["pack"].get("pack_format") != 15
+
+
+def test_zh_cn_is_not_a_fallback_for_an_unusable_zh_tw(tmp_path):
+    _write(tmp_path / "pack" / "en_us" / "guide.md", EN)
+    _write(tmp_path / "pack" / "zh_tw" / "guide.md", "# 標題\n\n只有一段。\n")
+    _write(tmp_path / "pack" / "zh_cn" / "guide.md", CN)
+
+    result = scan_md_sources(tmp_path, read_zh_cn=True)
+
+    assert result.zh_cn_used_files == 0 and not any(i.zh_cn for i in result.items)
+
+
+def test_discovery_skips_previous_output_packs(tmp_path, db):
+    src = tmp_path / "in"
+    _write(src / "assets" / "demo" / "guide" / "intro.md", EN)
+    _seed_translation(db, src)
+    root = tmp_path / "pack"
+    (root / "kubejs" / "assets").mkdir(parents=True)
+    out = root / "resourcepacks" / "ZhOut"
+    run_md_pipeline(
+        db,
+        src,
+        MdPipelineOptions(
+            version="1.21.1", dry_run=False, publish=True, output_root=str(out)
+        ),
+    )
+
+    found = discover_md_source_folders(root)
+
+    assert [Path(p).name for p in found] == ["kubejs"]
