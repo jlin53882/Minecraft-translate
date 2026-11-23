@@ -163,20 +163,20 @@ class LmDbOptions:
         偵測到的版本即使資料庫還沒有也會預選並列入選項（同步時才會建立）。
         """
         self._detected = version
-        if self._picked:
-            self.refresh_info()
-            return
         self._refresh_database_state(self._settings)
-        set_target_version(self.version_field, version)
+        if not self._picked:
+            set_target_version(self.version_field, version)
         self.refresh_info()
         self._update()
 
     def clear_suggested_version(self) -> None:
         """來源變更後，清掉屬於舊來源的偵測值與預選（使用者自選的版本保留）。"""
+        had_detected = self._detected is not None
         self._detected = None
         if not self._picked:
             set_target_version(self.version_field, None)
-        self._refresh_database_state(self._settings)
+        if had_detected:  # 選項裡只有偵測值會變；沒偵測過就不必重讀資料庫
+            self._refresh_database_state(self._settings)
         self.refresh_info()
 
     def _on_version_changed(self, _event=None) -> None:
@@ -221,8 +221,11 @@ class LmDbOptions:
         if self._existing_versions_only:
             choices = list(self._versions)
             # 來源偵測到、但資料庫還沒有的版本也要能選：同步 ModDB 就是建立這個版本的步驟。
-            if self._standalone_version and self._detected not in (None, *choices):
-                choices.insert(0, self._detected)
+            # 使用者自選的版本（可能是偵測到的新版本）也要留在選項裡，換來源不會把它清掉。
+            if self._standalone_version:
+                for extra in (self.selected_version(), self._detected):
+                    if extra and extra not in choices:
+                        choices.insert(0, extra)
             refresh_existing_version_options(self.version_field, choices)
         try:
             self._summary = summarize_database(settings)

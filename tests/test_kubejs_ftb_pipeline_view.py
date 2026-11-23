@@ -237,3 +237,23 @@ def test_discover_discards_version_result_when_source_changes_while_detecting(
     assert view._detected_version is None
     assert view._candidates == []
     assert candidates_called is False
+
+
+def test_user_picked_new_version_survives_source_change_and_redetection(monkeypatch):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    options = view.lm_db_options
+    monkeypatch.setattr(
+        "app.views.moddb.lm_db_options.database_version_choices",
+        lambda _settings: ["1.20.1"],
+    )
+    view._apply_detected_version("1.21.1")  # 偵測到、但資料庫沒有的版本
+    options.version_field.value = "1.21.1"
+    options._on_version_changed()  # 使用者明確選了它
+
+    view.source_field.value = "other-source"
+    view._source_changed()  # 換來源
+
+    assert view.game_version() == "1.21.1"  # 自選的版本保留
+    view._apply_detected_version("1.22")  # 新來源的偵測不覆蓋，但要出現在選項
+    assert view.game_version() == "1.21.1"
+    assert "1.22" in [option.key for option in options.version_field.options]
