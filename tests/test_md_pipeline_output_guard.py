@@ -82,6 +82,7 @@ def test_manually_edited_output_is_not_overwritten(tmp_path, fake_lm, warnings):
     assert result["step3"]["skipped_manual_edit"] == 1
     assert result["step3"]["written_files"] == 0
     assert any("手動修改" in w for w in warnings)
+    assert not any("沒有更新" in w for w in warnings)
 
 
 def test_deleting_the_edited_output_regenerates_it(tmp_path, fake_lm):

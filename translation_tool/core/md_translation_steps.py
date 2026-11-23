@@ -554,7 +554,10 @@ def step3_inject_impl(
             progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
     finally:
         # 中途失敗也要存下已寫出的檔案紀錄，否則下一輪會把工具自己寫的檔誤判為手動修改
-        guard.save()
+        try:
+            guard.save()
+        except OSError as exc:  # 不能蓋掉迴圈裡原本的例外
+            log_warning(f"[MD] 無法儲存完成檔紀錄（下次可能誤判為手動修改）：{exc!r}")
     # 被 zh_tw／zh_cn 底稿取代的舊英文譯後檔是預期的略過，不算「沒更新」
     not_updated = (
         stats["skipped_files"]
