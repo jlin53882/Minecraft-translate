@@ -28,13 +28,11 @@ def test_config_view_loads_models_and_keys_from_config(monkeypatch):
     cfg = {
         "logging": {"log_level": "INFO", "log_dir": "logs"},
         "translator": {
-            "output_dir_name": "out",
             "replace_rules_path": "replace_rules.json",
             "cache_directory": "cache",
             "enable_cache_saving": True,
             "parallel_execution_workers": 4,
         },
-        "ftb_translator": {"output_dir_name": "FTB任務翻譯輸出"},
         "species_cache": {
             "cache_directory": "sp",
             "cache_filename": "sp.tsv",
@@ -100,7 +98,6 @@ def test_config_view_add_and_remove_model_row(monkeypatch):
         lambda: {
             "logging": {},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "lm_translator": {},
             "output_bundler": {},
@@ -587,7 +584,6 @@ def test_config_view_save_click_maps_rows_back_to_config(monkeypatch):
     view = ConfigView(mock_page())
     view.controls_map["logging.log_level"].value = "INFO"
     view.controls_map["logging.log_dir"].value = "logs"
-    view.controls_map["translator.output_dir_name"].value = "out"
     view.controls_map["translator.replace_rules_path"].value = "replace_rules.json"
     view.controls_map["translator.cache_directory"].value = "cache"
     view.controls_map["translator.enable_cache_saving"].value = True
@@ -643,7 +639,6 @@ def test_config_view_show_snack_bar_adds_to_overlay(monkeypatch):
         lambda: {
             "logging": {},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "lm_translator": {},
             "output_bundler": {},
@@ -666,7 +661,6 @@ def test_config_view_init_controls_builds_ui(monkeypatch):
         lambda: {
             "logging": {},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "lm_translator": {},
             "output_bundler": {},

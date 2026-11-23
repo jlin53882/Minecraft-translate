@@ -5,18 +5,13 @@
         "log_format": "%(asctime)s - %(levelname)s - [%(name)s] - %(message)s"
     },
     "translator": {
-        "output_dir_name": "zh_tw_generated",
         "replace_rules_path": "replace_rules.json",
         "cache_directory": "快取資料",
         "parallel_execution_workers": 4,
         "enable_cache_saving": true,
         "md_use_zh_cn_base": true,
         "pack_read_zh_cn": true,
-        "custom_translator_folder": "custom_translators",
         "cjk_ratio_threshold": 0.7
-    },
-    "ftb_translator": {
-        "output_dir_name": "FTB任務翻譯輸出"
     },
     "translation_db": {
         "enabled": true,

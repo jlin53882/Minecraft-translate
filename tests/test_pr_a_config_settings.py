@@ -39,13 +39,13 @@ def test_config_ui_round_trips_pr_a_settings():
         == DEFAULT_CONFIG["logging"]["log_format"]
     )
     assert (
-        view.controls_map["translator.custom_translator_folder"].value
-        == "custom_translators"
+        view.controls_map["translator.replace_rules_path"].value
+        == DEFAULT_CONFIG["translator"]["replace_rules_path"]
     )
     assert view.controls_map["extractor.skip_zh_cn_extract"].value is False
 
     view.controls_map["logging.log_format"].value = "%(levelname)s :: %(message)s"
-    view.controls_map["translator.custom_translator_folder"].value = "my_translations"
+    view.controls_map["translator.replace_rules_path"].value = "my_rules.json"
     view.controls_map["extractor.skip_zh_cn_extract"].value = True
     saved = {}
     save_config_from_view(
@@ -56,7 +56,7 @@ def test_config_ui_round_trips_pr_a_settings():
     )
 
     assert saved["logging"]["log_format"] == "%(levelname)s :: %(message)s"
-    assert saved["translator"]["custom_translator_folder"] == "my_translations"
+    assert saved["translator"]["replace_rules_path"] == "my_rules.json"
     assert saved["extractor"]["skip_zh_cn_extract"] is True
 
 

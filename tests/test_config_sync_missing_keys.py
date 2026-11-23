@@ -15,7 +15,7 @@ def example(tmp_path, monkeypatch):
     """用小型範本取代真正的 DEFAULT_CONFIG / example，讓測試可預期。"""
     template = {
         "translator": {
-            "output_dir_name": "zh_tw_generated",
+            "replace_rules_path": "replace_rules.json",
             "new_flag": True,
             "nested": {"a": 1, "b": {"deep_new": "x"}},
             "workers_list": [1, 2],
@@ -52,7 +52,7 @@ def test_adds_missing_keys_but_never_changes_user_values(tmp_path, example):
     _write(
         cfg,
         {
-            "translator": {"output_dir_name": "MY_OUT", "new_flag": False},
+            "translator": {"replace_rules_path": "MY_OUT", "new_flag": False},
             "lm_translator": {"temperature": 0, "keys": ["AIzaUSER"]},
             "extractor": {"skip_zh_cn_extract": True},
         },
@@ -62,7 +62,7 @@ def test_adds_missing_keys_but_never_changes_user_values(tmp_path, example):
     result = _read(cfg)
 
     # 使用者的值完全不變（含 False / 0）
-    assert result["translator"]["output_dir_name"] == "MY_OUT"
+    assert result["translator"]["replace_rules_path"] == "MY_OUT"
     assert result["translator"]["new_flag"] is False
     assert result["lm_translator"]["temperature"] == 0
     assert result["lm_translator"]["keys"] == ["AIzaUSER"]
@@ -106,7 +106,7 @@ def test_user_value_of_different_type_is_kept(tmp_path, example):
 
 def test_is_idempotent_and_does_not_rewrite_when_nothing_missing(tmp_path, example):
     cfg = tmp_path / "config.json"
-    _write(cfg, {"translator": {"output_dir_name": "A"}})
+    _write(cfg, {"translator": {"replace_rules_path": "A"}})
     assert cm.sync_missing_config_keys(cfg)  # 第一次有補
     before = cfg.read_bytes()
     mtime = cfg.stat().st_mtime_ns
@@ -117,7 +117,7 @@ def test_is_idempotent_and_does_not_rewrite_when_nothing_missing(tmp_path, examp
 
 def test_backup_created_only_when_changes_are_made(tmp_path, example):
     cfg = tmp_path / "config.json"
-    original = {"translator": {"output_dir_name": "A"}}
+    original = {"translator": {"replace_rules_path": "A"}}
     _write(cfg, original)
     cm.sync_missing_config_keys(cfg)
     assert _read(tmp_path / "config.json.pre-sync.bak") == original
@@ -148,7 +148,7 @@ def test_noop_without_config_or_with_invalid_json(tmp_path, example):
 
 def test_write_failure_leaves_user_file_unchanged(tmp_path, example, monkeypatch):
     cfg = tmp_path / "config.json"
-    _write(cfg, {"translator": {"output_dir_name": "A"}})
+    _write(cfg, {"translator": {"replace_rules_path": "A"}})
     before = cfg.read_bytes()
     monkeypatch.setattr(cm, "save_config", lambda *a, **k: False)
     assert cm.sync_missing_config_keys(cfg) == []
@@ -157,7 +157,7 @@ def test_write_failure_leaves_user_file_unchanged(tmp_path, example, monkeypatch
 
 def test_no_backup_means_no_change(tmp_path, example, monkeypatch):
     cfg = tmp_path / "config.json"
-    _write(cfg, {"translator": {"output_dir_name": "A"}})
+    _write(cfg, {"translator": {"replace_rules_path": "A"}})
     before = cfg.read_bytes()
 
     def boom(*a, **k):
@@ -175,15 +175,15 @@ def test_real_defaults_sync_makes_user_file_complete_and_valid(tmp_path):
         cfg,
         {
             "lm_translator": {"keys": ["AIza" + "A" * 35]},
-            "translator": {"output_dir_name": "MY_OUT"},
+            "translator": {"replace_rules_path": "MY_OUT"},
         },
     )
     added = cm.sync_missing_config_keys(cfg)
     assert added
     result = _read(cfg)
-    assert result["translator"]["output_dir_name"] == "MY_OUT"
+    assert result["translator"]["replace_rules_path"] == "MY_OUT"
     assert result["lm_translator"]["keys"] == ["AIza" + "A" * 35]
     # 同步後的檔案與「只靠合併」得到的有效設定一致
     merged = cm.load_config(cfg)
-    assert merged["translator"]["output_dir_name"] == "MY_OUT"
+    assert merged["translator"]["replace_rules_path"] == "MY_OUT"
     assert cm.sync_missing_config_keys(cfg) == []

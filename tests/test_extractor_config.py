@@ -132,7 +132,6 @@ def test_config_save_extractor_folder_names():
             return {
                 "logging": {"log_level": "INFO", "log_dir": "logs"},
                 "translator": {
-                    "output_dir_name": "zh_tw_generated",
                     "replace_rules_path": "replace_rules.json",
                     "cache_directory": "快取資料",
                     "enable_cache_saving": True,
@@ -231,7 +230,6 @@ def test_save_config_from_view_section_guards_create_missing_sections(monkeypatc
             return {
                 "logging": {"log_level": "INFO", "log_dir": "logs"},
                 "translator": {
-                    "output_dir_name": "zh_tw_generated",
                     "replace_rules_path": "",
                     "cache_directory": "",
                     "enable_cache_saving": True,
@@ -301,7 +299,6 @@ def test_save_config_from_view_catches_value_error(monkeypatch):
             return {
                 "logging": {},
                 "translator": {},
-                "ftb_translator": {},
                 "species_cache": {},
                 "lm_translator": {},
                 "output_bundler": {},
@@ -349,7 +346,6 @@ def test_save_config_from_view_catches_value_error(monkeypatch):
             return {
                 "logging": {"log_level": "INFO", "log_dir": "logs"},
                 "translator": {
-                    "output_dir_name": "zh_tw_generated",
                     "replace_rules_path": "replace_rules.json",
                     "cache_directory": "快取資料",
                     "enable_cache_saving": True,
