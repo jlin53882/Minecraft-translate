@@ -117,95 +117,83 @@ def test_wizard_blocks_next_until_sources_are_analyzed_and_selected():
     view.include_ftb.value = False
     assert wizard._step_problem(1) is not None  # 來源類型都未選
     view.include_kubejs.value = True
-    assert wizard._step_problem(1) is not None  # 版本未填
-    view.version_field.value = "1.21"
     assert wizard._step_problem(1) is None
+    assert not hasattr(view, "version_field")  # 遊戲版本不在第 1 步
 
 
-def test_wizard_requires_output_directory_before_the_final_step():
+def test_game_version_is_chosen_once_in_step_two(monkeypatch):
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    options = view.lm_db_options
+    monkeypatch.setattr(options, "_refresh_database_state", lambda _s: None)
+    options._versions = ["1.20.1", "1.21.1"]
+    options.version_field.options = [
+        ft.dropdown.Option(v, v) for v in options._versions
+    ]
 
+    assert view._wizard._step_problem(2) is not None  # 尚未選版本
+    assert view._run_blocker(publish=False) is not None
+
+    view._apply_detected_version("1.21.1")  # 分析來源偵測到的版本預選
+    assert view.game_version() == "1.21.1"
+    assert view._wizard._step_problem(2) is None
+    assert view.translation_db_choice()[1] == "1.21.1"  # LM 目標版本與遊戲版本相同
+
+    options._on_version_changed()  # 使用者自選後，不會被之後的偵測覆蓋
+    options.version_field.value = "1.20.1"
+    view._apply_detected_version("1.21.1")
+    assert view.game_version() == "1.20.1"
+
+
+def test_detected_version_missing_from_database_is_selectable(monkeypatch):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    options = view.lm_db_options
+    options._versions = ["1.20.1"]
+    monkeypatch.setattr(
+        "app.views.moddb.lm_db_options.database_version_choices",
+        lambda _settings: ["1.20.1"],
+    )
+
+    view._apply_detected_version("1.21.1")
+
+    # 同步 ModDB 就是建立這個版本的步驟，所以偵測到的新版本必須能選。
+    assert view.game_version() == "1.21.1"
+    assert "1.21.1" in [option.key for option in options.version_field.options]
+    assert "資料庫尚無此版本" in options.info.value
+
+
+def test_one_click_opens_wizard_and_output_is_required_only_at_the_final_step(
+    monkeypatch,
+):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    opened: list[bool] = []
+    monkeypatch.setattr(view._wizard, "open", lambda: opened.append(True))
+    view.source_field.value = "/pack"
+
+    # 手動預覽／同步不需要輸出目錄，但版本只能在精靈裡選，所以精靈不能先擋輸出目的地。
     view.output_field.value = ""
-    assert view._wizard._step_problem(3) is not None
+    view._one_click_clicked()
+    assert opened == [True]
+    assert view._wizard._step_problem(3) is not None  # 最後一步才擋
+
     view.output_field.value = "/overlay"
     assert view._wizard._step_problem(3) is None
 
 
-def _preview_summary(*, conflicts: int = 0) -> dict:
-    return {
-        "source_root": "/pack",
-        "coverage": {"files_read": 3, "files_seen": 3, "items_found": 9},
-        "sync": {"items_to_sync": 4, "items_unchanged": 5},
-        "output": {
-            "output_root": "/overlay",
-            "entries_applied": 4,
-            "conflicts": [{"path": f"c{i}"} for i in range(conflicts)],
-            "unapplied": [],
-        },
-    }
-
-
-def test_one_click_confirmation_enables_publish_when_preview_is_clean():
+def test_wizard_final_step_runs_publish_directly_without_preview(monkeypatch):
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    calls: list[tuple[bool, bool]] = []
 
-    view._offer_publish_confirmation(True, _preview_summary())
+    async def fake_start(*, dry_run: bool, publish: bool) -> None:
+        calls.append((dry_run, publish))
 
-    assert view._publish_confirm_button.disabled is False
+    monkeypatch.setattr(view, "_start", fake_start)
 
+    import asyncio
 
-def test_one_click_confirmation_blocks_publish_on_overlay_conflicts():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    asyncio.run(view._run_one_click_publish())
 
-    view._offer_publish_confirmation(True, _preview_summary(conflicts=2))
-
-    assert view._publish_confirm_button.disabled is True
-
-
-def test_one_click_confirmation_is_not_offered_after_failed_preview():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
-
-    view._offer_publish_confirmation(False, _preview_summary())
-
-    assert view._publish_dialog is None
-
-
-class _FinishedPreviewSession:
-    def __init__(self, summary: dict):
-        self._snapshot = {
-            "status": "DONE",
-            "progress": 1.0,
-            "logs": [],
-            "summary": summary,
-        }
-
-    def snapshot(self) -> dict:
-        return self._snapshot
-
-
-def test_one_click_preview_completion_opens_publish_confirmation():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
-    view._running = True
-    view._one_click_stage = "preview"
-    preview = _preview_summary()
-    preview["state"] = "preview"
-    view.session = _FinishedPreviewSession(preview)
-
-    view._sync_session()
-
-    assert view._one_click_stage is None
-    assert view._publish_dialog is not None
-    assert view._publish_confirm_button.disabled is False
-
-
-def test_plain_preview_completion_does_not_open_publish_confirmation():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
-    view._running = True
-    view._one_click_stage = None
-    view.session = _FinishedPreviewSession(_preview_summary())
-
-    view._sync_session()
-
-    assert view._publish_dialog is None
+    assert calls == [(False, True)]
+    assert not hasattr(view, "_offer_publish_confirmation")
 
 
 def test_discover_discards_version_result_when_source_changes_while_detecting(
@@ -249,3 +237,23 @@ def test_discover_discards_version_result_when_source_changes_while_detecting(
     assert view._detected_version is None
     assert view._candidates == []
     assert candidates_called is False
+
+
+def test_user_picked_new_version_survives_source_change_and_redetection(monkeypatch):
+    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    options = view.lm_db_options
+    monkeypatch.setattr(
+        "app.views.moddb.lm_db_options.database_version_choices",
+        lambda _settings: ["1.20.1"],
+    )
+    view._apply_detected_version("1.21.1")  # 偵測到、但資料庫沒有的版本
+    options.version_field.value = "1.21.1"
+    options._on_version_changed()  # 使用者明確選了它
+
+    view.source_field.value = "other-source"
+    view._source_changed()  # 換來源
+
+    assert view.game_version() == "1.21.1"  # 自選的版本保留
+    view._apply_detected_version("1.22")  # 新來源的偵測不覆蓋，但要出現在選項
+    assert view.game_version() == "1.21.1"
+    assert "1.22" in [option.key for option in options.version_field.options]

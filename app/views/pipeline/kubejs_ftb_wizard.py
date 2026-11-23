@@ -1,8 +1,7 @@
-"""KubeJS／FTB 一鍵執行精靈：與模組包一鍵製作相同的 1/4 → 4/4 對話框。
+"""KubeJS／FTB 一鍵執行精靈：三步對話框（1/3 → 3/3）。
 
-精靈持有所有執行設定（候選根目錄、遊戲版本、同步模式、來源類型、LM 翻譯、overlay 輸出目錄），
-頁面只保留來源路徑與步驟按鈕。第 4 步「開始預覽」只負責啟動唯讀預覽；預覽成功後仍由
-流水線頁的「確認發布」對話框決定是否寫入 overlay。
+精靈持有所有執行設定（候選根目錄、同步模式、來源類型、LM 翻譯、overlay 輸出目錄），
+遊戲版本在第 2 步與 Mod 資料庫一起選擇；頁面保留來源路徑、輸出目的地與步驟按鈕。第 3 步「確認並執行」列出所有設定；輸出目的地未填時擋在這一步，確認後直接執行並發布 overlay。
 """
 
 from __future__ import annotations
@@ -15,13 +14,12 @@ from app.ui import kit
 from app.ui.design import C
 from app.ui.dialogs import close_page_dialog, present_page_dialog, set_dialog_feedback
 from app.views.pipeline.pipeline_forms import build_pipeline_dialog, dialog_button
-from app.views.pipeline.pipeline_workbench import build_pipeline_input_row
 
 if TYPE_CHECKING:  # pragma: no cover - 僅供型別標註
     from app.views.kubejs_ftb_pipeline_view import KubejsFtbPipelineView
 
-STEP_COUNT = 4
-_STEP_TITLES = ("來源與版本", "翻譯設定", "輸出目的地", "確認並預覽")
+STEP_COUNT = 3
+_STEP_TITLES = ("來源與來源類型", "翻譯設定", "確認並執行")
 
 
 class KubejsFtbWizard:
@@ -73,19 +71,18 @@ class KubejsFtbWizard:
         builders = {
             1: self._content_source,
             2: self._content_translate,
-            3: self._content_output,
-            4: self._content_summary,
+            3: self._content_summary,
         }
         return ft.Column(
             [builders[self._step](), self._feedback], spacing=12, tight=True
         )
 
     def _step_actions(self) -> list[ft.Control]:
-        """每一步都有取消；第 1 步沒有上一步，最後一步的主要動作是開始預覽。"""
+        """每一步都有取消；第 1 步沒有上一步，最後一步的主要動作是確認並執行。"""
         cancel = dialog_button("取消", self._close)
         if self._step == STEP_COUNT:
             primary = dialog_button(
-                "開始預覽", self._finish, role="primary", icon=ft.Icons.SEARCH
+                "確認並執行", self._finish, role="primary", icon=ft.Icons.PUBLISH
             )
         else:
             primary = dialog_button("下一步", self._next, role="primary")
@@ -110,8 +107,7 @@ class KubejsFtbWizard:
                 kit.hint_text(
                     "多個候選時必須明確選擇；尚未分析來源時請先在主頁面按「分析來源」。"
                 ),
-                ft.Row([view.version_field, view.scan_mode], spacing=12, wrap=True),
-                view.version_hint,
+                view.scan_mode,
                 ft.Row([view.include_kubejs, view.include_ftb], spacing=16, wrap=True),
             ],
             spacing=12,
@@ -136,33 +132,12 @@ class KubejsFtbWizard:
             tight=True,
         )
 
-    def _content_output(self) -> ft.Control:
-        view = self._view
-        return ft.Column(
-            [
-                kit.section_label("Overlay 輸出目錄（正式發布必填）"),
-                build_pipeline_input_row(
-                    view.output_field,
-                    kit.pick_button(
-                        ft.Icons.FOLDER_SPECIAL_OUTLINED,
-                        "選擇 overlay 輸出目錄",
-                        view._pick_output,
-                    ),
-                ),
-                kit.hint_text(
-                    "輸出會覆蓋模組包根目錄內的 kubejs／config/ftbquests overlay 檔案，只在確認發布後寫入。"
-                ),
-            ],
-            spacing=12,
-            tight=True,
-        )
-
     def _content_summary(self) -> ft.Control:
         view = self._view
         rows = [
             ("來源", view.source_field.value or "—"),
             ("有效來源根目錄", view.root_dropdown.value or "—"),
-            ("遊戲版本", view.version_field.value or "—"),
+            ("遊戲版本", view.game_version() or "—"),
             ("同步模式", "完整掃描" if view.scan_mode.value == "full" else "增量同步"),
             ("來源類型", _source_label(view)),
             ("LM 翻譯待處理", "開啟" if view.translate_missing.value else "未啟用"),
@@ -177,7 +152,7 @@ class KubejsFtbWizard:
             ]
             + [
                 kit.hint_text(
-                    "按「開始預覽」只會唯讀掃描；預覽完成後會再確認是否發布 overlay。"
+                    "按「確認並執行」會掃描來源、同步 ModDB，並在驗證通過後直接寫入 overlay 輸出目錄；不會另外預覽。"
                 )
             ],
             spacing=10,
@@ -203,8 +178,14 @@ class KubejsFtbWizard:
         self._show()
 
     def _finish(self, _e=None) -> None:
+        problem = self._step_problem(STEP_COUNT)
+        if problem is not None:
+            set_dialog_feedback(
+                self._view._page, self._feedback, f"⚠️ {problem[0]}", problem[1]
+            )
+            return
         self._close()
-        self._view._begin_one_click_preview()
+        self._view._begin_one_click_publish()
 
     def _step_problem(self, step: int) -> tuple[str, str] | None:
         view = self._view
@@ -215,20 +196,16 @@ class KubejsFtbWizard:
                 return "來源有多個候選，請先選擇有效來源根目錄", C.GOLD
             if not (view.include_kubejs.value or view.include_ftb.value):
                 return "至少選擇 KubeJS 或 FTB Quests", C.RED
-            if not (view.version_field.value or "").strip():
-                return "請先選擇或輸入遊戲版本", C.RED
-        if step == 3 and not (view.output_field.value or "").strip():
-            return "一鍵執行會發布 overlay，請先填寫輸出目錄", C.RED
+        if step == 2 and not view.game_version():
+            return "請先選擇遊戲版本", C.RED
+        if step == STEP_COUNT and not (view.output_field.value or "").strip():
+            return "一鍵執行會發布 overlay，請先在主頁面填寫輸出目的地", C.RED
         return None
 
 
 def _db_label(view: KubejsFtbPipelineView) -> str:
-    use_db, version = view.translation_db_choice()
-    if not use_db:
-        return "未使用（LM 翻譯會略過）"
-    return f"使用；目標版本：{version or view.version_field.value or '—'}" + (
-        "" if version else "（未指定，沿用遊戲版本）"
-    )
+    use_db, _version = view.translation_db_choice()
+    return "使用" if use_db else "未使用（LM 翻譯會略過）"
 
 
 def _source_label(view: KubejsFtbPipelineView) -> str:

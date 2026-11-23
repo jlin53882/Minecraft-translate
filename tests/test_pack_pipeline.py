@@ -24,6 +24,14 @@ from translation_tool.translation_db.repository import TranslationDB
 from translation_tool.translation_db.scanner import ScanOptions, scan_folder_generator
 
 
+@pytest.fixture(autouse=True)
+def _isolated_run_records(tmp_path, monkeypatch):
+    """沒有指定 run_workspace 的測試，執行紀錄也不能寫進真實的 app 資料根目錄。"""
+    monkeypatch.setattr(
+        pack_pipeline_module, "get_data_root", lambda: tmp_path / "app-data"
+    )
+
+
 def test_service_preview_opens_a_sqlite_readonly_connection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -713,3 +721,18 @@ def test_pipeline_rejects_stale_selected_pack_root(tmp_path: Path):
             )
     finally:
         db.close()
+
+
+def test_run_records_default_to_app_data_root(tmp_path, monkeypatch):
+    """沒有指定 run_workspace 時，執行紀錄放在 app 資料根目錄，不在輸出／來源旁。"""
+    from translation_tool.translation_db import pack_pipeline as pp
+
+    monkeypatch.setattr(pp, "get_data_root", lambda: tmp_path / "data")
+    report = type("R", (), {"run_id": "abc123", "source_root": str(tmp_path / "src")})()
+    options = pp.PackPipelineOptions(
+        version="1.21.1", output_root=str(tmp_path / "out" / "overlay")
+    )
+
+    workspace = pp._run_workspace(report, options)
+
+    assert workspace == tmp_path / "data" / pp.RUN_RECORDS_DIR_NAME / "abc123"

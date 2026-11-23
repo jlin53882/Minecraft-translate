@@ -174,3 +174,31 @@ def set_target_version(control: ft.Dropdown, value: str | None) -> None:
     known = {option.key for option in control.options}
     control.value = text if text in known else None
     control.text = text
+
+
+def existing_target_version_dropdown(
+    *,
+    value: str | None = None,
+    label: str = "目標版本",
+    hint: str = "選擇資料庫已有的版本",
+    on_change=None,
+    on_focus=None,
+) -> ft.Dropdown:
+    """Build a non-editable dropdown that lists only versions already in the database."""
+    return kit.dropdown(
+        label=label,
+        hint_text=hint,
+        editable=False,
+        enable_filter=True,
+        options=[],
+        value=value or None,
+        on_select=on_change,
+        on_focus=on_focus,
+    )
+
+
+def refresh_existing_version_options(control: ft.Dropdown, versions: list[str]) -> None:
+    """Replace options with database versions; keep the selection only if it still exists."""
+    current = target_version_value(control)
+    kit.set_dropdown_options(control, [(version, version) for version in versions])
+    set_target_version(control, current if current in versions else None)
