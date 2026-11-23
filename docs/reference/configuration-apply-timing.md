@@ -135,6 +135,6 @@
 - `logging.log_level`／`log_format` 存檔後立即套用；機器翻譯頁日誌行數在每次開始任務時讀最新設定。
 - 錯誤記錄（`errors_*.log`）每次寫入時讀 `logging.log_dir`；應用日誌需重啟才換資料夾。
 - `translator.enable_cache_saving`：`cache_manager.save_translation_cache` 每次寫入前讀取，下次寫入生效。
-- `translator.md_use_zh_cn_base`、`translator.pack_read_zh_cn`：只決定翻譯頁「使用 zh_cn 當底稿」開關與 KubeJS／FTB 流水線精靈「讀取 zh_cn」勾選的初始值，下次建立頁面或重置輸入時讀取；每次執行以畫面上的開關為準。
+- `translator.md_use_zh_cn_base`、`translator.pack_read_zh_cn`：只決定翻譯頁「使用 zh_cn 當底稿」開關與 KubeJS／FTB 流水線精靈「讀取 zh_cn」勾選的初始值，Markdown 開關在翻譯頁按「重置」時重新讀取，KubeJS／FTB 勾選框在流水線頁面建立時讀取一次（需重新啟動應用程式）；每次執行以畫面上的開關為準。
 - `translator.replace_rules_path`：合併流程每次執行時讀取（`translator` 區段），下次執行生效。
 - 不做：進行中任務中途改批次大小、預算、溫度或提示詞等引擎行為（結果不可重現）；這些設定依上表在「下一批次／下次請求／下次任務」讀取。

@@ -601,6 +601,25 @@ def _zh_cn_doc_is_current(source_md: str, pending_root: Path | None) -> bool:
     return _zh_cn_base_of(doc, source_md) is not None
 
 
+def _orphaned_zh_cn_base_outputs(
+    by_source: dict[str, list[Path]], src_root: Path, pending_root: Path | None
+) -> dict[Path, str]:
+    """zh_cn 底稿的譯後檔已沒有現行 pending（使用者關掉 zh_cn 底稿，Step 1 清掉了它）：
+    這些譯後檔不再使用，是預期的略過（superseded），不能算「沒有更新」。"""
+    orphaned: dict[Path, str] = {}
+    for source_md, paths in by_source.items():
+        if not (
+            is_safe_relative_path(source_md)
+            and (src_root / source_md).is_file()
+            and not _zh_cn_doc_is_current(source_md, pending_root)
+        ):
+            continue
+        for jp in paths:
+            if _zh_cn_base_of(read_pending_schema_doc(jp), source_md) is not None:
+                orphaned[jp] = "superseded"
+    return orphaned
+
+
 def _plan_inject_skips(
     json_files: list[Path],
     jroot: Path,
@@ -635,6 +654,7 @@ def _plan_inject_skips(
     ]
     plan = plan_sources(live_sources)
     skips: dict[Path, str] = {}
+    skips.update(_orphaned_zh_cn_base_outputs(by_source, src_root, pending_root))
     for rel_cn, rel_en in plan.pair_cn.items():
         if rel_cn in by_source and rel_en in by_source:
             log_warning(f"[MD] 略過 {rel_en} 的譯後檔：輸出由 zh_cn 底稿 {rel_cn} 負責")

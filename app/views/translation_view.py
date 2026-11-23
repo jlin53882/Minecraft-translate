@@ -240,6 +240,10 @@ class TranslationView(ft.Column):
     # ------------------------------------------------------------------
     # Tab builders
     # ------------------------------------------------------------------
+    def _md_use_zh_cn_default(self) -> bool:
+        """設定頁的 zh_cn 底稿預設值（service 不可用時退回預設開）。"""
+        return get_md_use_zh_cn_default()
+
     def _build_md_tab(self) -> ft.Control:
         """建立 Markdown 翻譯標籤頁"""
         return build_md_tab(self)

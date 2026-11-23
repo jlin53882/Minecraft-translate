@@ -327,3 +327,54 @@ def test_settings_page_lists_both_switches():
     text = repr(LAYOUT)
     assert "translator.md_use_zh_cn_base" in text
     assert "translator.pack_read_zh_cn" in text
+
+
+def test_pipeline_view_start_forwards_read_zh_cn_to_the_service(monkeypatch, tmp_path):
+    import asyncio
+
+    seen: dict = {}
+    monkeypatch.setattr(kfv, "get_pack_read_zh_cn_default", lambda: True)
+    view = kfv.KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    view.read_zh_cn.value = False
+    view.source_field.value = str(tmp_path)
+    view.version_field.value = "1.21.1"
+    view._candidates = [str(tmp_path)]
+    monkeypatch.setattr(view, "_run_blocker", lambda publish: None)
+
+    def fake_launch(_page, fn, **_kwargs):
+        monkeypatch.setattr(
+            kfv,
+            "run_kubejs_ftb_pipeline_service",
+            lambda *a, **k: seen.update(k),
+        )
+        fn()
+        return True
+
+    monkeypatch.setattr(kfv, "launch_page_operation", fake_launch)
+
+    asyncio.run(view._start(dry_run=True, publish=False))
+
+    assert seen["read_zh_cn"] is False
+
+
+def test_zh_cn_translated_files_left_after_switching_off_are_superseded(
+    tmp_path, fake_lm
+):
+    """先以 zh_cn 底稿跑過、再關閉開關：舊的 zh_cn 譯後檔是預期的略過，不警告「沒有更新」。"""
+    from translation_tool.core import md_translation_steps
+
+    src, out = _md_layout(tmp_path)
+    run_md_pipeline(str(src), output_dir=str(out), lang_mode="non_cjk_only")
+    warnings: list[str] = []
+    real = md_translation_steps.log_warning
+    md_translation_steps.log_warning = lambda msg, *a: warnings.append(str(msg))
+    try:
+        for _ in range(2):
+            result = run_md_pipeline(
+                str(src), output_dir=str(out), lang_mode="non_cjk_only", use_zh_cn=False
+            )
+            assert result["step3"]["skipped_pending_mismatch"] == 0
+            assert result["step3"]["skipped_superseded"] >= 1
+    finally:
+        md_translation_steps.log_warning = real
+    assert not any("沒有更新" in w for w in warnings)

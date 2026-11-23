@@ -203,6 +203,7 @@ SETTINGS: tuple[Setting, ...] = (
         C_TRANSLATOR,
         "沒有 zh_tw 時，以結構對齊的 zh_cn 簡轉繁當底稿，只把殘留英文送 LM；關閉後 zh_cn 檔不參與，一律從英文翻譯",
         default=True,
+        timing_note="只決定開關的初始值：翻譯頁按「重置」時重新讀取；每次執行以畫面上的開關為準。",
     ),
     Setting(
         "translator.pack_read_zh_cn",
@@ -210,8 +211,9 @@ SETTINGS: tuple[Setting, ...] = (
         "KubeJS／FTB 流水線預設讀取 zh_cn（可在流水線精靈每次覆寫）",
         "general",
         C_TRANSLATOR,
-        "關閉後掃描來源時不讀 zh_cn 語系檔，只用 en_us 與 zh_tw",
+        "關閉後掃描來源時不讀 zh_cn 語系檔，只用 en_us 與 zh_tw；之前由 zh_cn 建立的資料庫條目與譯文會保留",
         default=True,
+        timing_note="只決定勾選框的初始值：流水線頁面建立時讀取，需重新啟動應用程式才套用；每次執行以畫面上的勾選為準。",
     ),
     Setting(
         "translation_db.enabled",
