@@ -18,22 +18,17 @@ from app.services_impl.pack_pipeline_service import (
     get_pack_read_zh_cn_default,
     run_kubejs_ftb_pipeline_service,
 )
-from app.services_impl.pack_version_service import (
-    detect_minecraft_version,
-    known_minecraft_versions,
-)
+from app.services_impl.pack_version_service import detect_minecraft_version
 from app.tasks.operation_registry import launch_page_operation
 from app.tasks.task_session import TaskSession, tag_session
 from app.ui import kit
 from app.ui.design import C
-from app.ui.dialogs import close_page_dialog, present_page_dialog
 from app.ui.poller import PollerHandle
 from app.ui.snack import show_snack
 from app.ui.status_chip import make_status_chip, set_chip_status
 from app.ui.update_scope import update_regions
 from app.views.moddb.lm_db_options import LmDbOptions
 from app.views.pipeline.kubejs_ftb_wizard import KubejsFtbWizard
-from app.views.pipeline.pipeline_forms import build_pipeline_dialog, dialog_button
 from app.views.pipeline.pipeline_progress import PipelineProgressPanel
 from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
@@ -47,7 +42,6 @@ _POLL_INTERVAL_SEC = 0.2
 
 
 _MODES = ("both", "ftb", "kubejs")
-_SUGGESTION_LIMIT = 8
 
 
 class KubejsFtbPipelineView(ft.Column):
@@ -83,9 +77,6 @@ class KubejsFtbPipelineView(ft.Column):
         self._source_generation = 0
         self._current_dry_run = True
         self._current_publish = False
-        self._one_click_stage: str | None = None
-        self._publish_dialog: ft.AlertDialog | None = None
-        self._publish_confirm_button: ft.Button | None = None
         self._detected_version: str | None = None
 
         self._build_controls(page)
@@ -107,24 +98,6 @@ class KubejsFtbPipelineView(ft.Column):
             path=True,
             on_change=self._source_changed,
         )
-        # 版本由來源自動帶入（分析來源時）；使用者也可直接輸入。建議清單只列前幾筆符合的版本。
-        self._version_auto = False
-        self.version_hint = kit.hint_text(
-            "分析來源後會自動帶入版本，也可輸入（例如 1.21）篩選。"
-        )
-        self.version_field = kit.dropdown(
-            label="遊戲版本",
-            hint_text="輸入如 1.21 篩選版本",
-            editable=True,
-            enable_filter=True,
-            options=[],
-            width=260,
-            on_text_change=self._version_typed,
-            on_select=self._version_selected,
-        )
-        kit.set_dropdown_options(
-            self.version_field, [(v, v) for v in self._version_suggestions("")]
-        )
         self.scan_mode = kit.dropdown(
             label="同步模式",
             value="full",
@@ -140,7 +113,7 @@ class KubejsFtbPipelineView(ft.Column):
             options=[],
         )
         self.output_field = kit.text_field(
-            "Overlay 輸出目錄（正式發布必填）",
+            "輸出目的地（overlay 輸出目錄）",
             hint="例如：D:/翻譯輸出/ATM10-overlay",
             mono=True,
             expand=True,
@@ -159,8 +132,11 @@ class KubejsFtbPipelineView(ft.Column):
         self.read_zh_cn = ft.Checkbox(
             label="讀取 zh_cn 語系檔", value=get_pack_read_zh_cn_default()
         )
-        # 與模組包一鍵製作相同的 Mod 資料庫設定卡：使用資料庫、沿用全域目標版本、目標版本與統計。
-        self.lm_db_options = LmDbOptions(self._page.update)
+        # 精靈第 2 步的設定卡：使用資料庫、遊戲版本（只列資料庫已有的版本）與統計。
+        # 遊戲版本與 LM 目標版本是同一個值，只在這裡選一次；分析來源偵測到的版本會預選。
+        self.lm_db_options = LmDbOptions(
+            self._page.update, existing_versions_only=True, standalone_version=True
+        )
 
     def _build_status_controls(self, page: ft.Page) -> None:
         self.status_chip = make_status_chip("尚未開始")
@@ -216,82 +192,18 @@ class KubejsFtbPipelineView(ft.Column):
         )
         self.controls = [self.workbench_view]
 
-    def _version_suggestions(self, text: str) -> list[str]:
-        """建議清單：空白時為偵測到的版本與最新的幾個版本；有輸入時為前綴符合的版本（最多 8 筆）。"""
-        text = text.strip()
-        versions = known_minecraft_versions()
-        if text:
-            matches = [v for v in versions if v.startswith(text)]
-        else:
-            matches = versions
-        if (
-            self._detected_version
-            and self._detected_version not in matches
-            and not text
-        ):
-            matches = [self._detected_version, *matches]
-        return matches[:_SUGGESTION_LIMIT]
-
-    def _refresh_version_suggestions(self, text: str) -> None:
-        matches = self._version_suggestions(text)
-        kit.set_dropdown_options(self.version_field, [(v, v) for v in matches])
-        self.version_field.value = text or None
-        total = (
-            len([v for v in known_minecraft_versions() if v.startswith(text.strip())])
-            if text.strip()
-            else 0
-        )
-        if text.strip():
-            self.version_hint.value = (
-                f"符合 {total} 個版本，列出前 {len(matches)} 個；可直接輸入完整版本。"
-                if total
-                else "沒有符合的版本，可直接輸入完整版本號。"
-            )
-
-    def _version_typed(self, e=None) -> None:
-        """使用者手動輸入版本：視為手動值，之後分析來源不會覆蓋它。"""
-        text = (
-            e.control.text if e is not None and getattr(e, "control", None) else ""
-        ) or ""
-        self._version_auto = False
-        self._refresh_version_suggestions(text)
-        self._safe_update()
-
-    def _version_selected(self, e=None) -> None:
-        self._version_auto = False
-
     def _apply_detected_version(self, version: str | None) -> None:
-        """依來源偵測結果帶入版本；手動輸入過的版本不會被覆蓋。"""
+        """依來源偵測結果預選遊戲版本；使用者已在第 2 步自選的版本不會被覆蓋。"""
         self._detected_version = version
-        manual = bool(self.version_field.value) and not self._version_auto
-        if version is None:
-            if self._version_auto:
-                self.version_field.value = None
-                self._version_auto = False
-            self.version_hint.value = "未偵測到版本，請輸入或選擇（例如 1.21）。"
-            return
-        if manual:
-            self.version_hint.value = (
-                f"來源偵測到 {version}，目前保留你手動輸入的版本。"
-            )
-            return
-        keys = [option.key for option in self.version_field.options]
-        if version not in keys:
-            kit.set_dropdown_options(
-                self.version_field, [(version, version)] + [(k, k) for k in keys]
-            )
-        self.version_field.value = version
-        self._version_auto = True
-        self.version_hint.value = f"已自動偵測：{version}（可手動改）"
+        self.lm_db_options.suggest_version(version)
 
     def _source_changed(self, _e=None) -> None:
         """來源路徑變更後清除舊候選，避免執行時沿用前一個模組包根目錄。"""
         self._source_generation += 1
         self._candidates = []
-        if self._version_auto:
-            # 自動帶入的版本屬於舊來源，換來源後等待重新偵測。
-            self.version_field.value = None
-            self._version_auto = False
+        # 預選的版本屬於舊來源，換來源後等待重新偵測。
+        self._detected_version = None
+        self.lm_db_options.clear_suggested_version()
         self.root_dropdown.value = None
         kit.set_dropdown_options(self.root_dropdown, [])
         self.source_summary.value = "來源已變更，請重新分析來源。"
@@ -319,6 +231,23 @@ class KubejsFtbPipelineView(ft.Column):
                         spacing=6,
                     ),
                     self.source_summary,
+                    ft.Column(
+                        [
+                            kit.section_label("輸出目的地（overlay 輸出目錄） *"),
+                            build_pipeline_input_row(
+                                self.output_field,
+                                kit.pick_button(
+                                    ft.Icons.FOLDER_SPECIAL_OUTLINED,
+                                    "選擇 overlay 輸出目錄",
+                                    self._pick_output,
+                                ),
+                            ),
+                            kit.hint_text(
+                                "輸出到專用目錄（kubejs／config/ftbquests overlay），不會改動模組包來源。"
+                            ),
+                        ],
+                        spacing=6,
+                    ),
                 ],
                 spacing=14,
             ),
@@ -391,7 +320,7 @@ class KubejsFtbPipelineView(ft.Column):
             button.disabled = disabled
 
     def _one_click_clicked(self, _e=None) -> None:
-        """一鍵執行：開啟設定精靈；第 4 步開始唯讀預覽，預覽後由確認對話框決定是否發布。"""
+        """一鍵執行：開啟設定精靈；第 3 步確認設定後直接執行並發布 overlay。"""
         if self._running:
             show_snack(self._page, "已有 KubeJS／FTB 流水線執行中", C.GOLD)
             return
@@ -400,90 +329,11 @@ class KubejsFtbPipelineView(ft.Column):
             return
         self._wizard.open()
 
-    def _begin_one_click_preview(self) -> None:
-        """精靈第 4 步「開始預覽」：唯讀預覽，成功後才會出現發布確認。"""
-        self._one_click_stage = "preview"
-        self._page.run_task(self._run_one_click_preview)
+    def _begin_one_click_publish(self) -> None:
+        """精靈第 3 步「確認並執行」：直接掃描、同步並發布 overlay（不另外預覽）。"""
+        self._page.run_task(self._run_one_click_publish)
 
-    async def _run_one_click_preview(self) -> None:
-        await self._start(dry_run=True, publish=False)
-        if not self._running:
-            self._one_click_stage = None
-
-    def _offer_publish_confirmation(self, success: bool, summary: dict) -> None:
-        """預覽完成後顯示發布確認；有衝突或預覽失敗時不提供確認按鈕。"""
-        if not success or not summary:
-            show_snack(self._page, "預覽未完成，未開始發布", C.GOLD)
-            return
-        output = summary.get("output") or {}
-        conflicts = len(output.get("conflicts") or [])
-        self._publish_dialog = self._build_publish_dialog(
-            summary, blocked=conflicts > 0
-        )
-        present_page_dialog(self._page, self._publish_dialog)
-
-    def _build_publish_dialog(self, summary: dict, *, blocked: bool) -> ft.AlertDialog:
-        """確認發布對話框：列出預覽的來源、同步、翻譯與 overlay 數量，確認後才寫入模組包。"""
-        coverage = summary.get("coverage") or {}
-        sync = summary.get("sync") or {}
-        output = summary.get("output") or {}
-        lines = [
-            f"來源根目錄：{summary.get('source_root', '—')}",
-            (
-                f"來源檔案 {coverage.get('files_read', 0):,}/{coverage.get('files_seen', 0):,}"
-                f"　候選 {coverage.get('items_found', 0):,}"
-                f"　引用 {coverage.get('references_found', 0):,}"
-            ),
-            (
-                f"待同步 {sync.get('items_to_sync', 0):,}"
-                f"　未變更略過 {sync.get('items_unchanged', 0):,}"
-            ),
-            (
-                "LM 翻譯：發布時翻譯待處理條目"
-                if self.translate_missing.value
-                else "LM 翻譯：未啟用"
-            ),
-            f"overlay 輸出目錄：{output.get('output_root', self.output_field.value)}",
-            (
-                f"將套用 {output.get('entries_applied', 0):,}"
-                f"　衝突 {len(output.get('conflicts') or []):,}"
-                f"　未套用 {len(output.get('unapplied') or []):,}"
-            ),
-        ]
-        body = [ft.Text(line, size=13, color=C.TEXT, selectable=True) for line in lines]
-        if blocked:
-            body.append(
-                ft.Text(
-                    "輸出有衝突，請先處理衝突後再發布。",
-                    size=13,
-                    color=C.RED,
-                    weight=ft.FontWeight.W_500,
-                )
-            )
-        # 停用時改用無固定底色的 secondary 樣式，避免 primary 的底色蓋住 Flet 的停用外觀。
-        confirm = dialog_button(
-            "確認執行並發布",
-            self._confirm_publish,
-            role="secondary" if blocked else "primary",
-            icon=ft.Icons.PUBLISH,
-        )
-        confirm.disabled = blocked
-        self._publish_confirm_button = confirm
-        return build_pipeline_dialog(
-            self._page,
-            title="確認發布 overlay",
-            content=ft.Column(body, spacing=10, tight=True),
-            actions=[dialog_button("取消", self._close_publish_dialog), confirm],
-            icon=ft.Icons.PUBLISH,
-            tone="em",
-        )
-
-    def _close_publish_dialog(self, _e=None) -> None:
-        if self._publish_dialog is not None:
-            close_page_dialog(self._page, self._publish_dialog)
-
-    async def _confirm_publish(self, _e=None) -> None:
-        self._close_publish_dialog()
+    async def _run_one_click_publish(self) -> None:
         await self._start(dry_run=False, publish=True)
 
     async def _pick_source(self, _e=None) -> None:
@@ -573,10 +423,14 @@ class KubejsFtbPipelineView(ft.Column):
     async def _publish_run(self, _e=None) -> None:
         await self._start(dry_run=False, publish=True)
 
+    def game_version(self) -> str:
+        """本次執行的遊戲版本：在精靈第 2 步選擇，同時是 ModDB 版本與 LM 目標版本。"""
+        return self.lm_db_options.selected_version()
+
     def translation_db_choice(self) -> tuple[bool, str | None]:
         """LM 翻譯使用的資料庫設定（與一鍵製作相同的快照）：(是否使用資料庫, 目標版本或 None)。
 
-        目標版本未指定（None）時，流水線會沿用遊戲版本。
+        版本與 :meth:`game_version` 相同；未選擇時為 None。
         """
         snapshot = self.lm_db_options.snapshot_for_run(load_db_settings())
         return bool(snapshot.use_db), (snapshot.version or None)
@@ -591,8 +445,8 @@ class KubejsFtbPipelineView(ft.Column):
             return "已有 KubeJS／FTB 流水線執行中", C.GOLD
         if not (self.source_field.value or "").strip():
             return "請先輸入來源路徑", C.RED
-        if not (self.version_field.value or "").strip():
-            return "請先選擇或輸入遊戲版本", C.RED
+        if not self.game_version():
+            return "請先在「一鍵執行」第 2 步選擇遊戲版本", C.RED
         if not (self.include_kubejs.value or self.include_ftb.value):
             return "至少選擇 KubeJS 或 FTB Quests", C.RED
         if publish and not (self.output_field.value or "").strip():
@@ -626,7 +480,7 @@ class KubejsFtbPipelineView(ft.Column):
         self.run_summary.value = "執行中…"
         self._safe_update()
         source = (self.source_field.value or "").strip()
-        version = (self.version_field.value or "").strip()
+        version = self.game_version()
         lm_use_db, lm_version = self.translation_db_choice()
         pack_root = self.root_dropdown.value or (
             self._candidates[0] if self._candidates else None
@@ -716,9 +570,6 @@ class KubejsFtbPipelineView(ft.Column):
                 dry_run=self._current_dry_run,
             )
             self._render_summary(summary)
-            if self._one_click_stage == "preview":
-                self._one_click_stage = None
-                self._offer_publish_confirmation(success, summary)
         self._safe_update()
 
     def _sync_progress_stage(self, progress: float, status: str) -> None:

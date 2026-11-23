@@ -5,8 +5,8 @@
 `KubejsFtbPipelineView` 是薄的 Flet 協調層。它只收集路徑與執行選項、啟動
 `launch_page_operation`、輪詢 `TaskSession`，並使用與一鍵流水線相同的工作台外框、
 狀態卡與延遲顯示的進度面板。左欄依序放「專案路徑」與「流水線步驟」，右欄放
-「執行狀態」與執行日誌；候選根目錄、遊戲版本、同步模式、來源類型、LM 開關與輸出目錄收納在
-一鍵執行的四步精靈（`app/views/pipeline/kubejs_ftb_wizard.py`），不佔用工作台版面。四個步驟各自對應一個服務模式：分析來源（唯讀候選探索）、預覽同步計畫
+「執行狀態」與執行日誌；候選根目錄、同步模式、來源類型、遊戲版本（與 Mod 資料庫設定卡同一個下拉，`LmDbOptions(standalone_version=True)`）、LM 開關與輸出目錄收納在
+一鍵執行的三步精靈（`app/views/pipeline/kubejs_ftb_wizard.py`），不佔用工作台版面。四個步驟各自對應一個服務模式：分析來源（唯讀候選探索）、預覽同步計畫
 （dry-run）、同步 ModDB（寫入 DB，啟用 LM 時翻譯待處理條目，不輸出檔案）、輸出 overlay
 （正式發布）。精靈第 2 步另有 `read_zh_cn`（勾選「讀取 zh_cn 語系檔」，預設值由 `get_pack_read_zh_cn_default()` 讀 `translator.pack_read_zh_cn`），經 `run_kubejs_ftb_pipeline_service` 的 `read_zh_cn` 進入 `PackPipelineOptions`，最後傳給 `scan_pack_sources`；只影響本次掃描，DB 內先前由 zh_cn 建立的條目與譯文照舊保留並輸出。
 實際來源識別、掃描、DB 同步與輸出由下列共用核心負責：
@@ -37,9 +37,8 @@ Web 沒有資料夾選擇器結果時，路徑欄位仍是可用的一級輸入�
 
 ## 生命週期
 
-一鍵執行是兩段式：預覽（`dry_run=True`）完成後，`_sync_session` 依 `_one_click_stage`
-開啟確認對話框；只有確認後才以 `dry_run=False, publish=True` 啟動正式發布。確認對話框
-的數字來自預覽的 summary，有 overlay 衝突時確認按鈕停用。
+一鍵執行只有一段：精靈第 3 步「確認並執行」呼叫 `_begin_one_click_publish`，直接以
+`dry_run=False, publish=True` 啟動，沒有預覽與確認對話框。
 
 按鈕 → `launch_page_operation` → 背景 service → `TaskSession` → `PollerHandle` →
 UI 區域更新。`will_unmount` 只停止輪詢，背景工作仍由 operation registry 管理；

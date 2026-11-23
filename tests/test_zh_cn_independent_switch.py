@@ -160,7 +160,7 @@ def test_pipeline_view_start_forwards_read_zh_cn_to_the_service(monkeypatch, tmp
     view = kfv.KubejsFtbPipelineView(mock_page(), mock_filepicker())
     view.read_zh_cn.value = False
     view.source_field.value = str(tmp_path)
-    view.version_field.value = "1.21.1"
+    view.lm_db_options.version_field.value = "1.21.1"
     view._candidates = [str(tmp_path)]
     monkeypatch.setattr(view, "_run_blocker", lambda publish: None)
 

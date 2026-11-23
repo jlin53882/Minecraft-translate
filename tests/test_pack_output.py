@@ -936,3 +936,127 @@ def test_export_allows_tolerated_ftb_source_warning(tmp_path: Path):
         )
     finally:
         db.close()
+
+
+def _multi_locale_ftb_pack(
+    tmp_path: Path, other: str = "nb_no", untranslated_key: str | None = None
+) -> tuple[TranslationDB, str]:
+    """en_us 與只含部分 key 的另一語系（預設 nb_no）都會指向同一個 zh_tw 目標檔。
+
+    ``untranslated_key`` 是另一語系獨有、而且沒有譯文的 key。
+    """
+    quests = tmp_path / "config" / "ftbquests" / "quests" / "lang"
+    (quests / "en_us").mkdir(parents=True)
+    (quests / other).mkdir(parents=True)
+    (quests / "en_us" / "chapter.snbt").write_text(
+        '{chapter.a.title:"Theurgy"}', encoding="utf-8"
+    )
+    extra = f', {untranslated_key}:"Nur Fremdsprache"' if untranslated_key else ""
+    (quests / other / "chapter.snbt").write_text(
+        '{chapter.a.title:"Theurgi", chapter.b.title:"Kun norsk"' + extra + "}",
+        encoding="utf-8",
+    )
+    db = TranslationDB(tmp_path / "translation.db")
+    list(
+        scan_folder_generator(
+            db,
+            tmp_path,
+            ScanOptions("1.21.1", include_pack_content=True),
+            workers=1,
+        )
+    )
+    scope = scan_pack_sources(tmp_path, "1.21.1").pack_scope
+    rows = db._q(
+        "SELECT e.id, eo.source_locale, e.key FROM entry e "
+        "JOIN entry_origin eo ON eo.entry_id=e.id "
+        "WHERE e.kind='ftb_quest_lang' AND eo.pack_scope=?",
+        (scope,),
+    )
+    for entry_id, locale, key in rows:
+        if not (untranslated_key and key.endswith(f":{untranslated_key}")):
+            db.save_manual(entry_id, f"譯文-{locale}", propagate=False)
+    return db, scope
+
+
+def test_export_merges_ftb_sources_that_share_one_zh_tw_target(tmp_path: Path):
+    db, scope = _multi_locale_ftb_pack(tmp_path)
+    try:
+        output = tmp_path.parent / "ftb-multi-locale-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw/chapter.snbt").open(
+                encoding="utf-8"
+            )
+        )
+        # 後處理的來源檔不能把先前來源已寫入的譯文蓋掉。
+        assert str(translated["chapter.a.title"]) == "譯文-en_us"
+        assert str(translated["chapter.b.title"]) == "譯文-nb_no"
+    finally:
+        db.close()
+
+
+def test_merged_ftb_target_is_based_on_en_us_not_the_first_foreign_source(
+    tmp_path: Path,
+):
+    # de_de 排在 en_us 前面：若拿第一個處理的來源當基底，de_de 獨有、未翻譯的 key 會以德文原文寫進 zh_tw。
+    db, scope = _multi_locale_ftb_pack(
+        tmp_path, other="de_de", untranslated_key="chapter.d.title"
+    )
+    try:
+        output = tmp_path.parent / "ftb-foreign-first-overlay"
+        report = export_pack_overlay(db, tmp_path, "1.21.1", output, pack_scope=scope)
+
+        assert report.ok
+        translated = snbt.load(
+            (output / "config/ftbquests/quests/lang/zh_tw/chapter.snbt").open(
+                encoding="utf-8"
+            )
+        )
+        assert str(translated["chapter.a.title"]) == "譯文-en_us"
+        assert str(translated["chapter.b.title"]) == "譯文-de_de"
+        assert "chapter.d.title" not in translated
+    finally:
+        db.close()
+
+
+def test_dry_run_verifies_in_a_temp_stage_without_touching_output(tmp_path: Path):
+    db, scope = _multi_locale_ftb_pack(tmp_path)
+    try:
+        output = tmp_path.parent / "ftb-dry-run-overlay"
+        messages: list[str] = []
+        report = export_pack_overlay(
+            db,
+            tmp_path,
+            "1.21.1",
+            output,
+            pack_scope=scope,
+            dry_run=True,
+            progress=messages.append,
+        )
+
+        assert report.ok and report.dry_run
+        assert report.entries_rescan_verified > 0
+        assert not output.exists()
+        assert any("重掃描" in message for message in messages)
+    finally:
+        db.close()
+
+
+def test_ftb_plan_value_normalizes_crlf_but_leaves_kubejs_untouched():
+    from translation_tool.translation_db.pack_output import _plan_value
+
+    def item(kind: str) -> EffectivePackTranslation:
+        return EffectivePackTranslation(
+            entry_id=1,
+            kind=kind,
+            mod_id="m",
+            key="k",
+            en_us="a",
+            zh_tw="甲\r\n乙\r丙",
+            origin=EntryOrigin("scope", kind, "p", "s", "h", "fmt", "en_us"),
+        )
+
+    assert _plan_value(item(KIND_FTB_QUEST_LANG)) == "甲\n乙\n丙"
+    assert _plan_value(item(KIND_KUBEJS_LANG)) == "甲\r\n乙\r丙"
