@@ -1,6 +1,7 @@
 """tests/test_dead_code_detection.py
 用途：靜態分析確認 ftb_translator_export 有實際 caller（非死碼）。
 """
+
 from pathlib import Path
 
 
@@ -16,8 +17,8 @@ def test_ftb_translator_export_has_callers():
     for f in py_files:
         try:
             content = f.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            continue
+        except OSError:
+            content = ""
         if f.name != "ftb_translator_export.py" and "ftb_translator_export" in content:
             callers.append(str(f.relative_to(repo_root)))
 

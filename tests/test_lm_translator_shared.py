@@ -46,7 +46,6 @@ class TestSharedModuleExports:
 
         assert callable(get_default_cache_rules)
 
-
     def test_translate_loop_result_exported(self):
         """測試 TranslateLoopResult 導出。"""
         from translation_tool.core.lm_translator_shared import TranslateLoopResult
@@ -103,7 +102,6 @@ class TestSharedModuleAllList:
 
         for item in expected:
             assert item in __all__, f"{item} should be in __all__"
-
 
     def test_all_list_count(self):
         """測試 __all__ 數量。"""
