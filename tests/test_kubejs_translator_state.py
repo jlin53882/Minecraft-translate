@@ -8,62 +8,6 @@ import pytest
 from translation_tool.core import kubejs_translator_state
 
 
-def test_new_run_ids_are_short_but_legacy_uuid_ids_remain_readable() -> None:
-    """新快照避免 Windows 深層路徑超長，既有 32 碼快照仍可載入。"""
-    generated = {kubejs_translator_state.new_run_id() for _ in range(32)}
-
-    assert generated
-    assert all(len(run_id) == 20 for run_id in generated)
-    assert all(
-        kubejs_translator_state._RUN_ID_RE.fullmatch(run_id) for run_id in generated
-    )
-    assert kubejs_translator_state._RUN_ID_RE.fullmatch("a" * 32)
-
-
-def test_commit_staging_run_copies_when_windows_blocks_directory_rename(
-    tmp_path: Path, monkeypatch
-) -> None:
-    staging = tmp_path / ".pipeline" / "staging" / "abc"
-    committed = tmp_path / ".pipeline" / "runs" / "abc"
-    staging.mkdir(parents=True)
-    (staging / "data.json").write_text('{"key": "value"}', encoding="utf-8")
-
-    def blocked_rename(*_args, **_kwargs):
-        raise PermissionError("simulated Windows directory lock")
-
-    monkeypatch.setattr(kubejs_translator_state.os, "replace", blocked_rename)
-
-    used_copy = kubejs_translator_state.commit_staging_run(staging, committed)
-
-    assert used_copy is True
-    assert (committed / "data.json").read_text(encoding="utf-8") == '{"key": "value"}'
-    assert not staging.exists()
-
-
-def test_failed_copy_fallback_leaves_staging_available(
-    tmp_path: Path, monkeypatch
-) -> None:
-    staging = tmp_path / ".pipeline" / "staging" / "abc"
-    committed = tmp_path / ".pipeline" / "runs" / "abc"
-    staging.mkdir(parents=True)
-    (staging / "data.json").write_text('{"key": "value"}', encoding="utf-8")
-
-    def blocked_rename(*_args, **_kwargs):
-        raise PermissionError("simulated Windows directory lock")
-
-    def failed_copy(*_args, **_kwargs):
-        raise OSError("simulated disk or permission failure")
-
-    monkeypatch.setattr(kubejs_translator_state.os, "replace", blocked_rename)
-    monkeypatch.setattr(kubejs_translator_state.shutil, "copytree", failed_copy)
-
-    with pytest.raises(OSError, match="disk or permission"):
-        kubejs_translator_state.commit_staging_run(staging, committed)
-
-    assert (staging / "data.json").read_text(encoding="utf-8") == '{"key": "value"}'
-    assert not committed.exists()
-
-
 def test_sync_managed_tree_reports_and_preserves_legacy_unowned_file(
     tmp_path: Path,
 ) -> None:

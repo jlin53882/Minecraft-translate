@@ -230,20 +230,6 @@ def test_lm_translator_shared_loop_import():
     assert lm_translator_shared_loop is not None
 
 
-def test_lm_translator_shared_preview_import():
-    """Verify lm_translator_shared_preview can be imported."""
-    from translation_tool.core import lm_translator_shared_preview
-
-    assert lm_translator_shared_preview is not None
-
-
-def test_lm_translator_shared_recording_import():
-    """Verify lm_translator_shared_recording can be imported."""
-    from translation_tool.core import lm_translator_shared_recording
-
-    assert lm_translator_shared_recording is not None
-
-
 def test_output_bundler_import():
     """Verify output_bundler can be imported."""
     from translation_tool.core import output_bundler

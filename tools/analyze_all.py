@@ -47,8 +47,6 @@ core_modules = [
     "lm_translator_shared",
     "lm_translator_shared_cache",
     "lm_translator_shared_loop",
-    "lm_translator_shared_preview",
-    "lm_translator_shared_recording",
     "output_bundler",
     "translatable_extractor",
     "translation_path_writer",

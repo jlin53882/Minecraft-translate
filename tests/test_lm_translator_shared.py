@@ -46,29 +46,6 @@ class TestSharedModuleExports:
 
         assert callable(get_default_cache_rules)
 
-    def test_touch_set_exported(self):
-        """測試 TouchSet 導出。"""
-        from translation_tool.core.lm_translator_shared import TouchSet
-
-        assert TouchSet is not None
-
-    def test_write_dry_run_preview_exported(self):
-        """測試 write_dry_run_preview 導出。"""
-        from translation_tool.core.lm_translator_shared import write_dry_run_preview
-
-        assert callable(write_dry_run_preview)
-
-    def test_write_cache_hit_preview_exported(self):
-        """測試 write_cache_hit_preview 導出。"""
-        from translation_tool.core.lm_translator_shared import write_cache_hit_preview
-
-        assert callable(write_cache_hit_preview)
-
-    def test_translation_recorder_exported(self):
-        """測試 TranslationRecorder 導出。"""
-        from translation_tool.core.lm_translator_shared import TranslationRecorder
-
-        assert TranslationRecorder is not None
 
     def test_translate_loop_result_exported(self):
         """測試 TranslateLoopResult 導出。"""
@@ -116,10 +93,6 @@ class TestSharedModuleAllList:
             "_is_valid_hit",
             "fast_split_items_by_cache",
             "get_default_cache_rules",
-            "TouchSet",
-            "write_dry_run_preview",
-            "write_cache_hit_preview",
-            "TranslationRecorder",
             "TranslateLoopResult",
             "_get_default_batch_size",
             "translate_items_with_cache_loop",
@@ -130,6 +103,7 @@ class TestSharedModuleAllList:
 
         for item in expected:
             assert item in __all__, f"{item} should be in __all__"
+
 
     def test_all_list_count(self):
         """測試 __all__ 數量。"""

@@ -104,7 +104,6 @@ Minecraft-translate/
 | `core/lm_translator_shared_loop.py` | 批次翻譯迴圈（含 cache 查詢、WAR 記錄） | `translate_items_with_cache_loop()`, `_get_default_batch_size()` |
 | `core/lm_translator_shared_cache.py` | 翻譯 cache 查詢與匹配邏輯 | `fast_split_items_by_cache()`, `get_default_cache_rules()`, `_is_valid_hit()` |
 | `core/lm_translator_skeleton.py` | FTB / KubeJS / Markdown 共用 cache、batch、flush、checkpoint 與 progress contract | `prepare_translator_items()`, `run_translator_skeleton()`, `make_checkpoint_adapter()` |
-| `core/lm_translator_shared_preview.py` | 翻譯預覽輸出（dry-run / cache-hit） | `write_dry_run_preview()`, `write_cache_hit_preview()` |
 | `core/lang_merge_pipeline.py` | 合併流程管線（ZIP → 解壓 → 合併 → 寫出） | （內部用於 `lang_merger`） |
 | `plugins/ftbquests/ftbquests_snbt_extractor.py` | FTB Quests SBNT 解析與欄位提取 | `extract_lang_file()`, `extract_quest_file()`, `process_quest_folder()` |
 | `plugins/ftbquests/ftbquests_snbt_inject.py` | FTB Quests SBNT 翻譯注入 | `patch_lang_snbt_file()`, `patch_quest_snbt_file()` |
