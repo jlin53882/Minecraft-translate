@@ -231,17 +231,6 @@ class KubejsFtbPipelineView(ft.Column):
         matches = self._version_suggestions(text)
         kit.set_dropdown_options(self.version_field, [(v, v) for v in matches])
         self.version_field.value = text or None
-        total = (
-            len([v for v in known_minecraft_versions() if v.startswith(text.strip())])
-            if text.strip()
-            else 0
-        )
-        if text.strip():
-            self.version_hint.value = (
-                f"符合 {total} 個版本，列出前 {len(matches)} 個；可直接輸入完整版本。"
-                if total
-                else "沒有符合的版本，可直接輸入完整版本號。"
-            )
 
     def _version_typed(self, e=None) -> None:
         """使用者手動輸入版本：視為手動值，之後分析來源不會覆蓋它。"""
