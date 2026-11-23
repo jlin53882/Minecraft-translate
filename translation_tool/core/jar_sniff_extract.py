@@ -104,7 +104,7 @@ def _walk_sniffed_members(
 ) -> SniffTraversalStatus:
     """在 outer／nested archive 中找出未被路徑規則認領的書籍／指南成員。
 
-    DB scanner 與 Book extraction 必須使用同一個 ``sniffed_groups`` 判斷。
+    DB scanner 與 Book extraction 必須使用同一個 ``sniffed_groups_detailed`` 判斷。
     這裡保留 archive 仍開啟時執行的 callback，讓提取端可以安全讀取 nested
     member，也讓預覽端只取檔案大小而不必把內容留在記憶體。
     """

@@ -125,3 +125,151 @@ def test_shared_loop_cancelled_while_waiting_for_rate_limit(monkeypatch):
             sleep_seconds_between_batches=0,
         )
     assert res.status == "CANCELLED"
+
+
+# ---------- 一鍵流水線 ----------
+
+
+def test_pipeline_cancel_stops_current_generator_and_skips_rest(monkeypatch):
+    from app.views.pipeline import pipeline_view
+    from tests.conftest import mock_filepicker, mock_page
+
+    view = pipeline_view.PipelineView(mock_page(), mock_filepicker())
+    produced = []
+
+    def step1(session):
+        for i in range(100):
+            produced.append(i)
+            if i == 3:
+                view._on_cancel()  # 使用者在第 4 個 update 時按取消
+            yield {"progress": i / 100}
+
+    step2_called = []
+
+    assert view.runner.run_step(1, "第一步", step1) is False
+    assert produced == [0, 1, 2, 3]
+    assert view.runner.run_step(2, "第二步", lambda s: step2_called.append(1)) is False
+    assert step2_called == []
+
+
+def test_pipeline_cancel_propagates_to_step_session(monkeypatch):
+    from app.views.pipeline import pipeline_view
+    from tests.conftest import mock_filepicker, mock_page
+
+    view = pipeline_view.PipelineView(mock_page(), mock_filepicker())
+    seen = {}
+
+    def translate_step(session):
+        session.start()  # service 會重新 start session（清除 session 自己的取消旗標）
+        view._on_cancel()
+        seen["session_flag"] = session.cancel_requested
+        seen["scope"] = c.is_cancelled()
+
+    view.runner.run_step(3, "啟動翻譯", translate_step)
+    assert seen == {"session_flag": True, "scope": True}
+
+    view._begin_run()  # 下一次執行會重設取消狀態
+    assert view.runner.cancel_event.is_set() is False
+
+
+# ---------- run_cancellable_blocking ----------
+
+
+def test_cancellable_blocking_without_scope_runs_in_current_thread():
+    caller = threading.get_ident()
+    assert c.run_cancellable_blocking(threading.get_ident) == caller
+
+
+def test_cancellable_blocking_returns_value_and_reraises_error():
+    with c.cancel_scope(lambda: False):
+        assert c.run_cancellable_blocking(lambda: 42) == 42
+        with pytest.raises(ValueError, match="boom"):
+            c.run_cancellable_blocking(
+                lambda: (_ for _ in ()).throw(ValueError("boom"))
+            )
+
+
+def test_cancellable_blocking_abandons_stuck_call_on_cancel():
+    cancel = threading.Event()
+    release = threading.Event()
+    abandoned = []
+    late = []
+
+    def stuck():
+        release.wait(5)
+        return "late"
+
+    threading.Timer(0.1, cancel.set).start()
+    started = time.monotonic()
+    with c.cancel_scope(cancel.is_set), pytest.raises(c.TaskCancelled):
+        c.run_cancellable_blocking(
+            stuck,
+            on_abandon=lambda: abandoned.append(True),
+            on_late_result=late.append,
+            poll_interval=0.02,
+        )
+    assert time.monotonic() - started < 2
+    assert abandoned == [True]
+    release.set()
+    deadline = time.monotonic() + 2
+    while not late and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert late == ["late"]
+
+
+def test_cancellable_blocking_cleans_up_result_finished_while_being_abandoned(
+    monkeypatch,
+):
+    """工作剛好在放棄的瞬間完成：結果不可無人接手（漏掉就是沒關閉的回應）。
+
+    把 done.set() 拉長，製造「輔助執行緒已完成、尚未標記」與「呼叫端判定放棄」重疊的時間窗。
+    """
+    import types
+
+    class SlowSetEvent(threading.Event):
+        def set(self):
+            time.sleep(0.05)
+            super().set()
+
+    cancel = threading.Event()  # 先建立真的 Event，不受下面替換影響
+    monkeypatch.setattr(
+        c,
+        "threading",
+        types.SimpleNamespace(
+            Event=SlowSetEvent, Lock=threading.Lock, Thread=threading.Thread
+        ),
+    )
+    late = []
+
+    def work():
+        time.sleep(0.01)
+        return "response"
+
+    def fire():
+        time.sleep(0.03)  # 工作已完成、done.set() 仍在延遲中
+        cancel.set()
+
+    threading.Thread(target=fire, daemon=True).start()
+    returned = []
+    try:
+        with c.cancel_scope(cancel.is_set):
+            returned.append(
+                c.run_cancellable_blocking(
+                    work, on_late_result=late.append, poll_interval=0.005
+                )
+            )
+    except c.TaskCancelled:
+        pass
+    deadline = time.monotonic() + 2
+    while not (returned or late) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    # 結果一定有人接手：呼叫端拿到，或（被放棄時）交給 on_late_result 清理；不可兩者皆無
+    assert returned == ["response"] or late == ["response"]
+    assert not (returned and late)
+
+
+def test_cancellable_blocking_does_not_start_when_already_cancelled():
+    calls = []
+    with c.cancel_scope(lambda: True), pytest.raises(c.TaskCancelled):
+        c.run_cancellable_blocking(lambda: calls.append(1))
+    assert calls == []

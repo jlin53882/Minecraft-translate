@@ -20,7 +20,6 @@ import orjson
 from ftb_snbt_lib.tag import Compound  # 避免跟 typing.List 混淆
 from ftb_snbt_lib.tag import List as SnbtList
 
-# 導入我們自訂的日誌工具
 from .ftbquests_snbt_extractor import (
     merge_translated_lines,
     walk_snbt_file_tolerant,

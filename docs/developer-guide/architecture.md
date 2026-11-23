@@ -107,7 +107,6 @@ Minecraft-translate/
 │       ├── cache_shards.py      # 快取分片
 │       ├── cache_store.py       # 快取儲存
 │       ├── config_manager.py    # 設定管理
-│       ├── exceptions.py        # 自訂例外
 │       ├── log_unit.py          # 日誌工具
 │       ├── safe_json_loader.py  # 安全 JSON 載入
 │       ├── species_cache.py     # 物種快取
@@ -120,8 +119,8 @@ Minecraft-translate/
 ├── tests/                     # 測試
 │   ├── conftest.py            # pytest 全域 fixture
 │   ├── fixtures/              # 測試資料
-│   ├── test_ftb*.py           # FTB 翻譯器測試
-│   ├── test_kubejs*.py        # KubeJS 翻譯器測試
+│   ├── test_ftb*.py           # FTB Quests 抽取／注入測試
+│   ├── test_kubejs*.py        # KubeJS 抽取／注入測試
 │   ├── test_lm_*.py           # LM 翻譯器測試
 │   ├── test_lang_*.py         # 語系合併測試
 │   ├── test_md_*.py           # MD 翻譯器測試
@@ -153,13 +152,6 @@ Minecraft-translate/
 | **FTB Quests** | `pack_sources.py`（用 `ftbquests_snbt_extractor.py`） | ModDB 共用翻譯（`moddb_translate_service.py`） | `pack_output.py`（用 `ftbquests_snbt_inject.py`） | `pack_pipeline.py` |
 | **Patchouli** | `jar_processor_extract.py` | `lm_translator.py` | `lang_merge_content_copy.py` | `lang_merge_pipeline.py` |
 | **Markdown** | `md_pipeline.py`（`translation_db/`，用 `md_extract_qa.py`） | ModDB 共用翻譯（`moddb_translate_service.py`） | `md_pipeline.py`（輸出資源包 overlay） | `md_pipeline_service.py` |
-| **Lang 檔** | `lang_merge_pending.py` | `lm_translator.py` | `lang_merge_pipeline.py` | `lang_codec.py` |
-
-------|---------------|---------------|---------------|--------|
-| **KubeJS** | `kubejs_translator.py` | `kubejs_tooltip_lmtranslator.py` | `kubejs_tooltip_inject.py` | `kubejs_translator_clean.py` |
-| **FTB Quests** | `ftbquests_snbt_extractor.py` | `ftbquests_lmtranslator.py` | `ftbquests_snbt_inject.py` | `ftb_translator_clean.py` |
-| **Patchouli** | `jar_processor_extract.py` | `lm_translator.py` | `lang_merge_content_copy.py` | `lang_merge_pipeline.py` |
-| **Markdown** | `md_translation_steps.py:step1` | `md_translation_steps.py:step2` | `md_translation_steps.py:step3` | `md_translation_assembly.py` |
 | **Lang 檔** | `lang_merge_pending.py` | `lm_translator.py` | `lang_merge_pipeline.py` | `lang_codec.py` |
 
 ---

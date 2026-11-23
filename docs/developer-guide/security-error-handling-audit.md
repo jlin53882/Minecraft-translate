@@ -77,12 +77,12 @@ Ruff 報出的 BLE001、S110、S112、print 與 legacy comment 不等於同一�
 
 | 類別 | 處理 |
 |---|---|
-| **資料相關的無聲失敗**（會讓輸出殘缺卻沒有紀錄） | **記錄 log**：unshield 失敗（FTB／MD）、recorder 記錄失敗、批次刷新 fallback、預先統計、待翻譯檔無法讀取、快取分片與分片序號讀取、checkpoint 損毀、隔離檔寫入失敗、強制輪替分片、KubeJS 翻譯檔與統計讀取、色碼檢查、worker 數設定、icon 預覽失敗、開啟資料夾失敗 |
+| **資料相關的無聲失敗**（會讓輸出殘缺卻沒有紀錄） | **記錄 log**：unshield 失敗、recorder 記錄失敗、批次刷新 fallback、預先統計、待翻譯檔無法讀取、快取分片與分片序號讀取、checkpoint 損毀、隔離檔寫入失敗、強制輪替分片、KubeJS 翻譯檔與統計讀取、色碼檢查、worker 數設定、icon 預覽失敗、開啟資料夾失敗 |
 | **UI 保護**（`session.add_log`、進度、狀態回報、畫面更新） | 保留並說明原因：失敗不可中斷任務；`session.add_log` 集中於 `_safe_session_log` |
 | **logging 自身失敗** | 保留並說明原因：不可再記錄（會遞迴）也不可中斷呼叫端 |
 | **外部不可信輸入的逐檔／逐編碼嘗試** | 保留並說明原因：壞檔略過，並視情況留 debug 紀錄 |
 | **已有紀錄／回報的邊界**（多數 service／UI 層） | 保留；已寫原因者標在原處，其餘列入棘輪 |
-| **`print`** | `main.py`、`icon_preview_cache.py`、`exceptions.py`、`config_manager.py` 使用 logging；QA 命令列工具刻意保留 `print` |
+| **`print`** | `main.py`、`icon_preview_cache.py`、`config_manager.py` 使用 logging；QA 命令列工具刻意保留 `print` |
 
 ### TODO、legacy 與相容註解
 

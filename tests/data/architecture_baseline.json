@@ -21,11 +21,7 @@
   "translation_tool/core/codex_oauth.py:PendingChatGPTLogin.complete": 33,
   "translation_tool/core/codex_oauth.py:_validate_id_token": 21,
   "translation_tool/core/codex_oauth.py:get_chatgpt_access_token": 32,
-  "translation_tool/core/ftb_translator.py:run_ftb_pipeline": 43,
   "translation_tool/core/jar_processor_extract.py:run_extraction_process_impl": 32,
-  "translation_tool/core/kubejs_translator.py:run_kubejs_pipeline": 78,
-  "translation_tool/core/kubejs_translator_clean.py:clean_kubejs_from_raw_impl": 67,
-  "translation_tool/core/kubejs_translator_state.py:load_current_manifest": 22,
   "translation_tool/core/kubejs_translator_state.py:sync_managed_tree": 36,
   "translation_tool/core/lang_merge_content_copy.py:_compute_patchouli_lang_effectiveness": 25,
   "translation_tool/core/lang_merge_content_copy.py:process_content_or_copy_file_impl": 137,
@@ -49,16 +45,12 @@
   "translation_tool/core/output_bundler.py:bundle_outputs_generator": 48,
   "translation_tool/core/text_sniffer.py:classify_book_string": 36,
   "translation_tool/core/translation_path_writer.py:set_by_path": 28,
-  "translation_tool/plugins/ftbquests/ftbquests_lmtranslator.py:translate_ftb_pending_to_zh_tw": 68,
   "translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:extract_quest_file": 23,
   "translation_tool/plugins/ftbquests/ftbquests_snbt_extractor.py:process_quest_folder": 25,
-  "translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py:inject_ftbquests_zh_tw_from_jsons": 52,
   "translation_tool/plugins/ftbquests/ftbquests_snbt_inject.py:patch_quest_snbt_file": 54,
   "translation_tool/plugins/kubejs/kubejs_tooltip_extract.py:extract": 60,
   "translation_tool/plugins/kubejs/kubejs_tooltip_inject.py:inject": 80,
-  "translation_tool/plugins/kubejs/kubejs_tooltip_lmtranslator.py:translate_kubejs_pending_to_zh_tw": 61,
   "translation_tool/plugins/md/md_extract_qa.py:extract_blocks": 24,
-  "translation_tool/plugins/md/md_lmtranslator.py:translate_md_pending": 55,
   "translation_tool/translation_db/bulk_review.py:BulkReviewMixin._bulk_review_sibling_info": 24,
   "translation_tool/translation_db/quality.py:matches_quality": 32,
   "translation_tool/translation_db/repository.py:TranslationDB._apply_review_preview": 26,
@@ -79,9 +71,6 @@
   "translation_tool/translation_db/smart_review_validation.py:_validate_item": 22,
   "translation_tool/utils/config_manager.py:_validate_lm_translator_config": 38,
   "translation_tool/utils/config_manager.py:_validate_token_budget_config": 49,
-  "translation_tool/utils/exceptions.py:handle_translation_errors": 24,
-  "translation_tool/utils/exceptions.py:handle_translation_errors.decorator": 24,
-  "translation_tool/utils/exceptions.py:handle_translation_errors.decorator.wrapper": 24,
   "translation_tool/utils/replace_rules.py:_CompiledRules._apply_literals_once": 24
  },
  "modules": {
@@ -389,14 +378,6 @@
    "top_level_defs": 2,
    "annotation_coverage": 0.571
   },
-  "app.services_impl.pipelines._task_runner": {
-   "max_complexity": 4,
-   "public_api": 1,
-   "class_methods": 0,
-   "import_depth": 6,
-   "top_level_defs": 1,
-   "annotation_coverage": 0.571
-  },
   "app.services_impl.pipelines.bundle_service": {
    "max_complexity": 16,
    "public_api": 5,
@@ -428,14 +409,6 @@
    "import_depth": 4,
    "top_level_defs": 6,
    "annotation_coverage": 0.917
-  },
-  "app.services_impl.pipelines.md_service": {
-   "max_complexity": 1,
-   "public_api": 1,
-   "class_methods": 0,
-   "import_depth": 4,
-   "top_level_defs": 1,
-   "annotation_coverage": 0.8
   },
   "app.services_impl.pipelines.merge_service": {
    "max_complexity": 11,
@@ -2005,22 +1978,6 @@
    "top_level_defs": 1,
    "annotation_coverage": 0.269
   },
-  "app.views.translation.translation_actions": {
-   "max_complexity": 17,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 3,
-   "top_level_defs": 12,
-   "annotation_coverage": 0.308
-  },
-  "app.views.translation.translation_panels": {
-   "max_complexity": 3,
-   "public_api": 3,
-   "class_methods": 0,
-   "import_depth": 6,
-   "top_level_defs": 6,
-   "annotation_coverage": 0.522
-  },
   "app.views.translation_view": {
    "max_complexity": 6,
    "public_api": 1,
@@ -2173,36 +2130,12 @@
    "top_level_defs": 6,
    "annotation_coverage": 0.923
   },
-  "translation_tool.core.ftb_translator": {
-   "max_complexity": 43,
-   "public_api": 9,
-   "class_methods": 0,
-   "import_depth": 8,
-   "top_level_defs": 8,
-   "annotation_coverage": 0.892
-  },
-  "translation_tool.core.ftb_translator_clean": {
-   "max_complexity": 14,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 0,
-   "top_level_defs": 5,
-   "annotation_coverage": 0.69
-  },
   "translation_tool.core.ftb_translator_export": {
    "max_complexity": 10,
    "public_api": 2,
    "class_methods": 0,
    "import_depth": 0,
    "top_level_defs": 2,
-   "annotation_coverage": 1.0
-  },
-  "translation_tool.core.ftb_translator_template": {
-   "max_complexity": 8,
-   "public_api": 1,
-   "class_methods": 0,
-   "import_depth": 0,
-   "top_level_defs": 1,
    "annotation_coverage": 1.0
   },
   "translation_tool.core.guide_blocks": {
@@ -2299,30 +2232,6 @@
    "class_methods": 1,
    "import_depth": 4,
    "top_level_defs": 7,
-   "annotation_coverage": 1.0
-  },
-  "translation_tool.core.kubejs_translator": {
-   "max_complexity": 78,
-   "public_api": 11,
-   "class_methods": 3,
-   "import_depth": 4,
-   "top_level_defs": 19,
-   "annotation_coverage": 0.925
-  },
-  "translation_tool.core.kubejs_translator_clean": {
-   "max_complexity": 67,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 3,
-   "top_level_defs": 5,
-   "annotation_coverage": 1.0
-  },
-  "translation_tool.core.kubejs_translator_io": {
-   "max_complexity": 5,
-   "public_api": 2,
-   "class_methods": 0,
-   "import_depth": 3,
-   "top_level_defs": 2,
    "annotation_coverage": 1.0
   },
   "translation_tool.core.kubejs_translator_paths": {
@@ -2645,38 +2554,6 @@
    "top_level_defs": 8,
    "annotation_coverage": 1.0
   },
-  "translation_tool.core.md_translation_assembly": {
-   "max_complexity": 16,
-   "public_api": 5,
-   "class_methods": 0,
-   "import_depth": 9,
-   "top_level_defs": 6,
-   "annotation_coverage": 0.884
-  },
-  "translation_tool.core.md_translation_progress": {
-   "max_complexity": 5,
-   "public_api": 0,
-   "class_methods": 2,
-   "import_depth": 0,
-   "top_level_defs": 1,
-   "annotation_coverage": 0.667
-  },
-  "translation_tool.core.md_translation_stats": {
-   "max_complexity": 13,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 8,
-   "top_level_defs": 4,
-   "annotation_coverage": 1.0
-  },
-  "translation_tool.core.md_translation_steps": {
-   "max_complexity": 17,
-   "public_api": 3,
-   "class_methods": 0,
-   "import_depth": 1,
-   "top_level_defs": 3,
-   "annotation_coverage": 0.538
-  },
   "translation_tool.core.neutral_book_json": {
    "max_complexity": 7,
    "public_api": 2,
@@ -2837,14 +2714,6 @@
    "top_level_defs": 0,
    "annotation_coverage": null
   },
-  "translation_tool.plugins.ftbquests.ftbquests_lmtranslator": {
-   "max_complexity": 68,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 8,
-   "top_level_defs": 7,
-   "annotation_coverage": 0.525
-  },
   "translation_tool.plugins.ftbquests.ftbquests_snbt_extractor": {
    "max_complexity": 25,
    "public_api": 10,
@@ -2893,14 +2762,6 @@
    "top_level_defs": 32,
    "annotation_coverage": 0.953
   },
-  "translation_tool.plugins.kubejs.kubejs_tooltip_lmtranslator": {
-   "max_complexity": 61,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 8,
-   "top_level_defs": 6,
-   "annotation_coverage": 0.889
-  },
   "translation_tool.plugins.md": {
    "max_complexity": 0,
    "public_api": 0,
@@ -2924,14 +2785,6 @@
    "import_depth": 1,
    "top_level_defs": 10,
    "annotation_coverage": 0.833
-  },
-  "translation_tool.plugins.md.md_lmtranslator": {
-   "max_complexity": 55,
-   "public_api": 8,
-   "class_methods": 0,
-   "import_depth": 8,
-   "top_level_defs": 8,
-   "annotation_coverage": 0.92
   },
   "translation_tool.plugins.shared": {
    "max_complexity": 0,
@@ -3556,14 +3409,6 @@
    "import_depth": 1,
    "top_level_defs": 9,
    "annotation_coverage": 1.0
-  },
-  "translation_tool.utils.exceptions": {
-   "max_complexity": 24,
-   "public_api": 8,
-   "class_methods": 4,
-   "import_depth": 2,
-   "top_level_defs": 10,
-   "annotation_coverage": 0.227
   },
   "translation_tool.utils.file_replace": {
    "max_complexity": 3,

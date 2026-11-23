@@ -80,7 +80,7 @@ Behavioral coverage: `test_dashboard_mount_reload_does_not_create_a_task_lifecyc
 
 ### TaskSession terminal 契約（所有背景任務）
 
-`start()` 之後任何結束路徑都要有一次 `finish()`，失敗順序為 `set_error()` → `finish()`（`TaskSession.finish()` 對已出錯的維持 ERROR）；`TaskManager` 以 `finish` 為結案事件。覆蓋範圍：`_task_runner.run_callable_task`（Markdown）；extract（lang／book／dual／取消）、LM、merge（folder／zip）、`MergeView`／翻譯頁的 worker 例外邊界，以及 `PipelineActions`（dual 抽取、一鍵 merge、打包）。護欄：`tests/test_task_terminal_lifecycle.py`（真正的 `TaskManager`，每條路徑都驗證 `active() == []` 與 recent 狀態）。
+`start()` 之後任何結束路徑都要有一次 `finish()`，失敗順序為 `set_error()` → `finish()`（`TaskSession.finish()` 對已出錯的維持 ERROR）；`TaskManager` 以 `finish` 為結案事件。覆蓋範圍：extract（lang／book／dual／取消）、LM、merge（folder／zip）、`MergeView`／翻譯頁的 worker 例外邊界，以及 `PipelineActions`（dual 抽取、一鍵 merge、打包）。護欄：`tests/test_task_terminal_lifecycle.py`（真正的 `TaskManager`，每條路徑都驗證 `active() == []` 與 recent 狀態）。
 
 #### `session.start()` 的 owner 分類（`rg "session\.start\(" app`）
 

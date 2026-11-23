@@ -8,32 +8,21 @@ import os
 import re
 import shutil
 import tempfile
-import threading
 import uuid
 from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.file_replace import replace_with_retry
 
-STATE_VERSION = 1
 # New IDs are shorter to keep the deeply nested Windows pipeline paths below
 # MAX_PATH.  Keep accepting the original UUID-hex form so existing snapshots
 # remain readable after an upgrade.
 _RUN_ID_RE = re.compile(r"^(?:[0-9a-f]{20}|[0-9a-f]{32})$")
 _HASH_CHUNK_SIZE = 1024 * 1024
-_OUTPUT_LOCKS: dict[str, threading.RLock] = {}
-_OUTPUT_LOCKS_LOCK = threading.Lock()
 
 
 def new_run_id() -> str:
     return uuid.uuid4().hex[:20]
-
-
-def source_identity(source_root: Path) -> tuple[str, str]:
-    """Return a stable full identity and a short on-disk identifier."""
-    normalized = os.path.normcase(str(source_root.resolve())).casefold()
-    identity = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-    return identity, identity[:20]
 
 
 def sha256_file(path: Path) -> str:

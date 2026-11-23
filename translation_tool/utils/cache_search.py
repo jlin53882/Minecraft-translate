@@ -13,7 +13,6 @@
     from translation_tool.utils.cache_search import CacheSearchEngine
 
     engine = CacheSearchEngine(db_path="cache/search_index.db")
-    engine.index_cache_entry({'src': 'Hello', 'dst': '你好', 'mod': 'test', 'path': 'test.json'})
     results = engine.search("你好", limit=50)
 """
 
