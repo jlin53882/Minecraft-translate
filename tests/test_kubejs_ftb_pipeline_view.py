@@ -122,90 +122,36 @@ def test_wizard_blocks_next_until_sources_are_analyzed_and_selected():
     assert wizard._step_problem(1) is None
 
 
-def test_wizard_requires_output_directory_before_the_final_step():
+def test_one_click_requires_output_destination_before_opening_wizard(monkeypatch):
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    opened: list[bool] = []
+    monkeypatch.setattr(view._wizard, "open", lambda: opened.append(True))
+    view.source_field.value = "/pack"
 
     view.output_field.value = ""
-    assert view._wizard._step_problem(3) is not None
+    view._one_click_clicked()
+    assert opened == []
+
     view.output_field.value = "/overlay"
-    assert view._wizard._step_problem(3) is None
+    view._one_click_clicked()
+    assert opened == [True]
 
 
-def _preview_summary(*, conflicts: int = 0) -> dict:
-    return {
-        "source_root": "/pack",
-        "coverage": {"files_read": 3, "files_seen": 3, "items_found": 9},
-        "sync": {"items_to_sync": 4, "items_unchanged": 5},
-        "output": {
-            "output_root": "/overlay",
-            "entries_applied": 4,
-            "conflicts": [{"path": f"c{i}"} for i in range(conflicts)],
-            "unapplied": [],
-        },
-    }
-
-
-def test_one_click_confirmation_enables_publish_when_preview_is_clean():
+def test_wizard_final_step_runs_publish_directly_without_preview(monkeypatch):
     view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    calls: list[tuple[bool, bool]] = []
 
-    view._offer_publish_confirmation(True, _preview_summary())
+    async def fake_start(*, dry_run: bool, publish: bool) -> None:
+        calls.append((dry_run, publish))
 
-    assert view._publish_confirm_button.disabled is False
+    monkeypatch.setattr(view, "_start", fake_start)
 
+    import asyncio
 
-def test_one_click_confirmation_blocks_publish_on_overlay_conflicts():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
+    asyncio.run(view._run_one_click_publish())
 
-    view._offer_publish_confirmation(True, _preview_summary(conflicts=2))
-
-    assert view._publish_confirm_button.disabled is True
-
-
-def test_one_click_confirmation_is_not_offered_after_failed_preview():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
-
-    view._offer_publish_confirmation(False, _preview_summary())
-
-    assert view._publish_dialog is None
-
-
-class _FinishedPreviewSession:
-    def __init__(self, summary: dict):
-        self._snapshot = {
-            "status": "DONE",
-            "progress": 1.0,
-            "logs": [],
-            "summary": summary,
-        }
-
-    def snapshot(self) -> dict:
-        return self._snapshot
-
-
-def test_one_click_preview_completion_opens_publish_confirmation():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
-    view._running = True
-    view._one_click_stage = "preview"
-    preview = _preview_summary()
-    preview["state"] = "preview"
-    view.session = _FinishedPreviewSession(preview)
-
-    view._sync_session()
-
-    assert view._one_click_stage is None
-    assert view._publish_dialog is not None
-    assert view._publish_confirm_button.disabled is False
-
-
-def test_plain_preview_completion_does_not_open_publish_confirmation():
-    view = KubejsFtbPipelineView(mock_page(), mock_filepicker())
-    view._running = True
-    view._one_click_stage = None
-    view.session = _FinishedPreviewSession(_preview_summary())
-
-    view._sync_session()
-
-    assert view._publish_dialog is None
+    assert calls == [(False, True)]
+    assert not hasattr(view, "_offer_publish_confirmation")
 
 
 def test_discover_discards_version_result_when_source_changes_while_detecting(

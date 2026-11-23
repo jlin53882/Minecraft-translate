@@ -172,7 +172,7 @@ def run_pack_pipeline(
 ) -> PackPipelineReport:
     """執行來源分析、DB 同步與可選 overlay 輸出。
 
-    ``dry_run`` 永遠只讀來源；``publish`` 只有在 dry-run 驗證成功後才會發布。
+    ``dry_run`` 永遠只讀來源；``publish`` 的 overlay 會先在暫存目錄通過來源驗證與重掃描，才會發布。
     ``db`` 為 None 時可做純來源預覽，但不能發布 overlay。
     """
     _validate_run_options(db, options)
@@ -187,7 +187,7 @@ def run_pack_pipeline(
     report = _make_report(
         run_id, options, root, result, timing_sec={"scan": scan_elapsed}
     )
-    _log(session, f"📦 [{run_id}] 來源分析完成：{root}")
+    _log(session, f"📦 [{run_id}] 來源分析完成：{root}（耗時 {scan_elapsed:.1f} 秒）")
     _log(session, _coverage_log(report))
     _set_progress(session, 0.35)
 
@@ -207,6 +207,7 @@ def run_pack_pipeline(
     elif not options.dry_run:
         raise PackPipelineError("正式同步需要資料庫；預覽模式可不提供資料庫")
     report.timing_sec["db_sync"] = time.perf_counter() - db_started
+    _log(session, f"⏱️ [{run_id}] DB 階段耗時 {report.timing_sec['db_sync']:.1f} 秒")
     _set_progress(session, 0.65)
     _raise_if_cancelled(session)
 
@@ -329,6 +330,8 @@ def _export_requested_output(
     elif options.publish:
         raise PackPipelineError("發布 overlay 需要輸出路徑與資料庫")
     report.timing_sec["output"] = time.perf_counter() - output_started
+    if report.output is not None:
+        _log(session, f"⏱️ overlay 階段耗時 {report.timing_sec['output']:.1f} 秒")
     report.output_published = bool(
         options.publish and report.output is not None and report.output.ok
     )
@@ -534,26 +537,25 @@ def _export_output(
     session,
 ) -> PackOutputReport:
     output = Path(options.output_root).expanduser().resolve()
-    preview = export_pack_overlay(
+    # 預覽與發布走同一條驗證路徑（規劃、來源驗證、寫入暫存、重掃描）；
+    # 發布不需要先另外預覽一次，驗證通過後才會把 stage 換進輸出目錄。
+    report = export_pack_overlay(
         db,
         root,
         options.version,
         output,
         pack_scope=scope,
-        dry_run=True,
+        dry_run=not options.publish,
         allowed_kinds=_selected_pack_kinds(options),
+        progress=lambda message: _log(session, message),
     )
-    _log(session, f"📋 overlay 預覽：{preview.entries_considered:,} 筆候選")
-    if not options.publish:
-        return preview
-    return export_pack_overlay(
-        db,
-        root,
-        options.version,
-        output,
-        pack_scope=scope,
-        allowed_kinds=_selected_pack_kinds(options),
+    label = "發布完成" if options.publish else "預覽完成"
+    _log(
+        session,
+        f"📋 overlay {label}：候選 {report.entries_considered:,} 筆，"
+        f"套用 {report.entries_applied:,} 筆",
     )
+    return report
 
 
 def _selected_pack_kinds(options: PackPipelineOptions) -> frozenset[str]:

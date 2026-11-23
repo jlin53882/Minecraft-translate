@@ -15,7 +15,12 @@ from app.services_impl.moddb_service import (
 )
 from app.ui import kit
 from app.ui.design import C
-from app.views.moddb.version_picker import set_target_version, target_version_dropdown
+from app.views.moddb.version_picker import (
+    existing_target_version_dropdown,
+    refresh_existing_version_options,
+    set_target_version,
+    target_version_dropdown,
+)
 from translation_tool.utils.log_unit import log_warning
 
 
@@ -40,7 +45,10 @@ class LmDbOptions:
         settings: DbSettings | None = None,
         on_missing_database=None,
         step2_version_provider: Callable[[DbSettings], tuple[str, str]] | None = None,
+        existing_versions_only: bool = False,
     ) -> None:
+        # 只列出資料庫已有的版本、不可手動輸入新版本（與 Mod 資料庫頁的版本選單一致）。
+        self._existing_versions_only = existing_versions_only
         self._page_update = page_update
         self._on_missing_database = on_missing_database
         self._step2_version_provider = step2_version_provider
@@ -72,13 +80,22 @@ class LmDbOptions:
         )
         if self.inherit_step2_switch is not None:
             self.inherit_version_switch.disabled = True
-        self.version_field = target_version_dropdown(
-            value=self._settings.version,
-            label="Mod 資料庫目標版本",
-            hint="選擇版本或輸入新目標版本",
-            on_change=self._on_version_changed,
-            on_focus=self._on_version_focus,
-        )
+        if existing_versions_only:
+            self.version_field = existing_target_version_dropdown(
+                value=self._settings.version,
+                label="Mod 資料庫目標版本",
+                hint="選擇資料庫已有的版本",
+                on_change=self._on_version_changed,
+                on_focus=self._on_version_focus,
+            )
+        else:
+            self.version_field = target_version_dropdown(
+                value=self._settings.version,
+                label="Mod 資料庫目標版本",
+                hint="選擇版本或輸入新目標版本",
+                on_change=self._on_version_changed,
+                on_focus=self._on_version_focus,
+            )
         self.version_field.disabled = True
         self.info = ft.Text("", size=11.5, color=C.DIM, selectable=True)
         self._refresh_database_state(self._settings)
@@ -161,6 +178,8 @@ class LmDbOptions:
         except Exception as exc:  # noqa: BLE001 - LM still permits a manual new target
             log_warning(f"讀取 LM 資料庫版本失敗：{exc!r}")
             self._versions = []
+        if self._existing_versions_only:
+            refresh_existing_version_options(self.version_field, self._versions)
         try:
             self._summary = summarize_database(settings)
         except Exception as exc:  # noqa: BLE001 - keep the page usable and expose warning

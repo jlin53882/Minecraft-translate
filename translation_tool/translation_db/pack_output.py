@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import uuid
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -56,6 +57,7 @@ _KUBEJS_LANG_SELECTOR = re.compile(
     r"(?:\[(?P<namespace>[^\]]+)\])?\.event\.add\["
 )
 _KUBEJS_LANG_KINDS = frozenset({KIND_LANG, KIND_KUBEJS_LANG})
+_FTB_KINDS = frozenset({KIND_FTB_QUESTS, KIND_FTB_QUEST_LANG})
 
 
 class PackOutputError(RuntimeError):
@@ -123,8 +125,13 @@ def export_pack_overlay(
     pack_scope: str | None = None,
     dry_run: bool = False,
     allowed_kinds: frozenset[str] | set[str] | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> PackOutputReport:
     """輸出生效譯文 overlay，不修改來源模組包或資料庫。
+
+    ``dry_run`` 會完整執行規劃、來源驗證、寫入與重掃描驗證，但只寫進系統暫存目錄、
+    不發布到 ``output_root``；預覽通過代表正式輸出會走同一條驗證路徑。
+    ``progress`` 接收各階段的人類可讀訊息，供畫面日誌顯示。
 
     ``output_root`` 是專用輸出目錄，成功後會包含零或多個：
 
@@ -150,25 +157,40 @@ def export_pack_overlay(
             if item.kind in selected_kinds or item.origin.source_kind in selected_kinds
         ]
     report.entries_considered = len(items)
+    _note(progress, f"📋 overlay 規劃：候選 {len(items):,} 筆")
     plans = _make_plan(root, items, report)
+    _note(progress, f"🔍 驗證來源檔：計畫 {len(plans):,} 筆")
     _validate_sources(root, plans, report)
     if not report.ok:
         raise PackOutputError(_format_report_error(report))
-    if dry_run:
-        report.entries_applied = len(plans)
-        return report
+    _note(progress, f"✅ 來源檔驗證通過：{report.source_files_checked:,} 個檔案")
 
-    output.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.stage-", dir=output.parent))
+    if dry_run:
+        stage = Path(tempfile.mkdtemp(prefix="pack-output-preview-"))
+    else:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        stage = Path(
+            tempfile.mkdtemp(prefix=f".{output.name}.stage-", dir=output.parent)
+        )
     try:
+        _note(progress, "✍️ 寫入暫存輸出")
         report.entries_applied = _write_plan(root, stage, plans, report)
         if not report.ok:
             raise PackOutputError(_format_report_error(report))
+        _note(progress, "🔁 重掃描驗證輸出內容")
         _verify_stage_with_rescan(root, stage, version, plans, report)
         if not report.ok:
             raise PackOutputError(_format_report_error(report))
-        _write_output_ownership_marker(stage, root, scope)
+        _note(
+            progress,
+            f"✅ 重掃描驗證通過：{report.entries_rescan_verified:,} 筆",
+        )
         report.files_written = sum(1 for path in stage.rglob("*") if path.is_file())
+        if dry_run:
+            report.entries_applied = len(plans)
+            return report
+        _write_output_ownership_marker(stage, root, scope)
+        _note(progress, f"📤 發布到輸出目錄：{output}")
         _publish_stage(stage, output, root, scope)
         return report
     except PackOutputError:
@@ -184,6 +206,11 @@ def export_pack_overlay(
         raise PackOutputError(f"輸出 overlay 失敗，未修改來源：{exc}") from exc
     finally:
         shutil.rmtree(stage, ignore_errors=True)
+
+
+def _note(progress: Callable[[str], None] | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
 
 
 def _make_plan(
@@ -219,9 +246,20 @@ def _make_plan(
         if previous is not None and previous != item.zh_tw:
             report.conflicts.append(f"目標碰撞：{target} [{_target_selector(item)}]")
             continue
-        seen[key] = item.zh_tw
-        plans.append(_PlannedTranslation(item, target, item.zh_tw))
+        value = _plan_value(item)
+        seen[key] = value
+        plans.append(_PlannedTranslation(item, target, value))
     return plans
+
+
+def _plan_value(item: EffectivePackTranslation) -> str:
+    """FTB 多行文字以換行字元分行；LM 偶爾回傳 CRLF，寫回後重掃描會多出一個空行。
+
+    輸出前統一成 LF，寫入值與重掃描讀回的值才會一致。
+    """
+    if item.kind in _FTB_KINDS or item.origin.source_kind in _FTB_KINDS:
+        return item.zh_tw.replace("\r\n", "\n").replace("\r", "\n")
+    return item.zh_tw
 
 
 def _target_for(item: EffectivePackTranslation) -> str | None:
@@ -293,27 +331,39 @@ def _kubejs_lang_locale(selector: str) -> str | None:
     return match.group("locale").lower() if match else None
 
 
+def _plan_sources(
+    pack_root: Path, plans: list[_PlannedTranslation]
+) -> dict[Path, set[str]]:
+    """每個來源檔只解析一次路徑，並收集計畫引用的來源 hash。
+
+    ``_source_path`` 會逐層檢查 reparse point 並 ``resolve``，成本不低；十幾萬筆
+    計畫其實只對應幾百個檔案，所以以 (種類, 相對路徑) 去重後再解析。
+    """
+    resolved: dict[tuple[str, str], Path] = {}
+    hashes: dict[Path, set[str]] = defaultdict(set)
+    for plan in plans:
+        origin = plan.item.origin
+        key = (origin.source_kind, origin.source_path)
+        source = resolved.get(key)
+        if source is None:
+            source = resolved[key] = _source_path(pack_root, plan.item)
+        hashes[source].add(origin.source_hash)
+    return hashes
+
+
 def _validate_sources(
     pack_root: Path,
     plans: list[_PlannedTranslation],
     report: PackOutputReport,
 ) -> None:
-    checked: set[Path] = set()
-    for plan in plans:
-        source = _source_path(pack_root, plan.item)
-        if source in checked:
-            continue
-        checked.add(source)
+    expected_by_source = _plan_sources(pack_root, plans)
+    for source in expected_by_source:
         report.source_files_checked += 1
         if not source.is_file():
             report.stale_sources.append(str(source))
             continue
         if not _source_path_is_safe(pack_root, source):
             report.stale_sources.append(f"{source} (symbolic link 或 junction)")
-    expected_by_source: dict[Path, set[str]] = defaultdict(set)
-    for plan in plans:
-        source = _source_path(pack_root, plan.item)
-        expected_by_source[source].add(plan.item.origin.source_hash)
 
     for source, expected_hashes in expected_by_source.items():
         if not expected_hashes or "" in expected_hashes:
@@ -415,19 +465,22 @@ def _write_plan(
                 f"{source_path}:{key} (quest selector 未命中或型別不符)"
             )
 
+    # 多個來源語系檔（en_us 與只有部分 key 的其他語系）會對應到同一個 zh_tw 目標檔。
+    # 目標檔只能以基底建立一次，之後每個來源只在其上補丁；若每個來源都重新複製基底，
+    # 後處理的來源會把先前已寫入的譯文整個蓋掉。
+    prepared_targets: set[str] = set()
     for source_path, updates in ftb_lang_updates.items():
         src = _safe_join(quests_root, source_path)
         target_path = _ftb_lang_target(source_path)
         dst = stage / "config" / "ftbquests" / "quests" / target_path
         dst.parent.mkdir(parents=True, exist_ok=True)
-        # 既有 zh_tw 檔案可能含有沒有進入本次 ModDB 計畫的鍵；若一律
-        # 由 en_us 建立 stage，部署 overlay 時會靜默刪掉那些既有內容。
-        # 以目標語系檔作為基底，只覆蓋明確命中的 selector。
-        existing_target = _safe_join(quests_root, target_path)
-        if existing_target.is_file():
-            shutil.copy2(existing_target, dst)
-        else:
-            shutil.copy2(src, dst)
+        if target_path not in prepared_targets:
+            prepared_targets.add(target_path)
+            # 既有 zh_tw 檔案可能含有沒有進入本次 ModDB 計畫的鍵；若一律
+            # 由 en_us 建立 stage，部署 overlay 時會靜默刪掉那些既有內容。
+            # 以目標語系檔作為基底，只覆蓋明確命中的 selector。
+            existing_target = _safe_join(quests_root, target_path)
+            shutil.copy2(existing_target if existing_target.is_file() else src, dst)
         _changed, _candidates, details = patch_lang_snbt_file(
             str(src), str(dst), updates, return_details=True
         )
@@ -576,12 +629,7 @@ def _verify_stage_with_rescan(
 def _copy_plan_sources(
     pack_root: Path, verification_root: Path, plans: list[_PlannedTranslation]
 ) -> None:
-    copied: set[Path] = set()
-    for plan in plans:
-        source = _source_path(pack_root, plan.item)
-        if source in copied:
-            continue
-        copied.add(source)
+    for source in _plan_sources(pack_root, plans):
         relative = source.relative_to(pack_root)
         destination = verification_root / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
