@@ -27,6 +27,7 @@ import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from translation_tool.core.book_dirs import is_guide_directory_segment
 from translation_tool.plugins.shared.rich_text_shield import shield_text
 
 
@@ -328,22 +329,55 @@ def build_pending_json(
 RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 
+# GuideME／AE2 指南的其他語言資料夾一律以底線開頭（``_es_es``）
+_RE_UNDERSCORE_LOCALE = re.compile(r"^_[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
+# 指南資料夾下第一層若長得像語言碼（``de_de``、``to_do``），無法確定是不是其他語言，不當英文來源
+_RE_LOCALE_LIKE = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
+
+
+def neutral_guide_index(parts: list[str]) -> int | None:
+    """無語言資料夾的指南（``ae2guide/aae_intro/x.md``）：回傳指南資料夾在 ``parts`` 的位置。
+
+    這種結構的英文沒有語言資料夾，其他語言放在指南資料夾下以底線開頭的資料夾
+    （``ae2guide/_es_es/aae_intro/x.md``），繁中輸出要放在同一層的 ``_zh_tw``。
+    不是這種結構時回傳 None：路徑已有 en_us／zh_cn／zh_tw 資料夾、沒有指南資料夾，
+    或路徑裡出現底線開頭的語言資料夾（那是其他語言，不是英文原文）。
+    指南資料夾正下方的資料夾若長得像語言碼，寧可略過也不當英文送翻。
+    """
+    dirs = parts[:-1]
+    if any(RE_LANG_SEG.match(seg) for seg in parts):
+        return None
+    if any(_RE_UNDERSCORE_LOCALE.match(seg) for seg in dirs):
+        return None
+    guide = next(
+        (i for i, seg in enumerate(dirs) if is_guide_directory_segment(seg)), None
+    )
+    if guide is None:
+        return None
+    slot = guide + 1
+    if slot < len(dirs) and _RE_LOCALE_LIKE.match(dirs[slot]):
+        return None
+    return guide
+
+
 def has_allowed_lang_segment(path: Path) -> bool:
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構，且大小寫不拘
-    return any(RE_LANG_SEG.match(seg) for seg in path.parts)
+    if any(RE_LANG_SEG.match(seg) for seg in path.parts):
+        return True
+    return neutral_guide_index(list(path.parts)) is not None
 
 
 def detect_lang_segment(parts: list[str]) -> str | None:
     """
     從路徑 segments 判斷語言資料夾（支援 _en_us/_zh_tw、大小寫）
-    回傳: "en_us" / "zh_tw" / "zh_cn" / None
+    回傳: "en_us" / "zh_tw" / "zh_cn" / None（無語言資料夾的指南視為 "en_us"）
     """
     for seg in parts:
         m = RE_LANG_SEG.match(seg)
         if m:
             # m.group(0) 可能是 _EN_US 這種，把前綴 _ 去掉再 lower
             return seg.lstrip("_").lower()
-    return None
+    return "en_us" if neutral_guide_index(parts) is not None else None
 
 
 def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
@@ -356,6 +390,12 @@ def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
     parts = rel_path.replace("\\", "/").split("/")
     src_norm = src_lang.lower()
     dst_norm = dst_lang.lower()
+
+    guide = neutral_guide_index(parts)
+    if guide is not None:
+        if src_norm != "en_us":
+            return "/".join(parts)
+        return "/".join([*parts[: guide + 1], f"_{dst_norm}", *parts[guide + 1 :]])
 
     for i, seg in enumerate(parts):
         m = RE_LANG_SEG.match(seg)

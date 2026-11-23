@@ -17,6 +17,27 @@ DEFAULT_BOOK_DIRS: tuple[str, ...] = (
     "guidebook",
 )
 
+GUIDE_DIR_NAMES = frozenset(
+    {
+        "ae2guide",
+        "guide",
+        "guides",
+        "guidebook",
+        "manual",
+        "manuals",
+        "documentation",
+        "docs",
+    }
+)
+
+
+def is_guide_directory_segment(segment: str) -> bool:
+    """路徑片段是不是指南／文件資料夾（``ae2guide``、``guides``、``<名稱>guide``）。"""
+
+    lowered = segment.casefold()
+    return lowered in GUIDE_DIR_NAMES or lowered.endswith(("guide", "guidebook"))
+
+
 # ``assets/<模組>/`` 之後才開始比對資料夾名稱，所以索引從 2 起算
 FIRST_DIR_INDEX = 2
 

@@ -47,7 +47,11 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from translation_tool.plugins.md.md_extract_qa import is_translatable_text_line
+from translation_tool.plugins.md.md_extract_qa import (
+    is_translatable_text_line,
+    map_rel_lang_path,
+    neutral_guide_index,
+)
 from translation_tool.plugins.shared.rich_text_shield import (
     ShieldPiece,
     unshield_text,
@@ -104,6 +108,10 @@ def map_lang_in_rel_path_allow_zh(
     parts = rel_path.replace("\\", "/").split("/")
     src_norm = src_lang.lower()
     dst_norm = dst_lang.lower()
+
+    if src_norm == "en_us" and neutral_guide_index(parts) is not None:
+        # 無語言資料夾的指南：英文沒有語言段，輸出放進指南資料夾下的 _zh_tw
+        return map_rel_lang_path(rel_path, src_norm, dst_norm), "SRC_EN"
 
     found_any_lang = False
     found_src_en = False
