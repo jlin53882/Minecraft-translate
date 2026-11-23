@@ -45,7 +45,7 @@ TranslationView（ft.Column）
 | `md_step_translate` | LM 批次翻譯 |
 | `md_step_inject` | 寫回完成目錄 |
 
-額外選項：`md_write_new_cache`（Switch）與 `md_lang_mode`（Dropdown：`non_cjk_only` / `cjk_only` / `all`，預設 `non_cjk_only`）。
+額外選項：`md_write_new_cache`（Switch）與 `md_lang_mode`（Dropdown：`non_cjk_only` / `cjk_only` / `all`，預設 `non_cjk_only`）與 `md_use_zh_cn`（Switch，使用 zh_cn 當底稿；預設值由 `get_md_use_zh_cn_default()` 讀 `translator.md_use_zh_cn_base`，經 `run_md_translation_service` 的 `use_zh_cn` 傳到 `run_md_pipeline`）。
 
 輸入欄位 `md_in_dir` 標籤為「輸入資料夾（遞迴掃描 .md）」，輸出欄位 `md_out_dir` 為「輸出資料夾（可選）」，兩者右側各有資料夾選擇按鈕。輸出留空時由服務使用預設位置 `<input>/Output/md`。
 
@@ -118,4 +118,4 @@ TranslationView（ft.Column）
 
 1. 新增 Markdown 相關步驟：在 `translation_panels` 的 `build_md_tab` 加入步驟，在 `translation_actions` 的 `run_md` 傳入參數，並在 `resume_interrupted` 還原對應選項。
 2. FTB／KubeJS 的流程修改應改在 `kubejs_ftb_pipeline_view.py`，不要在分頁中另外實作。
-3. `_reset_md_inputs()` 會重設步驟為全 True、`write_new_cache` 為 False，`lang_mode` 回到 `non_cjk_only`。
+3. `_reset_md_inputs()` 會重設步驟為全 True、`write_new_cache` 為 False，`lang_mode` 回到 `non_cjk_only`，`md_use_zh_cn` 回到設定預設值。續跑（`resume_interrupted`）從上次選項還原 `use_zh_cn`，舊續跑資料沒有時用設定預設值。

@@ -37,10 +37,17 @@ from translation_tool.utils.log_unit import log_error, log_warning
 
 # 可選匯入：避免某個 service 暫時不可用時，整頁無法開啟
 try:
-    from app.services_impl.pipelines.md_service import run_md_translation_service
+    from app.services_impl.pipelines.md_service import (
+        get_md_use_zh_cn_default,
+        run_md_translation_service,
+    )
 except Exception as _exc:  # noqa: BLE001 - 服務載入失敗時整頁仍可開啟，但原因必須留在 log
     log_error("Markdown 翻譯服務載入失敗，翻譯頁的 MD 功能將無法使用", exc_info=True)
     run_md_translation_service = None
+
+    def get_md_use_zh_cn_default() -> bool:
+        return True
+
 
 try:
     from app.tasks.task_session import TaskSession
@@ -289,6 +296,9 @@ class TranslationView(ft.Column):
         self.md_step_inject.value = flag("step_inject")
         self.md_write_new_cache.value = flag("write_new_cache")
         self.md_lang_mode.value = str(options.get("lang_mode") or "non_cjk_only")
+        self.md_use_zh_cn.value = bool(
+            options.get("use_zh_cn", get_md_use_zh_cn_default())
+        )
         runner = self._run_md
         self._refresh_steps()
         runner(dry_run=False)
@@ -368,6 +378,7 @@ class TranslationView(ft.Column):
         self.md_step_inject.value = True
         self.md_write_new_cache.value = False
         self.md_lang_mode.value = "non_cjk_only"
+        self.md_use_zh_cn.value = get_md_use_zh_cn_default()
         self._set_status("尚未開始", "neutral")
         self.progress.value = 0
         self._refresh_steps()

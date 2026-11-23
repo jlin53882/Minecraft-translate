@@ -17,6 +17,7 @@ from translation_tool.translation_db.pack_pipeline import (
     run_pack_pipeline,
 )
 from translation_tool.utils.cancellation import TaskCancelled
+from translation_tool.utils.config_manager import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,11 @@ def _empty_translation_report(*, dry_run: bool) -> dict[str, bool | int | str]:
         "candidates": 0,
         "planned_batches": 0,
     }
+
+
+def get_pack_read_zh_cn_default() -> bool:
+    """取得 KubeJS／FTB 流水線「讀取 zh_cn」開關的預設值。"""
+    return bool(load_config().get("translator", {}).get("pack_read_zh_cn", True))
 
 
 def discover_kubejs_ftb_pack_candidates(source: str) -> list[str]:
@@ -74,6 +80,7 @@ def run_kubejs_ftb_pipeline_service(
     translate_missing: bool = False,
     translation_version: str | None = None,
     use_translation_db: bool = True,
+    read_zh_cn: bool = True,
 ):
     """以既有 TaskSession 執行一次可取消的來源／DB／overlay run。
 
@@ -97,6 +104,7 @@ def run_kubejs_ftb_pipeline_service(
             publish=publish,
             output_root=output_root,
             translate_missing=translate_missing,
+            read_zh_cn=read_zh_cn,
         )
 
         translation_runner = (
@@ -132,5 +140,6 @@ def run_kubejs_ftb_pipeline_service(
 
 __all__ = [
     "discover_kubejs_ftb_pack_candidates",
+    "get_pack_read_zh_cn_default",
     "run_kubejs_ftb_pipeline_service",
 ]

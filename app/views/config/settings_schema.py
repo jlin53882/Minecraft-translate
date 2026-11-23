@@ -177,6 +177,8 @@ LAYOUT: dict[str, tuple[Card, ...]] = {
                 F("translator.cache_directory"),
                 F("translator.parallel_execution_workers"),
                 F("translator.enable_cache_saving"),
+                F("translator.md_use_zh_cn_base"),
+                F("translator.pack_read_zh_cn"),
                 F("translator.custom_translator_folder"),
                 Note(
                     "translator.cjk_ratio_threshold 已保留供舊設定相容，歷史上沒有實際 caller；"

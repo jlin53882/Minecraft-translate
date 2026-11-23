@@ -63,6 +63,7 @@ class PackPipelineOptions:
     output_root: str | None = None
     run_workspace: str | None = None
     translate_missing: bool = False
+    read_zh_cn: bool = True  # False：掃描來源時不讀 zh_cn 語系檔
 
     def __post_init__(self) -> None:
         if self.scan_mode not in {"full", "incremental"}:
@@ -389,6 +390,7 @@ def _scan_selected_sources(root: Path, options: PackPipelineOptions) -> PackScan
         options.version,
         include_kubejs=options.include_kubejs,
         include_ftb=options.include_ftb,
+        read_zh_cn=options.read_zh_cn,
     )
     enabled = set()
     if options.include_kubejs:

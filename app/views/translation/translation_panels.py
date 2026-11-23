@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import flet as ft
 
+from app.services_impl.pipelines.md_service import get_md_use_zh_cn_default
 from app.ui import kit
 from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
@@ -162,6 +163,14 @@ def build_md_tab(view) -> ft.Control:
             ft.dropdown.Option(key="all", text="抽取全部（all）"),
         ],
     )
+    zh_cn_row = kit.SwitchRow(
+        "使用 zh_cn 當底稿",
+        "沒有 zh_tw 時，以結構對齊的 zh_cn 簡轉繁當底稿，只把殘留英文送 LM；"
+        "關閉後 zh_cn 檔不參與，一律從英文翻譯（僅在「僅抽取非中文」模式有作用）",
+        get_md_use_zh_cn_default(),
+        divider=False,
+    )
+    view.md_use_zh_cn = zh_cn_row.switch
     steps = _step_row(
         view,
         [
@@ -194,6 +203,7 @@ def build_md_tab(view) -> ft.Control:
             build_path_row(view, view.md_in_dir),
             build_path_row(view, view.md_out_dir),
             view.md_lang_mode,
+            zh_cn_row,
         ],
         steps,
         cache,

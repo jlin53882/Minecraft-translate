@@ -131,6 +131,7 @@ def run_md(view, *, dry_run: bool):
         翻譯=view.md_step_translate.value,
         注入=view.md_step_inject.value,
         寫入新快取=view.md_write_new_cache.value,
+        使用zh_cn底稿=view.md_use_zh_cn.value,
     )
 
     def worker():
@@ -146,6 +147,7 @@ def run_md(view, *, dry_run: bool):
                 step_inject=bool(view.md_step_inject.value),
                 write_new_cache=bool(view.md_write_new_cache.value),
                 lang_mode=str(view.md_lang_mode.value or "non_cjk_only"),
+                use_zh_cn=bool(view.md_use_zh_cn.value),
             )
         except Exception as ex:  # noqa: BLE001
             try:

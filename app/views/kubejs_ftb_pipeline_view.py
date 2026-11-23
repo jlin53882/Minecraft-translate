@@ -15,6 +15,7 @@ import flet as ft
 from app.services_impl.moddb_service import load_db_settings
 from app.services_impl.pack_pipeline_service import (
     discover_kubejs_ftb_pack_candidates,
+    get_pack_read_zh_cn_default,
     run_kubejs_ftb_pipeline_service,
 )
 from app.services_impl.pack_version_service import (
@@ -155,6 +156,9 @@ class KubejsFtbPipelineView(ft.Column):
             label="FTB Quests", value=mode != "kubejs", visible=mode != "kubejs"
         )
         self.translate_missing = ft.Checkbox(label="LM 翻譯待處理", value=False)
+        self.read_zh_cn = ft.Checkbox(
+            label="讀取 zh_cn 語系檔", value=get_pack_read_zh_cn_default()
+        )
         # 與模組包一鍵製作相同的 Mod 資料庫設定卡：使用資料庫、沿用全域目標版本、目標版本與統計。
         self.lm_db_options = LmDbOptions(self._page.update)
 
@@ -643,6 +647,7 @@ class KubejsFtbPipelineView(ft.Column):
                 translate_missing=bool(self.translate_missing.value),
                 translation_version=lm_version,
                 use_translation_db=lm_use_db,
+                read_zh_cn=bool(self.read_zh_cn.value),
             ),
             name="KubeJS / FTB 流水線",
             owner="kubejs-ftb-pipeline",

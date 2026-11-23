@@ -6,7 +6,7 @@
 `launch_page_operation`、輪詢 `TaskSession`，並使用與一鍵流水線相同的工作台外框、
 狀態卡與延遲顯示的進度面板。左欄依序放「專案路徑」與「流水線步驟」，右欄放
 「執行狀態」與執行日誌；候選根目錄、遊戲版本、同步模式、來源類型、LM 開關與輸出目錄收納在
-一鍵執行的四步精靈（`app/views/pipeline/kubejs_ftb_wizard.py`），不佔用工作台版面。四個步驟各自對應一個服務模式：分析來源（唯讀候選探索）、預覽同步計畫
+一鍵執行的四步精靈（`app/views/pipeline/kubejs_ftb_wizard.py`），不佔用工作台版面。四個步驟各自對應一個服務模式：分析來源（唯讀候選探索）、預覽同步計畫 精靈第 2 步另有 `read_zh_cn`（勾選「讀取 zh_cn 語系檔」，預設值由 `get_pack_read_zh_cn_default()` 讀 `translator.pack_read_zh_cn`），經 `run_kubejs_ftb_pipeline_service` 的 `read_zh_cn` 進入 `PackPipelineOptions`，最後傳給 `scan_pack_sources`。
 （dry-run）、同步 ModDB（寫入 DB，啟用 LM 時翻譯待處理條目，不輸出檔案）、輸出 overlay
 （正式發布）。
 實際來源識別、掃描、DB 同步與輸出由下列共用核心負責：

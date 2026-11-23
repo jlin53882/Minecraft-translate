@@ -239,6 +239,7 @@ class MdFlow(Flow):
         "step_inject": True,
         "write_new_cache": True,
         "lang_mode": "non_cjk_only",
+        "use_zh_cn": True,
     }
     edit_marker = ("docs/en_us/intro.md", "Paragraph number 0", "Edited paragraph")
     inject_option = "step_inject"

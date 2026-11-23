@@ -127,6 +127,7 @@ def _decide_zh_cn_bases(
     lang_mode: str,
     extract_blocks_fn,
     report: _PairingReport,
+    use_zh_cn: bool = True,
 ) -> dict[str, _CnBase]:
     """沒有 zh_tw、有 en_us 與 zh_cn 時，決定 zh_cn 能不能整份當底稿（只在 non_cjk_only）。
 
@@ -134,8 +135,8 @@ def _decide_zh_cn_bases(
     只有與英文原文完全相同的殘留區塊會送 LM，其餘 zh_cn 內容於 Step 3 整檔簡轉繁。
     """
     bases: dict[str, _CnBase] = {}
-    if lang_mode != "non_cjk_only":
-        return bases
+    if lang_mode != "non_cjk_only" or not use_zh_cn:
+        return bases  # 使用者關閉 zh_cn 底稿：zh_cn 檔照舊不產生 pending，英文照常送翻
     for rel_cn, rel_en in sorted(plan.pair_cn.items()):
         en_text = _read_text_lenient(in_root / rel_en)
         cn_text = _read_text_lenient(in_root / rel_cn)
@@ -243,6 +244,7 @@ def step1_extract_impl(
     progress_fn: Callable[[Any, float], None],
     log_warning_fn: Callable[..., None],
     remove_stale: bool = True,
+    use_zh_cn: bool = True,
 ) -> dict[str, Any]:
     """
     第一步實作：掃描 Markdown 資料夾，依 lang_mode 過濾並抽取可翻譯區塊，將結果寫入待翻譯 JSON。
@@ -310,6 +312,7 @@ def step1_extract_impl(
         lang_mode=lang_mode,
         extract_blocks_fn=extract_blocks_fn,
         report=report,
+        use_zh_cn=use_zh_cn,
     )
     en_covered_by_cn = {base.rel_en for base in cn_bases.values()}
     for group in plan.conflicts:
