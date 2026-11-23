@@ -20,7 +20,6 @@ import pytest
 
 from app.services_impl.pipelines import (
     _task_runner,
-    md_service,
 )
 from app.tasks.task_session import TaskSession
 from translation_tool.core import (
@@ -228,6 +227,43 @@ class Flow:
             yield
 
 
+def _run_md_with_resume(
+    input_dir,
+    session,
+    output_dir=None,
+    dry_run=False,
+    step_translate=True,
+    **options,
+):
+    """Markdown 核心流程包上續跑標記（續跑框架自身的測試；Markdown 頁已改走 ModDB 流水線）。"""
+    from app.services_impl.pipelines._task_runner import run_callable_task
+    from translation_tool.core.md_translation_assembly import run_md_pipeline
+
+    with plugin_resume.resume_task(
+        "md",
+        input_dir=input_dir,
+        output_dir=output_dir,
+        options={"step_translate": step_translate, **options},
+        session=session,
+        dry_run=dry_run,
+        translate_enabled=step_translate,
+    ):
+        return run_callable_task(
+            session=session,
+            task_name="[非預期錯誤] MD 流程失敗：",
+            func=run_md_pipeline,
+            kwargs={
+                "input_dir": input_dir,
+                "session": session,
+                "output_dir": output_dir,
+                "dry_run": dry_run,
+                "step_translate": step_translate,
+                **options,
+            },
+            add_session_log_on_error=True,
+        )
+
+
 class MdFlow(Flow):
     kind = "md"
     cache_type = "md"
@@ -263,7 +299,7 @@ class MdFlow(Flow):
             **self.default_options,
         }
         kwargs.update(overrides)
-        md_service.run_md_translation_service(**kwargs)
+        _run_md_with_resume(**kwargs)
         return session
 
 

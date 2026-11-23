@@ -198,12 +198,12 @@ SETTINGS: tuple[Setting, ...] = (
     Setting(
         "translator.md_use_zh_cn_base",
         "bool",
-        "Markdown 翻譯預設使用 zh_cn 當底稿（可在翻譯頁每次覆寫）",
+        "Markdown 流水線預設讀取 zh_cn 當底稿（可在流水線頁每次覆寫）",
         "general",
         C_TRANSLATOR,
         "沒有 zh_tw 時，以結構對齊的 zh_cn 簡轉繁當底稿，只把殘留英文送 LM；關閉後 zh_cn 檔不參與，一律從英文翻譯",
         default=True,
-        timing_note="只決定開關的初始值：翻譯頁按「重置」時重新讀取；每次執行以畫面上的開關為準。",
+        timing_note="只決定勾選框的初始值：Markdown 流水線頁建立時讀取一次（需重新啟動應用程式）；每次執行以畫面上的勾選為準。",
     ),
     Setting(
         "translator.pack_read_zh_cn",

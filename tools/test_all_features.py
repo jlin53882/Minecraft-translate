@@ -412,18 +412,15 @@ def test_translation_view() -> bool:
     ok_all = True
 
     try:
-        from app.views.translation.translation_panels import (
-            build_ftb_tab,
-            build_kjs_tab,
-            build_md_tab,
-        )
+        from app.views.kubejs_ftb_pipeline_view import KubejsFtbPipelineView
+        from app.views.md_pipeline_view import MarkdownPipelineView
 
         ok_all &= result(
-            "build_ftb_tab / build_kjs_tab / build_md_tab 存在",
-            all(callable(fn) for fn in (build_ftb_tab, build_kjs_tab, build_md_tab)),
+            "KubejsFtbPipelineView / MarkdownPipelineView 存在",
+            all(callable(cls) for cls in (KubejsFtbPipelineView, MarkdownPipelineView)),
         )
     except Exception as e:  # noqa: BLE001
-        ok_all &= fail("translation_panels 函式", e)
+        ok_all &= fail("流水線頁面類別", e)
 
     return ok_all
 

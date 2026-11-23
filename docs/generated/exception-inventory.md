@@ -4,12 +4,12 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **385** 項；其中 **94** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **381** 項；其中 **90** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 346 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
-| UI／畫面保護 | 19 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
+| 已記錄／回報 | 344 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| UI／畫面保護 | 17 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 20 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
 | 位置 | 規則 | 分類 | 原因／處理 |
@@ -35,6 +35,7 @@
 | `app/services_impl/cache/cache_services.py:cache_save_all_service` | BLE001 | 已記錄／回報 | preserve the original save failure |
 | `app/services_impl/cache/cache_services.py:cache_search_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
 | `app/services_impl/cache/cache_services.py:cache_rebuild_index_service` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
+| `app/services_impl/md_pipeline_service.py:run_md_pipeline_service` | BLE001 | 已記錄／回報 | 任務邊界必須回報並終止 |
 | `app/services_impl/moddb_batch_operation.py:_run_batch_job` | BLE001 | 已記錄／回報 | worker boundary must publish unexpected failures |
 | `app/services_impl/moddb_retranslate_service.py:_cache_finalized_translation` | BLE001 | 已記錄／回報 | cache is best-effort after DB commit |
 | `app/services_impl/moddb_retranslate_service.py:_flush_repair_cache` | BLE001 | 已記錄／回報 | DB results survive cache failure |
@@ -136,6 +137,7 @@
 | `app/views/lookup_view.py:LookupView.single_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
 | `app/views/lookup_view.py:LookupView._push_batch_progress` | BLE001 | 已記錄／回報 | 進度更新失敗不可中斷批次查詢 |
 | `app/views/lookup_view.py:LookupView.batch_lookup_worker` | BLE001 | 已記錄／回報 | 失敗也要恢復按鈕並顯示原因 |
+| `app/views/md_pipeline_view.py:MarkdownPipelineView._poll` | BLE001 | 已記錄／回報 | UI 卸載時停止輪詢並保留任務結果 |
 | `app/views/merge/merge_db_options.py:MergeDbOptions._on_version_focus` | BLE001 | 已記錄／回報 | 頁面尚未掛載時略過即時更新 |
 | `app/views/merge/merge_db_options.py:MergeDbOptions._on_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
 | `app/views/merge/merge_db_options.py:MergeDbOptions._on_version_changed` | BLE001 | 已記錄／回報 | 頁面尚未掛載時只是不即時更新提示 |
@@ -223,12 +225,6 @@
 | `app/views/rules_view.py:RulesView._initial_load.run` | BLE001 | 已記錄／回報 | 失敗要顯示在 UI |
 | `app/views/rules_view.py:RulesView._scroll_table_to_top` | BLE001 | 已記錄／回報 | 捲動只是輔助，失敗不影響編輯 |
 | `app/views/rules_view.py:RulesView._focus_new_rule` | BLE001 | 已記錄／回報 | 取得焦點只是輔助 |
-| `app/views/translation/translation_actions.py:_safe_add_log` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/translation/translation_actions.py:_safe_page_update` | BLE001/S110 | UI／畫面保護 | （未寫原因；見分類） |
-| `app/views/translation/translation_actions.py:run_md.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation/translation_actions.py:run_md.worker` | BLE001 | 已記錄／回報 | （未寫原因；見分類） |
-| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 服務載入失敗時整頁仍可開啟，但原因必須留在 log |
-| `app/views/translation_view.py:<module>` | BLE001 | 已記錄／回報 | 載入失敗時整頁仍可開啟，但原因必須留在 log |
 | `translation_tool/checkers/english_residue_checker.py:check_english_residue_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/untranslated_checker.py:check_untranslated_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/variant_comparator.py:compare_variants_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |

@@ -14,7 +14,6 @@ APP_DIR = Path(__file__).resolve().parents[1] / "app"
 EXPECTED_USERS = {
     "MergeView._run_merge_worker",
     "SpeciesBulkLookup._run",
-    "_report_service_failure",
 }
 
 
