@@ -11,12 +11,10 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 from collections import defaultdict
 from typing import Any
 
 import ftb_snbt_lib as snbt
-import orjson
 from ftb_snbt_lib.tag import Compound  # 避免跟 typing.List 混淆
 from ftb_snbt_lib.tag import List as SnbtList
 
@@ -24,77 +22,6 @@ from .ftbquests_snbt_extractor import (
     merge_translated_lines,
     walk_snbt_file_tolerant,
 )
-
-
-def _normalize_config_dir(path: str) -> str:
-    """
-    容錯：避免出現 .../config/config 這種重複路徑。
-    """
-    if not path:
-        return path
-    norm = os.path.normpath(path)
-    base = os.path.basename(norm).lower()
-    parent = os.path.basename(os.path.dirname(norm)).lower()
-    if base == "config" and parent == "config":
-        return os.path.dirname(norm)
-    return norm
-
-
-def _load_json_dict(path: str) -> dict:
-    """載入 JSON 檔案為字典。"""
-    if not os.path.isfile(path):
-        return {}
-    with open(path, "rb") as f:
-        return orjson.loads(f.read())
-
-
-def split_lang_by_source_file(lang_map: dict) -> dict[str, dict[str, str]]:
-    """
-    將 extractor 產出的扁平 key 拆回來源檔：
-      - "xxx.snbt|some.key" -> 檔名=xxx.snbt, inner_key=some.key
-      - "some.key" -> 放到 "_default"（代表沒有來源檔名資訊）
-    回傳:
-      {
-        "aaa.snbt": {"k1":"v1", ...},
-        "bbb.snbt": {...},
-        "_default": {...}
-      }
-    """
-    out: dict[str, dict[str, str]] = {}
-    for k, v in lang_map.items():
-        if not (
-            isinstance(v, str)
-            or (isinstance(v, list) and all(isinstance(x, str) for x in v))
-        ):
-            continue
-        if "|" in k:
-            filename, inner_key = k.split("|", 1)
-        else:
-            filename, inner_key = "_default", k
-        out.setdefault(filename, {})[inner_key] = v
-    return out
-
-
-def walk_and_copy_all_snbt(src_root_dir: str, dst_root_dir: str) -> int:
-    """
-    把 src_root_dir 下所有 .snbt 複製到 dst_root_dir（保留相對路徑）
-    回傳複製數量
-    """
-    copied = 0
-    os.makedirs(dst_root_dir, exist_ok=True)
-
-    for root, _, files in os.walk(src_root_dir):
-        for fn in files:
-            if not fn.lower().endswith(".snbt"):
-                continue
-            src = os.path.join(root, fn)
-            rel = os.path.relpath(src, src_root_dir)
-            dst = os.path.join(dst_root_dir, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-            copied += 1
-
-    return copied
 
 
 def _read_snbt(path: str) -> Compound | None:

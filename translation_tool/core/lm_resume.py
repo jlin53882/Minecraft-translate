@@ -1,7 +1,7 @@
 """重開後續跑：偵測上次沒做完的翻譯，並判斷能不能接續（#151、#164、ADR-0001 方案 C）。
 
-涵蓋機器翻譯頁（``lm_directory``）與 FTB／KubeJS／MD 翻譯（``ftbquests``／``kubejs``／``md``，
-標記由 ``plugin_resume`` 寫出）。
+涵蓋機器翻譯頁（``lm_directory``），以及舊版 FTB／KubeJS／MD 翻譯殘留的標記
+（``ftbquests``／``kubejs``／``md``，``plugin_resume`` 只讀取與清除，不再寫入）。
 
 設計重點
 - 這裡的函式都是**唯讀**，不呼叫任何翻譯 API、不消耗額度；是否續跑由使用者在 UI 決定。
@@ -110,7 +110,7 @@ def peek_interrupted_task() -> InterruptedTask | None:
 def _plugin_task(kind: str) -> InterruptedTask | None:
     """FTB／KubeJS／MD 的標記。
 
-    沒有標記回傳 None。標記存在但**不是可驗證的版本 2**（舊版 ``JsonCheckpointAdapter`` 寫入專用的
+    沒有標記回傳 None。標記存在但**不是可驗證的版本 2**（舊版寫入專用的
     格式、``kind`` 不符、缺少輸入資料夾）時，仍回傳一個「無法續跑」的任務：使用者會在啟動對話框
     看到原因並可以放棄（清除），不能靜默忽略（#164 驗收條件）。
     """

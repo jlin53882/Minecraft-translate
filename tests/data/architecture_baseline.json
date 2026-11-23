@@ -2010,14 +2010,6 @@
    "top_level_defs": 0,
    "annotation_coverage": null
   },
-  "translation_tool.checkers.color_char_checker": {
-   "max_complexity": 12,
-   "public_api": 4,
-   "class_methods": 0,
-   "import_depth": 0,
-   "top_level_defs": 5,
-   "annotation_coverage": 1.0
-  },
   "translation_tool.checkers.english_residue_checker": {
    "max_complexity": 9,
    "public_api": 2,
@@ -2529,22 +2521,6 @@
    "import_depth": 5,
    "top_level_defs": 8,
    "annotation_coverage": 0.872
-  },
-  "translation_tool.core.lm_translator_shared_preview": {
-   "max_complexity": 3,
-   "public_api": 4,
-   "class_methods": 2,
-   "import_depth": 0,
-   "top_level_defs": 4,
-   "annotation_coverage": 1.0
-  },
-  "translation_tool.core.lm_translator_shared_recording": {
-   "max_complexity": 5,
-   "public_api": 1,
-   "class_methods": 3,
-   "import_depth": 0,
-   "top_level_defs": 1,
-   "annotation_coverage": 1.0
   },
   "translation_tool.core.lm_translator_skeleton": {
    "max_complexity": 6,

@@ -6,23 +6,13 @@ import hashlib
 import json
 import os
 import re
-import shutil
 import tempfile
-import uuid
 from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.file_replace import replace_with_retry
 
-# New IDs are shorter to keep the deeply nested Windows pipeline paths below
-# MAX_PATH.  Keep accepting the original UUID-hex form so existing snapshots
-# remain readable after an upgrade.
-_RUN_ID_RE = re.compile(r"^(?:[0-9a-f]{20}|[0-9a-f]{32})$")
 _HASH_CHUNK_SIZE = 1024 * 1024
-
-
-def new_run_id() -> str:
-    return uuid.uuid4().hex[:20]
 
 
 def sha256_file(path: Path) -> str:
@@ -222,25 +212,3 @@ def sync_managed_tree(
                 conflict(relative, "legacy_unowned_stale_file")
 
     return now_owned, conflicts, removed
-
-
-def commit_staging_run(staging_root: Path, committed_root: Path) -> bool:
-    """Commit a completed private run, copying if Windows temporarily blocks rename.
-
-    The destination uses a unique run id and is not referenced by ``current.json``
-    until this function completes. A copy fallback is therefore safe even if the
-    process stops partway through: the previous current manifest remains valid.
-    Returns True when the copy fallback was used.
-    """
-    committed_root.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.replace(staging_root, committed_root)
-        return False
-    except PermissionError:
-        try:
-            shutil.copytree(staging_root, committed_root)
-        except OSError:
-            shutil.rmtree(committed_root, ignore_errors=True)
-            raise
-        shutil.rmtree(staging_root, ignore_errors=True)
-        return True
