@@ -92,6 +92,11 @@ def _run(src: Path, out: Path):
         (f"{P}/ae2guide/_nds_de/w.md", None),
         (f"{P}/ae2guide/de_de.md", None),  # 檔名主幹就是語言碼
         (f"{P}/ae2guide/a/x_de_de.md", None),  # 檔名以語言碼結尾
+        # 內容根目錄本身是語言碼、或是原版規格的 lang 資料夾
+        (f"{P}/es_es/x.md", None),
+        (f"{P}/de_de/book/y.md", None),
+        (f"{P}/de/x.md", None),
+        (f"{P}/lang/a.md", None),
         # 已知取捨：兩字母章節名稱寧可略過；不帶底線的三字母語言碼目前辨識不出
         (f"{P}/ae2guide/ui/x.md", None),
         (f"{P}/ae2guide/me/x.md", None),
@@ -153,6 +158,42 @@ def test_iter_md_files_uses_content_not_folder_names(tmp_path):
         f"{P}/ae2guide/aae_intro/a.md",
         f"{P}/whatever_name/page.md",
     ]
+
+
+GERMAN = "# Einführung\n\nDieses Modul erlaubt es dir, Gegenstände in Zellen zu speichern und das Terminal zu öffnen.\n"
+SPANISH = "# Introducción\n\nEste módulo te permite guardar objetos en celdas y abrir la terminal para verlos todos.\n"
+FRENCH = "# Introduction\n\nCe module vous permet de stocker des objets dans des cellules et d'ouvrir le terminal.\n"
+RUSSIAN = "# Введение\n\nЭтот мод позволяет хранить предметы в ячейках и открывать терминал для просмотра.\n"
+JAPANESE = (
+    "---\nnavigation:\n  title: ME能動形成プレーン\n---\n\n# ME能動形成プレーン\n"
+)
+ENGLISH_WITH_SYMBOL = (
+    f"# Profiler\n\n{SENTENCE} A tick takes about 50 μs on average, and the profiler "
+    "shows how long each machine in the network needs to finish its work. Values "
+    "above 100 μs are shown in red, while values below 20 μs are shown in green so "
+    "that you can find slow machines quickly. The values update every second and "
+    "they are averaged over the last minute, which makes spikes easier to see. "
+    "Hold shift to see the full list of machines sorted from the slowest to the "
+    "fastest, and right click a row to jump to that machine in the world.\n"
+)
+
+
+def test_iter_md_files_rejects_non_english_content_without_locale_marker(tmp_path):
+    """沒有語言標記的路徑下，西／德／法／俄／日文都不能當英文原文送翻。"""
+    src, _ = _layout(
+        tmp_path,
+        {
+            f"{P}/guide/german.md": GERMAN,
+            f"{P}/guide/spanish.md": SPANISH,
+            f"{P}/guide/french.md": FRENCH,
+            f"{P}/guide/russian.md": RUSSIAN,
+            f"{P}/guide/japanese.md": JAPANESE,
+            f"{P}/guide/english.md": EN,
+            f"{P}/guide/symbol.md": ENGLISH_WITH_SYMBOL,  # 零星的 μ 不是其他語言
+        },
+    )
+    found = sorted(p.name for p in iter_md_files(src))
+    assert found == ["english.md", "symbol.md"]
 
 
 def test_boundary_is_relative_to_input_root(tmp_path):

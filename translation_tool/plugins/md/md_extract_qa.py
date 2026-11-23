@@ -24,10 +24,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from translation_tool.core.text_sniffer import sniff_text_file
+from translation_tool.core.text_sniffer import english_stopword_ratio, sniff_text_file
 from translation_tool.plugins.shared.rich_text_shield import shield_text
 
 
@@ -366,11 +367,15 @@ def neutral_guide_index(parts: list[str]) -> int | None:
     if any(_RE_UNDERSCORE_LOCALE.match(seg) for seg in dirs):
         return None
     anchor = 2
+    first_checked = anchor  # 內容根目錄本身也可能是語言碼（assets/<模組>/de_de/…）
     if dirs[anchor].casefold() == "guides":
         anchor += 2
         if anchor >= len(dirs):
             return None  # guides/<模組>/<指南 id> 還沒走完，找不到內容根目錄
-    if any(_RE_LOCALE_LIKE.match(seg) for seg in dirs[anchor + 1 :]):
+        first_checked = anchor + 1  # guides/<模組>/<id> 是註冊路徑，不檢查
+    elif dirs[anchor].casefold() == "lang":
+        return None  # 原版規格的語言檔資料夾，不是指南
+    if any(_RE_LOCALE_LIKE.match(seg) for seg in dirs[first_checked:]):
         return None
     stem = parts[-1].rpartition(".")[0] or parts[-1]
     if _RE_LOCALE_STEM.match(stem) or _RE_LOCALE_SUFFIX.search(stem):
@@ -379,6 +384,25 @@ def neutral_guide_index(parts: list[str]) -> int | None:
 
 
 _MAX_GUIDE_BYTES = 1024 * 1024
+# 英文停用字比例下限：英文指南中位數約 0.28，西／法／葡／俄等其他語言幾乎是 0、最高約 0.14
+_MIN_ENGLISH_RATIO = 0.12
+# 內文英文單字少於這個數量時（只有標題、連結、元件）無從判斷語言，也沒有多少文字會被送翻，不擋
+_MIN_WORDS_TO_JUDGE = 8
+# 非拉丁字母（中日韓、西里爾、阿拉伯等）佔字母的比例達到這個值就不是英文；拉丁字母的重音字母由停用字比例判斷
+_MAX_NON_LATIN_SHARE = 0.01
+
+
+def _non_latin_share(text: str) -> float:
+    """非拉丁字母（中日韓、西里爾等）佔所有字母的比例；英文裡零星的 μ、° 等符號不影響。"""
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    non_latin = sum(
+        1
+        for ch in letters
+        if not ch.isascii() and not unicodedata.name(ch, "").startswith("LATIN")
+    )
+    return non_latin / len(letters) if non_latin >= 3 else 0.0  # 零星符號（μ）不算
 
 
 def _is_guide_prose(path: Path, rel_parts: list[str]) -> bool:
@@ -389,7 +413,13 @@ def _is_guide_prose(path: Path, rel_parts: list[str]) -> bool:
         text = path.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return False
-    return sniff_text_file(text, path.suffix, "/".join(rel_parts)) is not None
+    if sniff_text_file(text, path.suffix, "/".join(rel_parts)) is None:
+        return False
+    # sniff_text_file 不分語言（西、德、法文長句也算敘述文字）：沒有語言標記的檔案要確認是英文原文
+    if _non_latin_share(text) >= _MAX_NON_LATIN_SHARE:
+        return False  # 日、韓、俄、中文等非拉丁字母（含 front matter 的標題）：不是英文原文
+    ratio, words = english_stopword_ratio(text)
+    return words < _MIN_WORDS_TO_JUDGE or ratio >= _MIN_ENGLISH_RATIO
 
 
 def has_allowed_lang_segment(path: Path, root: Path | None = None) -> bool:
