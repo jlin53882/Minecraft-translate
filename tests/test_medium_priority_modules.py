@@ -256,5 +256,3 @@ def test_ftb_translator_export_import():
     from translation_tool.core import ftb_translator_export
 
     assert ftb_translator_export is not None
-
-

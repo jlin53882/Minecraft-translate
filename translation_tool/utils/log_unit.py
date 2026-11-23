@@ -171,5 +171,3 @@ def progress(*args, session=None, p: float | None = None) -> None:
         session.set_progress(fp)
     except Exception:  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷任務
         pass
-
-

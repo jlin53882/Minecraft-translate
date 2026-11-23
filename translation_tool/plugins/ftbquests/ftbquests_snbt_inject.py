@@ -482,5 +482,3 @@ def patch_quest_snbt_file(
             "missing": missing,
         },
     )
-
-
