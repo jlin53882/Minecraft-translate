@@ -366,11 +366,17 @@ def neutral_guide_index(parts: list[str]) -> int | None:
     return guide
 
 
-def has_allowed_lang_segment(path: Path) -> bool:
+def has_allowed_lang_segment(path: Path, root: Path | None = None) -> bool:
+    """路徑是否屬於管線處理的 Markdown：有 en_us／zh_cn／zh_tw 資料夾，或是無語言資料夾的指南。
+
+    無語言資料夾的指南只看相對於 ``root`` 的路徑：輸入資料夾本身或它的上層剛好叫
+    ``ae2guide``、``docs`` 時，Step 1／Step 3 用的相對路徑沒有這一段，不能在這裡就算數。
+    """
     # 用 parts 掃描每個 segment，支援 structure/en_us 這種深層結構，且大小寫不拘
     if any(RE_LANG_SEG.match(seg) for seg in path.parts):
         return True
-    return neutral_guide_index(list(path.parts)) is not None
+    rel = path.relative_to(root) if root is not None else path
+    return neutral_guide_index(list(rel.parts)) is not None
 
 
 def detect_lang_segment(parts: list[str]) -> str | None:
@@ -430,7 +436,7 @@ def iter_md_files(root: Path):
             continue
 
         # ✅ 只允許 en_us / zh_tw（例如：.../en_us/... 或 .../structure/en_us/...）
-        if not has_allowed_lang_segment(p):
+        if not has_allowed_lang_segment(p, root):
             continue
 
         yield p

@@ -125,6 +125,19 @@ def test_iter_md_files_picks_neutral_english_but_not_other_locales(tmp_path):
     ]
 
 
+def test_guide_boundary_is_relative_to_input_root(tmp_path):
+    """輸入資料夾本身或上層叫 ae2guide／docs 時，不能因為絕對路徑含這一段就算指南。"""
+    inside = tmp_path / "ae2guide"
+    (inside / "chapter").mkdir(parents=True)
+    (inside / "chapter" / "a.md").write_text(EN, encoding="utf-8")
+    assert list(iter_md_files(inside)) == []
+
+    docs_parent = tmp_path / "docs" / "project"
+    docs_parent.mkdir(parents=True)
+    (docs_parent / "notes.md").write_text(EN, encoding="utf-8")
+    assert list(iter_md_files(docs_parent)) == []
+
+
 def test_neutral_english_and_existing_zh_tw_share_one_output():
     en, zh = "ae2guide/aae_intro/a.md", "ae2guide/_zh_tw/aae_intro/a.md"
     assert lang_output_key(en) == lang_output_key(zh)
