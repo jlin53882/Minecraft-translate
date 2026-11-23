@@ -91,7 +91,7 @@ TranslationView（ft.Column）
 - **Step3 Inject**（`step3_inject_impl`）：讀原始 MD + 翻譯 JSON，逐區塊套用（`apply_item_to_md_lines_fn`）→ 寫入 final_dir
   - `map_lang_in_rel_path_allow_zh_fn` 回傳 `status` 只認 `SRC_EN` / `SRC_ZH`，其他狀態跳過（`skipped_lang_status`）
   - 來源 MD 不存在 → `skipped_missing_source`；保留原始結尾換行（`ends_with_nl`）
-  - 只讀譯後 JSON；給了 `pending_dir` 時每檔先過 `verify_translated_doc`（`step2_status`、與現行 pending 的區塊身分、原始檔區塊 `content_hash`），不符則略過並計入 `skipped_incomplete`／`skipped_pending_mismatch`／`skipped_stale_source`，`完成` 內舊檔保留
+  - 只讀譯後 JSON；給了 `pending_dir` 時每檔先過 `verify_translated_doc`（`step2_status`、與現行 pending 的區塊身分、原始檔區塊 `content_hash`），不符則略過並計入 `skipped_incomplete`／`skipped_pending_mismatch`／`skipped_stale_source`，`完成` 內舊檔保留；寫入前用 `OutputGuard` 檢查完成檔是否被手動修改（`skipped_manual_edit`），被底稿取代的舊英文譯後檔計入 `skipped_superseded`
   - 路徑不安全（`is_safe_relative_path`／`is_inside`）→ `skipped_unsafe_path`
   - 區塊由後往前套用（`apply_items_to_md_lines`），多／少行時插入／刪除，不留空白行
 - Markdown 只有 `DONE` 才可執行 Step3；`PARTIAL`、`FAILED`、`CANCELLED` 不使用 pending JSON 產生完成目錄，避免未完成翻譯被當成最終輸出。

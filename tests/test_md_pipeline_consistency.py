@@ -545,7 +545,7 @@ def test_resume_step3_with_legacy_en_and_zh_pending_keeps_zh_translations(
     result = _run_non_cjk(src, out, step_extract=False, step_translate=False)
 
     assert _pair_final(out) == "一。\n\n譯:Two.\n"
-    assert result["step3"]["skipped_output_conflict"] == 1
+    assert result["step3"]["skipped_superseded"] == 1
 
 
 def test_pair_classification_ignores_a_bom_at_the_start_of_one_file(tmp_path, fake_lm):
