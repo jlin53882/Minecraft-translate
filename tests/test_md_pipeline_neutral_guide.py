@@ -75,6 +75,21 @@ def _run(src: Path, out: Path):
         ("ae2guide/to_do/x.md", None),  # 同上（略過比誤送翻安全）
         ("ae2guide/en_us/x.md", None),  # 已有明確語言資料夾：走原本的規則
         ("notes/x.md", None),  # 沒有指南資料夾
+        # 更深層、不同形狀的其他語言都不當英文
+        ("ae2guide/intro/de_de/y.md", None),
+        ("ae2guide/intro/es-es/z.md", None),
+        ("ae2guide/intro/ja/z.md", None),
+        ("ae2guide/_fil_ph/w.md", None),
+        ("ae2guide/_lzh/w.md", None),
+        ("ae2guide/_nds_de/w.md", None),
+        ("ae2guide/de_de.md", None),  # 檔名主幹就是語言碼
+        ("ae2guide/a/x_de_de.md", None),  # 檔名以語言碼結尾
+        ("docs/guide/de_de/x.md", None),
+        # 太泛的資料夾名稱不算指南；一般章節名稱不被誤擋
+        ("docs/CHANGELOG.md", None),
+        ("some/manual/notes.md", None),
+        ("ae2guide/items-blocks-machines/sky_dust.md", 0),
+        ("ae2guide/items-blocks-machines/io_port.md", 0),
     ],
 )
 def test_neutral_guide_index(rel, expected):
@@ -136,6 +151,39 @@ def test_guide_boundary_is_relative_to_input_root(tmp_path):
     docs_parent.mkdir(parents=True)
     (docs_parent / "notes.md").write_text(EN, encoding="utf-8")
     assert list(iter_md_files(docs_parent)) == []
+
+
+def test_pipeline_skips_non_guide_docs_and_nested_locales(tmp_path, fake_lm):
+    """docs／manual 的一般文件、巢狀其他語言都不送翻，也不寫輸出。"""
+    src, out = _layout(
+        tmp_path,
+        {
+            "docs/pack/CHANGELOG.md": EN,
+            "ae2guide/intro/de_de/y.md": "# Titel\n\nHallo Welt.\n",
+            "ae2guide/intro/ok.md": EN,
+        },
+    )
+
+    result = _run(src, out)
+
+    assert result["step1"]["md_files_found"] == 1
+    assert all("Hallo" not in sent for sent in fake_lm["sent"])
+    finals = sorted(
+        p.relative_to(out / "md" / "完成").as_posix()
+        for p in (out / "md" / "完成").rglob("*.md")
+    )
+    assert finals == ["ae2guide/_zh_tw/intro/ok.md"]
+
+
+def test_neutral_with_zh_cn_sibling_uses_zh_cn_base():
+    en, cn = "ae2guide/a/x.md", "ae2guide/_zh_cn/a/x.md"
+    plan = plan_sources([en, cn])
+    assert plan.pair_cn == {cn: en}
+
+
+def test_neutral_and_en_us_folder_conflict():
+    plan = plan_sources(["ae2guide/a/x.md", "ae2guide/_en_us/a/x.md"])
+    assert sorted(plan.skip.values()) == ["output_conflict", "output_conflict"]
 
 
 def test_neutral_english_and_existing_zh_tw_share_one_output():

@@ -329,10 +329,27 @@ def build_pending_json(
 RE_LANG_SEG = re.compile(r"^_?(en_us|zh_cn|zh_tw)$", re.IGNORECASE)
 
 
-# GuideME／AE2 指南的其他語言資料夾一律以底線開頭（``_es_es``）
-_RE_UNDERSCORE_LOCALE = re.compile(r"^_[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
-# 指南資料夾下第一層若長得像語言碼（``de_de``、``to_do``），無法確定是不是其他語言，不當英文來源
-_RE_LOCALE_LIKE = re.compile(r"^_?[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
+# 語言碼的形狀：``de``、``de_de``、``pt-br``、``fil_ph``、``nds_de``（兩到三個字母，可帶區域）
+_LOCALE_SHAPE = r"[a-z]{2,3}(?:[_-][a-z]{2,4})?"
+# GuideME／AE2 指南的其他語言資料夾以底線開頭（``_es_es``）
+_RE_UNDERSCORE_LOCALE = re.compile(rf"^_{_LOCALE_SHAPE}$", re.IGNORECASE)
+# 內容根目錄之下任何一層長得像語言碼（``de_de``、``es-es``、``ja``、``_fil_ph``）的資料夾，或整個檔名主幹就是語言碼
+# 不帶底線時只認 ``de``、``de_de``、``es-es`` 這種兩字母形狀：更寬會把 ``io_port``、``sky_dust`` 這類章節名稱誤擋
+_RE_LOCALE_LIKE = re.compile(
+    rf"^(?:_{_LOCALE_SHAPE}|[a-z]{{2}}(?:[_-][a-z]{{2}})?)$", re.IGNORECASE
+)
+# 檔名主幹整個就是語言碼：只認帶區域或底線開頭的形狀（``de_de``、``_ja``），不擋 ``ok``、``id`` 這種短檔名
+_RE_LOCALE_STEM = re.compile(
+    rf"^(?:_{_LOCALE_SHAPE}|[a-z]{{2}}[_-][a-z]{{2}})$", re.IGNORECASE
+)
+# 檔名主幹以 ``_xx_yy`` 結尾（``x_de_de.md``）
+_RE_LOCALE_SUFFIX = re.compile(r"_[a-z]{2}_[a-z]{2}$", re.IGNORECASE)
+# 太泛的資料夾名稱：``docs``、``manual`` 底下多半是一般文件，不是會被遊戲讀取的指南
+_GENERIC_DOC_DIRS = frozenset({"docs", "documentation", "manual", "manuals"})
+
+
+def _is_neutral_guide_dir(seg: str) -> bool:
+    return seg.casefold() not in _GENERIC_DOC_DIRS and is_guide_directory_segment(seg)
 
 
 def neutral_guide_index(parts: list[str]) -> int | None:
@@ -342,26 +359,27 @@ def neutral_guide_index(parts: list[str]) -> int | None:
     （``ae2guide/_es_es/aae_intro/x.md``），繁中輸出要放在同一層的 ``_zh_tw``。
     內容根目錄是第一個指南資料夾；若那個資料夾叫 ``guides``（GuideME 預設的
     ``guides/<模組>/<指南 id>/``），內容根目錄是它往下兩層（``guides/powah/book/_fr_fr/``）。
+    ``docs``、``manual`` 這類太泛的名稱不算指南資料夾。
     不是這種結構時回傳 None：路徑已有 en_us／zh_cn／zh_tw 資料夾、沒有指南資料夾，
     或路徑裡出現底線開頭的語言資料夾（那是其他語言，不是英文原文）。
-    內容根目錄正下方的資料夾若長得像語言碼，寧可略過也不當英文送翻。
+    內容根目錄之下任何一層（含檔名）長得像語言碼，寧可略過也不當英文送翻。
     """
     dirs = parts[:-1]
     if any(RE_LANG_SEG.match(seg) for seg in parts):
         return None
     if any(_RE_UNDERSCORE_LOCALE.match(seg) for seg in dirs):
         return None
-    guide = next(
-        (i for i, seg in enumerate(dirs) if is_guide_directory_segment(seg)), None
-    )
+    guide = next((i for i, seg in enumerate(dirs) if _is_neutral_guide_dir(seg)), None)
     if guide is None:
         return None
     if dirs[guide].casefold() == "guides":
         guide += 2
         if guide >= len(dirs):
             return None  # guides/<模組>/<指南 id> 還沒走完，找不到內容根目錄
-    slot = guide + 1
-    if slot < len(dirs) and _RE_LOCALE_LIKE.match(dirs[slot]):
+    if any(_RE_LOCALE_LIKE.match(seg) for seg in dirs[guide + 1 :]):
+        return None
+    stem = parts[-1].rpartition(".")[0] or parts[-1]
+    if _RE_LOCALE_STEM.match(stem) or _RE_LOCALE_SUFFIX.search(stem):
         return None
     return guide
 
@@ -425,7 +443,8 @@ def map_rel_lang_path(rel_path: str, src_lang: str, dst_lang: str) -> str:
 def iter_md_files(root: Path):
     """
     遞迴列出所有 .md（大小寫不敏感），排除 README.md（不分大小寫、任何層級）
-    ✅ 額外限制：只處理路徑中包含 en_us / zh_tw（含 _ 前綴、大小寫不拘）的檔案
+    ✅ 額外限制：只處理路徑中含 en_us／zh_cn／zh_tw 資料夾（含 _ 前綴、大小寫不拘）的檔案，
+    或相對於 root 位在指南資料夾下、沒有語言資料夾的英文指南（見 neutral_guide_index）
     """
     for p in root.rglob("*"):
         if not p.is_file():
