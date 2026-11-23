@@ -37,6 +37,7 @@ from translation_tool.translation_db.schema import (
     KIND_KUBEJS_LANG,
     KIND_KUBEJS_SCRIPT,
 )
+from translation_tool.utils.app_paths import get_data_root
 from translation_tool.utils.cancellation import TaskCancelled, raise_if_cancelled
 
 PACK_KINDS = frozenset(
@@ -44,6 +45,8 @@ PACK_KINDS = frozenset(
 )
 KUBEJS_KINDS = frozenset({KIND_KUBEJS_LANG, KIND_KUBEJS_SCRIPT})
 FTB_KINDS = frozenset({KIND_FTB_QUEST_LANG, KIND_FTB_QUESTS})
+# 執行紀錄在 app 資料根目錄下的資料夾名稱
+RUN_RECORDS_DIR_NAME = "pipeline_runs"
 
 
 class PackPipelineError(RuntimeError):
@@ -879,15 +882,14 @@ def _program_identity() -> dict[str, str | None]:
 
 
 def _run_workspace(report: PackPipelineReport, options: PackPipelineOptions) -> Path:
+    """執行紀錄（manifest 與報告）放在 app 資料根目錄的 ``pipeline_runs/<run_id>``。
+
+    與 config、快取、logs 同一處，不會在使用者的來源或輸出目錄旁留下隱藏資料夾；
+    ``run_workspace`` 可指定其他位置（測試或進階用途）。
+    """
     if options.run_workspace:
         return Path(options.run_workspace).expanduser().resolve() / report.run_id
-    if options.output_root:
-        return (
-            Path(options.output_root).expanduser().resolve().parent
-            / ".minecraft-translate-runs"
-            / report.run_id
-        )
-    return Path(report.source_root).parent / ".minecraft-translate-runs" / report.run_id
+    return get_data_root() / RUN_RECORDS_DIR_NAME / report.run_id
 
 
 def _log(session, message: str) -> None:

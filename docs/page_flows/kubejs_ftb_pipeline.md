@@ -41,7 +41,7 @@ flowchart LR
 
 `config/ftbquests` 與原始 `kubejs/*.js` 不會放入 Resource Pack ZIP。每次執行
 會建立 `run_id`、`pack_scope`、kind 統計、問題明細、輸出計畫與驗證結果的
-`manifest.json`，並分開寫入 `metadata/source_mapping.json`、
+`manifest.json`（放在 app 資料根目錄的 `pipeline_runs/<run_id>/`，與 config、快取同一處，不會在來源或輸出目錄旁留下資料夾），並分開寫入 `metadata/source_mapping.json`、
 `metadata/translation_plan.json`、`reports/scan_report.json`、
 `reports/coverage.json`、`reports/execution.json`、`reports/format_issues.json`、
 `reports/writeback_diff.json`。每筆來源 mapping 都包含 selector、source hash 與
