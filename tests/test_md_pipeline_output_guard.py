@@ -173,3 +173,36 @@ def test_replaced_english_translation_does_not_trigger_not_updated_warning(
         (out / "md" / "完成" / ".md_output_hashes.json").read_text(encoding="utf-8")
     )
     assert "pack/zh_tw/guide.md" in manifest["files"]
+
+
+def test_crash_mid_step3_does_not_cause_false_manual_edit_next_run(
+    tmp_path, fake_lm, monkeypatch
+):
+    """Step 3 寫到一半失敗：已寫出的檔案紀錄要保留，下一輪不能把它們誤判為手動修改。"""
+    src, out = tmp_path / "in", tmp_path / "out"
+    _write(src / "a" / "en_us" / "one.md", "Alpha one.\n")
+    _write(src / "b" / "en_us" / "two.md", "Beta two.\n")
+    _run(src, out)
+    _write(src / "a" / "en_us" / "one.md", "Alpha changed.\n")
+    _write(src / "b" / "en_us" / "two.md", "Beta changed.\n")
+
+    real_write = Path.write_text
+    state = {"n": 0}
+
+    def flaky_write(self, *args, **kwargs):
+        if self.suffix == ".md" and "完成" in self.parts:
+            state["n"] += 1
+            if state["n"] == 2:
+                raise PermissionError("locked")
+        return real_write(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", flaky_write)
+    with pytest.raises(PermissionError):
+        _run(src, out)
+    monkeypatch.setattr(Path, "write_text", real_write)
+
+    result = _run(src, out)
+
+    assert result["step3"]["skipped_manual_edit"] == 0
+    assert "Alpha changed" in _final(out, "a/zh_tw/one.md").read_text(encoding="utf-8")
+    assert "Beta changed" in _final(out, "b/zh_tw/two.md").read_text(encoding="utf-8")

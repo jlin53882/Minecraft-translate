@@ -531,33 +531,36 @@ def step3_inject_impl(
     json_files = list(iter_json_files_fn(jroot))
     pre_skips = _plan_inject_skips(json_files, jroot, src_root, pending_root)
     total = len(json_files)
-    for idx, jp in enumerate(json_files, start=1):
-        outcome = pre_skips.get(jp) or _inject_one_doc(
-            jp,
-            src_root=src_root,
-            out_done=out_done,
-            pending_root=pending_root,
-            content_hash_fn=content_hash_fn,
-            load_items_from_json_fn=load_items_from_json_fn,
-            apply_item_to_md_lines_fn=apply_item_to_md_lines_fn,
-            map_lang_fn=map_lang_in_rel_path_allow_zh_fn,
-            written_outputs=written_outputs,
-            convert_zh_cn_fn=convert_zh_cn_fn or (lambda s: convert_text(s, None)),
-            guard=guard,
-        )
-        stats[outcome_counter[outcome]] += 1
-        if outcome == "written_zh_cn":
-            stats["written_from_zh_cn"] += 1
-        if outcome not in ("written", "written_zh_cn"):
-            stats["skipped_files"] += 1
-        progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
-
-    guard.save()
+    try:
+        for idx, jp in enumerate(json_files, start=1):
+            outcome = pre_skips.get(jp) or _inject_one_doc(
+                jp,
+                src_root=src_root,
+                out_done=out_done,
+                pending_root=pending_root,
+                content_hash_fn=content_hash_fn,
+                load_items_from_json_fn=load_items_from_json_fn,
+                apply_item_to_md_lines_fn=apply_item_to_md_lines_fn,
+                map_lang_fn=map_lang_in_rel_path_allow_zh_fn,
+                written_outputs=written_outputs,
+                convert_zh_cn_fn=convert_zh_cn_fn or (lambda s: convert_text(s, None)),
+                guard=guard,
+            )
+            stats[outcome_counter[outcome]] += 1
+            if outcome == "written_zh_cn":
+                stats["written_from_zh_cn"] += 1
+            if outcome not in ("written", "written_zh_cn"):
+                stats["skipped_files"] += 1
+            progress_fn(session, progress_base + progress_span * (idx / max(1, total)))
+    finally:
+        # 中途失敗也要存下已寫出的檔案紀錄，否則下一輪會把工具自己寫的檔誤判為手動修改
+        guard.save()
     # 被 zh_tw／zh_cn 底稿取代的舊英文譯後檔是預期的略過，不算「沒更新」
     not_updated = (
         stats["skipped_files"]
         - stats["skipped_lang_status"]
         - stats["skipped_superseded"]
+        - stats["skipped_manual_edit"]  # 已有專屬警告，重跑抽取與翻譯也不會改變結果
     )
     if not_updated > 0:
         log_warning(
@@ -608,7 +611,7 @@ def _plan_inject_skips(
     - 沒有 zh_tw 時，英文與 zh_cn 都有譯後檔：以 zh_cn 為底稿，英文那份略過。zh_cn 譯後檔
       只有在現行 pending 還在時才算數（Step 1 退回英文時不會有 zh_cn pending）
     - 同語系重複（輸出會互相覆蓋）：全部略過
-    被略過的檔案計入 skipped_output_conflict 並警告。
+    被底稿取代的英文譯後檔計入 skipped_superseded，其餘被略過的檔案計入 skipped_output_conflict 並警告。
     """
     by_source: dict[str, list[Path]] = {}
     for jp in json_files:
