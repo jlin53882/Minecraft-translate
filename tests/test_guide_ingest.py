@@ -582,3 +582,16 @@ def test_one_folder_can_hold_both_a_book_and_an_advancement(tmp_path):
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
     kinds = {i.kind for i in result.items}
     assert {"patchouli", "advancement"} <= kinds
+
+
+def test_translation_only_oracle_menu_is_not_imported_by_position(tmp_path: Path):
+    """只有譯文選單、沒有原文時，序號對不上原文順序，不能匯入（會掛到別的選單項目）。"""
+    jar = tmp_path / "pack.zip"
+    base = "assets/oracle_index/books/ot"
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr(
+            f"{base}/translated/zh_tw/content/_meta.json",
+            '{"b": "基礎", "c": "酷"}',
+        )
+    result = scan_jar(jar, ScanOptions(version="1.21.1", translated=True), dir_names=())
+    assert [i for i in result.items if "_meta.json" in i.key] == []

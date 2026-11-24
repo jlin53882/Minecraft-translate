@@ -297,6 +297,12 @@ def _load_meta(text: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def meta_top_level_keys(text: str) -> set[str] | None:
+    """``_meta.json`` 最上層的鍵（含值為空字串的鍵）；不是 JSON 物件時回傳 None。"""
+    data = _load_meta(text)
+    return None if data is None else set(data)
+
+
 def extract_meta_entries(text: str) -> list[tuple[str, str]] | None:
     """Oracle Index ``_meta.json`` 的顯示名稱：``[(路徑, 文字)]``；不是 JSON 物件時回傳 None。"""
     data = _load_meta(text)

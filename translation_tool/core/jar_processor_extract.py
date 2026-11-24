@@ -352,7 +352,7 @@ def _with_book_literals_bytes(
     if mod_id is None:
         return data
     try:
-        en = json.loads(data.decode("utf-8-sig"))
+        en = json.loads(data.decode("utf-8-sig"), strict=False)
     except (UnicodeDecodeError, ValueError):
         return data
     if not isinstance(en, dict):

@@ -147,3 +147,35 @@ def test_budget_exhaustion_while_reading_books_is_not_swallowed(
 
     with pytest.raises(ArchiveBudgetError):
         _with_book_literals_bytes(jar, f"assets/{MOD}/lang/en_us.json", raw, budget)
+
+
+def test_one_oversized_book_is_skipped_but_the_rest_are_still_read(
+    tmp_path: Path,
+) -> None:
+    """單一書籍超過讀取上限只略過那一本，不讓整個 jar 的掃描結果被清空。"""
+    jar = _jar(tmp_path)
+    with zipfile.ZipFile(jar, "a", zipfile.ZIP_DEFLATED) as zf:
+        huge = json.dumps({"name": "Huge Book Title", "pad": "x" * (11 * 1024 * 1024)})
+        zf.writestr(f"data/{MOD}/modonomicon/books/huge/entries/e.json", huge)
+
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+
+    assert result.error == ""
+    assert {i.key for i in result.items} >= {EN_KEY, "Slime of Vitae"}
+    assert "Huge Book Title" not in {i.key for i in result.items}
+
+
+def test_extract_reads_en_us_with_raw_control_characters(tmp_path: Path) -> None:
+    """en_us.json 字串裡有未跳脫的控制字元時（掃描器可讀），提取也要補上字面英文。"""
+    jar = tmp_path / "tab.jar"
+    raw = '{"' + EN_KEY + '": "Blood\tOrb"}'
+    with zipfile.ZipFile(jar, "w") as zf:
+        zf.writestr(f"assets/{MOD}/lang/en_us.json", raw)
+        zf.writestr(BOOK, json.dumps(_book()))
+    out = tmp_path / "out"
+    regex = re.compile(r"^assets/[^/]+/lang/en_us\.json$")
+    extract_from_jar_impl(str(jar), str(out), regex)
+    written = json.loads(
+        (out / "assets" / MOD / "lang" / "en_us.json").read_text(encoding="utf-8")
+    )
+    assert written["Slime of Vitae"] == "Slime of Vitae"

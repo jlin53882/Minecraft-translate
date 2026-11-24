@@ -674,3 +674,14 @@ def test_complete_oracle_menu_translation_is_still_preserved(tmp_path: Path) -> 
     )
     assert emitted.is_file()
     assert "english_text_queued_for_guide_translation" not in reasons
+
+
+def test_oracle_menu_translation_with_an_empty_value_is_still_complete(
+    tmp_path: Path,
+) -> None:
+    """空字串值是「顯示頁面標題」的合法寫法，不算缺鍵。"""
+    records = _oracle_menus(tmp_path, {"a": "奧術", "b": ""})
+
+    reasons = {r["reason"] for r in records}
+    assert "oracle_menu_translation_incomplete" not in reasons
+    assert "official_translation_preserved" in reasons

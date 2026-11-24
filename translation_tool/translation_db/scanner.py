@@ -664,8 +664,9 @@ class _MetaBlocks:
         entries = self._entries(member)
         if entries is None:
             return None
-        if self._paths is None:  # 沒有原文：譯文自己的順序
-            return [text for _path, text in entries]
+        if self._paths is None:
+            # 沒有原文：選單序號是原文的順序，譯文自己的順序（缺鍵、換順序）會對到錯的條目，不匯入
+            return None
         found = dict(entries)
         return [found.get(path, "") for path in self._paths]
 
@@ -900,9 +901,16 @@ def _with_book_literals(
     mod_id = main_lang_mod_id(en_member)
     if mod_id is None:
         return en
-    extra = collect_mod_literals(
-        zf.namelist(), lambda name: _read_json_member(zf, budget, name), mod_id, en
-    )
+
+    def read_book(name: str) -> dict | None:
+        try:
+            return _read_json_member(zf, budget, name)
+        except ArchiveBudgetError:
+            raise  # 整包累計超限：不能只補部分書籍，交給外層中止這個 JAR
+        except ZipSizeError:
+            return None  # 單一書籍過大：只略過那一本
+
+    extra = collect_mod_literals(zf.namelist(), read_book, mod_id, en)
     return {**en, **extra} if extra else en
 
 

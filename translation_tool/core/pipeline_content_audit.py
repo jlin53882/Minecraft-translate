@@ -18,8 +18,8 @@ from typing import Any
 
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
-    extract_meta_entries,
     has_translatable_text,
+    meta_top_level_keys,
 )
 from translation_tool.core.guide_translation import (
     guide_locale_rel,
@@ -167,13 +167,13 @@ def _is_incomplete_oracle_menu(relative: Path, text: str, source_root: Path) -> 
     if not original.is_file():
         return False
     try:
-        translated = extract_meta_entries(text)
-        source = extract_meta_entries(original.read_text(encoding="utf-8-sig"))
+        translated = meta_top_level_keys(text)
+        source = meta_top_level_keys(original.read_text(encoding="utf-8-sig"))
     except (OSError, UnicodeError):
         return False
     if translated is None or source is None:
         return False
-    return not {key for key, _ in source} <= {key for key, _ in translated}
+    return not source <= translated
 
 
 def _incomplete_oracle_menus(source_root: Path) -> set[str]:

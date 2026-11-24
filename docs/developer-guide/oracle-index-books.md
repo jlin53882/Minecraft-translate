@@ -32,7 +32,7 @@ Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `ass
 
 - 譯文頁的語系由路徑判斷：`text_sniffer.split_locale` 先呼叫 `split_translated`，路徑含 `translated/<語系>/`（舊版 `.translated`）時回傳語系與去掉語系資料夾的中性路徑，原文頁與譯文頁因此得到同一個中性路徑。
 - `translated` 前面至少要有一層書的資料夾；語系碼不是 `en_us`、`zh_tw`、`zh_cn` 的譯文歸為其他語言，不處理。
-- 掃描 jar 與掃描已解壓資料夾時讀不到 `sinytra-wiki.json`，用 `infer_layout` 只看路徑推測版面；遊戲的實際判斷（`layout_from_wiki_meta`）留給輸出階段使用。
+- 掃描 jar 與掃描已解壓資料夾時讀不到 `sinytra-wiki.json`，用 `infer_layout` 只看路徑推測版面；各階段都用 `infer_layout`；`layout_from_wiki_meta` 是依 `sinytra-wiki.json` 判斷的契約實作，目前還沒有接上。
 - `_kind_of`（`sniff_groups.py`）對 Oracle 頁面不再靠內容判斷，路徑確認是頁面就是指南。
 - `.mdx` 頁面 front matter 最上層的 `title:` 與內文段落一起抽取，標題區塊排在所有段落之後（`guide_blocks.extract_guide_blocks`）；其他副檔名仍只抽 `navigation.title`。
 
