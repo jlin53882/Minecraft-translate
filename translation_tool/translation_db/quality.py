@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
+from collections.abc import Mapping
+from typing import Any
 
 from translation_tool.core.format_diagnostics import (
     analyze_format_diagnostics,
@@ -182,6 +185,37 @@ def translation_issues(
     return _result_messages(result, source)
 
 
+# 原文與譯文都沒有這些字元時不可能有格式差異，整批比對時略過完整分析以省時間
+# （§ 色碼、% 格式符號、{ 與 $ 佔位符／巨集、< 標記、& 色碼、字面或實際換行）。
+_FORMAT_HINT_RE = re.compile(r"[§%{$<&\\\n]")
+
+
+def format_mismatches(
+    sources: Mapping[str, Any],
+    translations: Mapping[str, Any],
+    *,
+    kind: str | None = "lang",
+) -> dict[str, list[str]]:
+    """兩份「key → 文字」資料中，共同的 key 裡譯文與原文特殊字元不一致的條目。
+
+    只比對雙方都是字串、原文非空且譯文不是空白的值；回傳 ``{key: [差異說明]}``。
+    語系檔檢查（QC 頁）與語系合併的輸出驗證共用，規則與 ``translation_issues`` 相同。
+    """
+    found: dict[str, list[str]] = {}
+    for key, source in sources.items():
+        translated = translations.get(key)
+        if not isinstance(source, str) or not isinstance(translated, str):
+            continue
+        if not source or not translated.strip():
+            continue
+        if not (_FORMAT_HINT_RE.search(source) or _FORMAT_HINT_RE.search(translated)):
+            continue
+        issues = translation_issues(source, translated, kind=kind)
+        if issues:
+            found[key] = issues
+    return found
+
+
 def _diagnostic_map(result):
     return {
         (issue.category, issue.identifier, issue.direction): (abs(issue.delta), issue)
@@ -349,6 +383,7 @@ def matches_quality(
 
 
 __all__ = [
+    "format_mismatches",
     "format_quality_comparison",
     "format_token_spans",
     "format_tokens",

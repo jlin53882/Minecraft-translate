@@ -1813,6 +1813,11 @@ class TranslationDB(
             quality_flags.rebuild(conn)
         self._has_quality_flags = True
 
+    def count_format_mismatch(self, entry_ids: Iterable[int]) -> int:
+        """指定條目中，生效譯文與原文特殊字元不一致的筆數（掃描匯入摘要用）。"""
+        with self._lock:
+            return quality_flags.count_mismatch(self._conn, entry_ids)
+
     def verify_quality_flags(self) -> list[tuple]:
         """比對品質旗標與逐一判斷的重算；空清單表示一致（只供測試與維護）。"""
         with self._lock:

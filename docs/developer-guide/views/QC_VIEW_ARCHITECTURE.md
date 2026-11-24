@@ -2,7 +2,7 @@
 
 ## 定位
 
-QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗證工具，非翻譯管線必要環節。頁面先以三張模式卡（`kit.ChoiceCard`，由 `QC_MODES` 定義）選擇檢驗模式，只顯示對應的設定面板；三種模式共用同一組 `progress_bar` + `log_view`。
+QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗證工具，非翻譯管線必要環節。頁面先以四張模式卡（`kit.ChoiceCard`，由 `QC_MODES` 定義）選擇檢驗模式，只顯示對應的設定面板；四種模式共用同一組 `progress_bar` + `log_view`。
 
 流程圖見 [page_flows/qc.md](../../page_flows/qc.md)。
 
@@ -11,7 +11,8 @@ QCView 是 **Quality Check（品質檢查）頁**，翻譯完成後的品質驗�
 - `app/views/qc_view.py` — 主視圖
 - `app/views/qc_base.py` — `QCBase` 共用背景任務執行器（`task_worker`、`_guess_level`）
 - `app/ui/ui_batcher.py` — UiBatcher（背景執行緒 → event loop 的批次 UI 更新）
-- `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（Key 缺失檢查模式的面板內容）
+- `app/views/untranslated_checker.py` — `UntranslatedChecker` 元件（Key 缺失檢查模式的面板內容；以類別屬性參數化文字與服務）
+- `app/views/format_consistency_checker.py` — `FormatConsistencyChecker`（繼承 `UntranslatedChecker`，格式一致性模式的面板內容）
 - `app/services.py` — `run_untranslated_check_service` / `run_variant_compare_service` / `run_variant_compare_tsv_service`（皆為 generator 包裝）；另有 `run_english_residue_check_service`，目前 QCView 沒有使用
 - `translation_tool/checkers/` — 實際比對邏輯（`untranslated_checker.py`、`variant_comparator.py`、`variant_comparator_tsv.py`）
 
@@ -63,9 +64,10 @@ start_task()（event loop）
 
 建構子拆成 `_init_qc_state_and_progress`（狀態、共用進度列／日誌、`QCBase`、各欄位與按鈕）、`_build_qc_mode_cards`（`mode_cards`）、`_build_qc_json_panel`、`_build_qc_tsv_and_untranslated_panels`（組出 `mode_panels` 並呼叫 `_apply_mode`）。`select_mode(mode)` 切換 `self.mode`（預設為 `QC_MODES` 第一項 `untranslated`），只顯示對應面板。
 
-版面由上而下：`kit.page_header`「QC 品質檢驗」（副標「檢查缺漏、簡繁不一致與英文殘留；報告輸出到你指定的資料夾」）→ 一列三張模式卡（標題／副標：「Key 缺失檢查」比對 en_us 與 zh_tw 的 key；「簡繁差異（JSON 資料夾）」OpenCC 轉換後逐檔比對；「簡繁差異（TSV 單檔）」輸出含轉換欄位的 CSV；預設選中第一張並顯示勾選標記）→ 目前模式的設定面板（預設只顯示「Key 缺失檢查」）→ 「處理日誌」卡片（預設為空，進度條隱藏）。
+版面由上而下：`kit.page_header`「QC 品質檢驗」（副標「檢查缺漏、簡繁不一致與英文殘留；報告輸出到你指定的資料夾」）→ 一列四張模式卡（標題／副標：「Key 缺失檢查」比對 en_us 與 zh_tw 的 key；「格式一致性」比對譯文與原文的特殊字元是否一致；「簡繁差異（JSON 資料夾）」OpenCC 轉換後逐檔比對；「簡繁差異（TSV 單檔）」輸出含轉換欄位的 CSV；預設選中第一張並顯示勾選標記）→ 目前模式的設定面板（預設只顯示「Key 缺失檢查」）→ 「處理日誌」卡片（預設為空，進度條隱藏）。
 
 - **模式 `untranslated`**：`untranslated_checker` 元件（Key 缺失檢查，`UntranslatedChecker(page, file_picker, task_runner)`）
+- **模式 `format_consistency`**：`format_checker` 元件（`FormatConsistencyChecker(page, file_picker, task_runner)`），服務 `run_format_consistency_check_service`
 - **模式 `compare_json`**：簡繁差異比較 JSON 資料夾（`cn_dir_textfield` / `tw_dir_textfield_2` / `compare_out_dir_textfield` / `compare_start_button`）
 - **模式 `compare_tsv`**：簡繁差異比較 TSV 單檔（`tsv_file_textfield` / `tsv_out_file_textfield` / `compare_tsv_start_button`）
 - 共用：「處理日誌」`kit.section_card`，內含 `progress_bar`（預設隱藏，`start_task` 時顯示）+ `log_view`（`LogView`，`mode="append"`、`max_lines=2000`、`height=360`）
@@ -87,6 +89,11 @@ start_task()（event loop）
 
 ### TSV 簡繁差異（`translation_tool/checkers/variant_comparator_tsv.py` 的 `compare_variants_tsv_generator`）
 - 單檔模式：讀 TSV（需有 `key` / `zh_cn` / `zh_tw` 欄，否則 error），用 `OpenCC('s2twp')` 轉換 `zh_cn` 欄後與 `zh_tw` 比對（不套用 replace rules），差異輸出 CSV（欄位 `key` / `zh_cn_original` / `zh_cn_converted_by_opencc` / `zh_tw_original`，`utf-8-sig`）
+
+### 格式一致性檢查（`translation_tool/checkers/format_consistency_checker.py` 的 `check_format_consistency_generator`）
+- 掃 `en_dir` 的所有 `.json`，找 `tw_dir` 下相同相對路徑的檔案；找不到對應繁中檔只略過並計數（缺漏由 Key 缺失檢查處理）。
+- 只比對雙方都是非空字串的共同 key，用 `translation_issues(kind=lang)` 判斷（與 Mod DB 品質檢查同一份規則）；有差異的條目寫成 `{key: {en_us, zh_tw, issues}}`，保留相對路徑。
+- 單檔讀取失敗只回報 `error`，不中斷整批。
 
 ### 未翻譯檢查（`translation_tool/checkers/untranslated_checker.py` 的 `check_untranslated_generator`）
 - 掃 `en_dir` 的所有 `.json`，找 `tw_dir` 下相同相對路徑的檔案；**找不到對應繁中檔案 → 整檔標記未翻譯**

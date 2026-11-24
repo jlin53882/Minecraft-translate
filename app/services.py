@@ -15,6 +15,9 @@ from app.services_impl.logging_service import GLOBAL_LOG_LIMITER
 from translation_tool.checkers.english_residue_checker import (
     check_english_residue_generator,
 )
+from translation_tool.checkers.format_consistency_checker import (
+    check_format_consistency_generator,
+)
 from translation_tool.checkers.untranslated_checker import check_untranslated_generator
 from translation_tool.checkers.variant_comparator import compare_variants_generator
 from translation_tool.checkers.variant_comparator_tsv import (
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "run_english_residue_check_service",
+    "run_format_consistency_check_service",
     "run_untranslated_check_service",
     "run_variant_compare_service",
     "run_variant_compare_tsv_service",
@@ -43,6 +47,23 @@ def run_untranslated_check_service(en_dir: str, tw_dir: str, out_dir: str):
         logger.error(f"[致命錯誤] 未翻譯檢查失敗：{e!r}\n{full_traceback}")
         yield {
             "log": f"[致命錯誤] 未翻譯檢查失敗：{e!r}\n{full_traceback}",
+            "error": True,
+            "progress": 0,
+        }
+
+
+def run_format_consistency_check_service(en_dir: str, tw_dir: str, out_dir: str):
+    """執行此 generator 並逐步回報進度（yield update dict）。"""
+    try:
+        for update_dict in check_format_consistency_generator(en_dir, tw_dir, out_dir):
+            filtered = GLOBAL_LOG_LIMITER.filter(update_dict)
+            if filtered is not None:
+                yield filtered
+    except Exception as e:  # noqa: BLE001 - 錯誤已記錄或回報給呼叫端，不中斷整批流程
+        full_traceback = traceback.format_exc()
+        logger.error(f"[致命錯誤] 格式一致性檢查失敗：{e!r}\n{full_traceback}")
+        yield {
+            "log": f"[致命錯誤] 格式一致性檢查失敗：{e!r}\n{full_traceback}",
             "error": True,
             "progress": 0,
         }

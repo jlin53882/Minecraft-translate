@@ -225,3 +225,48 @@ def test_single_apply_asks_again_when_the_reference_breaks_format_tokens():
     dialog._apply_one(row, ref)
     assert len(dialog.applied) == 1
     assert dialog.applied[0][0].confirmed_quality is True
+
+
+def test_scan_summary_counts_imported_translations_with_format_mismatch(db):
+    """模組自帶譯文的特殊字元與原文不一致：照常匯入，摘要提示筆數。"""
+    from app.services_impl.moddb_service import _report_format_mismatch
+
+    db.ingest(
+        "26.1",
+        [
+            ScanItem(KIND_LANG, "m", "bad", "§6Gold %s", "黃金"),  # 少了 §6 與 %s
+            ScanItem(KIND_LANG, "m", "ok", "§6Gold %s", "§6黃金%s"),
+            ScanItem(KIND_LANG, "m", "plain", "Plain", "純文字"),
+        ],
+    )
+    session, logs, summaries = _session()
+    report = ScanReport(version="26.1")
+    report.touched_entry_ids.update(
+        int(r[0]) for r in db._q("SELECT id FROM entry WHERE mc_version='26.1'")
+    )
+
+    _report_format_mismatch(session, db, ScanOptions(version="26.1"), report)
+
+    assert report.format_mismatch == 1
+    assert summaries[-1]["format_mismatch"] == 1
+    assert any("特殊字元" in str(entry) for entry in logs)
+    # 仍已匯入
+    assert (
+        db._one(
+            "SELECT zh_tw FROM effective f JOIN entry e ON e.id=f.entry_id WHERE e.key='bad'"
+        )[0]
+        == "黃金"
+    )
+
+
+def test_scan_summary_skips_format_count_for_dry_run_and_empty_scans(db):
+    from app.services_impl.moddb_service import _report_format_mismatch
+
+    session, logs, summaries = _session()
+    report = ScanReport(version="26.1")
+    _report_format_mismatch(session, db, ScanOptions(version="26.1"), report)
+    report.touched_entry_ids.add(1)
+    _report_format_mismatch(
+        session, db, ScanOptions(version="26.1", dry_run=True), report
+    )
+    assert report.format_mismatch == 0 and not logs and not summaries

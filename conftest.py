@@ -26,3 +26,18 @@ def _reset_lm_global_state():
     yield
     reset_trackers()
     reset_key_health()
+
+
+@pytest.fixture(autouse=True)
+def _reset_ui_mirror_task_context():
+    """每個測試前後清掉「目前任務」的 context（模組層級的 ContextVar）。
+
+    服務入口（``UI_LOG_HANDLER.set_session``）會把目前執行緒歸屬到某個任務；沒清掉的話，
+    同一個 worker 後面執行的測試寫出的後台記錄會帶著別的測試的任務識別，
+    UI→後台鏡像去重的測試就會因為「歸屬不相容」而偶發失敗。
+    """
+    from translation_tool.utils import ui_mirror
+
+    ui_mirror.set_current_task(None)
+    yield
+    ui_mirror.set_current_task(None)

@@ -408,6 +408,30 @@ def _reject_unknown_translation_source(session, source: int) -> None:
     session.set_error()
 
 
+def _report_format_mismatch(session, db, options, report) -> None:
+    """匯入完成後，統計本次匯入的條目中譯文與原文特殊字元不一致的筆數並提示。
+
+    只提示、不改變匯入結果：模組自帶或簡轉繁的譯文照常寫入 DB，不一致的在輸出端會被擋下，
+    也能用條目校對的「token 不一致」篩選找出來。
+    """
+    if options.dry_run or not report.touched_entry_ids:
+        return
+    try:
+        report.format_mismatch = db.count_format_mismatch(report.touched_entry_ids)
+    except Exception:  # noqa: BLE001 - 統計只是提示，失敗不能讓已提交的匯入變成失敗
+        log_exception("統計匯入條目的格式不一致筆數失敗")
+        return
+    if report.format_mismatch:
+        _log_both(
+            session,
+            f"⚠️ 本次匯入的條目中有 {report.format_mismatch:,} 筆譯文的特殊字元"
+            "（色碼、%s、{0} 等）與原文不一致；仍已匯入，輸出時不會被採用，"
+            "可在條目校對用「token 不一致」篩選檢視。",
+            "warning",
+        )
+        session.set_summary(report.as_dict())
+
+
 def _reuse_reviewed_after_scan(session, db, options, report) -> None:
     """匯入完成後，沿用其他版本已審核的相同譯文；衝突與目標已審核者只回報。
 
@@ -474,6 +498,7 @@ def _consume_scan(session, db, folder, options, cancelled, workers: int) -> None
                 report = update["report"]
                 session.set_summary(report.as_dict())
     if db is not None and report is not None and not cancelled():
+        _report_format_mismatch(session, db, options, report)
         _reuse_reviewed_after_scan(session, db, options, report)
 
 

@@ -25,6 +25,7 @@ from .lang_merge_dict import (
 )
 from .lang_merge_io import quarantine_copy
 from .lang_merge_provenance import write_translation_provenance
+from .lang_merge_quality import warn_format_mismatches
 from .lang_merge_zip_io import (
     _write_bytes_atomic,
     _write_text_atomic,
@@ -239,6 +240,7 @@ def _process_single_mod(
         )
         if source_provenance_by_key:
             log_info(f"{log_prefix}資料庫採用 {len(source_provenance_by_key)} 筆譯文")
+        warn_format_mismatches(final_tw, en_data, log_prefix)
 
         # =============================
         # Step 5 — 寫入 pending.json

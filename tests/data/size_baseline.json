@@ -47,7 +47,7 @@
     "app/views/moddb/repair_reviewer.py": 830,
     "app/views/moddb/review_scope_dialog.py": 842,
     "app/views/moddb/same_text_review_dialog.py": 1017,
-    "app/views/moddb/scan_panel.py": 818,
+    "app/views/moddb/scan_panel.py": 824,
     "app/views/moddb/smart_review_batch_reviewer.py": 1118,
     "app/views/moddb/smart_review_reviewer.py": 873,
     "app/views/moddb/smart_review_run_panel.py": 899,

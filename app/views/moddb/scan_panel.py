@@ -764,10 +764,11 @@ class ScanPanel(ft.Column):
         kept = s.get("reuse_skipped_reviewed") or 0
         changed = s.get("reuse_source_changed") or 0
         blocked = s.get("reuse_quality_blocked") or 0
+        mismatch = s.get("format_mismatch") or 0
         by_jar = s.get("reuse_jar_english") or 0
         self._last_reuse_history_id = s.get("reuse_history_id")
         self.reuse_row_summary.visible = bool(
-            applied or conflicts or kept or changed or blocked
+            applied or conflicts or kept or changed or blocked or mismatch
         )
         self.reuse_text.value = (
             f"沿用其他版本已審核譯文 {applied:,} 筆"
@@ -775,6 +776,11 @@ class ScanPanel(ft.Column):
             + f"・衝突未處理 {conflicts:,} 筆"
             f"・目標已審核而保留 {kept:,} 筆・原文不同待判斷 {changed:,} 筆"
             f"・特殊字元與原文不一致未沿用 {blocked:,} 筆"
+            + (
+                f"\n本次匯入的譯文中特殊字元與原文不一致 {mismatch:,} 筆（仍已匯入）"
+                if mismatch
+                else ""
+            )
         )
 
     def _open_version_diff(self, _e=None) -> None:
