@@ -1,7 +1,7 @@
 """translation_tool/checkers/format_consistency_checker.py 模組。
 
 用途：逐檔比對 en_us 與 zh_tw 語系資料夾，找出譯文與原文的特殊字元（色碼、``%s``、
-``{0}``、具名佔位符等）不一致的條目。檢查規則與 Mod DB 的品質檢查共用
+``{0}`` 等）不一致的條目。檢查規則與 Mod DB 的品質檢查共用
 （``translation_issues``），沒有第二份規則。
 """
 

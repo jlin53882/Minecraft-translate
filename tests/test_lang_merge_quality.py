@@ -12,7 +12,7 @@ from translation_tool.translation_db.quality import format_mismatches
 
 def test_format_mismatches_skips_strings_without_any_format_characters():
     """沒有任何特殊字元的字串不做完整分析；有差異的才回傳。"""
-    sources = {"a": "Plain", "b": "§6Gold %s", "c": "Named {count}", "d": "Fine"}
+    sources = {"a": "Plain", "b": "§6Gold %s", "c": "Count {0}", "d": "Fine"}
     translations = {"a": "純文字", "b": "黃金", "c": "{數量}", "d": "不錯", "e": "多餘"}
 
     found = format_mismatches(sources, translations)

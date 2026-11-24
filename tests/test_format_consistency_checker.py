@@ -20,7 +20,7 @@ def test_find_format_mismatches_reports_only_inconsistent_strings():
     en = {
         "gold": "§6Gold %s ingot",
         "ok": "§6Gold %s ingot",
-        "named": "Value {count}",
+        "named": "Value {0}",
         "plain": "Plain text",
         "no_tw": "Only English",
         "empty_tw": "Hello %s",
@@ -29,7 +29,7 @@ def test_find_format_mismatches_reports_only_inconsistent_strings():
     tw = {
         "gold": "黃金錠",  # 少了 §6 與 %s
         "ok": "§6黃金%s錠",
-        "named": "{數量} 個",  # 具名佔位符被改名
+        "named": "{數量} 個",  # {0} 被改名
         "plain": "純文字",
         "empty_tw": "  ",
         "list": ["甲", "乙"],

@@ -11,13 +11,8 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-# 具名佔位符（``{count}``、``${var}``、``{{var}}``）只認 ASCII 識別字：
-# ``{@pagebreak}``、``{image:…}`` 這類指南／任務標記不是佔位符，由指南規則處理。
-_NAMED = r"[A-Za-z_][\w.\-]*"
 _SCAN_RE = re.compile(
-    r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|"
-    rf"\$\{{{_NAMED}\}}|\{{\{{\s*{_NAMED}\s*\}}\}}|\{{{_NAMED}\}}|"
-    r"\{\d*\}|\\n|\n"
+    r"§[0-9a-fk-orA-FK-OR]|%(?:\d+\$)?[sdfxXeEgGcb%]|\$\(|\{\d*\}|\\n|\n"
 )
 _TOOLTIP_PREFIX = "$(t:"
 _TOOLTIP_TOKEN = "$(t:…)"
@@ -39,10 +34,6 @@ def macro_end(text: str, start: int) -> int | None:
 
 def _normalize_token(raw: str) -> str:
     token = raw.replace("\r", "")
-    if token.startswith("{{"):
-        return (
-            "{{" + token[2:-2].strip() + "}}"
-        )  # ``{{ var }}`` 與 ``{{var}}`` 視為同一個
     return _TOOLTIP_TOKEN if token.startswith(_TOOLTIP_PREFIX) else token
 
 
@@ -87,7 +78,7 @@ def token_category(token: str) -> str:
         return "minecraft"
     if token.startswith("$("):
         return "patchouli"
-    if token.startswith(("%", "${")) or (token.startswith("{") and token.endswith("}")):
+    if token.startswith("%") or (token.startswith("{") and token.endswith("}")):
         return "placeholder"
     if token in ("\n", "\\n"):
         return "newline"
