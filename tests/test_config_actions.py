@@ -26,13 +26,10 @@ def make_full_view():
         "logging.log_level",
         "logging.log_dir",
         "logging.log_format",
-        "translator.output_dir_name",
         "translator.replace_rules_path",
         "translator.cache_directory",
         "translator.enable_cache_saving",
         "translator.parallel_execution_workers",
-        "translator.custom_translator_folder",
-        "ftb_translator.output_dir_name",
         "species_cache.cache_directory",
         "species_cache.cache_filename",
         "species_cache.wikipedia_language",
@@ -98,7 +95,6 @@ class TestLoadConfigIntoViewLangMergerLabels:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -138,7 +134,6 @@ class TestLoadConfigIntoViewLangMergerLabels:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -178,7 +173,6 @@ class TestLoadConfigIntoViewLangMergerLabels:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -223,7 +217,6 @@ class TestLoadConfigIntoViewPrompts:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -257,7 +250,6 @@ class TestLoadConfigIntoViewPrompts:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -293,7 +285,6 @@ class TestLoadConfigIntoViewBatchSizes:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -324,7 +315,6 @@ class TestLoadConfigIntoViewBatchSizes:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -359,7 +349,6 @@ class TestLoadConfigIntoViewSkipTerms:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -422,7 +411,6 @@ class TestLoadConfigIntoViewSkipTerms:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -485,7 +473,6 @@ class TestLoadConfigIntoViewPatchouliSettings:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -523,7 +510,6 @@ class TestLoadConfigIntoViewPatchouliSettings:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -559,7 +545,6 @@ class TestLoadConfigIntoViewPatchouliSettings:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -595,7 +580,6 @@ class TestLoadConfigIntoViewPatchouliSettings:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -626,7 +610,6 @@ class TestLoadConfigIntoViewPatchouliSettings:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {
@@ -674,7 +657,6 @@ def _make_base_config():
             "log_format": "%(message)s",
         },
         "translator": {},
-        "ftb_translator": {},
         "species_cache": {},
         "output_bundler": {},
         "lang_merger": {"pending_folder_name": "待翻譯"},
@@ -799,7 +781,6 @@ class TestRpmCooldownSetting:
         cfg = {
             "logging": {"log_level": "INFO", "log_dir": "logs"},
             "translator": {},
-            "ftb_translator": {},
             "species_cache": {},
             "output_bundler": {},
             "lang_merger": {"pending_folder_name": "待翻譯"},

@@ -30,7 +30,6 @@ class TestSchemaKeys完整性:
             "ui",
             "logging",
             "translator",
-            "ftb_translator",
             "translation_db",
             "smart_review",
             "species_cache",
@@ -58,12 +57,6 @@ class TestSchema型別合約:
         assert isinstance(t["enable_cache_saving"], bool)
         assert isinstance(t["parallel_execution_workers"], int)
         assert isinstance(t["replace_rules_path"], str)
-        assert isinstance(t["output_dir_name"], str)
-        assert isinstance(t["custom_translator_folder"], str)
-
-    def test_ftb_translator_fields_types(self):
-        f = DEFAULT_CONFIG["ftb_translator"]
-        assert isinstance(f["output_dir_name"], str)
 
     def test_species_cache_fields_types(self):
         s = DEFAULT_CONFIG["species_cache"]
@@ -286,3 +279,30 @@ def test_default_gemini_models_order_is_stable():
         )
     )
     assert list(example["lm_translator"]["models"]) == expected
+
+
+REMOVED_SETTING_PATHS = (
+    "translator.output_dir_name",
+    "ftb_translator.output_dir_name",
+    "translator.custom_translator_folder",
+)
+
+
+class Test已移除設定不再出現:
+    """這些設定沒有任何程式讀取，不得重新出現在 schema、預設值或設定頁。"""
+
+    def test_removed_settings_absent_from_schema_and_defaults(self):
+        from translation_tool.utils.config_schema import SETTINGS_BY_PATH
+
+        for path in REMOVED_SETTING_PATHS:
+            assert path not in SETTINGS_BY_PATH, path
+        assert "output_dir_name" not in DEFAULT_CONFIG["translator"]
+        assert "custom_translator_folder" not in DEFAULT_CONFIG["translator"]
+        assert "ftb_translator" not in DEFAULT_CONFIG
+
+    def test_removed_settings_absent_from_settings_page_layout(self):
+        from app.views.config.settings_schema import LAYOUT
+
+        layout_text = repr(LAYOUT)
+        for path in REMOVED_SETTING_PATHS:
+            assert path not in layout_text, path

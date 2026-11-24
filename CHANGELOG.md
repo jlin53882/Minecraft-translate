@@ -27,7 +27,7 @@
 - 刪除 Markdown、KubeJS、FTB Quests 的舊三步驟流程（`md_translation_*`、`md_pipeline_files／pairing／zh_cn`、`kubejs_translator*`、`ftb_translator*`，以及三個 `*_lmtranslator`）、`utils/exceptions.py` 與 `_task_runner.py`：目前的 Markdown 走 ModDB 流水線、KubeJS／FTB 走 `pack_pipeline`，這些模組沒有任何正式程式引用。
 - 一併刪除只被它們使用的函式（例如 `inject_ftbquests_zh_tw_from_jsons`、`load_custom_translations`、`get_formatted_duration`），以及零呼叫的 `sniffed_groups`、`guide_mark_issues`、`_retry_same_source_translations` 等。
 - `tools/test_all_features.py` 移除 KubeJS／FTB 舊流程的兩個煙霧測試。
-- `translator.output_dir_name`、`ftb_translator.output_dir_name`、`translator.custom_translator_folder` 設定項目前沒有任何流程讀取，暫時保留以相容既有 `config.json`。
+- 移除沒有任何程式讀取的設定項 `translator.output_dir_name`、`ftb_translator.output_dir_name`、`translator.custom_translator_folder`：從設定頁、`config_schema` 與 `config.example.json` 拿掉（`ftb_translator` 區塊隨之消失）。既有 `config.json` 殘留的這三個鍵不會報錯，載入時被忽略，存檔時原樣保留在檔案裡，不會被補回或清掉；要整理可手動刪除。
 
 ### Mod 資料庫掃描：新增「模組包資料夾」匯入來源
 - 掃描頁的匯入來源分成「mods 資料夾（jar）」「模組包資料夾」「翻譯 ZIP（已翻譯）」。mods 資料夾只掃 jar，不再讀 KubeJS／FTB Quests，也不產生模組包版本；KubeJS／FTB Quests 改由模組包資料夾（或翻譯 ZIP）匯入。

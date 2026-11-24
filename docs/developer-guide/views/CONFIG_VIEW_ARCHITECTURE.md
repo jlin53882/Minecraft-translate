@@ -4,7 +4,7 @@
 
 ## 定位
 
-ConfigView（`app/views/config_view.py`）是全域設定頁：以**左側導覽 + 右側內容**的兩欄佈局，管理 `config.json` 的設定區段。設定頁可編輯 logging / translator / ftb_translator / lm_translator / lang_merger / extractor / output_bundler / species_cache / translation_db；kind 為 none 的設定（如 `ui.theme_mode`、`jar_extractor.lang_codes`）不在此頁編輯，由側欄或提取頁處理。頁面頂部為 `build_header` 與「資料庫位置」資訊列（`db_location.py`）；底部為固定橫幅，乾淨狀態顯示一般儲存提示，偵測到欄位或動態列變更時持續提示「設定尚未儲存」並將按鈕改為「儲存變更」。預設進入「一般設定」頁，每個設定欄位下方有說明文字（含套用時機與用途）。
+ConfigView（`app/views/config_view.py`）是全域設定頁：以**左側導覽 + 右側內容**的兩欄佈局，管理 `config.json` 的設定區段。設定頁可編輯 logging / translator / lm_translator / lang_merger / extractor / output_bundler / species_cache / translation_db；kind 為 none 的設定（如 `ui.theme_mode`、`jar_extractor.lang_codes`）不在此頁編輯，由側欄或提取頁處理。頁面頂部為 `build_header` 與「資料庫位置」資訊列（`db_location.py`）；底部為固定橫幅，乾淨狀態顯示一般儲存提示，偵測到欄位或動態列變更時持續提示「設定尚未儲存」並將按鈕改為「儲存變更」。預設進入「一般設定」頁，每個設定欄位下方有說明文字（含套用時機與用途）。
 
 ## 檔案結構
 
@@ -29,7 +29,7 @@ app/views/config/
 
 | id | label | 內容 |
 |----|-------|------|
-| `general` | 一般設定 | 依序為「日誌設定 (Logging)」、「翻譯與處理設定 (Translator)」、「成品打包器 (Output Bundler)」三張卡，欄位單欄堆疊：logging（log_level / log_dir / log_format）、translator（`output_dir_name`、`replace_rules_path`、`cache_directory`、`parallel_execution_workers`、`enable_cache_saving`、`custom_translator_folder`）、`ftb_translator.output_dir_name`、`output_bundler.output_zip_name` |
+| `general` | 一般設定 | 依序為「日誌設定 (Logging)」、「翻譯與處理設定 (Translator)」、「成品打包器 (Output Bundler)」三張卡，欄位單欄堆疊：logging（log_level / log_dir / log_format）、translator（`replace_rules_path`、`cache_directory`、`parallel_execution_workers`、`enable_cache_saving`、`md_use_zh_cn_base`、`pack_read_zh_cn`）、`output_bundler.output_zip_name` |
 | `api_models` | API & 模型設定 | 「API 金鑰設定」卡（依序為 provider 選擇、`_keys_panel`、ChatGPT 模型選擇、ChatGPT 模型設定；`_keys_panel` 的 Gemini 區塊標題「Gemini API 金鑰」旁「+」新增，每列為遮罩輸入框＋顯示/隱藏眼睛＋刪除鈕，下方為 `ChatGPTOAuthPanel` 登入區塊）與「模型設定」卡（`_models_panel`：標題「模型清單 (Models List)」＋「新增模型名稱」輸入框＋「+」；輸入框文字只是草稿，按「+」加入後才成為設定變更；每列為序號、勾選啟用、模型名、`max_output_tokens`「模型上限」欄（空白表示用全域值）、上移／下移／刪除） |
 | `translation_behavior` | 翻譯行為設定 | 「基本設定」卡（temperature、`retry_same_as_source`、rate_limit.timeout、`sleep_seconds_between_batches`（預設 4 秒）、`lm_translate_folder_name`）與「過濾條件與目錄」卡（skip_terms、translatable_keywords、patchouli 目錄名稱三個多行欄並排；`short_text_skip_len` 在其下方）。`retry_same_as_source` 開啟時，譯文與原文相同的候選會在 persistence 前單獨重新確認一次；第二次仍相同就接受。 |
 | `merger` | 語言合併器設定 | 單張「語言合併器設定 (Lang Merger)」卡，由上而下：pending 資料夾命名／整理資料夾名稱／key 最小出現次數／隔離資料夾名稱（兩欄兩列）、「語系過濾設定」（zh 英文含量閾值）、「Patchouli 進階設定」（翻譯來源優先級勾選、en_us 跳過門檻）、「檔案合併(階段 2)」（合併 XX_extracted → assets/） |
@@ -165,6 +165,5 @@ JSON 損毀的結果以 `(mtime_ns, size)` 快取，同一個壞檔只解析、�
 ## 設定鍵的 runtime 接線狀態
 
 - `extractor.skip_zh_cn_extract`：設定頁提供預設值；ExtractorView 建立時載入，提取/預覽仍保留每次操作的手動覆寫，最後由 regex/generator 實際套用。
-- `translator.custom_translator_folder`：設定頁提供 round-trip；目前沒有流程讀取它。
 - `logging.log_format`：設定頁提供 round-trip；`update_logger_config` 的 formatter 在下一次流水線啟動時套用。
 - `extractor.target_language`、`translator.cjk_ratio_threshold`：仍由三層合併保留讀取，但目前沒有可證明的 runtime caller 與規則；列為 `DEPRECATED_CONFIG_KEYS`（`translation_tool/utils/config_manager.py`），不在 UI 提供可調整控制項。
