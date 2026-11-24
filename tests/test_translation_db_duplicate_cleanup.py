@@ -288,3 +288,35 @@ def test_preview_token_rejects_a_new_duplicate_before_apply(tmp_path):
         assert db._one("SELECT COUNT(*) FROM entry") == (3,)
     finally:
         db.close()
+
+
+def test_duplicate_merge_moves_other_originals_to_the_survivor(tmp_path):
+    """路徑別名合併：被合併條目的其他原文與譯文併進保留的條目，不重複、不覆蓋。"""
+    from translation_tool.translation_db import variants
+
+    db = _db(tmp_path)
+    try:
+        old_id = _insert_alias(db, LEGACY_KEY)
+        current_id = _insert_alias(db, CURRENT_KEY, translation="龍血")
+        with db._tx() as conn:
+            variants.add_translation(conn, old_id, "Dragon blood v2", SRC_AI, "龍血二")
+            variants.add_translation(conn, old_id, "Shared wording", SRC_AI, "共用甲")
+            variants.add_translation(
+                conn, current_id, "Shared wording", SRC_MANUAL, "共用乙"
+            )
+            variants.add_translation(conn, old_id, ENGLISH, SRC_AI, "與主原文相同")
+        db.apply_duplicate_cleanup(VERSION, db.preview_duplicate_cleanup(VERSION).token)
+        survivor = db._one("SELECT id FROM entry")[0]
+        rows = db._q(
+            "SELECT v.en_us, t.source, t.zh_tw FROM entry_variant v "
+            "JOIN variant_translation t ON t.variant_id = v.id "
+            "WHERE v.entry_id = ? ORDER BY v.en_us, t.source",
+            (survivor,),
+        )
+        assert rows == [
+            ("Dragon blood v2", SRC_AI, "龍血二"),
+            ("Shared wording", SRC_AI, "共用甲"),
+            ("Shared wording", SRC_MANUAL, "共用乙"),
+        ]  # 與主原文相同的不搬；同一份其他原文把缺的來源補上
+    finally:
+        db.close()

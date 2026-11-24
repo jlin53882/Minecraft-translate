@@ -573,3 +573,52 @@ def test_blank_source_is_not_a_strong_category():
     assert "blank_source" not in STRONG_CATEGORIES
     assert _EntryDetail(any_cjk=True).default_delete("blank_source") is False
     assert _EntryDetail(any_cjk=False).default_delete("blank_source") is True
+
+
+def test_cleanup_revert_brings_back_other_originals_and_their_translations(tmp_path):
+    """清理刪除條目時，其他原文與譯文存進快照，還原後（編號可能不同）仍掛在條目上。"""
+    db = _db(tmp_path)
+    junk = db._one("SELECT id FROM entry WHERE key='g/a.md#0'")[0]
+    with db._tx() as conn:
+        from translation_tool.translation_db import variants
+
+        variants.add_translation(conn, junk, "Other wording", 0, "另一種說法")
+        variants.add_translation(conn, junk, "Other wording", 6, "人工說法")
+        variants.ensure_variant(conn, junk, "Pending wording")
+    report_path = tmp_path / "r.json"
+    db.export_cleanup_report(VERSION, report_path)
+    _apply(db, report_path)
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 0  # 隨條目刪除
+    info = db.last_cleanup_batch()
+    assert db.revert_cleanup(info.batch_id).complete
+    restored = db._one("SELECT id FROM entry WHERE key='g/a.md#0'")[0]
+    rows = db._q(
+        "SELECT v.en_us, t.source, t.zh_tw FROM entry_variant v "
+        "LEFT JOIN variant_translation t ON t.variant_id = v.id "
+        "WHERE v.entry_id = ? ORDER BY v.en_us, t.source",
+        (restored,),
+    )
+    assert rows == [
+        ("Other wording", 0, "另一種說法"),
+        ("Other wording", 6, "人工說法"),
+        ("Pending wording", None, None),
+    ]
+
+
+def test_revert_of_an_old_snapshot_without_variants_still_works(tmp_path):
+    """舊版清理批次的快照沒有其他原文欄位，還原照常完成。"""
+    db = _db(tmp_path)
+    report_path = tmp_path / "r.json"
+    db.export_cleanup_report(VERSION, report_path)
+    _apply(db, report_path)
+    info = db.last_cleanup_batch()
+    row = db._one("SELECT payload FROM cleanup_batch WHERE id = ?", (info.batch_id,))
+    payload = json.loads(row[0])
+    payload.pop("entry_variant", None)
+    payload.pop("variant_translation", None)
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE cleanup_batch SET payload = ? WHERE id = ?",
+            (json.dumps(payload), info.batch_id),
+        )
+    assert db.revert_cleanup(info.batch_id).complete

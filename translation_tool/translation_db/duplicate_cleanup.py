@@ -22,6 +22,7 @@ from translation_tool.translation_db.operation_progress import (
     ProgressCallback,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
+from translation_tool.translation_db.variants import merge_into as merge_variants
 
 _CHUNK = 500
 _MERGE_KINDS = frozenset({KIND_GUIDE, KIND_PATCHOULI})
@@ -595,6 +596,7 @@ class DuplicateCleanupMixin:
         self._merge_translation_rows(survivor_id, duplicate_id)
         self._copy_history_rows(survivor_id, duplicate_id)
         self._copy_source_changes(survivor_id, duplicate_id)
+        merge_variants(self._conn, survivor_id, duplicate_id)
         self._delete_entry_with_source_changes(duplicate_id)
 
     def _merge_translation_rows(self, survivor_id: int, duplicate_id: int) -> None:
