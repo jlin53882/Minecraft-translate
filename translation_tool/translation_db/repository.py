@@ -6105,6 +6105,42 @@ class TranslationDB(
             self._load_mod_for_priority_sql(priority), (mod_id,)
         ) + self._load_variant_rows(mod_id, priority)
 
+    def adopt_current_translation_for_variant(
+        self, entry_id: int, variant_en: str, expected_zh_tw: str
+    ) -> tuple[bool, str]:
+        """把條目目前的生效譯文沿用為某份其他原文的譯文（使用者明確按下才做）。
+
+        回傳 ``(是否寫入, 原因)``。畫面上的譯文已過期（與資料庫目前生效譯文不同）、其他原文
+        已不存在或已有譯文時不寫入；舊譯文是照另一段原文翻的，與這份原文的特殊字元
+        （色碼、佔位符、換行、指南標記）不一致時也不寫入，原因列出差異。只給還沒有任何譯文的
+        其他原文用：流水線剛寫入 AI 譯文後，畫面上的按鈕不會蓋過它。
+        """
+        with self._tx() as conn:
+            row = conn.execute(
+                "SELECT e.kind, f.zh_tw FROM entry e "
+                "LEFT JOIN effective f ON f.entry_id = e.id WHERE e.id=?",
+                (entry_id,),
+            ).fetchone()
+            if row is None or not row[1] or row[1] != expected_zh_tw:
+                return False, "目前譯文已變更，請重新整理後再試"
+            vid = variants.variant_id(conn, entry_id, variant_en)
+            if vid is None:
+                return False, "這份原文已不存在，請重新整理後再試"
+            if conn.execute(
+                "SELECT 1 FROM variant_translation WHERE variant_id=? AND zh_tw<>'' "
+                "LIMIT 1",
+                (vid,),
+            ).fetchone():
+                return False, "這份原文已經有譯文，請重新整理後再試"
+            issues = translation_issues(variant_en, row[1], kind=row[0])
+            if issues:
+                return False, "舊譯文與這份原文的格式不一致：" + "；".join(issues[:3])
+            if not variants.adopt_translation(
+                conn, entry_id, variant_en, SRC_MANUAL, row[1]
+            ):
+                return False, "這份原文已經有人工譯文"
+            return True, ""
+
     def _entry_variants(self, entry_id: int) -> list[variants.VariantRow]:
         """條目的其他原文與目前生效譯文（條目詳情用）。"""
         with self._lock:

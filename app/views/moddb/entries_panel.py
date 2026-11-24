@@ -674,7 +674,7 @@ class EntriesPanel(ft.Column):
             catalog = self._render_source_catalog or source_catalog_for(db)
         self._fill_status_chips(entry, catalog)
         self._refresh_smart_review_chip()
-        self.meta_col.controls = build_entry_metadata(detail, catalog)
+        self.meta_col.controls = build_entry_metadata(detail, catalog, self)
         self.format_review.render(
             entry.en_us or NO_SOURCE_TEXT,
             self.tw_field.value or "",

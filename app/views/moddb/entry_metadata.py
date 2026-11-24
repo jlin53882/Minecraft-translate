@@ -8,10 +8,13 @@ from app.services_impl.moddb_service import EntryDetail, format_taipei_time, pac
 from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
+from app.views.moddb.entry_variant_actions import adopt_current_translation
 from app.views.moddb.formatting import kind_label
 
 
-def build_entry_metadata(detail: EntryDetail, catalog=None) -> list[ft.Control]:
+def build_entry_metadata(
+    detail: EntryDetail, catalog=None, panel=None
+) -> list[ft.Control]:
     entry = detail.entry
     return [
         _key_row(entry.key),
@@ -20,7 +23,7 @@ def build_entry_metadata(detail: EntryDetail, catalog=None) -> list[ft.Control]:
         *(_origin_rows(detail.origins) if detail.origins else []),
         *(_reference_rows(detail.references) if detail.references else []),
         _time_row(entry),
-        *(_variant_rows(detail, catalog)),
+        *(_variant_rows(detail, catalog, panel)),
     ]
 
 
@@ -152,7 +155,7 @@ def _clip(text: str) -> str:
     return text[:MAX_VARIANT_CHARS] + "…"
 
 
-def _variant_rows(detail: EntryDetail, catalog) -> list[ft.Control]:
+def _variant_rows(detail: EntryDetail, catalog, panel=None) -> list[ft.Control]:
     """鍵值相同但原文不同的其他原文：每份列出原文與目前的譯文狀態。
 
     這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，也不影響上方的生效譯文。
@@ -169,7 +172,7 @@ def _variant_rows(detail: EntryDetail, catalog) -> list[ft.Control]:
                 kit.chip(
                     f"另有 {len(detail.variants)} 個原文版本（流水線專用）", "gold"
                 ),
-                *(_variant_row(variant, catalog) for variant in shown),
+                *(_variant_row(variant, catalog, detail, panel) for variant in shown),
                 *(
                     [kit.hint_text(f"另有 {hidden} 份較舊的原文未展開")]
                     if hidden
@@ -181,15 +184,28 @@ def _variant_rows(detail: EntryDetail, catalog) -> list[ft.Control]:
     ]
 
 
-def _variant_row(variant, catalog) -> ft.Control:
+def _variant_row(variant, catalog, detail=None, panel=None) -> ft.Control:
+    controls: list[ft.Control] = [
+        kit.mono_text(f"原文：{_clip(variant.en_us)}", size=12)
+    ]
     if variant.zh_tw:
         label = source_label(variant.source, catalog, variant.review_status)
-        status: ft.Control = kit.hint_text(f"譯文（{label}）：{_clip(variant.zh_tw)}")
+        controls.append(kit.hint_text(f"譯文（{label}）：{_clip(variant.zh_tw)}"))
     else:
-        status = kit.hint_text("尚無譯文：下次一鍵流水線或機器翻譯遇到時會翻譯")
-    return ft.Column(
-        [kit.mono_text(f"原文：{_clip(variant.en_us)}", size=12), status], spacing=2
-    )
+        controls.append(kit.hint_text("尚無譯文：下次一鍵流水線或機器翻譯遇到時會翻譯"))
+        if panel is not None and detail is not None and detail.entry.zh_tw:
+            controls.append(
+                kit.button(
+                    "沿用目前譯文",
+                    "ghost",
+                    icon=ft.Icons.CONTENT_COPY,
+                    size="sm",
+                    on_click=lambda _e, v=variant: adopt_current_translation(panel, v),
+                    tooltip="把上方目前的譯文當作這份原文的譯文（舊譯文是照另一段原文翻的，"
+                    "特殊字元與這份原文不一致時不會寫入；只供流水線使用，未審核）",
+                )
+            )
+    return ft.Column(controls, spacing=2)
 
 
 def _detected_change(new_en: str) -> ft.Control:

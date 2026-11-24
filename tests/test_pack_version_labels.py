@@ -193,3 +193,125 @@ def test_entry_metadata_collapses_many_and_long_variants(db):
     assert len(originals) == MAX_VARIANTS_SHOWN
     assert all(len(t) <= len("原文：") + MAX_VARIANT_CHARS + 1 for t in originals)
     assert "另有 2 份較舊的原文未展開" in texts
+
+
+def _buttons(controls) -> list:
+    found: list = []
+
+    def walk(node) -> None:
+        if type(node).__name__ == "Button":
+            found.append(node)
+        content = getattr(node, "content", None)
+        if content is not None:
+            walk(content)
+        for child in getattr(node, "controls", None) or []:
+            walk(child)
+
+    for control in controls:
+        walk(control)
+    return found
+
+
+def test_adopt_button_only_for_variants_without_translation_and_runs_the_action(
+    db, monkeypatch
+):
+    """有目前譯文時，沒有譯文的其他原文才有「沿用目前譯文」；按下去交給動作模組。"""
+    from types import SimpleNamespace
+
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Main", "主譯文")])
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Pending Wording")])
+    db.ingest(
+        "1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Translated Wording", "已翻")]
+    )
+    entry_id = db._one("SELECT id FROM entry")[0]
+    detail = db.entry_detail(entry_id)
+    assert detail.entry.zh_tw == "主譯文"
+
+    calls = []
+    monkeypatch.setattr(
+        "app.views.moddb.entry_metadata.adopt_current_translation",
+        lambda panel, variant: calls.append((panel, variant.en_us)),
+    )
+    panel = SimpleNamespace()
+    buttons = _buttons(build_entry_metadata(detail, None, panel))
+    assert len(buttons) == 1  # 只有「尚無譯文」的那份
+    buttons[0].on_click(None)
+    assert calls == [(panel, "Pending Wording")]
+    assert (
+        _buttons(build_entry_metadata(detail, None, None)) == []
+    )  # 沒有面板就不給按鈕
+
+
+def test_adopt_action_writes_then_reloads_and_reports_refusals(db, monkeypatch):
+    """動作模組：成功時寫入並重整，被拒絕（格式不一致）時只顯示原因、不寫入。"""
+    from types import SimpleNamespace
+
+    from app.views.moddb import entry_variant_actions
+
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Main", "主譯文")])
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Changed")])
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Has %s token")])
+    entry_id = db._one("SELECT id FROM entry")[0]
+    detail = db.entry_detail(entry_id)
+    snacks: list[str] = []
+    monkeypatch.setattr(
+        entry_variant_actions, "show_snack", lambda _p, text, *_a: snacks.append(text)
+    )
+    reloaded: list[int] = []
+    panel = SimpleNamespace(
+        selected=detail.entry,
+        db=lambda: db,
+        _page=SimpleNamespace(),
+        _on_changed=None,
+        saved_text=SimpleNamespace(value=""),
+        reload_page_in_place=lambda: reloaded.append(1),
+        _safe_update=lambda: None,
+    )
+    by_en = {v.en_us: v for v in detail.variants}
+
+    entry_variant_actions.adopt_current_translation(panel, by_en["Has %s token"])
+    assert snacks and snacks[-1].startswith("舊譯文與這份原文的格式不一致")
+    assert db._one("SELECT COUNT(*) FROM variant_translation")[0] == 0 and not reloaded
+
+    entry_variant_actions.adopt_current_translation(panel, by_en["Changed"])
+    assert db._q("SELECT zh_tw FROM variant_translation") == [("主譯文",)]
+    assert reloaded == [1] and panel.saved_text.value.startswith("已沿用目前譯文")
+
+
+def test_adopt_action_logs_database_errors_and_reports_when_it_cannot_start(
+    db, monkeypatch
+):
+    """資料庫錯誤寫後台 log 並提示；背景無法啟動時也要告訴使用者。"""
+    import sqlite3
+    from types import SimpleNamespace
+
+    from app.views.moddb import entry_variant_actions
+
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Main", "主譯文")])
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Changed")])
+    detail = db.entry_detail(db._one("SELECT id FROM entry")[0])
+    snacks: list[str] = []
+    logged: list[str] = []
+    monkeypatch.setattr(
+        entry_variant_actions, "show_snack", lambda _p, text, *_a: snacks.append(text)
+    )
+    monkeypatch.setattr(
+        entry_variant_actions, "log_exception", lambda text: logged.append(text)
+    )
+    panel = SimpleNamespace(
+        selected=detail.entry, db=lambda: db, _page=SimpleNamespace(), _on_changed=None
+    )
+    variant = detail.variants[0]
+
+    def boom(*_a, **_k):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(db, "adopt_current_translation_for_variant", boom)
+    entry_variant_actions.adopt_current_translation(panel, variant)
+    assert logged and "沿用失敗（資料庫錯誤" in snacks[-1]
+
+    monkeypatch.setattr(
+        entry_variant_actions.entry_writes, "run_write", lambda *a, **k: False
+    )
+    entry_variant_actions.adopt_current_translation(panel, variant)
+    assert snacks[-1].startswith("沿用無法啟動")

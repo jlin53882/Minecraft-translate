@@ -552,3 +552,59 @@ def test_scan_preview_matches_real_ingest_for_kubejs_companion_items(tmp_path):
     finally:
         real_db.close()
         preview_db.close()
+
+
+# ------------------------------------------------------------- 沿用目前譯文給其他原文
+def _adopt_setup(db, en="Show %s Background", tw="顯示 %s 背景"):
+    db.ingest(VERSION, [ScanItem(KIND_LANG, "foo", "item.foo.a", en, tw, "")])
+    _scan_changed(db, "Background %s Style")
+    return db._one("SELECT id FROM entry")[0]
+
+
+def test_adopt_current_translation_writes_unreviewed_manual_variant_translation(db):
+    eid = _adopt_setup(db)
+    ok, reason = db.adopt_current_translation_for_variant(
+        eid, "Background %s Style", "顯示 %s 背景"
+    )
+    assert (ok, reason) == (True, "")
+    assert db._q(
+        "SELECT t.source, t.zh_tw, t.review_status FROM variant_translation t"
+    ) == [(SRC_MANUAL, "顯示 %s 背景", "unreviewed")]
+    hit = TranslationResolver(db, VERSION).lookup(
+        KIND_LANG, "foo", "item.foo.a", "Background %s Style"
+    )
+    assert hit is not None and hit.zh_tw == "顯示 %s 背景" and hit.source == SRC_MANUAL
+    again = db.adopt_current_translation_for_variant(
+        eid, "Background %s Style", "顯示 %s 背景"
+    )
+    assert again == (False, "這份原文已經有譯文，請重新整理後再試")
+
+
+def test_adopt_current_translation_refuses_format_mismatch_stale_and_missing(db):
+    eid = _adopt_setup(db, en="Show Background", tw="顯示背景")
+    # 新原文有 %s、舊譯文沒有：特殊字元不一致，不寫入
+    _scan_changed(db, "Value: %s")
+    ok, reason = db.adopt_current_translation_for_variant(eid, "Value: %s", "顯示背景")
+    assert not ok and reason.startswith("舊譯文與這份原文的格式不一致")
+    # 畫面上的譯文已過期
+    ok, reason = db.adopt_current_translation_for_variant(
+        eid, "Background %s Style", "別的譯文"
+    )
+    assert (ok, reason) == (False, "目前譯文已變更，請重新整理後再試")
+    # 這份原文不存在
+    ok, reason = db.adopt_current_translation_for_variant(eid, "Nope", "顯示背景")
+    assert (ok, reason) == (False, "這份原文已不存在，請重新整理後再試")
+    assert db._one("SELECT COUNT(*) FROM variant_translation")[0] == 0
+
+
+def test_adopt_refuses_when_the_pipeline_already_wrote_a_translation(db):
+    """畫面顯示後流水線剛寫入 AI 譯文：沿用按鈕不會再蓋過它。"""
+    eid = _adopt_setup(db)
+    db.write_back(VERSION, [_wb("Background %s Style", "AI 譯 %s")])
+    ok, reason = db.adopt_current_translation_for_variant(
+        eid, "Background %s Style", "顯示 %s 背景"
+    )
+    assert (ok, reason) == (False, "這份原文已經有譯文，請重新整理後再試")
+    assert db._q("SELECT source, zh_tw FROM variant_translation") == [
+        (SRC_AI, "AI 譯 %s")
+    ]

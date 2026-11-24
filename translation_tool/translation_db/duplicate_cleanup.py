@@ -22,6 +22,8 @@ from translation_tool.translation_db.operation_progress import (
     ProgressCallback,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
+from translation_tool.translation_db.variants import VARIANT_TABLES, content_fingerprint
+from translation_tool.translation_db.variants import merge_into as merge_variants
 
 _CHUNK = 500
 _MERGE_KINDS = frozenset({KIND_GUIDE, KIND_PATCHOULI})
@@ -537,6 +539,8 @@ class DuplicateCleanupMixin:
             snapshot = self._snapshot_entries([entry_id])
             parts: dict[str, list[list[Any]]] = {}
             for table, data in snapshot.items():
+                if table in VARIANT_TABLES:
+                    continue  # 其他原文另用「內容」判斷（見下方），不含編號與 last_seen
                 columns = list(data["columns"])
                 drop = {
                     "qflags",
@@ -549,6 +553,11 @@ class DuplicateCleanupMixin:
                 ]
                 rows = [[row[index] for index in keep] for row in data["rows"]]
                 parts[table] = sorted(rows, key=lambda row: repr(row))
+            other_originals = content_fingerprint(snapshot)
+            if other_originals:
+                # 只有真的有其他原文時才納入：沒有時指紋與還沒有這兩張表時完全相同，
+                # 舊批次照常可還原；合併後才新增的其他原文譯文會被視為保留條目已被改動
+                parts["variants"] = other_originals
             encoded = json.dumps(parts, ensure_ascii=False, sort_keys=True)
             states[int(entry_id)] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         return states
@@ -595,6 +604,7 @@ class DuplicateCleanupMixin:
         self._merge_translation_rows(survivor_id, duplicate_id)
         self._copy_history_rows(survivor_id, duplicate_id)
         self._copy_source_changes(survivor_id, duplicate_id)
+        merge_variants(self._conn, survivor_id, duplicate_id)
         self._delete_entry_with_source_changes(duplicate_id)
 
     def _merge_translation_rows(self, survivor_id: int, duplicate_id: int) -> None:

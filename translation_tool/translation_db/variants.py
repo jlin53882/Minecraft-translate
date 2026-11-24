@@ -123,6 +123,24 @@ def add_variant_translation(
     return bool(cursor.rowcount)
 
 
+def adopt_translation(
+    conn: sqlite3.Connection, entry_id: int, en_us: str, source: int, zh_tw: str
+) -> bool:
+    """把譯文寫成條目某份既有其他原文的人工譯文（未審核；只新增、不覆蓋）。
+
+    該其他原文不存在時不建立，回傳 False；同一變體同一來源已有譯文也回傳 False。
+    """
+    vid = variant_id(conn, entry_id, en_us)
+    if vid is None:
+        return False
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO variant_translation "
+        "(variant_id, source, zh_tw, review_status) VALUES (?, ?, ?, 'unreviewed')",
+        (vid, source, zh_tw),
+    )
+    return bool(cursor.rowcount)
+
+
 def entry_variants(
     conn: sqlite3.Connection, entry_id: int, group_expr: str, rank_expr: str
 ) -> list[VariantRow]:
@@ -177,3 +195,171 @@ def backfill_from_src_change(conn: sqlite3.Connection) -> tuple[int, int]:
     after = int(conn.execute("SELECT COUNT(*) FROM entry_variant").fetchone()[0])
     created = after - before
     return created, max(total - created, 0)
+
+
+_CHUNK = 500
+VARIANT_TABLES = frozenset({"entry_variant", "variant_translation"})
+
+
+def _marks(count: int) -> str:
+    return ",".join("?" * count)
+
+
+def snapshot(conn: sqlite3.Connection, entry_ids: list[int]) -> dict[str, dict]:
+    """條目的其他原文與譯文（刪除前的快照，供還原）；沒有變體表時回傳空 dict。
+
+    ``{"entry_variant": {columns, rows}, "variant_translation": {columns, rows}}``，
+    與 ``cleanup`` 其他資料表的快照同形。
+    """
+    if not tables_available(conn):
+        return {}
+    variant_rows: list[list] = []
+    translation_rows: list[list] = []
+    variant_columns: list[str] = []
+    translation_columns: list[str] = []
+    for start in range(0, len(entry_ids), _CHUNK):
+        chunk = entry_ids[start : start + _CHUNK]
+        cursor = conn.execute(
+            f"SELECT * FROM entry_variant WHERE entry_id IN ({_marks(len(chunk))})",
+            tuple(chunk),
+        )
+        variant_columns = [d[0] for d in cursor.description]
+        found = [list(r) for r in cursor.fetchall()]
+        variant_rows.extend(found)
+        vids = [r[variant_columns.index("id")] for r in found]
+        for vstart in range(0, len(vids), _CHUNK):
+            vchunk = vids[vstart : vstart + _CHUNK]
+            cursor = conn.execute(
+                "SELECT * FROM variant_translation "
+                f"WHERE variant_id IN ({_marks(len(vchunk))})",
+                tuple(vchunk),
+            )
+            translation_columns = [d[0] for d in cursor.description]
+            translation_rows.extend(list(r) for r in cursor.fetchall())
+    return {
+        "entry_variant": {"columns": variant_columns, "rows": variant_rows},
+        "variant_translation": {
+            "columns": translation_columns,
+            "rows": translation_rows,
+        },
+    }
+
+
+def restore(
+    conn: sqlite3.Connection, saved: dict[str, dict], entry_map: dict[int, int]
+) -> None:
+    """把快照裡已還原條目的其他原文與譯文寫回（``entry_map`` 為 原編號 → 實際編號）。
+
+    變體與譯文都用新編號寫入（只新增、不覆蓋）；舊版快照沒有這兩張表，直接略過。
+    """
+    part = saved.get("entry_variant")
+    if not part or not part.get("rows") or not tables_available(conn):
+        return
+    variant_map = _restore_variants(conn, part, entry_map)
+    _restore_variant_translations(
+        conn, saved.get("variant_translation") or {}, variant_map
+    )
+
+
+def _restore_variants(
+    conn: sqlite3.Connection, part: dict, entry_map: dict[int, int]
+) -> dict[int, int]:
+    """寫回其他原文，回傳 原變體編號 → 實際變體編號（只含已還原的條目）。"""
+    columns = part["columns"]
+    old_id, owner = columns.index("id"), columns.index("entry_id")
+    names = [c for c in columns if c not in ("id", "entry_id")]
+    variant_map: dict[int, int] = {}
+    for row in part["rows"]:
+        entry_id = entry_map.get(int(row[owner]))
+        if entry_id is None:
+            continue
+        record = dict(zip(columns, row, strict=True))
+        conn.execute(
+            "INSERT OR IGNORE INTO entry_variant "
+            f"(entry_id, {', '.join(names)}) VALUES ({_marks(len(names) + 1)})",
+            (entry_id, *(record[c] for c in names)),
+        )
+        found = variant_id(conn, entry_id, record["en_us"])
+        if found is not None:
+            variant_map[int(row[old_id])] = found
+    return variant_map
+
+
+def _restore_variant_translations(
+    conn: sqlite3.Connection, part: dict, variant_map: dict[int, int]
+) -> None:
+    """把其他原文的譯文掛回對應後的變體（只新增、不覆蓋）。"""
+    columns = part.get("columns") or []
+    if not columns:
+        return
+    names = [c for c in columns if c not in ("id", "variant_id")]
+    owner = columns.index("variant_id")
+    for row in part["rows"]:
+        new_vid = variant_map.get(int(row[owner]))
+        if new_vid is None:
+            continue
+        record = dict(zip(columns, row, strict=True))
+        conn.execute(
+            "INSERT OR IGNORE INTO variant_translation "
+            f"(variant_id, {', '.join(names)}) VALUES ({_marks(len(names) + 1)})",
+            (new_vid, *(record[c] for c in names)),
+        )
+
+
+def content_fingerprint(saved: dict[str, dict]) -> list[list]:
+    """快照裡其他原文的「內容」（原文、來源、譯文、審核狀態），排序後回傳；沒有變體時為空串列。
+
+    不含編號與 ``first_seen``／``last_seen``（每次重掃都會更新），所以只有內容真的變了
+    指紋才會變。合併還原用它判斷保留條目有沒有在合併後被改動。
+    """
+    part = saved.get("entry_variant") or {}
+    if not part.get("rows"):
+        return []
+    columns = part["columns"]
+    id_i, en_i = columns.index("id"), columns.index("en_us")
+    by_id = {int(row[id_i]): [row[en_i]] for row in part["rows"]}
+    tpart = saved.get("variant_translation") or {}
+    tcolumns = tpart.get("columns") or []
+    if tcolumns:
+        owner = tcolumns.index("variant_id")
+        keep = [
+            tcolumns.index(name)
+            for name in ("source", "zh_tw", "zh_cn", "checker", "review_status")
+            if name in tcolumns
+        ]
+        translated: dict[int, list[list]] = {}
+        for row in tpart["rows"]:
+            translated.setdefault(int(row[owner]), []).append([row[i] for i in keep])
+        rows = [
+            [by_id[vid][0], sorted(translated.get(vid, []), key=repr)] for vid in by_id
+        ]
+    else:
+        rows = [[en, []] for (en,) in by_id.values()]
+    return sorted(rows, key=repr)
+
+
+def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) -> None:
+    """路徑別名合併：把被合併條目的其他原文與譯文併進保留的條目（只新增、不覆蓋）。
+
+    與保留條目主原文相同的其他原文不搬（那是主原文）；保留條目已有的同一份其他原文只補
+    它沒有的來源，同一來源的譯文不同時保留條目優先（被合併條目的那筆隨條目刪除，
+    還原合併批次可以找回）。被合併條目的剩餘列隨條目一併刪除。
+    """
+    if not tables_available(conn):
+        return
+    main = conn.execute("SELECT en_us FROM entry WHERE id=?", (survivor_id,)).fetchone()
+    for vid, en_us in conn.execute(
+        "SELECT id, en_us FROM entry_variant WHERE entry_id=?", (duplicate_id,)
+    ).fetchall():
+        if main is not None and main[0] == en_us:
+            continue
+        target = ensure_variant(conn, survivor_id, en_us)
+        conn.execute(
+            "INSERT OR IGNORE INTO variant_translation "
+            "(variant_id, source, zh_tw, zh_cn, checker, review_status, "
+            "created_at, updated_at, revision) "
+            "SELECT ?, source, zh_tw, zh_cn, checker, review_status, "
+            "created_at, updated_at, revision FROM variant_translation "
+            "WHERE variant_id=?",
+            (target, vid),
+        )

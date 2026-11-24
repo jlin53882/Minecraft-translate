@@ -60,6 +60,12 @@ from translation_tool.translation_db.schema import (
     KIND_PATCHOULI,
     SRC_MANUAL,
 )
+from translation_tool.translation_db.variants import (
+    restore as restore_variants,
+)
+from translation_tool.translation_db.variants import (
+    snapshot as snapshot_variants,
+)
 
 REPORT_FORMAT = "mod-db-cleanup-v2"
 _OLD_REPORT_FORMATS = ("mod-db-cleanup-v1",)
@@ -1111,6 +1117,8 @@ class CleanupMixin:
             if progress is not None:
                 progress.tick(len(chunk))
         snapshot["src_change"] = {"columns": columns, "rows": rows}
+        # 其他原文（變體）與它的譯文：刪除條目時外鍵會連帶刪除，快照存起來供還原
+        snapshot.update(snapshot_variants(self._conn, list(ids)))
         return snapshot
 
     def cleanup_batches(self) -> list[CleanupBatchInfo]:
@@ -1297,6 +1305,7 @@ class CleanupMixin:
                 if table == "translation":
                     self._restore_revisions(columns, rows, mapping, tracker)
         self._refresh(self._conn, entry_map.values())
+        restore_variants(self._conn, snapshot, entry_map)
         part = snapshot.get("src_change") or {"columns": [], "rows": []}
         restored_keys = {
             (r["kind"], r["mc_version"], r["mod_id"], r["key"])
