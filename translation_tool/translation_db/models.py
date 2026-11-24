@@ -13,6 +13,7 @@ from translation_tool.translation_db.smart_review_status import (
     MANUAL_EDIT_STATUSES,
     SmartReviewStatus,
 )
+from translation_tool.translation_db.variants import VariantRow
 
 # Keep the accepted values in the storage model so the DB matcher and every UI
 # that exposes this filter cannot silently drift apart when a new format kind
@@ -557,11 +558,13 @@ class EntryDetail:
     same_text: list[SameTextRow] = field(default_factory=list)
     history: list[HistoryRow] = field(default_factory=list)
     src_changes: list[SrcChangeRow] = field(default_factory=list)
+    # 條目的其他原文（鍵值相同、原文不同）與目前生效譯文；譯文只供流水線查詢
+    variants: list[VariantRow] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class SrcChangeRow:
-    """掃描時發現、尚未採用的原文變動（資料庫仍保留舊原文）。"""
+    """掃描或寫回時發現的原文變動歷史（主原文維持舊原文，新原文另存為其他原文）。"""
 
     old_en: str
     new_en: str

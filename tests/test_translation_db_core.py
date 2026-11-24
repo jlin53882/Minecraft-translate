@@ -1844,7 +1844,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 18
+    assert SCHEMA_VERSION == 19
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1861,6 +1861,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v16-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v17-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v18-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v19-*.bak"))
     assert db._q(
         "SELECT name FROM sqlite_schema WHERE type='table' "
         "AND name IN ('smart_review_run', 'smart_review_candidate') "

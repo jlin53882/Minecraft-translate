@@ -5,12 +5,13 @@ from __future__ import annotations
 import flet as ft
 
 from app.services_impl.moddb_service import EntryDetail, format_taipei_time, pack_label
+from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.formatting import kind_label
 
 
-def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
+def build_entry_metadata(detail: EntryDetail, catalog=None) -> list[ft.Control]:
     entry = detail.entry
     return [
         _key_row(entry.key),
@@ -19,7 +20,7 @@ def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
         *(_origin_rows(detail.origins) if detail.origins else []),
         *(_reference_rows(detail.references) if detail.references else []),
         _time_row(entry),
-        *(_source_change(change.new_en) for change in detail.src_changes[:1]),
+        *(_variant_rows(detail, catalog)),
     ]
 
 
@@ -140,10 +141,61 @@ def _reference_rows(references) -> list[ft.Control]:
     ]
 
 
-def _source_change(new_en: str) -> ft.Control:
+MAX_VARIANTS_SHOWN = 3
+MAX_VARIANT_CHARS = 200
+
+
+def _clip(text: str) -> str:
+    """長段落（手冊、指南）只顯示開頭，避免把儲存／審核按鈕推到畫面外。"""
+    if len(text) <= MAX_VARIANT_CHARS:
+        return text
+    return text[:MAX_VARIANT_CHARS] + "…"
+
+
+def _variant_rows(detail: EntryDetail, catalog) -> list[ft.Control]:
+    """鍵值相同但原文不同的其他原文：每份列出原文與目前的譯文狀態。
+
+    這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，也不影響上方的生效譯文。
+    唯讀開啟、尚未升級（沒有其他原文表或尚未回填）的舊資料庫沒有其他原文，仍顯示最新一筆偵測到的新原文。
+    其他原文最多展開 ``MAX_VARIANTS_SHOWN`` 份、每份原文與譯文最多顯示 ``MAX_VARIANT_CHARS`` 字，其餘收合。
+    """
+    if not detail.variants:
+        return [_detected_change(change.new_en) for change in detail.src_changes[:1]]
+    shown = detail.variants[:MAX_VARIANTS_SHOWN]
+    hidden = len(detail.variants) - len(shown)
+    return [
+        ft.Column(
+            [
+                kit.chip(
+                    f"另有 {len(detail.variants)} 個原文版本（流水線專用）", "gold"
+                ),
+                *(_variant_row(variant, catalog) for variant in shown),
+                *(
+                    [kit.hint_text(f"另有 {hidden} 份較舊的原文未展開")]
+                    if hidden
+                    else []
+                ),
+            ],
+            spacing=6,
+        )
+    ]
+
+
+def _variant_row(variant, catalog) -> ft.Control:
+    if variant.zh_tw:
+        label = source_label(variant.source, catalog, variant.review_status)
+        status: ft.Control = kit.hint_text(f"譯文（{label}）：{_clip(variant.zh_tw)}")
+    else:
+        status = kit.hint_text("尚無譯文：下次一鍵流水線或機器翻譯遇到時會翻譯")
+    return ft.Column(
+        [kit.mono_text(f"原文：{_clip(variant.en_us)}", size=12), status], spacing=2
+    )
+
+
+def _detected_change(new_en: str) -> ft.Control:
     return ft.Column(
         [
-            kit.chip("掃描到原文已變動（尚未採用）", "gold"),
+            kit.chip("掃描到原文已變動", "gold"),
             kit.mono_text(f"新原文：{new_en}", size=12),
         ],
         spacing=4,

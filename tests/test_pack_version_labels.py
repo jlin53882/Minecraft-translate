@@ -143,3 +143,53 @@ def test_target_options_list_game_versions_and_pack_versions():
     ]
     assert dict(options)["1.21.1\tATM 8.5"] == "1.21.1 · ATM 8.5"
     assert split_reference("1.21.1\tATM 8.5") == ("1.21.1", "ATM 8.5")
+
+
+def _texts(controls) -> list[str]:
+    out: list[str] = []
+
+    def walk(node) -> None:
+        value = getattr(node, "value", None)
+        if isinstance(value, str):
+            out.append(value)
+        content = getattr(node, "content", None)
+        if content is not None:
+            walk(content)
+        for child in getattr(node, "controls", None) or []:
+            walk(child)
+
+    for control in controls:
+        walk(control)
+    return out
+
+
+def test_entry_metadata_lists_other_originals_with_translation_state(db):
+    """條目詳情列出其他原文：有譯文顯示來源與譯文，沒有則提示下次會翻譯。"""
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Show Background")])
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Pending Wording")])
+    db.ingest(
+        "1.21.1",
+        [ScanItem("lang", "foo", "item.foo.a", "Background Style", "背景樣式")],
+    )
+    entry_id = db._one("SELECT id FROM entry")[0]
+    texts = _texts(build_entry_metadata(db.entry_detail(entry_id)))
+    assert "原文：Background Style" in texts and "原文：Pending Wording" in texts
+    assert any(t.startswith("譯文（模組自帶繁中）：背景樣式") for t in texts)
+    assert any(t.startswith("尚無譯文") for t in texts)
+    assert "另有 2 個原文版本（流水線專用）" in texts
+
+
+def test_entry_metadata_collapses_many_and_long_variants(db):
+    """其他原文最多展開 3 份、長原文截斷，避免把儲存／審核按鈕推到畫面外。"""
+    from app.views.moddb.entry_metadata import MAX_VARIANT_CHARS, MAX_VARIANTS_SHOWN
+
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Main")])
+    long_text = "L" * (MAX_VARIANT_CHARS + 50)
+    for i in range(MAX_VARIANTS_SHOWN + 2):
+        db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", f"{long_text}{i}")])
+    entry_id = db._one("SELECT id FROM entry")[0]
+    texts = _texts(build_entry_metadata(db.entry_detail(entry_id)))
+    originals = [t for t in texts if t.startswith("原文：")]
+    assert len(originals) == MAX_VARIANTS_SHOWN
+    assert all(len(t) <= len("原文：") + MAX_VARIANT_CHARS + 1 for t in originals)
+    assert "另有 2 份較舊的原文未展開" in texts
