@@ -15,7 +15,7 @@
  │   ├─ assets/、config.example.json、pyproject.toml、DLL/PYD …   （唯讀資源）
  └─ data/                       ← 使用者資料：更新時完全不碰
      ├─ config.json、replace_rules.json
-     └─ logs/、快取資料/、學名資料庫/、.icon_cache/、custom_translators/
+     └─ logs/、快取資料/、學名資料庫/、.icon_cache/
 ```
 
 舊版平面式（exe 與資料放同一資料夾）仍然支援，行為與過去相同：只有「exe 所在資料夾名稱為 `app`」才會啟用分離式。
@@ -47,7 +47,7 @@
 
 舊使用者把新版放進同一個安裝資料夾後，使用者資料仍在 `<根>/`（`app/` 的上一層）。第一次呼叫 `get_data_root()` 時會一次性搬進 `data/`：
 
-- 只搬已知項目：`config.json`、`replace_rules.json`、`logs/`、`快取資料/`、`學名資料庫/`、`.icon_cache/`、`custom_translators/`。其他檔案不碰。
+- 只搬已知項目：`config.json`、`replace_rules.json`、`logs/`、`快取資料/`、`學名資料庫/`、`.icon_cache/`。其他檔案不碰。
 - `data/` 內已有同名項目時**不覆蓋、不合併**，舊位置的檔案保留。
 - 單一項目搬移失敗只記錄，不影響啟動，下次啟動再試。
 - 每個行程只執行一次，重複執行是冪等的。
