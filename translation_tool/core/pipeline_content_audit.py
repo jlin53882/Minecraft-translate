@@ -30,9 +30,17 @@ from translation_tool.core.locale_path import (
     find_locale_marker,
     has_locale_dir,
 )
+from translation_tool.core.oracle_index import is_translatable_meta
 
 _TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt"})
 _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
+
+
+def _is_text_source(relative: Path) -> bool:
+    """進指南翻譯流程的文字檔：``.md``／``.mdx``／``.txt``，以及 Oracle Index 書的選單 ``_meta.json``。"""
+    if relative.suffix.lower() in _TEXT_SUFFIXES:
+        return True
+    return is_translatable_meta(Path("assets", relative).as_posix())
 
 
 def _load_existing_content_records(report_path: Path) -> list[dict[str, Any]]:
@@ -151,9 +159,11 @@ def _official_translation_keys(source_root: Path) -> set[str]:
 
     keys: set[str] = set()
     for path in source_root.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in _TEXT_SUFFIXES:
+        if not path.is_file():
             continue
         relative = path.relative_to(source_root)
+        if not _is_text_source(relative):
+            continue
         try:
             text = path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError):
@@ -263,7 +273,7 @@ def classify_other_output_assets(
             "source": source.as_posix(),
             "relative_path": Path("assets", relative).as_posix(),
         }
-        if source.suffix.lower() not in _TEXT_SUFFIXES:
+        if not _is_text_source(relative):
             record.update(
                 status="pending",
                 reason="unsupported_other_output_format",

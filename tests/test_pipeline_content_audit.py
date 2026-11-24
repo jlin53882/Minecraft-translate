@@ -608,3 +608,26 @@ def test_content_manifest_accumulates_across_merge_stages(tmp_path: Path):
     reasons = {record["reason"] for record in manifest["records"]}
     assert "localized_text_preserved" in reasons
     assert "english_text_queued_for_guide_translation" in reasons
+
+
+def test_oracle_meta_json_is_routed_to_the_pending_guide_tree(tmp_path: Path) -> None:
+    import json
+
+    book = "assets/oracle_index/books/b"
+    source = tmp_path / "other_output" / book / "content" / "_meta.json"
+    source.parent.mkdir(parents=True)
+    source.write_text(json.dumps({"arcane": "Arcane"}), encoding="utf-8")
+    data = tmp_path / "other_output" / book / "data" / "info.json"
+    data.parent.mkdir(parents=True)
+    data.write_text(json.dumps({"a": "Not Text"}), encoding="utf-8")
+
+    records = classify_other_output_assets(tmp_path)
+
+    by_source = {Path(r["source"]).name: r for r in records}
+    assert by_source["_meta.json"]["status"] == "pending"
+    assert (
+        by_source["_meta.json"]["reason"] == "english_text_queued_for_guide_translation"
+    )
+    pending = tmp_path / "patchouli_output" / "待翻譯" / book / "content" / "_meta.json"
+    assert pending.is_file()
+    assert by_source["info.json"]["reason"] == "unsupported_other_output_format"
