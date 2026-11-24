@@ -18,12 +18,15 @@ Mod 翻譯資料庫（SQLite）的資料表結構、來源代碼與連線設定�
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
 from pathlib import Path
 
+_LOG = logging.getLogger(__name__)
+
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -517,6 +520,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_entry_origin_locale_repair_migration(conn)
     if next_version == 18:
         return _backup_before_entry_variant_migration(conn)
+    if next_version == 19:
+        return _backup_before_variant_backfill_migration(conn)
     return None
 
 
@@ -574,6 +579,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_entry_origin_locale_repair_v17(conn)
     elif next_version == 18:
         _migrate_entry_variant_v18(conn)
+    elif next_version == 19:
+        _migrate_variant_backfill_v19(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -1325,8 +1332,8 @@ def _migrate_entry_origin_locale_repair_v17(conn: sqlite3.Connection) -> None:
     _migrate_entry_origin_locale_v16(conn)
 
 
-def _backup_before_entry_variant_migration(conn: sqlite3.Connection) -> Path | None:
-    """在加入其他原文（變體）表前建立一致的旁側備份。"""
+def _schema_backup(conn: sqlite3.Connection, version: int) -> Path | None:
+    """在升到 ``version`` 前建立一致的旁側備份（記憶體資料庫沒有檔案，不備份）。"""
     main = next(
         (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
         "",
@@ -1335,9 +1342,14 @@ def _backup_before_entry_variant_migration(conn: sqlite3.Connection) -> Path | N
         return None
     source_path = Path(main)
     backup_path = source_path.with_name(
-        f"{source_path.name}.pre-schema-v18-{time.time_ns()}.bak"
+        f"{source_path.name}.pre-schema-v{version}-{time.time_ns()}.bak"
     )
     return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _backup_before_entry_variant_migration(conn: sqlite3.Connection) -> Path | None:
+    """在加入其他原文（變體）表前建立一致的旁側備份。"""
+    return _schema_backup(conn, 18)
 
 
 def _migrate_entry_variant_v18(conn: sqlite3.Connection) -> None:
@@ -1348,6 +1360,26 @@ def _migrate_entry_variant_v18(conn: sqlite3.Connection) -> None:
         ).fetchone()
         if exists is None:
             raise sqlite3.DatabaseError(f"schema v18 缺少 {table} 表")
+
+
+def _backup_before_variant_backfill_migration(
+    conn: sqlite3.Connection,
+) -> Path | None:
+    """在把原文變動紀錄回填成其他原文前建立一致的旁側備份。"""
+    return _schema_backup(conn, 19)
+
+
+def _migrate_variant_backfill_v19(conn: sqlite3.Connection) -> None:
+    """把既有 ``src_change`` 登記成條目的其他原文（沒有譯文；冪等）。"""
+    from translation_tool.translation_db import variants
+
+    created, skipped = variants.backfill_from_src_change(conn)
+    _LOG.info(
+        "[資料庫升級] 原文變動紀錄回填為其他原文：新增 %d 筆、略過 %d 筆"
+        "（找不到對應條目或與主原文相同）",
+        created,
+        skipped,
+    )
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:

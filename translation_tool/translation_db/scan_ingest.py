@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Protocol
 
 from translation_tool.core.source_locale import (
@@ -25,6 +25,7 @@ from translation_tool.translation_db.content_identity import loose_text
 from translation_tool.translation_db.identity import canonical_entry_key
 from translation_tool.translation_db.models import EntryOrigin, IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
+from translation_tool.translation_db.variants import add_translation, ensure_variant
 
 _LOG = logging.getLogger(__name__)
 _SLOW_INGEST_GROUP_SECONDS = 1.0
@@ -83,6 +84,13 @@ class IngestTarget(Protocol):
 
     def record_src_change(
         self, kind: str, mod_id: str, key: str, old_en: str, new_en: str
+    ) -> None: ...
+
+    def record_variant(
+        self,
+        entry_id: int,
+        en_us: str,
+        translations: Sequence[tuple[int, str, str]],
     ) -> None: ...
 
     def adopt_en(self, entry_id: int, en_us: str) -> None: ...
@@ -179,6 +187,11 @@ def ingest_groups(
                 stats.new_entries += 1
             elif _source_changed(cur[1], item.en_us):
                 target.record_src_change(kind, mod_id, item.key, cur[1], item.en_us)
+                # 新原文登記成條目的其他原文；這個項目隨附的譯文是照新原文翻的，
+                # 掛在變體上（不掛到舊的主原文）。主原文與既有譯文不動。
+                target.record_variant(
+                    cur[0], item.en_us, scan_translations(item, convert)
+                )
                 stats.en_changed += 1
                 continue
             else:
@@ -343,6 +356,17 @@ class DbIngestTarget:
             "VALUES (?,?,?,?,?,?)",
             (kind, self.version, mod_id, key, old_en, new_en),
         )
+
+    def record_variant(
+        self,
+        entry_id: int,
+        en_us: str,
+        translations: Sequence[tuple[int, str, str]],
+    ) -> None:
+        for source, zh_tw, zh_cn in translations:
+            add_translation(self.conn, entry_id, en_us, source, zh_tw, zh_cn)
+        if not translations:
+            ensure_variant(self.conn, entry_id, en_us)
 
     def adopt_en(self, entry_id: int, en_us: str) -> None:
         self.conn.execute("UPDATE entry SET en_us=? WHERE id=?", (en_us, entry_id))
@@ -527,6 +551,14 @@ class PreviewIngestTarget:
 
     def record_src_change(
         self, kind: str, mod_id: str, key: str, old_en: str, new_en: str
+    ) -> None:
+        return None
+
+    def record_variant(
+        self,
+        entry_id: int,
+        en_us: str,
+        translations: Sequence[tuple[int, str, str]],
     ) -> None:
         return None
 

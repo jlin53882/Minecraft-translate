@@ -39,7 +39,7 @@ Flet 的 `update()` 成本與被走訪的控制項數成正比：`page.update()`
 UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同一把鎖。
 
 模組分工：`entry_row_tile.py`（固定列數的 `EntryTilePool`）、`entry_selection.py`（選取與詳情載入）、
-`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`entry_save_result.py`（`apply_save_result`：背景儲存結果的畫面套用，來源優先序資訊由 worker 算好）、`background_read.py`（`run_read`：
+`entry_metadata.py`（`build_entry_metadata`：出處、引用與「另有 N 個原文版本」的其他原文清單，唯讀）、`entry_writes.py`（`run_write`、儲存、還原與寫入後重整）、`entry_save_result.py`（`apply_save_result`：背景儲存結果的畫面套用，來源優先序資訊由 worker 算好）、`background_read.py`（`run_read`：
 審核範圍預覽這類背景唯讀工作）、`review_scope_dialog.py`（`compute_impact`、審核確認與解除審核）、
 `operation_summaries.py`（清理、批次取代、批量／單筆審核的預覽與結果文字，以及機翻頁各模式的卡片標題
 `translation_kpi_titles`；同一個操作的預覽與結果共用欄位與用語）。批次取代可替換筆數達 `LARGE_REPLACE_THRESHOLD` 時，最後確認附加 `batch_replace_scale_warning` 的寫入時間與背景機翻提醒。

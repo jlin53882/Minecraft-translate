@@ -4043,6 +4043,7 @@ class TranslationDB(
                 (entry.kind, entry.mc_version, entry.mod_id, entry.key),
             )
         ]
+        detail.variants = self._entry_variants(entry.id)
         history_review_sql = (
             "prev_checker, prev_review_status, new_checker, new_review_status"
             if self.has_review_state
@@ -6103,6 +6104,12 @@ class TranslationDB(
         return self._q(
             self._load_mod_for_priority_sql(priority), (mod_id,)
         ) + self._load_variant_rows(mod_id, priority)
+
+    def _entry_variants(self, entry_id: int) -> list[variants.VariantRow]:
+        """條目的其他原文與目前生效譯文（條目詳情用）。"""
+        with self._lock:
+            group, rank = self._priority_parts(self._stored_priority(self._conn))
+            return variants.entry_variants(self._conn, entry_id, group, rank)
 
     def _load_variant_rows(
         self, mod_id: str, priority: tuple[int, ...] | None

@@ -95,7 +95,7 @@ config 與 KubeJS script pipeline。
 
 取消掃描時 `cancel_clicked` 只呼叫 `session.request_cancel()`，等待目前處理中的檔案停止。
 
-預覽也會把每個項目分成新增、補入新來源譯文、已存在略過、原文已變動、補上原文：分類規則在 `scan_ingest.py` 的 `ingest_groups`，實際寫入用 `DbIngestTarget`、預覽用 `PreviewIngestTarget`（`TranslationDB.scan_preview_target` 只讀資料庫；還沒有資料庫時全部算新增）。預覽把這次掃描已「新增」的條目與譯文記在記憶體，後面的 jar 會像實際寫入一樣看到前面 jar 新增的內容，所以預覽與開始掃描的數字相同（jar 平行讀取、完成順序不固定，同一條目分散在多個 jar 且譯文不同時，兩次掃描各自的分類可能不同）。卡片說明在預覽時標示「預覽（未寫入）」（標題不變，避免截斷）；後台記錄的每個 jar 與最後一行摘要都用 `ingest_counts_text` 的同一組欄位。
+預覽也會把每個項目分成新增、補入新來源譯文、已存在略過、原文已變動、補上原文：分類規則在 `scan_ingest.py` 的 `ingest_groups`（原文已變動時除了 `record_src_change`，實際寫入的 `DbIngestTarget.record_variant` 還把新原文與這個項目隨附的譯文登記成條目的其他原文，預覽的 `PreviewIngestTarget` 不寫入），實際寫入用 `DbIngestTarget`、預覽用 `PreviewIngestTarget`（`TranslationDB.scan_preview_target` 只讀資料庫；還沒有資料庫時全部算新增）。預覽把這次掃描已「新增」的條目與譯文記在記憶體，後面的 jar 會像實際寫入一樣看到前面 jar 新增的內容，所以預覽與開始掃描的數字相同（jar 平行讀取、完成順序不固定，同一條目分散在多個 jar 且譯文不同時，兩次掃描各自的分類可能不同）。卡片說明在預覽時標示「預覽（未寫入）」（標題不變，避免截斷）；後台記錄的每個 jar 與最後一行摘要都用 `ingest_counts_text` 的同一組欄位。
 
 ### 條目校對與儲存
 
@@ -404,3 +404,7 @@ flowchart TD
 - 機翻最終狀態：有品質拒絕、來源回填、MAX_TOKENS、契約失敗、未解決的品質 retry 時（範圍內仍未翻譯的筆數只是統計，不單獨觸發警告），摘要狀態為 `DONE_WITH_WARNINGS`；`TaskSession.status` 仍是 `DONE`，後台「任務結束」紀錄會同時標出摘要狀態。單筆超出安全預算的政策（原文回填、不寫快取與資料庫）只套用於帶 `_batch_group` 的 Mod DB 項目。單筆超限只比較項目本身與設定的硬上限（不含提示詞、session 歷史與學到的輸出預算縮放）；JSON 不完整時只有供應商回報 MAX_TOKENS 才記為 MAX_TOKENS，其餘記為回應格式錯誤。
 - 取消：掃描、機翻與修復都以 `session.request_cancel()` 請求取消，已提交的批次保留。
 - 輪詢或畫面更新失敗時 `_abort_polling` 會恢復按鈕並顯示「畫面更新失敗」，不會永久停在執行中。
+
+## 條目詳情的其他原文
+
+條目詳情（`app/views/moddb/entry_metadata.py` 的 `build_entry_metadata`，由 `entries_panel` 傳入來源目錄）在「鍵值相同、原文不同」時列出「另有 N 個原文版本（流水線專用）」：每份其他原文（`TranslationDB.entry_detail` 的 `EntryDetail.variants`，`variants.entry_variants` 依資料庫共用優先序挑每份的生效譯文，新的在前）顯示原文，以及譯文與來源，或「尚無譯文」。這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，不影響上方的生效譯文。資料庫升級時 `schema._migrate_variant_backfill_v19` 呼叫 `variants.backfill_from_src_change`，把既有 `src_change` 登記成沒有譯文的其他原文（找不到條目或與主原文相同的略過，冪等）。

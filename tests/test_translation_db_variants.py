@@ -293,8 +293,8 @@ def test_write_back_same_batch_variants_and_blank_main_original(db):
     assert db._one("SELECT en_us FROM entry WHERE key='blank'")[0] == "Real Text"
 
 
-def test_v17_database_with_data_upgrades_to_v18_and_keeps_translations(tmp_path):
-    """舊資料庫（有資料、沒有變體表）升到 v18 後譯文仍在，並能開始寫變體。"""
+def test_v17_database_with_data_upgrades_and_keeps_translations(tmp_path):
+    """舊資料庫（有資料、沒有變體表）升級後譯文仍在，並能開始寫變體。"""
     import sqlite3
 
     path = tmp_path / "v17.db"
@@ -312,11 +312,153 @@ def test_v17_database_with_data_upgrades_to_v18_and_keeps_translations(tmp_path)
     try:
         assert (
             upgraded._one("SELECT value FROM meta WHERE key='schema_version'")[0]
-            == "18"
+            == "19"
         )
         assert upgraded._q("SELECT zh_tw FROM effective") == [("顯示背景",)]
         assert list(tmp_path.glob("v17.db.pre-schema-v18-*.bak"))
+        assert list(tmp_path.glob("v17.db.pre-schema-v19-*.bak"))
         stats = upgraded.write_back(VERSION, [_wb("Background Style", "背景樣式")])
         assert stats.variant_written == 1
     finally:
         upgraded.close()
+
+
+# ----------------------------------------------------------------- 掃描登記與回填
+def _scan_changed(db, en, tw="", cn="", source=None):
+    return db.ingest(
+        VERSION, [ScanItem(KIND_LANG, "foo", "item.foo.a", en, tw, cn, source)]
+    )
+
+
+def test_scan_registers_changed_original_as_variant_with_its_own_translation(db):
+    """掃描遇到原文變動：主原文與既有譯文不動，新原文與隨附的 jar 譯文存成變體。"""
+    _seed(db)
+    stats = _scan_changed(db, "Background Style", tw="背景樣式")
+    assert stats.en_changed == 1
+    assert db._q("SELECT en_us FROM entry") == [("Show Background",)]
+    assert db._q("SELECT zh_tw FROM effective") == [("顯示背景",)]
+    assert db._q(
+        "SELECT v.en_us, t.zh_tw, t.source FROM entry_variant v "
+        "JOIN variant_translation t ON t.variant_id = v.id"
+    ) == [("Background Style", "背景樣式", SRC_JAR_TW)]
+    hit = TranslationResolver(db, VERSION).lookup(
+        KIND_LANG, "foo", "item.foo.a", "Background Style"
+    )
+    assert hit is not None and hit.zh_tw == "背景樣式" and hit.source == SRC_JAR_TW
+
+
+def test_scan_without_translation_registers_pending_variant(db):
+    """沒有隨附譯文也登記新原文（供條目詳情顯示）；沒有譯文的變體不會被流水線讀到。"""
+    _seed(db)
+    _scan_changed(db, "Background Style")
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 1
+    assert db._one("SELECT COUNT(*) FROM variant_translation")[0] == 0
+    resolver = TranslationResolver(db, VERSION)
+    assert resolver.lookup(KIND_LANG, "foo", "item.foo.a", "Background Style") is None
+    # 重新掃描不重複登記，也不覆蓋已寫入的變體譯文
+    db.write_back(VERSION, [_wb("Background Style", "AI 譯")])
+    _scan_changed(db, "Background Style", tw="模組自帶")
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 1
+    assert sorted(r[0] for r in db._q("SELECT zh_tw FROM variant_translation")) == [
+        "AI 譯",
+        "模組自帶",
+    ]
+
+
+def test_scan_preview_does_not_register_variants(db):
+    _seed(db)
+    target = db.scan_preview_target(VERSION)
+    from translation_tool.translation_db.scan_ingest import preview_ingest_many
+
+    stats = preview_ingest_many(
+        target,
+        [
+            [
+                ScanItem(
+                    KIND_LANG, "foo", "item.foo.a", "Background Style", "背景樣式", ""
+                )
+            ]
+        ],
+        None,
+    )
+    assert stats[0].en_changed == 1
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 0
+
+
+def test_entry_detail_lists_variants_with_best_translation(db):
+    _seed(db)
+    _scan_changed(db, "Background Style")
+    _scan_changed(db, "Third Wording", tw="第三種")
+    db.write_back(VERSION, [_wb("Background Style", "AI 譯")])
+    eid = db._one("SELECT id FROM entry")[0]
+    rows = {v.en_us: v for v in db.entry_detail(eid).variants}
+    assert set(rows) == {"Background Style", "Third Wording"}
+    assert (
+        rows["Background Style"].zh_tw == "AI 譯"
+        and rows["Background Style"].source == SRC_AI
+    )
+    assert (
+        rows["Third Wording"].zh_tw == "第三種"
+        and rows["Third Wording"].source == SRC_JAR_TW
+    )
+
+
+def test_v19_migration_backfills_existing_src_change_once(tmp_path):
+    """既有 src_change 升級時登記成其他原文：略過找不到條目與同原文的紀錄，重複開啟不重複。"""
+    import sqlite3
+
+    path = tmp_path / "bf.db"
+    first = TranslationDB(path)
+    _seed(first)
+    first.close()
+    raw = sqlite3.connect(path)
+    raw.executemany(
+        "INSERT INTO src_change (kind, mc_version, mod_id, key, old_en, new_en) "
+        "VALUES (?,?,?,?,?,?)",
+        [
+            (
+                KIND_LANG,
+                VERSION,
+                "foo",
+                "item.foo.a",
+                "Show Background",
+                "Background Style",
+            ),
+            (
+                KIND_LANG,
+                VERSION,
+                "foo",
+                "item.foo.a",
+                "Show Background",
+                "Another Wording",
+            ),
+            (KIND_LANG, VERSION, "foo", "item.gone", "Old", "New"),  # 條目不存在
+            (
+                KIND_LANG,
+                VERSION,
+                "foo",
+                "item.foo.a",
+                "Old",
+                "Show Background",
+            ),  # 與主原文相同
+        ],
+    )
+    raw.execute("UPDATE meta SET value='18' WHERE key='schema_version'")
+    raw.commit()
+    raw.close()
+    upgraded = TranslationDB(path)
+    try:
+        assert sorted(r[0] for r in upgraded._q("SELECT en_us FROM entry_variant")) == [
+            "Another Wording",
+            "Background Style",
+        ]
+        assert upgraded._one("SELECT COUNT(*) FROM variant_translation")[0] == 0
+        assert upgraded._q("SELECT zh_tw FROM effective") == [("顯示背景",)]
+        assert list(tmp_path.glob("bf.db.pre-schema-v19-*.bak"))
+    finally:
+        upgraded.close()
+    again = TranslationDB(path)
+    try:
+        assert again._one("SELECT COUNT(*) FROM entry_variant")[0] == 2
+    finally:
+        again.close()

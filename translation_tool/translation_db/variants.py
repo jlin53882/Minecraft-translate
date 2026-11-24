@@ -14,6 +14,18 @@
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class VariantRow:
+    """條目的一份其他原文與目前生效的譯文（還沒有譯文時 ``zh_tw`` 為空）。"""
+
+    en_us: str
+    zh_tw: str
+    source: int | None
+    review_status: str | None
+    last_seen: str
 
 
 def tables_available(conn: sqlite3.Connection) -> bool:
@@ -88,6 +100,7 @@ def add_translation(
     en_us: str,
     source: int,
     zh_tw: str,
+    zh_cn: str = "",
 ) -> bool:
     """把譯文寫成條目某份其他原文的變體譯文（只新增、不覆蓋）。
 
@@ -95,8 +108,64 @@ def add_translation(
     """
     vid = ensure_variant(conn, entry_id, en_us)
     cursor = conn.execute(
-        "INSERT OR IGNORE INTO variant_translation (variant_id, source, zh_tw) "
-        "VALUES (?, ?, ?)",
-        (vid, source, zh_tw),
+        "INSERT OR IGNORE INTO variant_translation "
+        "(variant_id, source, zh_tw, zh_cn) VALUES (?, ?, ?, ?)",
+        (vid, source, zh_tw, zh_cn),
     )
     return bool(cursor.rowcount)
+
+
+def entry_variants(
+    conn: sqlite3.Connection, entry_id: int, group_expr: str, rank_expr: str
+) -> list[VariantRow]:
+    """條目的所有其他原文，新的在前；每份取優先序最高的譯文（沒有譯文則為空）。
+
+    ``group_expr``／``rank_expr`` 同 ``load_rows``。沒有變體表（舊 schema 唯讀開啟）回傳空串列。
+    """
+    if not tables_available(conn):
+        return []
+    rows = conn.execute(
+        f"""
+        SELECT v.id, v.en_us, v.last_seen, t.zh_tw, t.source, t.review_status,
+               {group_expr}, {rank_expr}
+        FROM entry_variant v
+        LEFT JOIN variant_translation t ON t.variant_id = v.id AND t.zh_tw <> ''
+        WHERE v.entry_id = ?
+        """,
+        (entry_id,),
+    ).fetchall()
+    best: dict[int, tuple[tuple[int, int], VariantRow]] = {}
+    for vid, en_us, last_seen, zh_tw, source, status, group, rank in rows:
+        # LEFT JOIN 沒有譯文時 group／rank 為 NULL：排在任何有譯文的列之後
+        order = (group, rank) if zh_tw is not None else (99, 99)
+        if vid not in best or order < best[vid][0]:
+            best[vid] = (
+                order,
+                VariantRow(en_us, zh_tw or "", source, status, last_seen),
+            )
+    ordered = sorted(
+        best.items(), key=lambda kv: (kv[1][1].last_seen, kv[0]), reverse=True
+    )
+    return [row for _vid, (_order, row) in ordered]
+
+
+def backfill_from_src_change(conn: sqlite3.Connection) -> tuple[int, int]:
+    """把既有 ``src_change``（原文變動紀錄）登記成條目的其他原文，回傳（新增, 略過）筆數。
+
+    只建立沒有譯文的變體（不連網、不改既有譯文）；找不到對應條目、或新原文與主原文相同的
+    紀錄略過。冪等：已登記的原文不重複建立。
+    """
+    if not tables_available(conn):
+        return 0, 0
+    total = int(conn.execute("SELECT COUNT(*) FROM src_change").fetchone()[0])
+    before = int(conn.execute("SELECT COUNT(*) FROM entry_variant").fetchone()[0])
+    conn.execute(
+        "INSERT OR IGNORE INTO entry_variant (entry_id, en_us, first_seen, last_seen) "
+        "SELECT e.id, sc.new_en, sc.detected_at, sc.detected_at FROM src_change sc "
+        "JOIN entry e ON e.kind = sc.kind AND e.mc_version = sc.mc_version "
+        "AND e.mod_id = sc.mod_id AND e.key = sc.key "
+        "WHERE sc.new_en <> '' AND sc.new_en <> e.en_us"
+    )
+    after = int(conn.execute("SELECT COUNT(*) FROM entry_variant").fetchone()[0])
+    created = after - before
+    return created, max(total - created, 0)

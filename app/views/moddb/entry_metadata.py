@@ -5,12 +5,13 @@ from __future__ import annotations
 import flet as ft
 
 from app.services_impl.moddb_service import EntryDetail, format_taipei_time, pack_label
+from app.services_impl.moddb_source_service import source_label
 from app.ui import kit
 from app.ui.design import C
 from app.views.moddb.formatting import kind_label
 
 
-def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
+def build_entry_metadata(detail: EntryDetail, catalog=None) -> list[ft.Control]:
     entry = detail.entry
     return [
         _key_row(entry.key),
@@ -19,7 +20,7 @@ def build_entry_metadata(detail: EntryDetail) -> list[ft.Control]:
         *(_origin_rows(detail.origins) if detail.origins else []),
         *(_reference_rows(detail.references) if detail.references else []),
         _time_row(entry),
-        *(_source_change(change.new_en) for change in detail.src_changes[:1]),
+        *(_variant_rows(detail, catalog)),
     ]
 
 
@@ -140,10 +141,42 @@ def _reference_rows(references) -> list[ft.Control]:
     ]
 
 
-def _source_change(new_en: str) -> ft.Control:
+def _variant_rows(detail: EntryDetail, catalog) -> list[ft.Control]:
+    """鍵值相同但原文不同的其他原文：每份列出原文與目前的譯文狀態。
+
+    這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，也不影響上方的生效譯文。
+    登記不到其他原文的舊紀錄（理論上不會發生）仍顯示最新一筆偵測到的新原文。
+    """
+    if not detail.variants:
+        return [_detected_change(change.new_en) for change in detail.src_changes[:1]]
+    return [
+        ft.Column(
+            [
+                kit.chip(
+                    f"另有 {len(detail.variants)} 個原文版本（流水線專用）", "gold"
+                ),
+                *(_variant_row(variant, catalog) for variant in detail.variants),
+            ],
+            spacing=6,
+        )
+    ]
+
+
+def _variant_row(variant, catalog) -> ft.Control:
+    if variant.zh_tw:
+        label = source_label(variant.source, catalog, variant.review_status)
+        status: ft.Control = kit.hint_text(f"譯文（{label}）：{variant.zh_tw}")
+    else:
+        status = kit.hint_text("尚無譯文：下次一鍵流水線或機器翻譯遇到時會翻譯")
+    return ft.Column(
+        [kit.mono_text(f"原文：{variant.en_us}", size=12), status], spacing=2
+    )
+
+
+def _detected_change(new_en: str) -> ft.Control:
     return ft.Column(
         [
-            kit.chip("掃描到原文已變動（尚未採用）", "gold"),
+            kit.chip("掃描到原文已變動", "gold"),
             kit.mono_text(f"新原文：{new_en}", size=12),
         ],
         spacing=4,
