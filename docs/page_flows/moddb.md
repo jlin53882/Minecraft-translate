@@ -101,7 +101,9 @@ config 與 KubeJS script pipeline。
 flowchart TD
     A["選取條目（select_entry：清單立刻標示、編輯區暫停用，背景讀 entry_detail 與影響預覽）"] --> B["編輯框輸入譯文（pending_text）"]
     B --> C["按「儲存」→ EntriesPanel._save → entry_writes.save_entry"]
-    C --> D["捕捉 entry、db、text、_flagged_batch 與同步旗標"]
+    C --> C2{"譯文與原文的特殊字元不一致？（needs_format_ack）"}
+    C2 -- 是，第一次 --> C3["只顯示提醒，不寫入；同一段文字再按一次才放行"]
+    C2 -- 否或已確認 --> D["捕捉 entry、db、text、_flagged_batch 與同步旗標"]
     D --> E["run_write 在背景執行 db.save_manual 與來源優先序檢查"]
     E --> F["run_task 排回 entry_save_result.apply_save_result"]
     F --> G{"有錯誤？"}

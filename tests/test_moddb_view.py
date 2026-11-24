@@ -1767,7 +1767,11 @@ def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries)
     panel._page._run_all_tasks()
     panel.tw_field.value = " §c警告§r %s\n第二行\n"
     panel._on_text_change()
-    panel._save()
+    panel._save()  # 與原文的特殊字元不一致（多了 §c／§r）：第一次只提醒，不寫入
+    panel._page._run_all_tasks()
+    assert "特殊字元不一致" in panel.saved_text.value
+    assert panel.db().get_entry(panel.selected.id).zh_tw != " §c警告§r %s\n第二行\n"
+    panel._save()  # 同一段文字再按一次才存入
     panel._page._run_all_tasks()
     stored = panel.db().get_entry(panel.selected.id).zh_tw
     assert stored == " §c警告§r %s\n第二行\n"

@@ -150,6 +150,7 @@ class EntriesPanel(ft.Column):
         self._render_source_catalog = None
         self._review_preview: list[ReviewPreviewItem] = []
         self._save_running = False
+        self._format_ack: tuple[int, str] | None = None
         self._select_ticket = 0
         self._post_refresh_message: str | None = None
         self._edit_debounce = Debouncer(lambda: self._page, EDIT_DEBOUNCE_SECONDS)

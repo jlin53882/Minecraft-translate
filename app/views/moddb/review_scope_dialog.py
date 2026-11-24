@@ -263,6 +263,10 @@ class ReviewScopeController:
             return
         if self._previewing:
             return  # 上一次審核範圍查詢還沒回來
+        warning = entry_writes.needs_format_ack(panel, entry, entry.zh_tw)
+        if warning:
+            show_snack(panel._page, warning, C.GOLD)
+            return
         propagate = bool(panel.sync_row.value)
         self._confirm_ticket += 1
         ticket = self._confirm_ticket

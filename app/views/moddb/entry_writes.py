@@ -10,6 +10,7 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any
 
+from app.services_impl.moddb_format_diff_service import analyze_format_diagnostics
 from app.tasks.operation_registry import (
     CancellationPolicy,
     CommitPolicy,
@@ -119,10 +120,40 @@ def _select_next_if_gone(panel, entry_id, selected_index) -> None:
 
 
 # ---------------------------------------------------------------- 手動儲存
+def needs_format_ack(panel, entry, text: str) -> str | None:
+    """譯文與原文的特殊字元不一致時，要求使用者對「同一段文字」再按一次才放行。
+
+    回傳要顯示的提醒文字；沒有問題、或同一段文字已經確認過時回傳 None。
+    人工編輯不強制擋下（使用者可能刻意調整），但不能在沒注意到的情況下存入或審核。
+    """
+    if not entry.en_us or not text.strip():
+        panel._format_ack = None
+        return None
+    result = analyze_format_diagnostics(entry.en_us, text, kind=entry.kind)
+    if not result.has_issues:
+        panel._format_ack = None
+        return None
+    if panel._format_ack == (entry.id, text):
+        panel._format_ack = None  # 已確認：這一次放行
+        return None
+    panel._format_ack = (entry.id, text)
+    detail = "、".join([*result.legacy_messages, *result.extra_guide_issues][:3])
+    return (
+        "譯文與原文的特殊字元不一致"
+        + (f"（{detail}）" if detail else "")
+        + "；確定要這樣處理，請再按一次"
+    )
+
+
 def save_entry(panel) -> None:
     entry, db = panel.selected, panel.db()
     text = panel.pending_text()
     if entry is None or db is None or not text or panel._save_running:
+        return
+    warning = needs_format_ack(panel, entry, text)
+    if warning:
+        panel.saved_text.value = warning
+        update_regions(panel.saved_text)
         return
     flagged_batch = panel._flagged_batch
     propagate = bool(panel.sync_row.value)
