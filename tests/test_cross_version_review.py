@@ -242,6 +242,58 @@ def test_apply_reference_and_stale_guard(db):
     assert _entry(db, "26.1", "k").zh_tw == "明亮"
 
 
+_FMT_EN = "§6Gold %s ingot"
+_FMT_BAD = "黃金錠"  # 少了 §6 與 %s
+
+
+def _seed_reviewed_bad_format(db):
+    db.ingest("1.20.1", [_item("k", _FMT_EN, "")])
+    eid = _entry(db, "1.20.1", "k").id
+    db.save_manual(eid, _FMT_BAD, propagate=False)
+    db.review_manual(eid, expected_zh_tw=_FMT_BAD, propagate=False)
+
+
+def test_auto_reuse_skips_reference_with_format_issues(db):
+    """參考譯文少了色碼／格式符號：自動沿用不寫入，只計數。"""
+    _seed_reviewed_bad_format(db)
+    ids = _import(db, "26.1", [_item("k", _FMT_EN, "")])
+
+    result = db.reuse_reviewed_translations("26.1", entry_ids=ids)
+
+    assert (result.applied, result.quality_blocked) == (0, 1)
+    assert _entry(db, "26.1", "k").zh_tw != _FMT_BAD
+
+
+def test_auto_reuse_still_applies_a_format_clean_reference(db):
+    db.ingest("1.20.1", [_item("k", _FMT_EN, "")])
+    eid = _entry(db, "1.20.1", "k").id
+    good = "§6黃金%s錠"
+    db.save_manual(eid, good, propagate=False)
+    db.review_manual(eid, expected_zh_tw=good, propagate=False)
+    ids = _import(db, "26.1", [_item("k", _FMT_EN, "")])
+
+    result = db.reuse_reviewed_translations("26.1", entry_ids=ids)
+
+    assert (result.applied, result.quality_blocked) == (1, 0)
+    assert _entry(db, "26.1", "k").zh_tw == good
+
+
+def test_manual_apply_needs_explicit_confirmation_for_format_issues(db):
+    _seed_reviewed_bad_format(db)
+    db.ingest("26.1", [_item("k", _FMT_EN, "")])
+    row = db.list_cross_version_differences("26.1")[0]
+
+    blocked = db.apply_cross_version_references([_apply_item(row)])
+    assert (blocked.applied, blocked.quality_blocked) == (0, 1)
+    assert _entry(db, "26.1", "k").zh_tw != _FMT_BAD
+
+    confirmed = db.apply_cross_version_references(
+        [ApplyItem.from_row(row, row.reference, confirmed_quality=True)]
+    )
+    assert (confirmed.applied, confirmed.quality_blocked) == (1, 0)
+    assert _entry(db, "26.1", "k").zh_tw == _FMT_BAD
+
+
 def test_apply_is_stale_when_the_target_became_reviewed_in_between(db):
     """畫面上目標是未審核；套用前同一段譯文被標為已審核 → 不可覆寫（文字沒變也一樣）。"""
     _seed_reviewed(db, text="亮色")

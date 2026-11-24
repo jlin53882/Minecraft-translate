@@ -208,3 +208,20 @@ def test_version_diff_mod_options_list_only_mods_with_differences(monkeypatch):
     dialog._loaded(1, [], ["alpha", "beta", "gamma"], None, None, (key, "beta", None))
     assert shown[-1] == [vdd.ALL_MODS, "beta"]
     assert dialog._mod_options.options(None) == []
+
+
+def test_single_apply_asks_again_when_the_reference_breaks_format_tokens():
+    """參考譯文少了原文的色碼：逐筆套用要再按一次確認，並以明確確認的項目送出。"""
+    dialog = _bare_dialog()
+    ref = VersionRef(2, "1.20.1", "參考", 1, "", "", mod_id="m", en_us="§6New")
+    row = CrossVersionRow(
+        1, KIND_LANG, "m", "k", "§6New", "目標", 1, False, (ref,), 1, False
+    )
+
+    dialog._apply_one(row, ref)
+    assert dialog.applied == [] and dialog._confirm_row == (1, 2)
+    assert "特殊字元" in dialog._apply_label(row, ref)
+
+    dialog._apply_one(row, ref)
+    assert len(dialog.applied) == 1
+    assert dialog.applied[0][0].confirmed_quality is True

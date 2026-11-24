@@ -902,6 +902,9 @@ class SameTextReviewDialog:
             f"、已審核未覆蓋 {result.skipped_reviewed} 筆"
             if result.skipped_reviewed
             else "",
+            f"、特殊字元與原文不一致未統一 {result.quality_blocked} 筆（請先修正統一譯文）"
+            if result.quality_blocked
+            else "",
         ]
         show_snack(
             self.page, f"已統一 {format_count(result.applied)} 筆{''.join(notes)}", C.EM

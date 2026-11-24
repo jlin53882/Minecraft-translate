@@ -176,6 +176,53 @@ def test_stage1_does_not_apply_database_value_equal_to_english(tmp_path, monkeyp
         assert provenance == {}
 
 
+def test_stage1_rejects_database_value_with_missing_format_tokens(
+    tmp_path, monkeypatch
+):
+    """資料庫譯文少了色碼／格式符號時，不可寫進合併輸出，條目留在待翻譯。"""
+    db_path = tmp_path / "bad-format.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.gold",
+                "§6Gold %s ingot",
+                "黃金錠",  # 少了 §6 與 %s
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.ok",
+                "§6Gold %s ingot",
+                "§6黃金%s錠",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path)
+
+    with merge_db_fill(use_db=True, version="1.21.1") as fill:
+        assert fill is not None
+        final, remaining, hits = fill.fill(
+            "foo",
+            {},
+            {
+                "item.foo.gold": "§6Gold %s ingot",
+                "item.foo.ok": "§6Gold %s ingot",
+            },
+        )
+        assert final == {"item.foo.ok": "§6黃金%s錠"}
+        assert remaining == {"item.foo.gold": "§6Gold %s ingot"}
+        assert hits == 1
+        assert fill.rejected_quality == 1
+        assert "item.foo.gold" in fill.rejected_quality_samples[0]
+
+
 def test_stage2_keeps_database_noop_in_pending_instead_of_assets(tmp_path, monkeypatch):
     """Stage 2 也必須把資料庫 no-op 留在待翻譯，不得寫入資源包 assets。"""
     db_path = tmp_path / "stage2-same-as-source.db"

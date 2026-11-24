@@ -43,6 +43,7 @@ from .content_identity import (
     pack_scope_of,
 )
 from .jar_english import jar_english, same_jar_english
+from .quality import translation_issues
 from .query_interrupt import QueryCancelled
 from .schema import KIND_KUBEJS_LANG, SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import (
@@ -152,9 +153,17 @@ class ApplyItem:
     expected_target_reviewed: bool
     expected_target_revision: int | None
     expected_ref_revision: int
+    # 參考譯文的特殊字元與目標原文不一致時，使用者已明確確認仍要套用
+    confirmed_quality: bool = False
 
     @classmethod
-    def from_row(cls, row: CrossVersionRow, ref: VersionRef) -> ApplyItem:
+    def from_row(
+        cls,
+        row: CrossVersionRow,
+        ref: VersionRef,
+        *,
+        confirmed_quality: bool = False,
+    ) -> ApplyItem:
         """以畫面上的一列與選定的參考建立套用項目。"""
         return cls(
             row.entry_id,
@@ -166,6 +175,7 @@ class ApplyItem:
             row.target_reviewed,
             row.target_revision,
             ref.revision,
+            confirmed_quality,
         )
 
 
@@ -181,6 +191,7 @@ class ReuseResult:
     )
     jar_english: int = 0  # ``applied`` 之中，原文不同但 jar 英文相同而沿用的筆數
     stale: int = 0  # 套用時畫面資料已過期而略過
+    quality_blocked: int = 0  # 參考譯文的特殊字元與目標原文不一致，未寫入（逐筆套用可明確確認）
     history_id: int | None = None  # 任一筆歷史編號，可傳給 ``TranslationDB.revert``
     entry_ids: list[int] = field(default_factory=list)
 
@@ -950,6 +961,16 @@ def reuse_reviewed(
     return result
 
 
+def reference_issues(row: CrossVersionRow, ref: VersionRef) -> list[str]:
+    """參考譯文與「目標」原文的格式差異（色碼、佔位符、換行、指南標記）；沒有差異回傳空串列。
+
+    沿用一律以目標的原文對照：原文不同但 jar 英文相同的條目，目標原文才是寫入後實際比對的基準。
+    """
+    if not row.en_us:
+        return []
+    return translation_issues(row.en_us, ref.zh_tw, kind=row.kind)
+
+
 def _reuse_one(
     db: TranslationDB,
     conn: sqlite3.Connection,
@@ -966,6 +987,8 @@ def _reuse_one(
         result.conflicts += 1
     elif row.target_reviewed:
         result.skipped_reviewed += 1
+    elif reference_issues(row, row.reference):
+        result.quality_blocked += 1  # 不自動沿用格式有問題的譯文；留給差異審核逐筆確認
     else:
         hid = _write_reference(db, conn, row, row.reference, batch, actor)
         result.applied += 1
@@ -993,6 +1016,9 @@ def apply_references(
                 result.stale += 1
                 continue
             row, ref = current
+            if not item.confirmed_quality and reference_issues(row, ref):
+                result.quality_blocked += 1
+                continue
             hid = _write_reference(db, conn, row, ref, batch, actor)
             result.applied += 1
             result.entry_ids.append(row.entry_id)

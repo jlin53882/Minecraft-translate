@@ -72,6 +72,7 @@ from translation_tool.translation_db.cross_version_review import (
     ApplyItem,
     CrossVersionRow,
     VersionRef,
+    reference_issues,
 )
 from translation_tool.translation_db.models import QUALITY_TOKEN_CATEGORIES
 from translation_tool.translation_db.quality import token_issues, whitespace_note
@@ -139,6 +140,7 @@ __all__ = [
     "STATUS_NOT_FOUND",
     "STATUS_RATE_LIMITED",
     "ApplyItem",
+    "reference_issues",
     "BatchReplaceChange",
     "BatchReplacePlan",
     "BatchReplaceResult",
@@ -430,6 +432,7 @@ def _reuse_reviewed_after_scan(session, db, options, report) -> None:
     report.reuse_conflicts = result.conflicts
     report.reuse_skipped_reviewed = result.skipped_reviewed
     report.reuse_source_changed = result.source_changed
+    report.reuse_quality_blocked = result.quality_blocked
     report.reuse_jar_english = result.jar_english
     report.reuse_history_id = result.history_id
     session.set_summary(report.as_dict())
@@ -438,6 +441,7 @@ def _reuse_reviewed_after_scan(session, db, options, report) -> None:
         or result.conflicts
         or result.skipped_reviewed
         or result.source_changed
+        or result.quality_blocked
     ):
         _log_both(
             session,
@@ -449,8 +453,9 @@ def _reuse_reviewed_after_scan(session, db, options, report) -> None:
             )
             + "、"
             f"衝突未處理 {result.conflicts:,} 筆、目標已審核保留 "
-            f"{result.skipped_reviewed:,} 筆、原文不同待判斷 {result.source_changed:,} 筆"
-            "（可到「版本差異審核」檢視與復原）",
+            f"{result.skipped_reviewed:,} 筆、原文不同待判斷 {result.source_changed:,} 筆、"
+            f"特殊字元與原文不一致未沿用 {result.quality_blocked:,} 筆"
+            "（可到「版本差異審核」檢視、逐筆確認與復原）",
         )
 
 

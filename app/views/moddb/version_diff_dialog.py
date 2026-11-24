@@ -18,6 +18,7 @@ from app.services_impl.moddb_service import (
     QueryCancelled,
     VersionRef,
     pack_label,
+    reference_issues,
 )
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.tasks.operation_registry import (
@@ -718,15 +719,15 @@ class VersionDiffDialog:
         )
 
     def _apply_label(self, row: CrossVersionRow, ref: VersionRef) -> str:
-        if self._needs_confirm(row) and self._confirm_row == (
+        if self._needs_confirm(row, ref) and self._confirm_row == (
             row.entry_id,
             ref.entry_id,
         ):
-            return (
-                "確認覆蓋已審核譯文並套用"
-                if row.target_reviewed
-                else "確認套用（原文不同）"
-            )
+            if row.target_reviewed:
+                return "確認覆蓋已審核譯文並套用"
+            if reference_issues(row, ref):
+                return "確認套用（特殊字元與原文不一致）"
+            return "確認套用（原文不同）"
         if row.conflict:
             return f"套用 {_ref_name(row.kind, ref)} 的譯文"
         return "套用參考譯文"
@@ -794,18 +795,25 @@ class VersionDiffDialog:
 
     # ------------------------------------------------------------------ 動作
     @staticmethod
-    def _needs_confirm(row: CrossVersionRow) -> bool:
-        """覆蓋已審核譯文，或參考譯文是針對不同原文寫的：逐筆套用也要再按一次確認。"""
-        return row.target_reviewed or row.source_changed
+    def _needs_confirm(row: CrossVersionRow, ref: VersionRef | None = None) -> bool:
+        """覆蓋已審核譯文、參考譯文是針對不同原文寫的，或參考譯文的特殊字元與原文不一致：
+        逐筆套用也要再按一次確認。"""
+        return bool(
+            row.target_reviewed
+            or row.source_changed
+            or (ref is not None and reference_issues(row, ref))
+        )
 
     def _apply_one(self, row: CrossVersionRow, ref: VersionRef) -> None:
         token = (row.entry_id, ref.entry_id)
-        if self._needs_confirm(row) and self._confirm_row != token:
+        if self._needs_confirm(row, ref) and self._confirm_row != token:
             self._confirm_row = token
             self._render()
             return
         self._confirm_row = None
-        item = ApplyItem.from_row(row, ref)
+        item = ApplyItem.from_row(
+            row, ref, confirmed_quality=bool(reference_issues(row, ref))
+        )
         self._apply([item], "套用參考譯文")
 
     def _toggle_row(self, row: CrossVersionRow, event) -> None:
@@ -890,7 +898,16 @@ class VersionDiffDialog:
         self.last_history_id = result.history_id
         self.revert_btn.visible = bool(result.applied)
         stale = f"、已過期略過 {result.stale} 筆" if result.stale else ""
-        show_snack(self.page, f"已套用 {format_count(result.applied)} 筆{stale}", C.EM)
+        blocked = (
+            f"、特殊字元與原文不一致略過 {result.quality_blocked} 筆（可逐筆確認後套用）"
+            if result.quality_blocked
+            else ""
+        )
+        show_snack(
+            self.page,
+            f"已套用 {format_count(result.applied)} 筆{stale}{blocked}",
+            C.GOLD if result.quality_blocked else C.EM,
+        )
         self._after_write()
 
     def _keep_target(self, row: CrossVersionRow) -> None:
