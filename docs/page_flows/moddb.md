@@ -407,4 +407,4 @@ flowchart TD
 
 ## 條目詳情的其他原文
 
-條目詳情（`app/views/moddb/entry_metadata.py` 的 `build_entry_metadata`，由 `entries_panel` 傳入來源目錄）在「鍵值相同、原文不同」時列出「另有 N 個原文版本（流水線專用）」：每份其他原文（`TranslationDB.entry_detail` 的 `EntryDetail.variants`，`variants.entry_variants` 依資料庫共用優先序挑每份的生效譯文，新的在前）顯示原文，以及譯文與來源，或「尚無譯文」。這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，不影響上方的生效譯文。資料庫升級時 `schema._migrate_variant_backfill_v19` 呼叫 `variants.backfill_from_src_change`，把既有 `src_change` 登記成沒有譯文的其他原文（找不到條目或與主原文相同的略過，冪等）。
+條目詳情（`app/views/moddb/entry_metadata.py` 的 `build_entry_metadata`，由 `entries_panel` 傳入來源目錄）在「鍵值相同、原文不同」時列出「另有 N 個原文版本（流水線專用）」：每份其他原文（`TranslationDB.entry_detail` 的 `EntryDetail.variants`，`variants.entry_variants` 依資料庫共用優先序挑每份的生效譯文，新的在前）顯示原文，以及譯文與來源，或「尚無譯文」；最多展開 `MAX_VARIANTS_SHOWN` 份、每份原文與譯文最多 `MAX_VARIANT_CHARS` 字，其餘收合成「另有 N 份較舊的原文未展開」，避免長段落把儲存與審核按鈕推到畫面外。這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，不影響上方的生效譯文。資料庫升級時 `schema._migrate_variant_backfill_v19` 呼叫 `variants.backfill_from_src_change`，把既有 `src_change` 登記成沒有譯文的其他原文（找不到條目或與主原文相同的略過，冪等）。

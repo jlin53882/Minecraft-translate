@@ -490,3 +490,65 @@ def test_kubejs_companion_translation_attaches_to_changed_original(db, companion
         KIND_KUBEJS_LANG, "ns@pack@h", "k", "New Text"
     )
     assert hit is not None and hit.zh_tw == "新文字"
+
+
+def test_entry_variants_pick_priority_winner_newest_first_and_track_last_seen(db):
+    """詳情的變體：每份取優先序最高的譯文、新的在前，重掃會更新 last_seen。"""
+    _seed(db)
+    _scan_changed(db, "Old Variant", tw="舊變體")
+    _scan_changed(db, "New Variant", tw="新變體", cn="")
+    # 兩個變體都再補一筆 AI 譯文；優先序（預設）是 jar 繁中先於 AI
+    db.write_back(VERSION, [_wb("Old Variant", "舊 AI"), _wb("New Variant", "新 AI")])
+    with db._tx() as conn:
+        conn.execute(
+            "UPDATE entry_variant SET last_seen='2000-01-01 00:00:00' WHERE en_us='Old Variant'"
+        )
+    eid = db._one("SELECT id FROM entry")[0]
+    rows = db.entry_detail(eid).variants
+    assert [v.en_us for v in rows] == ["New Variant", "Old Variant"]  # 新的在前
+    assert [(v.zh_tw, v.source) for v in rows] == [
+        ("新變體", SRC_JAR_TW),
+        ("舊變體", SRC_JAR_TW),
+    ]  # jar 繁中勝過 AI
+
+    _scan_changed(db, "Old Variant")  # 重掃：last_seen 更新、順序隨之改變
+    assert (
+        db._one("SELECT last_seen FROM entry_variant WHERE en_us='Old Variant'")[0]
+        > "2000-01-01 00:00:00"
+    )
+
+
+def test_scan_preview_matches_real_ingest_for_kubejs_companion_items(tmp_path):
+    """KubeJS／FTB 伴隨項目：預覽與實際寫入的分類統計完全一致，預覽不寫入。"""
+    from translation_tool.translation_db.scan_ingest import preview_ingest_many
+
+    def make(path):
+        d = TranslationDB(path)
+        d.ingest(
+            VERSION, [ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "k", "Old Text", "", "")]
+        )
+        d.ingest(
+            VERSION, [ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "j", "Same", "", "")]
+        )
+        return d
+
+    batch = [
+        ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "k", "New Text", "", ""),
+        ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "k", "", "新文字", ""),
+        ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "j", "Same", "", ""),
+        ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "n", "Brand New", "", ""),
+        ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "n", "", "全新", ""),
+    ]
+    real_db = make(tmp_path / "real.db")
+    preview_db = make(tmp_path / "preview.db")
+    try:
+        preview = preview_ingest_many(
+            preview_db.scan_preview_target(VERSION), [batch], None
+        )[0]
+        real = real_db.ingest(VERSION, batch)
+        assert preview == real
+        assert preview_db._one("SELECT COUNT(*) FROM entry_variant")[0] == 0
+        assert real_db._one("SELECT COUNT(*) FROM entry_variant")[0] == 1
+    finally:
+        real_db.close()
+        preview_db.close()

@@ -564,7 +564,7 @@ class EntryDetail:
 
 @dataclass(frozen=True)
 class SrcChangeRow:
-    """掃描時發現、尚未採用的原文變動（資料庫仍保留舊原文）。"""
+    """掃描或寫回時發現的原文變動歷史（主原文維持舊原文，新原文另存為其他原文）。"""
 
     old_en: str
     new_en: str
