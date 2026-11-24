@@ -29,6 +29,7 @@ from translation_tool.core.book_dirs import find_book_dir_index
 from translation_tool.core.book_formats import is_neutral_pages_candidate
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
+    extract_meta_entries,
     has_translatable_text,
 )
 from translation_tool.core.lang_codec import parse_lang_text
@@ -628,6 +629,43 @@ def _aligned_blocks(
     return other
 
 
+class _MetaBlocks:
+    """``_meta.json`` 的區塊：原文決定順序，譯文依鍵對上原文的區塊（缺的鍵為空字串）。"""
+
+    def __init__(self, zf: zipfile.ZipFile, budget: ZipReadBudget) -> None:
+        self._zf, self._budget = zf, budget
+        self._paths: list[str] | None = None
+
+    def _entries(self, member: str | None) -> list[tuple[str, str]] | None:
+        if member is None:
+            return None
+        try:
+            text = read_limited(self._zf, member, budget=self._budget).decode(
+                "utf-8-sig"
+            )
+        except UnicodeDecodeError:
+            return None
+        return extract_meta_entries(text)
+
+    def source(self, member: str | None) -> list[str] | None:
+        entries = self._entries(member)
+        if entries is None:
+            return None
+        self._paths = [path for path, _text in entries]
+        return [text for _path, text in entries]
+
+    def translation(
+        self, _zf: zipfile.ZipFile, _budget: ZipReadBudget, member: str | None
+    ) -> list[str] | None:
+        entries = self._entries(member)
+        if entries is None:
+            return None
+        if self._paths is None:  # 沒有原文：譯文自己的順序
+            return [text for _path, text in entries]
+        found = dict(entries)
+        return [found.get(path, "") for path in self._paths]
+
+
 def _guide_items(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -637,19 +675,22 @@ def _guide_items(
 ) -> list[ScanItem]:
     """指南（.md／.txt）：每個可翻譯段落一個條目，鍵值是 ``檔案鍵#段落序號``。"""
     kind, mod_id, file_key = ident_key
-    en = _read_blocks(zf, budget, members.get("en_us"))
+    read, align = _read_blocks, _aligned_blocks
+    if file_key.endswith("/_meta.json"):
+        # Oracle Index 選單：譯文依鍵對應原文（譯文可以缺鍵或換順序），不靠段落數
+        meta = _MetaBlocks(zf, budget)
+        en = meta.source(members.get("en_us"))
+        read, align = meta.translation, lambda _en, other, _member: other
+    else:
+        en = read(zf, budget, members.get("en_us"))
     if en is None and not options.translated:
         return []  # 掃描 jar 以原文為準；沒有原文就沒有可匯入的條目
     tw = cn = None
     # 翻譯 ZIP 固定讀 zh_tw；zh_cn 只在使用者開啟「讀取自帶 zh_cn」時讀取。
     if options.read_jar_translations or options.translated:
-        tw = _aligned_blocks(
-            en, _read_blocks(zf, budget, members.get("zh_tw")), members.get("zh_tw")
-        )
+        tw = align(en, read(zf, budget, members.get("zh_tw")), members.get("zh_tw"))
     if options.read_jar_translations:
-        cn = _aligned_blocks(
-            en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
-        )
+        cn = align(en, read(zf, budget, members.get("zh_cn")), members.get("zh_cn"))
     if en is None and tw is not None and cn is not None and len(tw) != len(cn):
         # 沒有原文可對齊，繁中與簡中段落數不同就無法逐段對應：只匯入繁中
         log_info(

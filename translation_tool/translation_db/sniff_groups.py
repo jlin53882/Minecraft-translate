@@ -102,8 +102,8 @@ def _kind_of(
     path_format = resolve_book_format(member)
     if is_unsupported_format(path_format):
         return None
-    if path_format.name == FORMAT_ORACLE_INDEX and member.lower().endswith(".mdx"):
-        return KIND_GUIDE  # 路徑已確認是 Oracle 書的頁面，不必再靠內容判斷
+    if path_format.name == FORMAT_ORACLE_INDEX:
+        return KIND_GUIDE  # 路徑已確認是 Oracle 書的頁面或選單（_meta.json），不必再靠內容判斷
     try:
         raw = read_limited(zf, member, budget=budget)
     except ArchiveBudgetError:

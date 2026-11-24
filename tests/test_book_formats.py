@@ -360,3 +360,41 @@ def test_invalid_neutral_pages_merge_is_quarantined(tmp_path: Path, monkeypatch)
         (output_dir / "patchouli_output" / "待翻譯").rglob("herbs.json")
     )
     assert list((output_dir / "errordata_output").rglob("herbs.json"))
+
+
+def test_oracle_meta_names_are_paired_by_key(tmp_path: Path):
+    jar = tmp_path / "oracle_meta.jar"
+    base = "assets/oracle_index/books/b"
+    source = {
+        "arcane": "Arcane",
+        "empty": "",
+        "nested": {"name": "Getting Started", "icon": None},
+        "machines": "Machines",
+    }
+    translated = {"machines": "機器", "nested": {"name": "開始使用"}, "arcane": "奧術"}
+    with zipfile.ZipFile(jar, "w") as archive:
+        archive.writestr(f"{base}/content/_meta.json", json.dumps(source))
+        archive.writestr(
+            f"{base}/translated/zh_tw/content/_meta.json",
+            json.dumps(translated, ensure_ascii=False),
+        )
+        archive.writestr(f"{base}/data/recipes.json", json.dumps({"a": "Not Text"}))
+
+    result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
+    assert result.error == ""
+    metas = {i.en_us: i.zh_tw for i in result.items if i.kind == "guide"}
+    assert metas == {
+        "Arcane": "奧術",
+        "Getting Started": "開始使用",
+        "Machines": "機器",
+    }
+    assert {i.key.split("#")[0] for i in result.items} == {"books/b/content/_meta.json"}
+
+
+def test_meta_entries_skip_empty_values_and_extra_fields():
+    from translation_tool.core.guide_blocks import extract_meta_entries
+
+    text = json.dumps({"a": "A", "b": "", "c": {"name": "C", "icon": "x"}, "d": 3})
+    assert extract_meta_entries(text) == [("a", "A"), ("c/name", "C")]
+    assert extract_meta_entries("[1]") is None
+    assert extract_meta_entries("{bad") is None

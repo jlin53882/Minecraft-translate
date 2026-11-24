@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
-from translation_tool.core.oracle_index import is_translatable_page
+from translation_tool.core.oracle_index import (
+    is_translatable_meta,
+    is_translatable_page,
+)
 from translation_tool.core.text_sniffer import (
     BOOK_ID_FIELDS,
     VANILLA_NON_TEXT_DIRS,
@@ -138,7 +141,8 @@ def resolve_book_format(
     if any(part in BOOK_EXCLUDED_DIRS for part in content_dirs):
         return BookFormatResolution(FORMAT_UNKNOWN, False, "known_non_book_directory")
     if namespace == "oracle_index" or "oracle_index" in content_dirs:
-        if is_translatable_page("/".join(parts)):
+        joined = "/".join(parts)
+        if is_translatable_page(joined) or is_translatable_meta(joined):
             return BookFormatResolution(FORMAT_ORACLE_INDEX, True, "oracle_index_page")
         return BookFormatResolution(
             FORMAT_ORACLE_INDEX, False, "oracle_index_not_a_page"

@@ -2,8 +2,8 @@
 
 Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `assets/oracle_index/books/<書>/`：頁面是 `.mdx`，每個資料夾的選單名稱放在 `_meta.json`。
 路徑規則集中在 `translation_tool/core/oracle_index.py`（純函式，不讀檔案、不翻譯、不寫檔），測試在 `tests/test_oracle_index.py`。
-掃描與配對已接上：`book_formats.py` 把內容與文件區的 `.mdx` 頁面視為可翻譯的指南（`resolve_book_format`、`is_unsupported_format`），素材、`data/` 與 `_meta.json` 仍不進通用流程。
-`_meta.json` 的抽取與譯文輸出尚未接上。
+掃描與配對已接上：`book_formats.py` 把內容與文件區的 `.mdx` 頁面視為可翻譯的指南（`resolve_book_format`、`is_unsupported_format`），`_meta.json` 的選單名稱也進同一個指南流程；素材與 `data/` 仍不進通用流程。
+譯文輸出尚未接上。
 
 契約依據 Oracle Index 1.4.1，以反組譯確認；整合包內會用到它的書是 Oritech（新版版面）與 mffs（舊版版面）。
 
@@ -36,6 +36,12 @@ Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `ass
 - `_kind_of`（`sniff_groups.py`）對 Oracle 頁面不再靠內容判斷，路徑確認是頁面就是指南。
 - `.mdx` 頁面 front matter 最上層的 `title:` 與內文段落一起抽取，標題區塊排在所有段落之後（`guide_blocks.extract_guide_blocks`）；其他副檔名仍只抽 `navigation.title`。
 
+## 選單（`_meta.json`）
+
+- `extract_meta_entries` 依檔案順序取出顯示名稱：字串值的路徑是鍵，物件值（含 `name`）的路徑是 `鍵/name`；空字串與 `icon` 等其他欄位不收。
+- 掃描時（`scanner._MetaBlocks`）譯文依路徑對上原文，譯文缺的鍵填空字串，不像一般指南那樣要求區塊數相同。條目鍵是 `books/<書>/<原文相對路徑>#<序號>`。
+- 輸出時必須保留原檔的全部鍵，空字串值維持空字串。
+
 ## 哪些要翻、哪些不能動
 
 - 要翻：內容與文件區的 `.mdx` 頁面與 `_meta.json`（`is_translatable_source`）。
@@ -61,7 +67,7 @@ Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `ass
 | 舊版書根目錄的頁面歸為文件模式 | 由反組譯推論 |
 | `schema` 寫成數字 `1` 視為新版 | 由 Gson 行為推論 |
 | `type` 欄位未被讀取 | 由找不到使用處推論 |
-| 掃描 Oritech／mffs 的 jar：原文頁與 `translated/<語系>/` 譯文頁配對、`title:` 抽出 | 已用真實 jar 驗證 |
+| 掃描 Oritech／mffs 的 jar：原文頁與 `translated/<語系>/` 譯文頁配對、`title:` 與 `_meta.json` 名稱抽出（Oritech 186 筆、zh_cn 對上 182 筆；mffs 15 筆） | 已用真實 jar 驗證 |
 | 遊戲內實際顯示 `translated/zh_tw/` 的選單與頁面 | 未實機驗證 |
 
 ## 更新 Oracle Index 時的重新驗證

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -262,3 +263,26 @@ def front_title_line(prefix: str, translated: str) -> str:
     if _YAML_SPECIAL.search(flat):
         flat = '"' + flat.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return prefix + flat
+
+
+def extract_meta_entries(text: str) -> list[tuple[str, str]] | None:
+    """Oracle Index ``_meta.json`` 的顯示名稱：``[(路徑, 文字)]``，依檔案內的順序。
+
+    值是字串時路徑是鍵，值是含 ``name`` 的物件時路徑是 ``鍵/name``；空字串（顯示時退回頁面標題）
+    與其他欄位（``icon`` 等）不收。JSON 無法解析或不是物件時回傳 None。
+    """
+    try:
+        data = json.loads(text, strict=False)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    entries: list[tuple[str, str]] = []
+    for key, value in data.items():
+        if isinstance(value, str) and value.strip():
+            entries.append((key, value))
+        elif isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str) and name.strip():
+                entries.append((f"{key}/name", name))
+    return entries

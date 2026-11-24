@@ -229,18 +229,23 @@ def infer_layout(path: str) -> Layout:
     return Layout.LEGACY
 
 
+def _content_member(path: str) -> OracleMember | None:
+    member = parse_member(path, infer_layout(path))
+    if member is not None and member.section in (Section.CONTENT, Section.DOCS):
+        return member
+    return None
+
+
 def is_translatable_page(path: str) -> bool:
     """內容或文件區的 ``.mdx`` 頁面（原文或譯文）。"""
-    member = parse_member(path, infer_layout(path))
-    return (
-        member is not None
-        and member.is_page
-        and member.section
-        in (
-            Section.CONTENT,
-            Section.DOCS,
-        )
-    )
+    member = _content_member(path)
+    return member is not None and member.is_page
+
+
+def is_translatable_meta(path: str) -> bool:
+    """內容或文件區的 ``_meta.json``（原文或譯文）：選單顯示名稱。"""
+    member = _content_member(path)
+    return member is not None and member.is_meta
 
 
 def split_translated(parts: Sequence[str]) -> tuple[str, str] | None:
