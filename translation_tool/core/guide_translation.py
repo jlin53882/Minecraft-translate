@@ -411,9 +411,17 @@ def render_guide(doc: dict) -> str:
             return str(doc["source"])
         return apply_meta_translations(str(doc["source"]), doc["blocks"])
     lines = str(doc["source"]).splitlines()
-    for (start, end), prefix, original, current in zip(
-        doc["ranges"], doc["prefixes"], doc["originals"], doc["blocks"], strict=True
-    ):
+    placements = list(
+        zip(
+            doc["ranges"],
+            doc["prefixes"],
+            doc["originals"],
+            doc["blocks"],
+            strict=True,
+        )
+    )
+    # 譯文行數與原文不同時會插入／刪除行，由後往前套用才不會讓前面段落的行號位移
+    for (start, end), prefix, original, current in reversed(placements):
         if current == original:
             continue
         if prefix:

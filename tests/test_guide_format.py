@@ -223,3 +223,33 @@ def test_deeply_nested_macro_line_stays_standalone():
 def test_unpaired_nested_parenthesis_macro_is_not_a_component_line():
     source = "Intro\n$(t:(unpaired)\nTail"
     assert guide_issues(source, "Intro$(t:(unpaired)Tail") == []
+
+
+def test_render_guide_keeps_later_blocks_aligned_when_line_counts_change():
+    from translation_tool.core.guide_blocks import extract_guide_blocks
+    from translation_tool.core.guide_translation import render_guide
+
+    source = (
+        "# Title\n\n"
+        "First line of a wrapped\nparagraph that continues\non a third line.\n\n"
+        "## Heading\n\n"
+        "Second paragraph here\nwrapped too.\n"
+    )
+    blocks = extract_guide_blocks(source, "page.mdx")
+    translations = {
+        "First line of a wrapped\nparagraph that continues\non a third line.": "第一段只有一行。",
+        "## Heading": "## 標題",
+        "Second paragraph here\nwrapped too.": "第二段第一行\n第二段第二行\n第二段第三行",
+    }
+    doc = {
+        "source": source,
+        "originals": [b.text for b in blocks],
+        "blocks": [translations.get(b.text, b.text) for b in blocks],
+        "ranges": [[b.start_line, b.end_line] for b in blocks],
+        "prefixes": [b.prefix for b in blocks],
+    }
+
+    assert render_guide(doc) == (
+        "# Title\n\n第一段只有一行。\n\n## 標題\n\n"
+        "第二段第一行\n第二段第二行\n第二段第三行\n"
+    )
