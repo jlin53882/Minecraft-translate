@@ -135,3 +135,11 @@ def test_page_title_and_body_are_rendered_back(tmp_path: Path) -> None:
     doc["blocks"] = ["這台機器會儲存能量供之後使用。", "概覽"]
     rendered = render_guide(doc)
     assert "title: 概覽" in rendered and "id: x" in rendered
+
+
+def test_short_oracle_pages_are_found_without_the_prose_heuristic(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, f"{BOOK}/content/x.mdx", "# Energy Storage\n\nStores energy.\n")
+    found = [p.relative_to(tmp_path).as_posix() for p in find_guide_files(tmp_path)]
+    assert found == [f"{BOOK}/content/x.mdx"]

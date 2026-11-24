@@ -296,8 +296,9 @@ def find_guide_files(root: Path) -> list[Path]:
             book_format = resolve_book_format("/".join(parts))
             if is_unsupported_format(book_format):
                 continue
+            is_oracle = book_format.name == FORMAT_ORACLE_INDEX  # 路徑已確認，不看內容
             is_meta = suffix == META_NAME
-            if is_meta and book_format.name != FORMAT_ORACLE_INDEX:
+            if is_meta and not is_oracle:
                 continue  # 只有 Oracle Index 的選單檔是指南內容
             locale = split_locale(parts[2:])
             if locale.other or locale.lang != "en_us":
@@ -310,7 +311,7 @@ def find_guide_files(root: Path) -> list[Path]:
                 text = path.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeDecodeError):
                 continue
-            if is_meta or sniff_text_file(text, suffix, "/".join(parts)) is not None:
+            if is_oracle or sniff_text_file(text, suffix, "/".join(parts)) is not None:
                 guide = GuidePath(path)
                 guide.guide_root = root
                 found.append(guide)
