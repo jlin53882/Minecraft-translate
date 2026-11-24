@@ -35,6 +35,10 @@ from translation_tool.core.guide_blocks import (
 from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
+from translation_tool.core.modonomicon_literals import (
+    collect_mod_literals,
+    main_lang_mod_id,
+)
 from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
@@ -886,6 +890,22 @@ def _build_scan_items(
     return out
 
 
+def _with_book_literals(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    en_member: str,
+    en: dict,
+) -> dict:
+    """模組主語系檔補上 Modonomicon 書籍內的字面英文（鍵與原文相同）；既有的鍵不覆蓋。"""
+    mod_id = main_lang_mod_id(en_member)
+    if mod_id is None:
+        return en
+    extra = collect_mod_literals(
+        zf.namelist(), lambda name: _read_json_member(zf, budget, name), mod_id, en
+    )
+    return {**en, **extra} if extra else en
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -902,6 +922,8 @@ def _items_for_group(
         return _advancement_items(zf, budget, ident_key, members)
     en_member = members.get("en_us")
     en = _read_json_member(zf, budget, en_member)
+    if kind == "lang" and en_member and isinstance(en, dict):
+        en = _with_book_literals(zf, budget, en_member, en)
     if not options.translated and en is None:
         return []  # 掃描 jar 以原文為準；沒有 en_us 就沒有可匯入的條目
 
