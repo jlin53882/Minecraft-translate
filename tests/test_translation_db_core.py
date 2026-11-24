@@ -1844,7 +1844,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     db = TranslationDB(path)
     detail = db.entry_detail(entry_id)
     manual = next(row for row in detail.translations if row.source == SRC_MANUAL)
-    assert SCHEMA_VERSION == 17
+    assert SCHEMA_VERSION == 18
     assert manual.review_status == "legacy_unknown" and manual.checker == "old-checker"
     assert detail.entry.review_status == "legacy_unknown"
     assert list(tmp_path.glob("legacy.db.pre-schema-v2-*.bak"))
@@ -1860,6 +1860,7 @@ def test_schema_v1_migration_marks_legacy_manual_unknown_and_keeps_backup(tmp_pa
     assert list(tmp_path.glob("legacy.db.pre-schema-v15-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v16-*.bak"))
     assert list(tmp_path.glob("legacy.db.pre-schema-v17-*.bak"))
+    assert list(tmp_path.glob("legacy.db.pre-schema-v18-*.bak"))
     assert db._q(
         "SELECT name FROM sqlite_schema WHERE type='table' "
         "AND name IN ('smart_review_run', 'smart_review_candidate') "
@@ -2081,12 +2082,15 @@ def test_write_back_is_insert_only(db):
     assert db.list_entries("1.21.1")[0][0].zh_tw == "第一次"
 
 
-def test_write_back_skips_when_english_differs(db):
+def test_write_back_stores_changed_english_as_variant(db):
+    """原文與主原文不同：主原文不動、記 src_change，譯文存成變體而不是丟掉。"""
     db.ingest("1.21.1", [item(en="Old Text Here")])
     stats = db.write_back(
         "1.21.1", [WriteBackItem(KIND_LANG, "foo", "item.foo.a", "New Text Here", "譯")]
     )
-    assert stats.written == 0 and stats.skipped == 1
+    assert stats.written == 0 and stats.skipped == 0 and stats.variant_written == 1
+    assert db._q("SELECT en_us FROM entry") == [("Old Text Here",)]
+    assert len(db.src_changes()) == 1
 
 
 # ---------------------------------------------------------- 查詢

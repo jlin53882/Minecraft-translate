@@ -8,7 +8,8 @@
 （``meta`` 沒有 ``tx_active``）時，遞增 ``ext_change_seq``。``_tx()`` 內的寫入由 ``data_gen``
 負責，觸發器只多做一次 ``meta`` 主鍵查詢。
 
-追蹤的資料表：``entry``、``translation``、``effective``、``history``、``src_change``；
+追蹤的資料表：``entry``、``translation``、``effective``、``history``、``src_change``、
+``entry_variant``、``variant_translation``；
 衍生欄位（``qflags``、``effective.diff`` 等）的更新不算，因為它們隨來源資料一起變。
 """
 
@@ -16,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 
-CHANGE_TRACKER_VERSION = "1"
+CHANGE_TRACKER_VERSION = "2"
 TX_ACTIVE = "tx_active"  # _tx() 內暫時存在的 meta 旗標
 SEQ_KEY = "ext_change_seq"
 
@@ -33,6 +34,8 @@ _TRACKED = {
     "effective": "entry_id, zh_tw, source, checker, review_status",
     "history": None,
     "src_change": None,
+    "entry_variant": None,
+    "variant_translation": None,
 }
 
 

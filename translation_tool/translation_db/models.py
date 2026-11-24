@@ -675,7 +675,8 @@ class IngestStats:
 class WriteBackStats:
     written: int = 0  # 目標版本新增的 AI 譯文
     filled_other: int = 0  # 其他版本相同內容的空白被補上
-    skipped: int = 0  # 已有 AI 來源譯文或原文不符而略過
+    skipped: int = 0  # 已有同來源譯文而略過
+    variant_written: int = 0  # 原文與主原文不同，譯文存成條目的其他原文（變體）
 
 
 @dataclass(frozen=True)

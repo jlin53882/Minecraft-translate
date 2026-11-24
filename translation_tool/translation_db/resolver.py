@@ -248,5 +248,6 @@ class WriteBackBuffer:
         )
         self.stats.written += done.written
         self.stats.filled_other += done.filled_other
+        self.stats.variant_written += done.variant_written
         self.stats.skipped += done.skipped
         return done

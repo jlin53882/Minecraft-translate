@@ -10,7 +10,9 @@ Mod 翻譯資料庫（SQLite）的資料表結構、來源代碼與連線設定�
 - ``effective``：每個 entry 依來源優先序選出的「生效譯文」，寫入時維護，讀取不必重算。
 - ``history``：手動更新、AI 舊譯文重翻與還原的異動紀錄；一般每個條目保留最近五筆，
   尚未完成 JSON 對帳的智慧校對 marker 會暫時保留。
-- ``src_change``：掃描／翻譯時發現「鍵值相同但原文已變動」而略過的紀錄。
+- ``src_change``：掃描／翻譯時發現「鍵值相同但原文已變動」的紀錄（歷史，不影響查詢）。
+- ``entry_variant`` / ``variant_translation``：同一個條目的「其他原文」及其譯文，結構與
+  ``entry`` / ``translation`` 同形；由 ``variants.py`` 獨佔讀寫（見 ADR 0007）。
 - ``scan_run``：掃描紀錄。
 """
 
@@ -21,7 +23,7 @@ import time
 from pathlib import Path
 
 KEEP_REVIEW_FLAG = "keep_review_on_text_change"  # 交易內暫時存在的 meta 旗標
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 KIND_LANG = "lang"
 KIND_PATCHOULI = "patchouli"
@@ -184,6 +186,31 @@ CREATE TABLE IF NOT EXISTS src_change (
     new_en      TEXT NOT NULL,
     detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (kind, mc_version, mod_id, key, new_en)
+);
+
+-- 同一條目的其他原文（entry.en_us 是主原文）；譯文掛在 variant_translation，
+-- 與 entry／translation 同形，日後要升級成「鍵值＋原文」完整變體模型只需搬資料。
+CREATE TABLE IF NOT EXISTS entry_variant (
+    id         INTEGER PRIMARY KEY,
+    entry_id   INTEGER NOT NULL REFERENCES entry (id) ON DELETE CASCADE,
+    en_us      TEXT NOT NULL,
+    first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (entry_id, en_us)
+);
+
+CREATE TABLE IF NOT EXISTS variant_translation (
+    id         INTEGER PRIMARY KEY,
+    variant_id INTEGER NOT NULL REFERENCES entry_variant (id) ON DELETE CASCADE,
+    source     INTEGER NOT NULL,
+    zh_tw      TEXT NOT NULL DEFAULT '',
+    zh_cn      TEXT NOT NULL DEFAULT '',
+    checker    TEXT NOT NULL DEFAULT '',
+    review_status TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revision   INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (variant_id, source)
 );
 
 -- 統計快取：依 meta.data_gen（每次寫入交易遞增）判斷是否過期，跨連線、跨重啟都有效
@@ -488,6 +515,8 @@ def _backup_for_migration(conn: sqlite3.Connection, next_version: int) -> Path |
         return _backup_before_entry_origin_locale_migration(conn)
     if next_version == 17:
         return _backup_before_entry_origin_locale_repair_migration(conn)
+    if next_version == 18:
+        return _backup_before_entry_variant_migration(conn)
     return None
 
 
@@ -543,6 +572,8 @@ def _migrate_to(conn: sqlite3.Connection, next_version: int) -> None:
         _migrate_entry_origin_locale_v16(conn)
     elif next_version == 17:
         _migrate_entry_origin_locale_repair_v17(conn)
+    elif next_version == 18:
+        _migrate_entry_variant_v18(conn)
 
 
 def _install_derived_tables(conn: sqlite3.Connection) -> None:
@@ -1292,6 +1323,31 @@ def _migrate_entry_origin_locale_repair_v17(conn: sqlite3.Connection) -> None:
     的 locale 並建立索引，因此可安全重用其修復行為。
     """
     _migrate_entry_origin_locale_v16(conn)
+
+
+def _backup_before_entry_variant_migration(conn: sqlite3.Connection) -> Path | None:
+    """在加入其他原文（變體）表前建立一致的旁側備份。"""
+    main = next(
+        (row[2] for row in conn.execute("PRAGMA database_list") if row[1] == "main"),
+        "",
+    )
+    if not main:
+        return None
+    source_path = Path(main)
+    backup_path = source_path.with_name(
+        f"{source_path.name}.pre-schema-v18-{time.time_ns()}.bak"
+    )
+    return _create_migration_backup(conn, source_path, backup_path)
+
+
+def _migrate_entry_variant_v18(conn: sqlite3.Connection) -> None:
+    """確認 v18 的其他原文（變體）表已安裝；DDL 在 migration 前已冪等執行。"""
+    for table in ("entry_variant", "variant_translation"):
+        exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone()
+        if exists is None:
+            raise sqlite3.DatabaseError(f"schema v18 缺少 {table} 表")
 
 
 def _install_schema_v3_objects(conn: sqlite3.Connection) -> None:
