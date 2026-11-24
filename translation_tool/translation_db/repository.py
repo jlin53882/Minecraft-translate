@@ -40,6 +40,7 @@ from translation_tool.translation_db import (
     parallel_scan,
     quality_flags,
     stat_summary,
+    variants,
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
 from translation_tool.translation_db.cleanup import CleanupMixin
@@ -526,16 +527,24 @@ class TranslationDB(
             else f"entry {alias}"
         )
 
-    def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
-        """回傳指定優先序使用的標準生效來源排序。"""
+    def _priority_parts(
+        self, priority: tuple[int, ...] | None = None
+    ) -> tuple[str, str]:
+        """指定優先序的生效來源排序，拆成（已校驗／已審核優先, 來源名次）兩個運算式。"""
         rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
         if not self.has_review_state:
-            return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
-        return (
+            return "CASE WHEN t.checker <> '' THEN 0 ELSE 1 END", rank
+        group = (
             "CASE WHEN t.review_status='reviewed' THEN 0 "
             "WHEN t.checker <> '' AND t.review_status IS NOT 'unreviewed' THEN 0 "
-            f"ELSE 1 END, {rank}"
+            "ELSE 1 END"
         )
+        return group, rank
+
+    def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
+        """回傳指定優先序使用的標準生效來源排序。"""
+        group, rank = self._priority_parts(priority)
+        return f"{group}, {rank}"
 
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
@@ -5009,7 +5018,8 @@ class TranslationDB(
         """把翻譯結果寫回資料庫（只新增、不覆蓋）。
 
         目標版本沒有該條目時直接建立；其他版本中「原文相同、完全沒有譯文」的條目
-        也補上同一筆譯文（只填空白）。
+        也補上同一筆譯文（只填空白）。鍵值相同但原文與主原文不同時，記錄原文變動，
+        並把譯文存成該條目的其他原文（變體），不改主原文、也不補其他版本。
         """
         stats = WriteBackStats()
         touched: list[int] = []
@@ -5033,7 +5043,7 @@ class TranslationDB(
                     ).lastrowid
                 elif (
                     row[1] != item.en_us
-                    and row[1]
+                    and row[1].strip()
                     and loose_text(row[1]) != loose_text(item.en_us)
                 ):
                     conn.execute(
@@ -5042,11 +5052,15 @@ class TranslationDB(
                         "VALUES (?,?,?,?,?,?)",
                         (item.kind, version, item.mod_id, item.key, row[1], item.en_us),
                     )
-                    stats.skipped += 1
+                    # 主原文保持不變；這份新原文的譯文存成條目的變體（流水線查得到）
+                    if variants.add_translation(conn, row[0], item.en_us, source, text):
+                        stats.variant_written += 1
+                    else:
+                        stats.skipped += 1
                     continue
                 else:
                     eid = row[0]
-                    if not row[1]:  # 原文原本未知：補上
+                    if not row[1].strip():  # 原文原本未知（空白）：補上
                         conn.execute(
                             "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
                         )
@@ -5828,12 +5842,15 @@ class TranslationDB(
 
     # ------------------------------------------------------- 翻譯流程查詢
     def load_mod(self, mod_id: str) -> list[tuple[str, str, str, str, str, int]]:
-        """一個模組在所有版本的生效譯文：``(類型, 鍵值, 原文, 版本, 譯文, 來源)``。"""
+        """一個模組在所有版本的生效譯文：``(類型, 鍵值, 原文, 版本, 譯文, 來源)``。
+
+        條目的其他原文（變體）譯文接在後面，欄位相同。
+        """
         return self._q(
             "SELECT e.kind, e.key, e.en_us, e.mc_version, f.zh_tw, f.source "
             "FROM entry e JOIN effective f ON f.entry_id = e.id WHERE e.mod_id = ?",
             (mod_id,),
-        )
+        ) + self._load_variant_rows(mod_id, None)
 
     def _reviewed_lang_candidate_rows(
         self, mod_id: str, mc_version: str | None
@@ -6079,8 +6096,25 @@ class TranslationDB(
     def load_mod_for_priority(
         self, mod_id: str, priority: tuple[int, ...]
     ) -> list[tuple[str, str, str, str, str, int]]:
-        """以呼叫端快照優先序唯讀選出模組生效譯文，不依賴共享 effective 表。"""
-        return self._q(self._load_mod_for_priority_sql(priority), (mod_id,))
+        """以呼叫端快照優先序唯讀選出模組生效譯文，不依賴共享 effective 表。
+
+        含條目的其他原文（變體）譯文，與主原文用同一套優先序。
+        """
+        return self._q(
+            self._load_mod_for_priority_sql(priority), (mod_id,)
+        ) + self._load_variant_rows(mod_id, priority)
+
+    def _load_variant_rows(
+        self, mod_id: str, priority: tuple[int, ...] | None
+    ) -> list[tuple[str, str, str, str, str, int]]:
+        """模組的其他原文（變體）生效譯文；舊版 schema 唯讀開啟時沒有變體表，回傳空串列。"""
+        with self._lock:
+            if priority is None:
+                # 與主原文列（effective 投影）同一套：資料庫 meta 裡的共用優先序，
+                # 不是這個執行個體開啟時帶入的優先序
+                priority = self._stored_priority(self._conn)
+            group, rank = self._priority_parts(priority)
+            return variants.load_rows(self._conn, group, rank, mod_id)
 
     def _load_mod_for_priority_sql(self, priority: tuple[int, ...]) -> str:
         """建立合併解析器使用的模組範圍排序查詢。"""

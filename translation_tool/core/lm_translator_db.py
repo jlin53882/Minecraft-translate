@@ -164,12 +164,17 @@ def flush_write_back(ctx: DirectoryDbContext | None, label: str = "") -> None:
     if ctx is None or ctx.buffer is None:
         return
     done = ctx.buffer.flush()
-    if done.written or done.filled_other:
-        log_info(
-            f"📚 {label}已寫入 Mod 資料庫 {done.written} 筆"
-            + (
-                f"（其他版本補上空白 {done.filled_other} 筆）"
-                if done.filled_other
-                else ""
+    if done.written or done.filled_other or done.variant_written:
+        parts = []
+        if done.written or done.filled_other:
+            parts.append(
+                f"已寫入 Mod 資料庫 {done.written} 筆"
+                + (
+                    f"（其他版本補上空白 {done.filled_other} 筆）"
+                    if done.filled_other
+                    else ""
+                )
             )
-        )
+        if done.variant_written:
+            parts.append(f"原文已變動，另存為其他原文 {done.variant_written} 筆")
+        log_info(f"📚 {label}" + "；".join(parts))
