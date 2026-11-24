@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from translation_tool.core.text_sniffer import is_placeholder_text
 from translation_tool.plugins.md.md_extract_qa import extract_blocks
 
 _FRONT_RULE = re.compile(r"^---\s*$")
+_TOP_TITLE = re.compile(r"^(title:\s*)(.*?)\s*$")
 _NAV_KEY = re.compile(r"^(\s*)navigation:\s*$")
 _TITLE_LINE = re.compile(r"^(\s+title:\s*)(.*?)\s*$")
 _ANY_TAG = re.compile(r"<[^<>]*>")
@@ -28,6 +30,23 @@ class GuideBlock:
     start_line: int  # 1-based
     end_line: int
     prefix: str = ""  # 只有 front matter 標題用：行首（含縮排與 ``title:``）
+    key: str = ""  # 只有 ``_meta.json`` 區塊用：在 JSON 內的路徑（鍵或 ``鍵/name``）
+
+
+def _top_level_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
+    """front matter 最上層 ``title:`` 的 ``(行號 1-based, 行首, 值)``；沒有則 None。"""
+    if not lines or not _FRONT_RULE.match(lines[0]):
+        return None
+    for number, line in enumerate(lines[1:], start=2):
+        if _FRONT_RULE.match(line):
+            return None
+        title = _TOP_TITLE.match(line)
+        if title:
+            value = title.group(2)
+            if len(value) >= 2 and value[0] in "'\"" and value[-1] == value[0]:
+                value = value[1:-1]
+            return (number, title.group(1), value) if value else None
+    return None
 
 
 def _front_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
@@ -225,11 +244,20 @@ def has_translatable_text(text: str) -> bool:
 
 
 def extract_guide_blocks(text: str, name: str) -> list[GuideBlock]:
+    if name == "_meta.json":
+        # Oracle Index 選單：每個顯示名稱一個區塊（沒有行號，寫回走 apply_meta_translations）
+        return [
+            GuideBlock(value, 0, 0, key=path)
+            for path, value in extract_meta_entries(text) or []
+        ]
     blocks = [
         GuideBlock(b.text, b.start_line, b.end_line)
         for b in extract_blocks(text, name, "all")
     ]
-    title = _front_title(text.splitlines())
+    lines = text.splitlines()
+    title = _front_title(lines)
+    if title is None and name.lower().endswith(".mdx"):
+        title = _top_level_title(lines)  # Oracle Index 頁面的標題
     if title is not None:
         number, prefix, value = title
         blocks.append(GuideBlock(value, number, number, prefix))
@@ -242,3 +270,59 @@ def front_title_line(prefix: str, translated: str) -> str:
     if _YAML_SPECIAL.search(flat):
         flat = '"' + flat.replace("\\", "\\\\").replace('"', '\\"') + '"'
     return prefix + flat
+
+
+def _meta_slots(data: dict) -> list[tuple[str, dict, str]]:
+    """``_meta.json`` 內要翻譯的位置：``[(路徑, 所在物件, 欄位)]``，依檔案順序。
+
+    值是字串時路徑是鍵，值是含 ``name`` 的物件時路徑是 ``鍵/name``；空字串（顯示時退回頁面標題）
+    與其他欄位（``icon`` 等）不收。
+    """
+    slots: list[tuple[str, dict, str]] = []
+    for key, value in data.items():
+        if isinstance(value, str) and value.strip():
+            slots.append((key, data, key))
+        elif isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str) and name.strip():
+                slots.append((f"{key}/name", value, "name"))
+    return slots
+
+
+def _load_meta(text: str) -> dict | None:
+    try:
+        data = json.loads(text, strict=False)
+    except ValueError:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def meta_top_level_keys(text: str) -> set[str] | None:
+    """``_meta.json`` 最上層的鍵（含值為空字串的鍵）；不是 JSON 物件時回傳 None。"""
+    data = _load_meta(text)
+    return None if data is None else set(data)
+
+
+def extract_meta_entries(text: str) -> list[tuple[str, str]] | None:
+    """Oracle Index ``_meta.json`` 的顯示名稱：``[(路徑, 文字)]``；不是 JSON 物件時回傳 None。"""
+    data = _load_meta(text)
+    if data is None:
+        return None
+    return [(path, owner[field]) for path, owner, field in _meta_slots(data)]
+
+
+def apply_meta_translations(text: str, translations: Sequence[str]) -> str:
+    """把譯文依 ``extract_meta_entries`` 的順序寫回；其餘的鍵、順序與欄位（含 ``icon``）原樣保留。
+
+    譯文數量對不上或原檔不是 JSON 物件時回傳原文。
+    """
+    data = _load_meta(text)
+    if data is None:
+        return text
+    slots = _meta_slots(data)
+    if len(slots) != len(translations):
+        return text
+    for (_path, owner, field), translated in zip(slots, translations, strict=True):
+        owner[field] = translated
+    tail = "\n" if text.endswith("\n") else ""
+    return json.dumps(data, ensure_ascii=False, indent=2) + tail

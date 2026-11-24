@@ -19,6 +19,10 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 
 from translation_tool.core.book_dirs import DEFAULT_BOOK_DIRS, find_book_dir_index
+from translation_tool.core.oracle_index import (
+    is_translatable_meta,
+    is_translatable_page,
+)
 from translation_tool.core.text_sniffer import (
     BOOK_ID_FIELDS,
     VANILLA_NON_TEXT_DIRS,
@@ -38,7 +42,6 @@ UNSUPPORTED_BOOK_FORMATS = frozenset(
     {
         FORMAT_ETERNAL_STARLIGHT,
         FORMAT_MODONOMICON,
-        FORMAT_ORACLE_INDEX,
     }
 )
 
@@ -104,6 +107,16 @@ def is_neutral_pages_candidate(path: str | PurePosixPath) -> bool:
     return parts[2].lower() == _NEUTRAL_ROOT
 
 
+def is_unsupported_format(resolution: BookFormatResolution) -> bool:
+    """這個格式不該送進通用的書籍／指南翻譯流程。
+
+    Oracle Index 的頁面可以翻譯；它的素材與資料檔（``supported`` 為 False）仍不能動。
+    """
+    return resolution.name in UNSUPPORTED_BOOK_FORMATS or (
+        resolution.name == FORMAT_ORACLE_INDEX and not resolution.supported
+    )
+
+
 def resolve_book_format(
     path: str | PurePosixPath,
     document: object | None = None,
@@ -128,8 +141,11 @@ def resolve_book_format(
     if any(part in BOOK_EXCLUDED_DIRS for part in content_dirs):
         return BookFormatResolution(FORMAT_UNKNOWN, False, "known_non_book_directory")
     if namespace == "oracle_index" or "oracle_index" in content_dirs:
+        joined = "/".join(parts)
+        if is_translatable_page(joined) or is_translatable_meta(joined):
+            return BookFormatResolution(FORMAT_ORACLE_INDEX, True, "oracle_index_page")
         return BookFormatResolution(
-            FORMAT_ORACLE_INDEX, False, "oracle_index_is_mdx_docs"
+            FORMAT_ORACLE_INDEX, False, "oracle_index_not_a_page"
         )
     if namespace == "modonomicon" or "modonomicon" in content_dirs:
         return BookFormatResolution(

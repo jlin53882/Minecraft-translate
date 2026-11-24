@@ -21,9 +21,10 @@ from dataclasses import dataclass
 
 from translation_tool.core.book_formats import (
     FORMAT_NEUTRAL_PAGES,
+    FORMAT_ORACLE_INDEX,
     FORMAT_STANDARD_PATCHOULI,
-    UNSUPPORTED_BOOK_FORMATS,
     is_neutral_pages_candidate,
+    is_unsupported_format,
     resolve_book_format,
 )
 from translation_tool.core.neutral_book_json import load_neutral_book_json
@@ -99,8 +100,10 @@ def _kind_of(
     單一檔案超過大小上限時視為不是（略過該檔）；整體預算用盡仍拋出 ``ArchiveBudgetError``。
     """
     path_format = resolve_book_format(member)
-    if path_format.name in UNSUPPORTED_BOOK_FORMATS:
+    if is_unsupported_format(path_format):
         return None
+    if path_format.name == FORMAT_ORACLE_INDEX:
+        return KIND_GUIDE  # 路徑已確認是 Oracle 書的頁面或選單（_meta.json），不必再靠內容判斷
     try:
         raw = read_limited(zf, member, budget=budget)
     except ArchiveBudgetError:

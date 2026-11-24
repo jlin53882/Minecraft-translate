@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -25,6 +25,12 @@ from translation_tool.core.guide_blocks import (
 )
 from translation_tool.core.guide_translation import render_guide
 from translation_tool.core.md_output_guard import MANIFEST_NAME, OutputGuard
+from translation_tool.core.oracle_index import (
+    is_translatable_meta,
+    is_translatable_page,
+    split_translated,
+    translated_rel,
+)
 from translation_tool.core.pack_format_lookup import resolve_version_input
 from translation_tool.core.pack_mcmeta import build_pack_mcmeta
 from translation_tool.core.text_sniffer import split_locale
@@ -88,6 +94,11 @@ class MdSourceFile:
     text: str
     blocks: list[Any]  # GuideBlock
     translatable: set[int] = field(default_factory=set)
+
+    @property
+    def is_meta(self) -> bool:
+        """Oracle Index 的 ``_meta.json``：不是行式文字，寫回走 JSON。"""
+        return self.rel.rsplit("/", 1)[-1] == "_meta.json"
 
     def item_key(self, index: int) -> str:
         return f"{self.file_key}#{index}"
@@ -252,14 +263,19 @@ def scan_md_sources(
 
     by_key: dict[str, dict[str, list[str]]] = {}
     paths: dict[str, Path] = {}
-    for path in iter_md_files(root):
+    for path in _guide_files(root):
         rel = path.relative_to(root).as_posix()
         result.files_seen += 1
-        lang = _lang_of(rel)
+        oracle = _oracle_locale(rel)
+        lang = oracle[0] if oracle else _lang_of(rel)
         if lang not in ("en_us", "zh_tw", "zh_cn"):
             continue
-        out_rel = map_rel_lang_path(
-            map_rel_lang_path(rel, "en_us", "zh_tw"), "zh_cn", "zh_tw"
+        out_rel = (
+            oracle[1]
+            if oracle
+            else map_rel_lang_path(
+                map_rel_lang_path(rel, "en_us", "zh_tw"), "zh_cn", "zh_tw"
+            )
         )
         paths[rel] = path
         by_key.setdefault(out_rel.casefold(), {"en_us": [], "zh_tw": [], "zh_cn": []})[
@@ -271,6 +287,40 @@ def scan_md_sources(
     for members in by_key.values():
         _scan_group(root, members, paths, read_zh_cn, convert, result)
     return result
+
+
+def _oracle_locale(rel: str) -> tuple[str, str] | None:
+    """Oracle Index 書的頁面或選單：``(語系, 輸出相對路徑)``；其他檔案回傳 None。
+
+    原文是 ``en_us``；``translated/<語系>/`` 底下是該語系的譯文，輸出路徑與原文的譯文位置相同。
+    不是繁中、簡中的語系回傳空語系字串，呼叫端略過。
+    """
+    if not (is_translatable_page(rel) or is_translatable_meta(rel)):
+        return None
+    parts = rel.split("/")
+    split = split_translated(parts)
+    if split is None:
+        lang, source_rel = "en_us", rel
+    else:
+        lang, source_rel = split
+    out_rel = translated_rel(source_rel, "zh_tw")
+    if out_rel is None:
+        return None
+    return lang, out_rel
+
+
+def _guide_files(root: Path) -> Iterator[Path]:
+    """來源資料夾內的指南檔：``.md``，以及 Oracle Index 書的 ``.mdx`` 與 ``_meta.json``。"""
+    yield from iter_md_files(root)
+    for pattern in ("*.mdx", "_meta.json"):
+        for path in root.rglob(pattern):
+            if path.is_file() and _oracle_locale(path.relative_to(root).as_posix()):
+                yield path
+
+
+def _out_rel(rel: str) -> str:
+    oracle = _oracle_locale(rel)
+    return oracle[1] if oracle else map_rel_lang_path(rel, "en_us", "zh_tw")
 
 
 def _scan_group(
@@ -300,7 +350,7 @@ def _scan_group(
     parts = rel.split("/")
     mod_id, file_key = _identity(parts, root)
     blocks = extract_guide_blocks(text, parts[-1])
-    out_rel = map_rel_lang_path(rel, "en_us", "zh_tw")
+    out_rel = _out_rel(rel)
     source = MdSourceFile(rel, out_rel, mod_id, file_key, text, blocks)
     tw_blocks = _aligned(blocks, tw_files, paths, rel, result)
     cn_blocks = (
@@ -342,7 +392,12 @@ def _aligned(
     text = _read_text(paths[rels[0]])
     if text is None:
         return None
-    other = [b.text for b in extract_guide_blocks(text, rels[0].rsplit("/", 1)[-1])]
+    other_blocks = extract_guide_blocks(text, rels[0].rsplit("/", 1)[-1])
+    if en_blocks and en_blocks[0].key:
+        # Oracle 選單：依 JSON 路徑對應原文，譯文缺的鍵為空字串，不要求數量相同
+        found = {b.key: b.text for b in other_blocks}
+        return [found.get(b.key, "") for b in en_blocks]
+    other = [b.text for b in other_blocks]
     if len(other) != len(en_blocks):
         result.issue(
             rels[0],
@@ -490,11 +545,14 @@ def _write_output(
         return False
     doc = {
         "source": source.text,
-        "ranges": [[b.start_line, b.end_line] for b in source.blocks],
-        "prefixes": [b.prefix for b in source.blocks],
         "originals": [b.text for b in source.blocks],
         "blocks": blocks,
     }
+    if source.is_meta:
+        doc["meta"] = True
+    else:
+        doc["ranges"] = [[b.start_line, b.end_line] for b in source.blocks]
+        doc["prefixes"] = [b.prefix for b in source.blocks]
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(render_guide(doc), encoding="utf-8")
     guard.record(source.out_rel, target)

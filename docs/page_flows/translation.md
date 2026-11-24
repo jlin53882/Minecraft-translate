@@ -25,6 +25,7 @@ flowchart TD
 
 - 來源探索：選到模組包根目錄時列出 `kubejs` 與 `resourcepacks/<包>`（底下要有 `assets`）；其他資料夾直接掃描。每個勾選的資料夾各跑一次，摘要合併。
 - 條目、輸出路徑與人工修改保護的規則見 [Markdown ModDB 流水線](../developer-guide/md-moddb-pipeline.md)。
+- Oracle Index 書（`assets/oracle_index/books/<書>/`）的 `.mdx` 頁面與 `_meta.json` 選單名稱也在掃描範圍；譯文輸出到 `<書>/translated/zh_tw/`，路徑與配對規則見 [Oracle Index 書籍的路徑契約](../developer-guide/oracle-index-books.md)。
 - 「讀取 zh_cn 檔」勾選的初始值取自設定 `translator.md_use_zh_cn_base`（預設開）；每次執行以畫面勾選為準。
 - 「LM 翻譯待處理」只翻本次來源涉及模組的指南條目；Mod 資料庫設定關閉時略過 LM 翻譯，只輸出 DB 既有譯文。
 
