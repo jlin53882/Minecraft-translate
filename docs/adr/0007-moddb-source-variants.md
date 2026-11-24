@@ -24,7 +24,9 @@
   `write_back` 不把變體補到其他版本的空白。
 - 條目清單、統計、審核、跨版本沿用、版本差異審核與 `jar_english` 只看 `entry`／`effective`，
   不受變體影響。
-- 變體譯文與一般資料庫命中走同一套特殊字元把關（語系合併 `MergeDbFill.merge_lookup`、目錄翻譯的 `is_valid_hit`、指南流水線），`tests/test_variant_quality_gates.py` 鎖住這個保證。
+- 變體譯文與一般資料庫命中走同一套特殊字元把關（語系合併 `MergeDbFill.merge_lookup`、
+  目錄翻譯的 `split_db_hits`、指南流水線 `_resolve_blocks`），
+  `tests/test_variant_quality_gates.py` 對這三條路徑各鎖住「不一致拒絕、一致採用」。
 - 不自動把舊譯文沿用到新原文：舊譯文是照另一段原文翻的，語意改變時會誤導。
 - 變體的 AI 譯文不需要審核即可被流水線使用，與一般 AI 譯文相同。
 
