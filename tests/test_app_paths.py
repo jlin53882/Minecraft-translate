@@ -180,7 +180,6 @@ def test_first_start_migrates_legacy_data_into_data_dir(monkeypatch, tmp_path):
         "快取資料/lang/a.json": "{}",
         "學名資料庫/s.json": "{}",
         ".icon_cache/jar_icons/a.png": "png",
-        "custom_translators/t.py": "x",
     }
     for rel, content in legacy.items():
         path = root / rel

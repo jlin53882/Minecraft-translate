@@ -101,7 +101,6 @@ def test_upgrade_keeps_data_unchanged(tmp_path):
         "快取資料/lang/shard_0001.json": '{"k": "v"}',
         "學名資料庫/species.json": "{}",
         ".icon_cache/jar_icons/a.png": "png",
-        "custom_translators/mine.py": "print(1)",
     }
     for rel, content in user_files.items():
         path = target / "data" / rel

@@ -55,7 +55,6 @@ LEGACY_USER_ITEMS: tuple[str, ...] = (
     "快取資料",
     "學名資料庫",
     ".icon_cache",
-    "custom_translators",
 )
 
 _migration_lock = threading.Lock()
