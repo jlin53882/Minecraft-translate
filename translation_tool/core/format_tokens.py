@@ -40,7 +40,9 @@ def macro_end(text: str, start: int) -> int | None:
 def _normalize_token(raw: str) -> str:
     token = raw.replace("\r", "")
     if token.startswith("{{"):
-        return "{{" + token[2:-2].strip() + "}}"  # ``{{ var }}`` 與 ``{{var}}`` 視為同一個
+        return (
+            "{{" + token[2:-2].strip() + "}}"
+        )  # ``{{ var }}`` 與 ``{{var}}`` 視為同一個
     return _TOOLTIP_TOKEN if token.startswith(_TOOLTIP_PREFIX) else token
 
 
@@ -85,10 +87,7 @@ def token_category(token: str) -> str:
         return "minecraft"
     if token.startswith("$("):
         return "patchouli"
-    if (
-        token.startswith(("%", "${"))
-        or (token.startswith("{") and token.endswith("}"))
-    ):
+    if token.startswith(("%", "${")) or (token.startswith("{") and token.endswith("}")):
         return "placeholder"
     if token in ("\n", "\\n"):
         return "newline"

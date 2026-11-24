@@ -348,7 +348,9 @@ def test_named_placeholders_are_format_tokens():
         token_category(token) == "placeholder"
         for token in format_tokens("{count} ${var} {{name}}")
     )
-    assert not format_tokens("{@pagebreak} {image:ftbquests:a.png width:50} {數量} {1a}")
+    assert not format_tokens(
+        "{@pagebreak} {image:ftbquests:a.png width:50} {數量} {1a}"
+    )
 
     from translation_tool.translation_db.quality import translation_issues
 

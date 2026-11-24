@@ -191,7 +191,9 @@ class ReuseResult:
     )
     jar_english: int = 0  # ``applied`` 之中，原文不同但 jar 英文相同而沿用的筆數
     stale: int = 0  # 套用時畫面資料已過期而略過
-    quality_blocked: int = 0  # 參考譯文的特殊字元與目標原文不一致，未寫入（逐筆套用可明確確認）
+    quality_blocked: int = (
+        0  # 參考譯文的特殊字元與目標原文不一致，未寫入（逐筆套用可明確確認）
+    )
     history_id: int | None = None  # 任一筆歷史編號，可傳給 ``TranslationDB.revert``
     entry_ids: list[int] = field(default_factory=list)
 
