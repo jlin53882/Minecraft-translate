@@ -361,6 +361,8 @@ def _with_book_literals_bytes(
     def read_book(name: str) -> Any:
         try:
             return json.loads(read_limited(zf, name, MAX_FILE_BYTES, budget=budget))
+        except ArchiveBudgetError:
+            raise  # 整包累計超限：不能寫出只含部分書籍的語系檔，交給外層中止這個 JAR
         except (ValueError, ZipSizeError):
             return None
 

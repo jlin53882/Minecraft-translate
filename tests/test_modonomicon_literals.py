@@ -125,3 +125,25 @@ def test_extract_without_literals_keeps_original_bytes(tmp_path: Path) -> None:
     assert (out / "assets" / MOD / "lang" / "en_us.json").read_text(
         encoding="utf-8"
     ) == raw
+
+
+def test_budget_exhaustion_while_reading_books_is_not_swallowed(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    from translation_tool.core.jar_processor_extract import _with_book_literals_bytes
+    from translation_tool.utils.zip_safety import ArchiveBudgetError, ZipReadBudget
+
+    jar = tmp_path / "two_books.jar"
+    with zipfile.ZipFile(jar, "w") as zf:
+        for name in ("a", "b"):
+            zf.writestr(
+                f"data/{MOD}/modonomicon/books/guide/{name}.json",
+                json.dumps({"name": f"Book {name} Title"}),
+            )
+    raw = json.dumps({EN_KEY: "Blood Orb"}).encode("utf-8")
+    budget = ZipReadBudget(max_members=1)
+
+    with pytest.raises(ArchiveBudgetError):
+        _with_book_literals_bytes(jar, f"assets/{MOD}/lang/en_us.json", raw, budget)
