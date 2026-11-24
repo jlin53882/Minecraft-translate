@@ -8,7 +8,6 @@ from app.views.pipeline.pipeline_workbench import (
     PipelineStepSpec,
     build_pipeline_input_row,
     build_pipeline_status_card,
-    build_pipeline_step_row,
     build_pipeline_steps_card,
     build_pipeline_workbench,
 )
@@ -30,22 +29,6 @@ class PipelineWidgetsMixin:
             on_click=self._on_one_click_click,
         )
         return self._one_click_button
-
-    def _step_row(
-        self, number: int, title: str, desc: str, icon: str, tone: str, handler
-    ) -> ft.Control:
-        """一個流水線步驟：編號圓點 + 標題 / 說明 + 「執行此步驟」按鈕。"""
-        return build_pipeline_step_row(
-            PipelineStepSpec(
-                number=number,
-                title=title,
-                description=desc,
-                icon=icon,
-                tone=tone,
-                on_click=handler,
-            ),
-            on_button_created=self._run_buttons.append,
-        )
 
     def _build_ui(self):
         paths_card = self._build_pipeline_paths_card()

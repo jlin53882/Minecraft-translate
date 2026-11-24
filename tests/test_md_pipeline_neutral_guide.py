@@ -3,19 +3,14 @@
 位置只看資源包結構（``assets|data/<模組>/<資料夾>/``，``guides`` 往下兩層），不靠資料夾名稱清單；
 檔案是不是指南敘述文字靠內容判斷。其他語言放在內容根目錄下以底線開頭的資料夾
 （``ae2guide/_es_es/``），繁中輸出放在同一層的 ``_zh_tw``。
-用真正的 Step 1／Step 2／Step 3，只把 LM 呼叫換成固定回覆。
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from translation_tool.core.md_pipeline_pairing import lang_output_key, plan_sources
-from translation_tool.core.md_translation_assembly import run_md_pipeline
-from translation_tool.plugins.md import md_lmtranslator
 from translation_tool.plugins.md.md_extract_qa import (
     detect_lang_segment,
     iter_md_files,
@@ -31,28 +26,6 @@ EN = (
 )
 
 
-@pytest.fixture
-def fake_lm(monkeypatch):
-    state = {"sent": []}
-
-    def fake_skeleton(items, *, hooks, **_kwargs):
-        for it in items:
-            state["sent"].append(it["text"])
-            hooks.on_translated_item({**it, "text": "譯:" + it["text"]})
-        return SimpleNamespace(
-            status="DONE", elapsed_sec=0.0, completed_calls=1, processed=len(items)
-        )
-
-    monkeypatch.setattr(md_lmtranslator, "validate_api_keys", lambda: None)
-    monkeypatch.setattr(
-        md_lmtranslator,
-        "prepare_translator_items",
-        lambda items, **_: ([], list(items)),
-    )
-    monkeypatch.setattr(md_lmtranslator, "run_translator_skeleton", fake_skeleton)
-    return state
-
-
 def _layout(tmp_path: Path, files: dict[str, str]):
     src = tmp_path / "in"
     for rel, text in files.items():
@@ -60,10 +33,6 @@ def _layout(tmp_path: Path, files: dict[str, str]):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     return src, tmp_path / "out"
-
-
-def _run(src: Path, out: Path):
-    return run_md_pipeline(str(src), output_dir=str(out), lang_mode="non_cjk_only")
 
 
 @pytest.mark.parametrize(
@@ -214,94 +183,3 @@ def test_boundary_is_relative_to_input_root(tmp_path):
     assert (
         list(iter_md_files(inside)) == []
     )  # 輸入資料夾本身就是內容根目錄：請選它的上層
-
-
-def test_pipeline_skips_non_guide_docs_and_nested_locales(tmp_path, fake_lm):
-    """一般文件、巢狀其他語言都不送翻，也不寫輸出。"""
-    src, out = _layout(
-        tmp_path,
-        {
-            f"{P}/docs/CHANGELOG.md": EN,
-            f"{P}/ae2guide/intro/de_de/y.md": "# Titel\n\nHallo Welt, das ist ein längerer Satz.\n",
-            f"{P}/ae2guide/intro/ok.md": EN,
-        },
-    )
-
-    result = _run(src, out)
-
-    assert result["step1"]["md_files_found"] == 1
-    assert all("Hallo" not in sent for sent in fake_lm["sent"])
-    finals = sorted(
-        p.relative_to(out / "md" / "完成").as_posix()
-        for p in (out / "md" / "完成").rglob("*.md")
-    )
-    assert finals == [f"{P}/ae2guide/_zh_tw/intro/ok.md"]
-
-
-def test_neutral_with_zh_cn_sibling_uses_zh_cn_base():
-    en, cn = f"{P}/ae2guide/a/x.md", f"{P}/ae2guide/_zh_cn/a/x.md"
-    plan = plan_sources([en, cn])
-    assert plan.pair_cn == {cn: en}
-
-
-def test_neutral_and_en_us_folder_conflict():
-    plan = plan_sources([f"{P}/ae2guide/a/x.md", f"{P}/ae2guide/_en_us/a/x.md"])
-    assert sorted(plan.skip.values()) == ["output_conflict", "output_conflict"]
-
-
-def test_neutral_english_and_existing_zh_tw_share_one_output():
-    en = f"{P}/ae2guide/aae_intro/a.md"
-    zh = f"{P}/ae2guide/_zh_tw/aae_intro/a.md"
-    assert lang_output_key(en) == lang_output_key(zh)
-    plan = plan_sources([en, zh])
-    assert plan.pair_en == {zh: en}
-    assert plan.skip == {en: "paired_en"}
-
-
-def test_end_to_end_neutral_guide_translates_into_zh_tw_dir(tmp_path, fake_lm):
-    src, out = _layout(
-        tmp_path,
-        {
-            f"{P}/ae2guide/aae_intro/a.md": EN,
-            f"{P}/ae2guide/_es_es/aae_intro/a.md": "# Introducción\n\nGuarda objetos.\n",
-        },
-    )
-
-    result = _run(src, out)
-
-    root = out / "md" / "完成" / "assets" / "m" / "ae2guide"
-    done = root / "_zh_tw" / "aae_intro" / "a.md"
-    assert done.is_file()
-    assert f"譯:{SENTENCE}" in done.read_text(encoding="utf-8")
-    # 西班牙文來源不會被送翻，也不會產生輸出
-    assert all("Guarda" not in sent for sent in fake_lm["sent"])
-    assert result["step1"]["md_files_found"] == 1
-    assert not (root / "_es_es").exists()
-
-
-def test_existing_zh_tw_sibling_keeps_translated_blocks(tmp_path, fake_lm):
-    zh = f"# 簡介\n\n把物品存放在元件中。\n\n{SENTENCE.replace('store', 'hold')}\n"
-    en = f"# Intro\n\n{SENTENCE}\n\n{SENTENCE.replace('store', 'hold')}\n"
-    src, out = _layout(
-        tmp_path,
-        {
-            f"{P}/ae2guide/aae_intro/a.md": en,
-            f"{P}/ae2guide/_zh_tw/aae_intro/a.md": zh,
-        },
-    )
-
-    _run(src, out)
-
-    done = (
-        out
-        / "md"
-        / "完成"
-        / "assets"
-        / "m"
-        / "ae2guide"
-        / "_zh_tw"
-        / "aae_intro"
-        / "a.md"
-    )
-    assert "把物品存放在元件中。" in done.read_text(encoding="utf-8")
-    assert fake_lm["sent"] == [SENTENCE.replace("store", "hold")]

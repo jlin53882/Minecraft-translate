@@ -127,33 +127,6 @@ def test_shared_loop_cancelled_while_waiting_for_rate_limit(monkeypatch):
     assert res.status == "CANCELLED"
 
 
-# ---------- service 層 ----------
-
-
-def test_run_callable_task_cancel_is_not_error():
-    from app.services_impl.pipelines._task_runner import run_callable_task
-    from app.tasks.task_session import TaskSession
-
-    session = TaskSession()
-
-    def work():
-        session.request_cancel()
-        c.raise_if_cancelled()
-
-    class _Handler:
-        def set_session(self, s):
-            pass
-
-    run_callable_task(
-        session=session, task_name="t", func=work, kwargs={}, ui_log_handler=_Handler()
-    )
-
-    snap = session.snapshot()
-    assert snap["status"] == "DONE"
-    assert session.error is False
-    assert any("已取消" in e.text for e in snap["logs"])
-
-
 # ---------- 一鍵流水線 ----------
 
 

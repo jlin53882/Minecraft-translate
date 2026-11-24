@@ -401,13 +401,6 @@ def _fetch_and_cache(name: str) -> SpeciesLookup:
     return SpeciesLookup(STATUS_FOUND, common_name)
 
 
-def query_wikipedia_and_update_cache(species_name: str) -> str | None:
-    """線上查詢維基百科並更新快取。"""
-    if _species_cache_data is None:
-        return None
-    return _fetch_and_cache(normalize_species_name(species_name)).value
-
-
 def _with_parent_reference(
     name: str, lookup: SpeciesLookup, *, fetch: bool
 ) -> SpeciesLookup:

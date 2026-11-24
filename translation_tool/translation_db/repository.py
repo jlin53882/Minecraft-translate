@@ -103,6 +103,7 @@ from translation_tool.translation_db.quality import (
     quality_state,
     repair_input_issues_for_kind,
     repair_output_issues_for_kind,
+    translation_issues,
     whitespace_note,
 )
 from translation_tool.translation_db.read_cache import READ_CACHE
@@ -1812,6 +1813,11 @@ class TranslationDB(
         with self._tx() as conn:
             quality_flags.rebuild(conn)
         self._has_quality_flags = True
+
+    def count_format_mismatch(self, entry_ids: Iterable[int]) -> int:
+        """指定條目中，生效譯文與原文特殊字元不一致的筆數（掃描匯入摘要用）。"""
+        with self._lock:
+            return quality_flags.count_mismatch(self._conn, entry_ids)
 
     def verify_quality_flags(self) -> list[tuple]:
         """比對品質旗標與逐一判斷的重算；空清單表示一致（只供測試與維護）。"""
@@ -5775,12 +5781,14 @@ class TranslationDB(
     ) -> int:
         """其他版本已有「類型／模組／鍵值／原文都相同」的譯文時直接沿用（不呼叫 AI）。
 
+        來源版本的譯文特殊字元與原文不一致時不沿用（那筆照常交給 AI）。
+
         只填沒有任何譯文的條目（可限定模組與類型）；沿用時保留原本的來源標記。回傳補上的條目數。
         """
         where, extra = self._untranslated_where(mod_ids, kind)
         with self._tx() as conn:
             rows = conn.execute(
-                "SELECT e.id, f2.source, f2.zh_tw FROM entry e "
+                "SELECT e.id, f2.source, f2.zh_tw, e.en_us, e.kind FROM entry e "
                 "LEFT JOIN effective f ON f.entry_id = e.id "
                 f"JOIN entry e2 ON {same_content_sql('e', 'e2')} "
                 "AND e2.mc_version <> e.mc_version "
@@ -5793,7 +5801,9 @@ class TranslationDB(
             # 譯文已確認一致；來源標記取目前優先序最高者（不可用代碼大小，人工不該被降成 AI）
             order = {s: i for i, s in enumerate(self.priority)}
             best: dict[int, tuple[int, int, str]] = {}
-            for eid, source, zh_tw in rows:
+            for eid, source, zh_tw, en_us, entry_kind in rows:
+                if en_us and translation_issues(en_us, zh_tw, kind=entry_kind):
+                    continue  # 來源版本的譯文格式已壞：不沿用，讓這筆留給 AI 重翻
                 rank = order.get(source, 99)
                 if eid not in best or rank < best[eid][0]:
                     best[eid] = (rank, source, zh_tw)

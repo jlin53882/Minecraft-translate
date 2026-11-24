@@ -40,11 +40,11 @@
 | `key_failure_cooldown_sec` | 每次判斷冷卻時讀 |
 | `rate_limit.*`、`rpm_cooldown_sec` | 每次請求前讀 |
 | `translator.parallel_execution_workers` | 每次建立執行緒池時讀；解析規則與各用途的預設／上限見 `translation_tool/utils/worker_count.py`（正整數才有效，無效值退回該用途預設） |
-| `translator.output_dir_name`、`ftb_translator.output_dir_name` | 每次任務讀 |
+| `translator.output_dir_name`、`ftb_translator.output_dir_name` | 目前沒有流程讀取（設定頁仍可 round-trip） |
 | `lang_merger.*` | 每次合併讀 |
 | `extractor.output_folder_names.*`、`jar_extractor.lang_codes` | 提取頁在按下動作時才讀 |
 | `extractor.skip_zh_cn_extract` | 提取頁建立時讀為預設值；每次操作仍可用頁面開關覆寫 |
-| `translator.custom_translator_folder` | 每次 FTB 任務建立時讀取，下一次任務生效 |
+| `translator.custom_translator_folder` | 目前沒有流程讀取（設定頁仍可 round-trip） |
 | `output_bundler.output_zip_name`（實際打包） | 打包時讀；**但輸入框提示文字是頁面建立時讀的（見 C）** |
 | `logging.log_level`、`logging.log_format` | 每次啟動流水線時 `update_logger_config` 重新套用 |
 | `lm_translator.translator.*`、`lm_translator.patchouli.dir_names` | 每次任務讀 |

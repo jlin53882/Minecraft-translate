@@ -45,6 +45,8 @@ UI 執行緒不在共用連線上查詢，避免與正在寫入的 worker 搶同
 `translation_kpi_titles`；同一個操作的預覽與結果共用欄位與用語）。批次取代可替換筆數達 `LARGE_REPLACE_THRESHOLD` 時，最後確認附加 `batch_replace_scale_warning` 的寫入時間與背景機翻提醒。
 
 掃描頁的 `ScanPanel._apply_summary` 在預覽與實際掃描填同一組卡片，預覽時在卡片說明標示「預覽（未寫入）」（卡片保留說明列，高度一致）；
+
+品質把關：人工儲存與審核前，譯文與原文的特殊字元不一致時要對同一段文字再按一次才放行（`entry_writes.needs_format_ack`，儲存與審核各自確認）。版本差異審核的逐筆套用在參考譯文格式不一致時同樣要再確認一次（`reference_issues`、`ApplyItem.confirmed_quality`，確認按鈕標籤列出全部原因），「保留目標譯文」遇到格式不一致的目標也要再按一次（`target_issues`）；批次套用與匯入後自動沿用略過這類條目並計入 `quality_blocked`，同文統一的 `SameTextApplyResult.quality_blocked` 同理。掃描摘要另列本次匯入的譯文中格式不一致的筆數（`format_mismatch`，只提示、不改變匯入結果）。
 機翻頁的 `TranslatePanel._apply_translation_summary` 同樣處理，第四張卡在兩種情況都是整個範圍仍未翻譯的筆數。
 
 更新範圍的補充規則：

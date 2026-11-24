@@ -4,13 +4,14 @@
 維護注意：PR1 拆分後更新測試以匹配新結構。
 """
 
-from app.views._log import LogView
+import flet as ft
+
 from app.ui.snack import show_snack
+from app.views._log import LogView
+from app.views.qc_base import QCBase
 from app.views.qc_view import QCView
 from app.views.untranslated_checker import UntranslatedChecker
-from app.views.qc_base import QCBase
-import flet as ft
-from tests.conftest import mock_page, mock_filepicker
+from tests.conftest import mock_filepicker, mock_page
 
 
 class _ProgressBar:
@@ -99,12 +100,8 @@ def test_task_runner_task_worker_exists_and_callable():
     def dummy_service(*args):
         return iter([])
 
-    # 這應該不會引發錯誤（即使生成器是空的）
-    try:
-        view.task_runner.task_worker(dummy_service, tuple())
-    except Exception as e:
-        # 不應有語法或簽名錯誤
-        raise AssertionError(f"task_worker 呼叫失敗: {e}")
+    # 這應該不會引發錯誤（即使生成器是空的）：有語法或簽名錯誤時直接讓例外拋出
+    view.task_runner.task_worker(dummy_service, ())
 
 
 def test_untranslated_checker_uses_task_runner():
@@ -122,11 +119,11 @@ def test_qc_view_all_textfields_exist(monkeypatch):
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    assert view.cn_dir_textfield.label == '簡中 (zh_cn) 來源資料夾 (JSON)'
-    assert view.tw_dir_textfield_2.label == '繁中 (zh_tw) 來源資料夾 (JSON)'
-    assert view.compare_out_dir_textfield.label == 'JSON 差異報告 輸出資料夾'
-    assert view.tsv_file_textfield.label == '簡繁差異 TSV 檔案路徑'
-    assert view.tsv_out_file_textfield.label == 'TSV 差異報告 輸出檔案 (.csv)'
+    assert view.cn_dir_textfield.label == "簡中 (zh_cn) 來源資料夾 (JSON)"
+    assert view.tw_dir_textfield_2.label == "繁中 (zh_tw) 來源資料夾 (JSON)"
+    assert view.compare_out_dir_textfield.label == "JSON 差異報告 輸出資料夾"
+    assert view.tsv_file_textfield.label == "簡繁差異 TSV 檔案路徑"
+    assert view.tsv_out_file_textfield.label == "TSV 差異報告 輸出檔案 (.csv)"
 
 
 def test_qc_view_all_buttons_exist(monkeypatch):
@@ -134,8 +131,8 @@ def test_qc_view_all_buttons_exist(monkeypatch):
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    assert view.compare_start_button.content == '啟動：JSON 資料夾差異比對'
-    assert view.compare_tsv_start_button.content == '啟動：TSV 單檔案差異比對'
+    assert view.compare_start_button.content == "啟動：JSON 資料夾差異比對"
+    assert view.compare_tsv_start_button.content == "啟動：TSV 單檔案差異比對"
 
 
 def test_qc_view_progress_bar_and_log_view(monkeypatch):
@@ -202,7 +199,7 @@ def test_qc_view_show_snack_bar_adds_to_overlay():
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    show_snack(view.page, 'Test error', '#FF0000')
+    show_snack(view.page, "Test error", "#FF0000")
 
     assert len(page.overlay) == 1
     assert page.overlay[0].open is True
@@ -212,7 +209,7 @@ def test_qc_view_pick_file_or_directory():
     """測試 _pick_file_or_directory 方法存在（已移除 tkinter）。"""
     view = QCView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, '_pick_file_or_directory')
+    assert hasattr(view, "_pick_file_or_directory")
     assert callable(view._pick_file_or_directory)
 
 
@@ -220,7 +217,7 @@ def test_qc_view_task_runner_exists():
     """測試 task_runner 存在"""
     view = QCView(mock_page(), mock_filepicker())
 
-    assert hasattr(view, 'task_runner')
+    assert hasattr(view, "task_runner")
     assert view.task_runner is not None
 
 
@@ -229,7 +226,7 @@ def test_qc_view_create_pick_button_returns_icon_button():
     page = mock_page()
     view = QCView(page, mock_filepicker())
 
-    btn = view._create_pick_button(view.cn_dir_textfield, 'Test', True)
+    btn = view._create_pick_button(view.cn_dir_textfield, "Test", True)
 
     assert btn is not None
     assert isinstance(btn, ft.IconButton)
@@ -253,3 +250,31 @@ def test_qc_view_compare_tsv_start_button_exists():
 def test_qc_view_log_view_exists():
     view = QCView(mock_page(), mock_filepicker())
     assert view.log_view is not None
+
+
+def test_format_consistency_card_is_a_mode_and_runs_its_own_service(monkeypatch):
+    """QC 頁有「格式一致性」模式：切換後只顯示它的面板，按下開始會用同一個 task_runner 跑它的服務。"""
+    from app.services import run_format_consistency_check_service
+    from app.views.format_consistency_checker import FormatConsistencyChecker
+
+    view = QCView(mock_page(), mock_filepicker())
+
+    assert isinstance(view.format_checker, FormatConsistencyChecker)
+    assert view.format_checker.task_runner is view.task_runner
+    assert "format_consistency" in view.mode_cards
+    assert view.format_checker.out_dir.label == "格式不一致報告 輸出資料夾"
+
+    view.select_mode("format_consistency")
+    assert view.mode_panels["format_consistency"].visible is True
+    assert view.mode_panels["untranslated"].visible is False
+
+    calls = []
+    monkeypatch.setattr(
+        view.task_runner, "task_worker", lambda fn, args, **kw: calls.append((fn, args))
+    )
+    view.format_checker.en_dir.value = "en"
+    view.format_checker.tw_dir.value = "tw"
+    view.format_checker.out_dir.value = "out"
+    view.format_checker._on_start(None)
+
+    assert calls == [(run_format_consistency_check_service, ("en", "tw", "out"))]

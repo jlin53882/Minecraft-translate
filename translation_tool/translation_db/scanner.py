@@ -196,6 +196,10 @@ class ScanReport:
     reuse_conflicts: int = 0  # 各版本已審核譯文不一致、未處理的筆數
     reuse_skipped_reviewed: int = 0  # 目標已審核而保留的筆數
     reuse_source_changed: int = 0  # 其他版本的原文不同、不自動沿用而留給差異審核的筆數
+    reuse_quality_blocked: int = 0  # 參考譯文特殊字元與原文不一致、不自動沿用的筆數
+    format_mismatch: int = (
+        0  # 本次匯入的條目中，生效譯文與原文特殊字元不一致的筆數（只提示，仍照常匯入）
+    )
     reuse_jar_english: int = (
         0  # ``reuse_applied`` 之中，原文不同但 jar 英文相同而沿用的筆數
     )
@@ -253,6 +257,8 @@ class ScanReport:
             "reuse_conflicts": self.reuse_conflicts,
             "reuse_skipped_reviewed": self.reuse_skipped_reviewed,
             "reuse_source_changed": self.reuse_source_changed,
+            "reuse_quality_blocked": self.reuse_quality_blocked,
+            "format_mismatch": self.format_mismatch,
             "reuse_jar_english": self.reuse_jar_english,
             "cancelled": self.cancelled,
             "issue_count": len(self.issues),

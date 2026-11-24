@@ -144,7 +144,7 @@ SETTINGS: tuple[Setting, ...] = (
         "主要輸出資料夾名稱",
         "general",
         C_TRANSLATOR,
-        "用於：翻譯結果輸出",
+        "目前沒有流程使用（保留以相容既有設定）",
         default="zh_tw_generated",
     ),
     Setting(
@@ -153,7 +153,7 @@ SETTINGS: tuple[Setting, ...] = (
         "FTB 任務輸出資料夾名稱",
         "general",
         C_TRANSLATOR,
-        "用於：FTB任務翻譯輸出",
+        "目前沒有流程使用（保留以相容既有設定）",
         default="FTB任務翻譯輸出",
     ),
     Setting(
@@ -350,7 +350,7 @@ SETTINGS: tuple[Setting, ...] = (
         "自訂翻譯資料夾",
         "general",
         C_TRANSLATOR,
-        "下次 FTB 任務讀取；相對路徑以專案根目錄為基準",
+        "目前沒有流程使用（保留以相容既有設定）",
         default="custom_translators",
     ),
     Setting(

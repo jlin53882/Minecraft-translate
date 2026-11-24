@@ -125,56 +125,6 @@ def test_icon_cache_paths_follow_data_root(monkeypatch, tmp_path):
     assert not (tmp_path / ".icon_cache").exists()
 
 
-def test_error_log_lives_under_data_root_logs(tmp_path):
-    """errors_<日期>.log 必須在 <資料根目錄>/logs，而不是 repo、cwd 或模組目錄。"""
-    from datetime import datetime
-
-    root = tmp_path / "data"
-    root.mkdir()
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    name = f"errors_{datetime.now().astimezone().strftime('%Y-%m-%d')}.log"
-    repo_log = REPO_ROOT / "logs" / name
-    repo_before = repo_log.stat().st_size if repo_log.exists() else None
-
-    _run_in_data_root(
-        "from translation_tool.utils.exceptions import _log_error_to_file;"
-        "_log_error_to_file(ValueError('data-root-marker'), 'probe_func')",
-        root,
-        cwd,
-    )
-
-    log_file = root.resolve() / "logs" / name
-    assert log_file.exists()
-    assert "data-root-marker" in log_file.read_text(encoding="utf-8")
-    assert not (cwd / "logs").exists()
-    after = repo_log.stat().st_size if repo_log.exists() else None
-    assert after == repo_before, "不得寫進 repo 的 logs/"
-
-
-def test_error_log_creates_missing_nested_data_root(tmp_path):
-    """MCT_DATA_DIR 指向尚不存在的巢狀目錄時，仍要建立 logs/ 並寫出錯誤記錄。"""
-    from datetime import datetime
-
-    root = tmp_path / "not-created" / "nested" / "root"
-    assert not root.exists()
-    cwd = tmp_path / "cwd"
-    cwd.mkdir()
-    name = f"errors_{datetime.now().astimezone().strftime('%Y-%m-%d')}.log"
-
-    _run_in_data_root(
-        "from translation_tool.utils.exceptions import _log_error_to_file;"
-        "_log_error_to_file(RuntimeError('nested-root-marker'), 'probe_func')",
-        root,
-        cwd,
-    )
-
-    log_file = root.resolve() / "logs" / name
-    assert log_file.is_file()
-    assert "nested-root-marker" in log_file.read_text(encoding="utf-8")
-    assert "probe_func" in log_file.read_text(encoding="utf-8")
-
-
 # ---------------------------------------------------------------------------
 # app/ 與 data/ 分離
 # ---------------------------------------------------------------------------

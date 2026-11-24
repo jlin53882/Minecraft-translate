@@ -45,12 +45,6 @@ MIRRORING_UI_CALLS = {
 #: (相對路徑, 限定函式名稱, 例外型別, 同函式同型別的第幾個 except) -> 為什麼這一組成對寫法是安全的（人工確認過）
 REVIEWED: dict[tuple[str, str, str, int], str] = {
     (
-        "app/services_impl/pipelines/_task_runner.py",
-        "run_callable_task",
-        "Exception",
-        0,
-    ): "if/else 互斥：只會走 mirror_session_log 或 logger.error 其中一條",
-    (
         "translation_tool/core/jar_processor_extract.py",
         "run_extraction_process_impl",
         "Exception",

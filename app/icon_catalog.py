@@ -245,11 +245,6 @@ class ModpackAssetCatalog:
         archives = loader_archives + archives
         return cls(archives, client_archive=client_jar)
 
-    @property
-    def has_client_assets(self) -> bool:
-        """是否找得到原版 client JAR（沒有時，引用原版貼圖的方塊無法顯示）。"""
-        return self.client_archive is not None
-
     def has(self, resource_path: str) -> bool:
         return bool(self.resources.get(resource_path))
 

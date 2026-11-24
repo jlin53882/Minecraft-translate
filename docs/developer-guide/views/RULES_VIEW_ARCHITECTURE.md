@@ -101,7 +101,7 @@ _render_current_page()
 驗證實作在 `rules_validation.check_rule`（回傳出錯欄位與訊息），`validate_rule` 只取訊息。
 1. `src.strip()` 為空 → `'from 欄位不可為空'`
 2. `re.compile(src)` 拋 `re.error` → `translate_regex_error`（missing `)` / bad escape / multiple repeat / unterminated char set / unknown extension 對應中文提示）
-3. **重複檢查**：與其他列（`idx != current_index`）的 `from` 相同 → `'⚠ 與第 N 條規則重複'`（批次驗證時用 `_build_from_index` 建立索引）
+3. **重複檢查**：與其他列（`idx != current_index`）的 `from` 相同 → `'⚠ 與第 N 條規則重複'`（批次驗證時用 `build_from_index` 建立索引）
 4. **群組引用**：`dst` 中 `\N` / `$N` 引用數 > `compiled.groups` → `'引用群組 \N 超出群組數 M'`
 5. **無效跳脫**：`dst` 含連續兩個反斜線且其後非數字 → `'可能存在無效跳脫…'`
 

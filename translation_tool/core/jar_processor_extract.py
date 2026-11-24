@@ -160,14 +160,6 @@ def build_collision_safe_output_names(
     return output_names
 
 
-def build_nested_output_names(
-    jar_paths: Iterable[str | Path],
-    root: str | Path | None = None,
-) -> dict[Path, str]:
-    """Backward-compatible alias for collision-safe extracted wrapper names."""
-    return build_collision_safe_output_names(jar_paths, root)
-
-
 def _source_manifest_entry(path: Path, wrapper: str) -> dict[str, Any]:
     """Return the durable source identity used to own one extracted wrapper."""
     resolved = path.resolve()

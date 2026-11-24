@@ -1,13 +1,11 @@
-"""FTB／KubeJS／MD 翻譯的「重開後續跑」標記（#164，沿用 #151 的設計）。
+"""舊版 FTB／KubeJS／MD 翻譯殘留的續跑標記：只讀取與清除，不再寫入。
 
-與機器翻譯頁相同：已完成批次的譯文在翻譯快取（每批 fsync），標記只是「這個任務沒做完」的
-記錄與重新執行所需的選項；續跑 = 以同一組輸入與選項重新執行整條流程，抽取／清理等步驟會
-重新推導，翻譯步驟由快取命中已完成的部分，只翻剩下的。
+目前沒有任何流程會寫出這些標記；這個模組只讓啟動時的續跑對話框能辨識、驗證與清除
+使用者磁碟上殘留的舊標記。
 
 - 標記檔：``<資料根目錄>/logs/translator_<kind>_checkpoint.json``（版本 2，含 ``kind``、
-  ``options``、涵蓋全部來源檔案的指紋）。沿用 ``JsonCheckpointAdapter`` 原本的檔名。
-- 標記在**整個任務完成**時才清除（FTB 是逐檔案翻譯，不能在第一個檔案完成時就清掉）。
-- 指紋是來源檔案內容的雜湊（不用 mtime），在任務開始時計算一次；排除輸出資料夾。
+  ``options``、涵蓋全部來源檔案的指紋）。
+- 指紋是來源檔案內容的雜湊（不用 mtime）；排除輸出資料夾。
 """
 
 from __future__ import annotations
@@ -15,16 +13,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import threading
-import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from translation_tool.utils.app_paths import get_data_root
-from translation_tool.utils.file_replace import atomic_write_text
 from translation_tool.utils.log_unit import log_info, log_warning
 
 # Kinds currently shown by the resume dialog. Historical KubeJS/FTB marker
@@ -74,9 +66,11 @@ def list_source_files(
     base = Path(input_dir).resolve()
     files: list[Path]
     if kind == "ftbquests":
-        from translation_tool.core.ftb_translator import resolve_ftbquests_quests_root
+        from translation_tool.core.ftb_translator_export import (
+            resolve_ftbquests_quests_root_impl,
+        )
 
-        base = Path(resolve_ftbquests_quests_root(input_dir))
+        base = Path(resolve_ftbquests_quests_root_impl(input_dir))
         files = [
             p
             for p in base.rglob("*")
@@ -139,139 +133,13 @@ def compute_source_fingerprint(
     return digest.hexdigest()
 
 
-# -- 任務期間的狀態 -----------------------------------------------------------------
-
-
-@dataclass
-class ResumeContext:
-    """一次翻譯任務的續跑資訊；``JsonCheckpointAdapter`` 依 ``kind`` 取得它。"""
-
-    kind: str
-    input_dir: str
-    output_dir: str | None
-    options: dict[str, Any]
-    fingerprint: str
-    loops_started: int = 0
-    loops_completed: int = 0
-    completed_base: int = 0  # 已完成迴圈處理的項目數（顯示用的累計進度）
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-    def initial_payload(self) -> dict[str, Any]:
-        """任務一開始就 durable 寫入的標記內容（還沒有任何批次）；之後由 adapter 逐批更新進度。"""
-        return {
-            "version": 2,
-            "kind": self.kind,
-            "input_dir": self.input_dir,
-            "output_dir": self.output_dir or "",
-            "options": self.options,
-            "fingerprint": self.fingerprint,
-            "completed_count": 0,
-            "total": 0,
-            "status": "STARTED",
-            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        }
-
-    def loop_started(self) -> None:
-        with self._lock:
-            self.loops_started += 1
-
-    def loop_completed(self, processed: int = 0) -> None:
-        with self._lock:
-            self.loops_completed += 1
-            self.completed_base += processed
-
-    @property
-    def all_loops_done(self) -> bool:
-        with self._lock:
-            return self.loops_completed >= self.loops_started
-
-
-_ACTIVE: dict[str, ResumeContext] = {}
-_ACTIVE_LOCK = threading.Lock()
-
-
-def active_context(kind: str) -> ResumeContext | None:
-    """目前進行中的任務（同一種流程同時只會有一個，UI 已限制）。"""
-    with _ACTIVE_LOCK:
-        return _ACTIVE.get(kind)
-
-
-def write_marker(kind: str, payload: dict[str, Any]) -> None:
-    """原子且 durable 地寫入標記：暫存檔 fsync → replace（鎖檔重試）→ fsync 目錄。"""
-    atomic_write_text(
-        marker_path(kind), json.dumps(payload, ensure_ascii=False, sort_keys=True)
-    )
-
-
 def discard_marker(kind: str) -> None:
     """使用者放棄任務時刪除標記；失敗會拋出 ``OSError``，讓對話框保留該任務並顯示錯誤。"""
     marker_path(kind).unlink(missing_ok=True)
 
 
-def clear_marker(kind: str) -> None:
-    try:
-        marker_path(kind).unlink(missing_ok=True)
-    except OSError as exc:
-        log_warning(f"[Resume] 無法清除 {kind} 的續跑標記：{exc!r}")
-
-
-@contextmanager
-def resume_task(
-    kind: str,
-    *,
-    input_dir: str,
-    output_dir: str | None,
-    options: dict[str, Any],
-    session: Any = None,
-    dry_run: bool = False,
-    translate_enabled: bool = True,
-    fingerprint_fn: Callable[[str, str, str | None], str | None] | None = None,
-) -> Iterator[ResumeContext | None]:
-    """包住整個翻譯任務：任務期間讓 adapter 能寫出續跑標記，結束時決定是否清除。
-
-    - dry-run 或沒有勾選翻譯步驟：不記錄標記，也不碰既有標記。
-    - 開始時立即寫入初始標記（``completed_count`` 0、``status`` ``STARTED``），之後由
-      ``JsonCheckpointAdapter`` 在每個 durable 批次更新進度。
-    - 整個任務完成（沒有錯誤、沒有取消、每個翻譯迴圈都 DONE）才清除標記；
-      取消、失敗、金鑰耗盡都保留。
-    - 無法計算來源指紋（來源太大、讀取失敗）時不提供續跑，不影響翻譯本身。
-    """
-    if dry_run or not translate_enabled:
-        yield None
-        return
-    compute = fingerprint_fn or compute_source_fingerprint
-    fingerprint = compute(kind, input_dir, output_dir)
-    if fingerprint is None:
-        yield None
-        return
-    ctx = ResumeContext(kind, input_dir, output_dir, dict(options), fingerprint)
-    # 任務一開始就 durable 寫入初始標記：抽取／清理途中、第一個批次完成前被強制結束，
-    # 重開後也偵測得到（只靠 adapter 的逐批更新，第一批 durable 之前磁碟上沒有任何標記）。
-    try:
-        write_marker(kind, ctx.initial_payload())
-    except OSError as exc:
-        log_warning(f"[Resume] 無法寫入 {kind} 的初始續跑標記（任務照常執行）：{exc!r}")
-    with _ACTIVE_LOCK:
-        _ACTIVE[kind] = ctx
-    returned_normally = False
-    try:
-        yield ctx
-        returned_normally = True
-    finally:
-        with _ACTIVE_LOCK:
-            if _ACTIVE.get(kind) is ctx:
-                del _ACTIVE[kind]
-        failed = bool(getattr(session, "error", False)) or bool(
-            getattr(session, "cancel_requested", False)
-        )
-        # 例外（含 KeyboardInterrupt／SystemExit）離開時一律保留標記；只有正常結束才可能清除
-        if returned_normally and not failed and ctx.all_loops_done:
-            clear_marker(kind)
-
-
 def read_marker(kind: str) -> dict[str, Any] | None:
     """讀取標記；不存在回傳 None，損毀的檔案隔離成 ``.corrupt``（與機器翻譯的標記一致）。"""
-    import json
 
     path = marker_path(kind)
     if not path.exists():

@@ -25,6 +25,7 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.quality import translation_issues
 from translation_tool.translation_db.schema import KIND_LANG
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
 
@@ -44,6 +45,8 @@ class MergeDbFill:
         self._lock = threading.Lock()
         self.filled = 0
         self.skipped_same_as_source = 0
+        self.rejected_quality = 0
+        self.rejected_quality_samples: list[str] = []
 
     def fill(
         self,
@@ -73,10 +76,12 @@ class MergeDbFill:
         mod_id: str | None,
         source_provenance_by_key: dict[str, dict[str, Any]] | None = None,
     ) -> Callable[[str, Any], str | None]:
-        """回傳 ``lookup(key, en_us) -> 譯文 | None``：英文原文相同、譯文已翻完且有變化才命中。
+        """回傳 ``lookup(key, en_us) -> 譯文 | None``：英文原文相同、譯文已翻完、有變化且特殊字元與原文一致才命中。
 
         資料庫可能保留專有名詞等「刻意維持原文」的結果，但資源包合併不能把這種
         no-op 值當成已套用的翻譯；它會回傳 ``None``，讓上層把條目留在待翻譯輸出。
+        特殊字元（色碼、``%s``、``{0}`` 等）與原文不一致的譯文同樣不採用，也留在待翻譯輸出，
+        與目錄翻譯讀取資料庫譯文時的把關相同。
         命中時把來源標記寫進 ``source_provenance_by_key``；沒有 ``mod_id`` 永遠不命中。
         """
 
@@ -89,6 +94,15 @@ class MergeDbFill:
             if hit.zh_tw == en:
                 with self._lock:
                     self.skipped_same_as_source += 1
+                return None
+            issues = translation_issues(en, hit.zh_tw, kind=KIND_LANG)
+            if issues:
+                with self._lock:
+                    self.rejected_quality += 1
+                    if len(self.rejected_quality_samples) < 5:
+                        self.rejected_quality_samples.append(
+                            f"{mod_id}:{key}（{'、'.join(issues[:2])}）"
+                        )
                 return None
             if source_provenance_by_key is not None:
                 source_provenance_by_key[key] = {
@@ -162,6 +176,13 @@ def merge_db_fill(
             log_info(
                 f"📚 語系合併由資料庫補上 {fill.filled} 筆譯文"
                 f"（目標版本 {stats.hit_target}　跨版本沿用 {stats.hit_cross}"
-                f"　原文相同略過 {fill.skipped_same_as_source}）"
+                f"　原文相同略過 {fill.skipped_same_as_source}"
+                f"　特殊字元與原文不一致略過 {fill.rejected_quality}）"
             )
+            if fill.rejected_quality:
+                log_warning(
+                    f"⚠️ 資料庫有 {fill.rejected_quality} 筆譯文特殊字元與原文不一致，"
+                    "未套用到合併輸出，條目留在待翻譯："
+                    + "；".join(fill.rejected_quality_samples)
+                )
             fill.close()

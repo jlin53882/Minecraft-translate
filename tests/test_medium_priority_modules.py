@@ -125,27 +125,6 @@ def test_jar_processor_preview_import():
     assert jar_processor_preview is not None
 
 
-def test_kubejs_translator_import():
-    """Verify kubejs_translator can be imported."""
-    from translation_tool.core import kubejs_translator
-
-    assert kubejs_translator is not None
-
-
-def test_kubejs_translator_clean_import():
-    """Verify kubejs_translator_clean can be imported."""
-    from translation_tool.core import kubejs_translator_clean
-
-    assert kubejs_translator_clean is not None
-
-
-def test_kubejs_translator_io_import():
-    """Verify kubejs_translator_io can be imported."""
-    from translation_tool.core import kubejs_translator_io
-
-    assert kubejs_translator_io is not None
-
-
 def test_kubejs_translator_paths_import():
     """Verify kubejs_translator_paths can be imported."""
     from translation_tool.core import kubejs_translator_paths
@@ -251,48 +230,6 @@ def test_lm_translator_shared_loop_import():
     assert lm_translator_shared_loop is not None
 
 
-def test_lm_translator_shared_preview_import():
-    """Verify lm_translator_shared_preview can be imported."""
-    from translation_tool.core import lm_translator_shared_preview
-
-    assert lm_translator_shared_preview is not None
-
-
-def test_lm_translator_shared_recording_import():
-    """Verify lm_translator_shared_recording can be imported."""
-    from translation_tool.core import lm_translator_shared_recording
-
-    assert lm_translator_shared_recording is not None
-
-
-def test_md_translation_assembly_import():
-    """Verify md_translation_assembly can be imported."""
-    from translation_tool.core import md_translation_assembly
-
-    assert md_translation_assembly is not None
-
-
-def test_md_translation_progress_import():
-    """Verify md_translation_progress can be imported."""
-    from translation_tool.core import md_translation_progress
-
-    assert md_translation_progress is not None
-
-
-def test_md_translation_stats_import():
-    """Verify md_translation_stats can be imported."""
-    from translation_tool.core import md_translation_stats
-
-    assert md_translation_stats is not None
-
-
-def test_md_translation_steps_import():
-    """Verify md_translation_steps can be imported."""
-    from translation_tool.core import md_translation_steps
-
-    assert md_translation_steps is not None
-
-
 def test_output_bundler_import():
     """Verify output_bundler can be imported."""
     from translation_tool.core import output_bundler
@@ -300,29 +237,8 @@ def test_output_bundler_import():
     assert output_bundler is not None
 
 
-def test_ftb_translator_import():
-    """Verify ftb_translator can be imported."""
-    from translation_tool.core import ftb_translator
-
-    assert ftb_translator is not None
-
-
-def test_ftb_translator_clean_import():
-    """Verify ftb_translator_clean can be imported."""
-    from translation_tool.core import ftb_translator_clean
-
-    assert ftb_translator_clean is not None
-
-
 def test_ftb_translator_export_import():
     """Verify ftb_translator_export can be imported."""
     from translation_tool.core import ftb_translator_export
 
     assert ftb_translator_export is not None
-
-
-def test_ftb_translator_template_import():
-    """Verify ftb_translator_template can be imported."""
-    from translation_tool.core import ftb_translator_template
-
-    assert ftb_translator_template is not None

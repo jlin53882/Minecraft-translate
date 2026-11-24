@@ -363,15 +363,6 @@ def _rank_discovery_roots(roots: dict[Path, int], max_candidates: int) -> list[P
     ]
 
 
-def discover_pack_root(folder: str | Path) -> Path | None:
-    """相容舊呼叫者：回傳排序後第一個根目錄。
-
-    新的流水線應使用 :func:`discover_pack_roots`，遇到多個候選時要求明確選擇。
-    """
-    roots = discover_pack_roots(folder)
-    return roots[0] if roots else None
-
-
 def scan_pack_sources(
     pack_root: str | Path,
     version: str,

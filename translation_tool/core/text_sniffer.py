@@ -161,17 +161,6 @@ def english_stopword_ratio(text: str) -> tuple[float, int]:
     return sum(w.lower() in _STOPWORDS for w in words) / len(words), len(words)
 
 
-def is_title_like(text: str) -> bool:
-    """短標題（一到三個英文字，首字大寫），用於 ``title``／``name`` 這種位置。"""
-    value = text.strip()
-    if _RESOURCE_ID.match(value) or _PATH_LIKE.match(value) or _COLOR.match(value):
-        return False
-    if _NUMBER.match(value) or _TRANSLATION_KEY.match(value):
-        return False
-    words = _WORD.findall(_MARKUP.sub(" ", value))
-    return 1 <= len(words) <= 8 and value[:1].isalpha()
-
-
 BOM_AND_SPACE = chr(0xFEFF) + " " + chr(9) + chr(13) + chr(10)
 _BLANK_LINE = re.compile("\n[ \t]*\n")
 _FRONT_MATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*(?:\n|\Z)", re.DOTALL)

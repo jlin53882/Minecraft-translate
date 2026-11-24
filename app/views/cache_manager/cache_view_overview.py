@@ -278,19 +278,6 @@ class CacheOverviewMixin:
             str(saved), delta=str(data.get("cache_root") or ""), delta_tone="neutral"
         )
 
-    def _load_overview(self):
-        """從服務載入快取總覽資料"""
-        try:
-            data = cache_get_overview_service()
-        except Exception as ex:  # noqa: BLE001
-            self._append_log(f"[WARN] 讀取總覽失敗：{ex}")
-            self._append_log(traceback.format_exc())
-            data = {}
-
-        self._refresh_overview_ui(data)
-        self._refresh_query_type_options()
-        self._render_query_type_shard_page()
-
     def _run_action(
         self,
         reason: str,

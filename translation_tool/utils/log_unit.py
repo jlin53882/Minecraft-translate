@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import sys
-import time
 from typing import Any
 
 _THIS_MODULE = __name__
@@ -172,16 +171,3 @@ def progress(*args, session=None, p: float | None = None) -> None:
         session.set_progress(fp)
     except Exception:  # noqa: BLE001, S110 - UI 進度回報失敗不可中斷任務
         pass
-
-
-def get_formatted_duration(start_tick: float) -> str:
-    """計算從 start_tick（perf_counter）到現在的耗時，回傳可讀字串。"""
-    current_tick = time.perf_counter()
-    duration = int(current_tick - start_tick)
-
-    hours, remainder = divmod(duration, 3600)
-    minutes, seconds = divmod(remainder, 60)
-
-    if hours > 0:
-        return f"{hours} 小時 {minutes} 分 {seconds} 秒"
-    return f"{minutes} 分 {seconds} 秒"

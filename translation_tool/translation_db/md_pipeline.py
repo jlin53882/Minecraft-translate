@@ -124,6 +124,7 @@ class MdOutputReport:
     files_written: int = 0
     blocks_translated: int = 0
     blocks_missing: int = 0
+    blocks_rejected: int = 0  # 譯文特殊字元或指南標記與原文不一致，輸出保留原文
     skipped_untranslated: int = 0
     skipped_manual_edit: int = 0
     issues: list[dict[str, str]] = field(default_factory=list)
@@ -169,6 +170,7 @@ class MdPipelineReport:
             "output_planned": out.files_planned if out else 0,
             "blocks_translated": out.blocks_translated if out else 0,
             "blocks_missing": out.blocks_missing if out else 0,
+            "blocks_rejected": out.blocks_rejected if out else 0,
             "skipped_manual_edit": out.skipped_manual_edit if out else 0,
             "issues": self.issues[:_MAX_ISSUES],
             "timing_sec": dict(self.timing_sec),
@@ -370,6 +372,44 @@ def sync_database(
 # ----------------------------------------------------------------- 輸出 overlay
 
 
+def _resolve_blocks(
+    resolver: TranslationResolver, source: MdSourceFile, report: MdOutputReport
+) -> tuple[list[str], int]:
+    """一個檔案各段落的輸出文字：DB 有譯文且特殊字元／指南標記與原文一致才採用，否則保留原文。
+
+    沒有譯文計入 ``blocks_missing``；有譯文但格式不一致另計入 ``blocks_rejected`` 並留下問題紀錄。
+    回傳 ``(各段落輸出文字, 採用譯文的段數)``。
+    """
+    from translation_tool.translation_db.quality import translation_issues
+
+    current = [b.text for b in source.blocks]
+    translated = 0
+    for index in sorted(source.translatable):
+        block = source.blocks[index]
+        hit = resolver.lookup(
+            KIND_GUIDE, source.mod_id, source.item_key(index), block.text
+        )
+        if not (hit and hit.zh_tw.strip()):
+            report.blocks_missing += 1
+            continue
+        issues = translation_issues(block.text, hit.zh_tw, kind=KIND_GUIDE)
+        if not issues:
+            current[index] = hit.zh_tw
+            translated += 1
+            continue
+        report.blocks_missing += 1
+        report.blocks_rejected += 1
+        if len(report.issues) < _MAX_ISSUES:
+            report.issues.append(
+                {
+                    "path": source.rel,
+                    "reason": "format_mismatch",
+                    "detail": f"第 {index + 1} 段：{'、'.join(issues[:2])}",
+                }
+            )
+    return current, translated
+
+
 def export_md_overlay(
     db: TranslationDB,
     scan: MdScanResult,
@@ -378,8 +418,6 @@ def export_md_overlay(
     session=None,
 ) -> MdOutputReport:
     """依 DB 的生效譯文輸出繁中指南；不修改來源，也不動 DB。"""
-    from translation_tool.translation_db.quality import guide_structure_issues
-
     output = Path(str(options.output_root or "")).expanduser()
     # 只有發布才寫輸出資料夾；同步 DB 步驟即使填了輸出資料夾也只計算輸出計畫
     write_files = options.publish and not options.dry_run
@@ -394,24 +432,7 @@ def export_md_overlay(
         for count, source in enumerate(scan.files):
             if count % 50 == 0:
                 _raise_if_cancelled(session)
-            current = [b.text for b in source.blocks]
-            translated = 0
-            for index in sorted(source.translatable):
-                block = source.blocks[index]
-                hit = resolver.lookup(
-                    KIND_GUIDE, source.mod_id, source.item_key(index), block.text
-                )
-                if (
-                    hit
-                    and hit.zh_tw.strip()
-                    and not guide_structure_issues(
-                        block.text, hit.zh_tw, kind=KIND_GUIDE
-                    )
-                ):
-                    current[index] = hit.zh_tw
-                    translated += 1
-                else:
-                    report.blocks_missing += 1
+            current, translated = _resolve_blocks(resolver, source, report)
             report.blocks_translated += translated
             if translated == 0:
                 report.skipped_untranslated += 1

@@ -176,6 +176,53 @@ def test_stage1_does_not_apply_database_value_equal_to_english(tmp_path, monkeyp
         assert provenance == {}
 
 
+def test_stage1_rejects_database_value_with_missing_format_tokens(
+    tmp_path, monkeypatch
+):
+    """資料庫譯文少了色碼／格式符號時，不可寫進合併輸出，條目留在待翻譯。"""
+    db_path = tmp_path / "bad-format.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.gold",
+                "§6Gold %s ingot",
+                "黃金錠",  # 少了 §6 與 %s
+                source=SRC_AI,
+            ),
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.ok",
+                "§6Gold %s ingot",
+                "§6黃金%s錠",
+                source=SRC_AI,
+            ),
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path)
+
+    with merge_db_fill(use_db=True, version="1.21.1") as fill:
+        assert fill is not None
+        final, remaining, hits = fill.fill(
+            "foo",
+            {},
+            {
+                "item.foo.gold": "§6Gold %s ingot",
+                "item.foo.ok": "§6Gold %s ingot",
+            },
+        )
+        assert final == {"item.foo.ok": "§6黃金%s錠"}
+        assert remaining == {"item.foo.gold": "§6Gold %s ingot"}
+        assert hits == 1
+        assert fill.rejected_quality == 1
+        assert "item.foo.gold" in fill.rejected_quality_samples[0]
+
+
 def test_stage2_keeps_database_noop_in_pending_instead_of_assets(tmp_path, monkeypatch):
     """Stage 2 也必須把資料庫 no-op 留在待翻譯，不得寫入資源包 assets。"""
     db_path = tmp_path / "stage2-same-as-source.db"
@@ -223,6 +270,47 @@ def test_stage2_keeps_database_noop_in_pending_instead_of_assets(tmp_path, monke
     assert json.loads(pending.read_text(encoding="utf-8")) == {
         "item.foo.same": "Caravane"
     }
+
+
+def test_stage2_warns_about_format_mismatch_in_the_merged_output(tmp_path, monkeypatch):
+    """Stage 2 輸出的譯文與原文特殊字元不一致時，照常寫入但記警告。"""
+    from translation_tool.core import lang_merge_quality
+
+    db_path = tmp_path / "stage2-format.db"
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [
+            ScanItem(
+                KIND_LANG,
+                "foo",
+                "item.foo.gold",
+                "§6Gold %s",
+                "§6黃金%s",
+                source=SRC_MANUAL,
+            )
+        ],
+    )
+    db.close()
+    _settings(monkeypatch, db_path)
+    lang_output = tmp_path / "stage2-output"
+    base = lang_output / "待翻譯" / "foo_extracted" / "assets" / "foo" / "lang"
+    _write(base / "en_us.json", {"item.foo.gold": "§6Gold %s"})
+    _write(base / "zh_tw.json", {"item.foo.gold": "黃金"})  # 作者自帶，少了色碼
+
+    warnings: list[str] = []
+    monkeypatch.setattr(lang_merge_quality, "log_warning", warnings.append)
+    list(
+        merge_extracted_to_assets(
+            lang_output,
+            use_translation_db=False,
+            translation_db_version="1.21.1",
+        )
+    )
+
+    target = lang_output / "assets" / "foo" / "lang" / "zh_tw.json"
+    assert json.loads(target.read_text(encoding="utf-8")) == {"item.foo.gold": "黃金"}
+    assert any("特殊字元與原文不一致" in w for w in warnings)
 
 
 def test_zip_batch_keeps_database_identity_after_global_path_switch(

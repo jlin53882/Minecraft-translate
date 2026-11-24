@@ -11,6 +11,24 @@
 
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
+### 品質檢查補上漏接的路徑
+- 語系合併：資料庫譯文的特殊字元（`§6`、`%s`、`{0}` 等）與原文不一致時不再寫進合併輸出，條目留在待翻譯。
+- 跨版本沿用：參考譯文格式有問題時不自動沿用，也不再批次套用；逐筆套用需再按一次確認。掃描摘要新增「特殊字元與原文不一致未沿用」筆數。
+- Markdown 輸出：改用完整的格式檢查（原本只檢查指南結構標記），不一致的段落保留原文，摘要新增被擋筆數。
+- 同文一致性：統一譯文格式有問題時不寫入其他成員。
+- 條目人工儲存、審核時，譯文與原文的特殊字元不一致要對同一段文字再按一次才放行（不強制擋下，避免妨礙刻意調整）。
+- 快取管理頁手動改譯文時，格式不一致會被拒絕（這樣的快取項目讀取時一定被退回）；還原歷史紀錄不受影響。
+- 掃描匯入完成後，摘要顯示本次匯入的譯文中特殊字元與原文不一致的筆數（仍照常匯入；各輸出流程再依自己的規則保留、擋下或回報）。
+- 語系合併：模組作者自帶的 zh_tw、zh_cn 轉繁與既有譯文照常保留，但合併日誌會警告格式不一致的筆數與前幾筆。
+- QC 頁新增「格式一致性」檢查：逐檔比對 en_us 與 zh_tw，把特殊字元不一致的條目輸出成報告。
+- token 掃描新增具名佔位符 `{count}`、`${var}`、`{{var}}`，品質旗標版本升為 12（既有資料庫第一次開啟時會重新計算旗標）。
+
+### 移除沒有使用者的舊流水線與死碼
+- 刪除 Markdown、KubeJS、FTB Quests 的舊三步驟流程（`md_translation_*`、`md_pipeline_files／pairing／zh_cn`、`kubejs_translator*`、`ftb_translator*`，以及三個 `*_lmtranslator`）、`utils/exceptions.py` 與 `_task_runner.py`：目前的 Markdown 走 ModDB 流水線、KubeJS／FTB 走 `pack_pipeline`，這些模組沒有任何正式程式引用。
+- 一併刪除只被它們使用的函式（例如 `inject_ftbquests_zh_tw_from_jsons`、`load_custom_translations`、`get_formatted_duration`），以及零呼叫的 `sniffed_groups`、`guide_mark_issues`、`_retry_same_source_translations` 等。
+- `tools/test_all_features.py` 移除 KubeJS／FTB 舊流程的兩個煙霧測試。
+- `translator.output_dir_name`、`ftb_translator.output_dir_name`、`translator.custom_translator_folder` 設定項目前沒有任何流程讀取，暫時保留以相容既有 `config.json`。
+
 ### Mod 資料庫掃描：新增「模組包資料夾」匯入來源
 - 掃描頁的匯入來源分成「mods 資料夾（jar）」「模組包資料夾」「翻譯 ZIP（已翻譯）」。mods 資料夾只掃 jar，不再讀 KubeJS／FTB Quests，也不產生模組包版本；KubeJS／FTB Quests 改由模組包資料夾（或翻譯 ZIP）匯入。
 - 修正：掃描時會往上找最多 4 層父目錄當模組包根目錄，所選資料夾放在某個有 `kubejs`／`config/ftbquests` 的目錄底下時，會匯入所選資料夾以外的內容，並以上層資料夾名稱當模組包版本。現在只看所選路徑本身與底下；KubeJS／FTB 流水線頁不受影響。

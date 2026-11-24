@@ -229,21 +229,3 @@ def sniffed_groups_detailed(
         budget_exhausted=bool(budget_error),
         budget_error=budget_error,
     )
-
-
-def sniffed_groups(
-    zf: zipfile.ZipFile,
-    names: Sequence[str],
-    claimed: set[str],
-    *,
-    translated: bool = False,
-    diagnostics: list[str] | None = None,
-) -> Groups:
-    """相容的簡化入口；需要完整性狀態時使用 ``sniffed_groups_detailed``。"""
-    return sniffed_groups_detailed(
-        zf,
-        names,
-        claimed,
-        translated=translated,
-        diagnostics=diagnostics,
-    ).groups

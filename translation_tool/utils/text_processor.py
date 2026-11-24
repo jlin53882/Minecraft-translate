@@ -371,28 +371,6 @@ def save_replace_rules(
             raise
 
 
-def load_custom_translations(folder_path: str, filename="table.tsv") -> dict[str, str]:
-    """從指定資料夾載入自訂的翻譯表 (TSV 格式)。"""
-    custom_map = {}
-    file_path = resolve_project_path(folder_path) / filename
-    if not file_path.exists():
-        log_info(f"自訂翻譯檔 {file_path} 不存在，略過。")
-        return custom_map
-    try:
-        import pandas as pd
-
-        df = pd.read_csv(
-            file_path, sep="\t", header=None, names=["source", "translation"]
-        )
-        for _, row in df.iterrows():
-            if pd.notna(row["source"]) and pd.notna(row["translation"]):
-                custom_map[str(row["source"])] = str(row["translation"])
-        log_info(f"成功從 {file_path} 載入 {len(custom_map)} 條自訂翻譯。")
-    except Exception as e:  # noqa: BLE001
-        log_error(f"讀取自訂翻譯檔 {file_path} 失敗: {e!r}")
-    return custom_map
-
-
 def safe_convert_text(text: str) -> str:
     """安全的文字轉換，處理空值與例外。"""
     if not text:
@@ -436,24 +414,6 @@ def convert_snbt_file_inplace(
     except Exception as e:  # noqa: BLE001
         log_error("convert_snbt_file_inplace 失敗: %s (%s)", path, e)
         return False
-
-
-def convert_snbt_tree_inplace(
-    root_dir: str, rules: list[dict[str, str]] | None = None
-) -> int:
-    """
-    遞迴掃描資料夾，把所有 .snbt 就地轉繁（CJK-only + rules）。
-    回傳：有變更的檔案數。
-    用途：inject copy zh_cn -> zh_tw 後，先整包轉繁再 patch
-    """
-    changed = 0
-    for r, _, files in os.walk(root_dir):
-        for fn in files:
-            if fn.lower().endswith(".snbt"):
-                fp = os.path.join(r, fn)
-                if convert_snbt_file_inplace(fp, rules):
-                    changed += 1
-    return changed
 
 
 def recursive_translate_dict(data: Any, rules: Sequence[dict[str, str]]) -> Any:
@@ -501,22 +461,6 @@ def recursive_translate(
 
     else:
         return data
-
-
-def orjson_dump_file(obj, fp, *, indent2: bool = True, newline: bool = True):
-    """
-    用 orjson 寫入檔案物件 fp。
-    - indent2=True: 等同 json.dump(..., indent=2)
-    - orjson 預設就是 UTF-8 且不會把中文變成 \\uXXXX（等同 ensure_ascii=False）
-    """
-    option = 0
-    if indent2:
-        option |= orjson.OPT_INDENT_2
-    if newline:
-        option |= orjson.OPT_APPEND_NEWLINE
-
-    data = orjson.dumps(obj, option=option)
-    fp.write(data)
 
 
 def orjson_pretty_str(obj) -> str:

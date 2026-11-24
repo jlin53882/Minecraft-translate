@@ -497,12 +497,6 @@ class _CompiledRules:
                         protected_until[index] = max(protected_until[index], end)
         return protected_until, protected_spans
 
-    def _protected_until(
-        self, text: str, output_trie: dict[Any, Any] | None = None
-    ) -> list[int]:
-        """回傳覆蓋各索引的目標片語結束偏移量。"""
-        return self._protected_spans(text, output_trie)[0]
-
     def _apply_literals_once(
         self,
         text: str,

@@ -4,12 +4,14 @@
 
 ## 職責
 
-- 提供三種檢驗模式，由模式卡切換，每種模式有自己的路徑欄位與啟動按鈕：
+- 提供四種檢驗模式，由模式卡切換，每種模式有自己的路徑欄位與啟動按鈕：
   - Key 缺失檢查（`untranslated`）：比對 en_us 與 zh_tw 的 key，由 `app/views/untranslated_checker.py` 的 `UntranslatedChecker` 提供 UI。
+  - 格式一致性（`format_consistency`）：逐檔比對 en_us 與 zh_tw，列出譯文與原文特殊字元（色碼、`%s`、`{0}`、`{name}` 等）不一致的條目；UI 是沿用 `UntranslatedChecker` 的 `FormatConsistencyChecker`（`app/views/format_consistency_checker.py`）。
   - 簡繁差異（JSON 資料夾）（`compare_json`）。
   - 簡繁差異（TSV 單檔）（`compare_tsv`）。
 - 透過 `app/services.py` 的服務函式啟動 `translation_tool/checkers/` 下的 generator：
   - `run_untranslated_check_service` → `check_untranslated_generator`（`untranslated_checker.py`）
+  - `run_format_consistency_check_service` → `check_format_consistency_generator`（`format_consistency_checker.py`）；規則與 Mod DB 共用 `translation_issues`
   - `run_variant_compare_service` → `compare_variants_generator`（`variant_comparator.py`）
   - `run_variant_compare_tsv_service` → `compare_variants_tsv_generator`（`variant_comparator_tsv.py`）
 - 背景執行與 UI 更新交給 `app/views/qc_base.py` 的 `QCBase.task_worker`。
@@ -23,9 +25,11 @@
 flowchart TD
   A["選擇檢驗模式（select_mode）"] --> B{"按下哪個啟動按鈕？"}
   B -- "Key 缺失檢查" --> C["UntranslatedChecker._on_start"]
+  B -- "格式一致性" --> C2["FormatConsistencyChecker._on_start"]
   B -- "JSON 資料夾差異" --> D["QCView.start_task（compare_json）"]
   B -- "TSV 單檔差異" --> E["QCView.start_task（compare_tsv）"]
   C --> F{"路徑是否齊全？"}
+  C2 --> F
   D --> G["清空日誌、顯示進度條、停用面板控制項"]
   E --> G
   G --> F

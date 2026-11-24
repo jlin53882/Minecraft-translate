@@ -85,16 +85,14 @@
 | 翻譯快取 | `快取資料/`（`cache_manager._CACHE_DIR_NAME`，設定 `translator.cache_directory`） | `utils/cache_manager.py` |
 | 學名資料庫 | `學名資料庫/`（`species_cache.cache_directory`） | `utils/species_cache.py` |
 | 日誌 | `logs/<日期>/app.log`（`logging.log_dir`，經 `resolve_project_path`） | `config_manager.setup_logging` |
-| 錯誤記錄 | `logs/errors_<日期>.log` | `utils/exceptions.py` |
 | 翻譯 checkpoint | `logs/translation_checkpoint.json` | `core/lm_translator.CHECKPOINT_FILE` |
 | 圖示快取 | `.icon_cache/` | `app/icon_index.py`、`app/views/icon_preview_view.py` |
-| 輸出資料夾 | **相對於使用者選的輸入資料夾**（例如 FTB 輸出在輸入資料夾的上一層、提取輸出在 mods 資料夾旁邊），不在資料根目錄內；僅確認 FTB 與提取兩處，其他流程未逐一查證 | `ftb_translator.py`、`extractor_view.py` |
+| 輸出資料夾 | **相對於使用者選的輸入資料夾**（例如提取輸出在 mods 資料夾旁邊），不在資料根目錄內；僅確認提取一處，其他流程未逐一查證 | `extractor_view.py` |
 
 ### 已處理的不一致
 
-以下三項原本相對於工作目錄或 `Path(__file__)`，現在都走 `get_data_root()`：
+以下兩項原本相對於工作目錄或 `Path(__file__)`，現在都走 `get_data_root()`：
 
-- `logs/errors_*.log`（`utils/exceptions.py`）
 - `logs/translation_checkpoint.json`（`core/lm_translator.CHECKPOINT_FILE`）
 - `.icon_cache/`（`app/icon_index.py`、`app/views/icon_preview_view.py`）
 

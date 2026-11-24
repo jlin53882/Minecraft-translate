@@ -613,11 +613,6 @@ class RulesView(RulesWidgetsMixin, ft.Column):
         else:
             show_snack(self.page, "已在最後一頁", C.EM, text_color=C.ON_EM)
 
-    @staticmethod
-    def _build_from_index(all_rules) -> dict:
-        """建立 {from: [索引...]}，供批次驗證時 O(1) 查重複。"""
-        return build_from_index(all_rules)
-
     def _validate_all(self, rules):
         """驗證全部規則；回傳 (錯誤索引, 訊息) 或 None。可在背景執行緒執行。"""
         from_index = build_from_index(rules)

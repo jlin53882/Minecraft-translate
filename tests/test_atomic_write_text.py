@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from translation_tool.core import lm_translator, plugin_resume
-from translation_tool.core.lm_translator_skeleton import JsonCheckpointAdapter
+from translation_tool.core import lm_translator
 from translation_tool.utils import file_replace
 
 
@@ -97,37 +96,7 @@ def test_atomic_write_text_creates_missing_parent(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "x"
 
 
-# --- 各呼叫端：鎖檔暫時拒絕時 checkpoint／標記仍要寫成功 -----------------------
-
-
-def test_plugin_resume_marker_survives_locked_replace(
-    tmp_path: Path, monkeypatch
-) -> None:
-    monkeypatch.setattr(
-        plugin_resume, "marker_path", lambda kind: tmp_path / f"{kind}.json"
-    )
-    flaky = _FlakyReplace(failures=2)
-    monkeypatch.setattr(os, "replace", flaky)
-
-    plugin_resume.write_marker("ftbquests", {"status": "STARTED"})
-
-    assert (tmp_path / "ftbquests.json").read_text(encoding="utf-8") == (
-        '{"status": "STARTED"}'
-    )
-    assert flaky.calls == 3
-
-
-def test_json_checkpoint_adapter_survives_locked_replace(
-    tmp_path: Path, monkeypatch
-) -> None:
-    adapter = JsonCheckpointAdapter("md", "fp", path=tmp_path / "md.json")
-    flaky = _FlakyReplace(failures=1)
-    monkeypatch.setattr(os, "replace", flaky)
-
-    adapter({"processed": 3, "total": 5, "status": "RUNNING"})
-
-    assert '"processed": 3' in (tmp_path / "md.json").read_text(encoding="utf-8")
-    assert not list(tmp_path.glob("*.tmp"))
+# --- 各呼叫端：鎖檔暫時拒絕時 checkpoint 仍要寫成功 -----------------------
 
 
 def test_lm_save_checkpoint_survives_locked_replace(

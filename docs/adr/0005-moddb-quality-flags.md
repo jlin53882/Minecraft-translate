@@ -57,7 +57,7 @@
 ### 目前實作版本
 
 本 ADR 的「指南結構定義版本 2」是指南標記規則的版本，不是資料庫品質旗標的整體版本。
-目前 `quality_flags.SCHEMA_VERSION` 為 `9`；KubeJS 與 FTB Quests 的獨立 `kind` 已納入
+目前 `quality_flags.SCHEMA_VERSION` 為 `12`（含具名佔位符 `{name}`、`${var}`、`{{var}}` 的 token 規則）；KubeJS 與 FTB Quests 的獨立 `kind` 已納入
 同一套品質旗標與重算流程。後續若新增格式種類、來源語系或品質判定規則，必須同步檢查
 旗標重算、唯讀 fallback、進階篩選與本文件／使用者文件，避免 UI 顯示的結果與資料庫查詢
 使用不同版本的判定。

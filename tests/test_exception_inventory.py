@@ -84,7 +84,6 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/icon_index.py": 2,
     "app/icon_reader.py": 3,
     "app/services_impl/cache/cache_services.py": 2,
-    "app/services_impl/pipelines/_task_runner.py": 1,
     "app/services_impl/pipelines/bundle_service.py": 1,
     "app/services_impl/pipelines/extract_service.py": 3,
     "app/services_impl/pipelines/lm_service.py": 1,
@@ -93,7 +92,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/ui/snack.py": 4,
     "app/views/cache_manager/cache_history_store.py": 2,
     "app/views/cache_manager/cache_view_history.py": 0,
-    "app/views/cache_manager/cache_view_overview.py": 2,
+    "app/views/cache_manager/cache_view_overview.py": 1,
     "app/views/cache_manager/cache_view_query.py": 2,
     "app/views/cache_manager/cache_view_shard.py": 4,
     "app/views/cache_manager/cache_view_shard_detail.py": 0,
@@ -104,7 +103,6 @@ UNEXPLAINED_NOQA_BASELINE = {
     "app/views/merge_view.py": 2,
     "app/views/qc_view.py": 1,
     "app/views/rules/rules_actions.py": 1,
-    "translation_tool/core/ftb_translator.py": 3,
     "translation_tool/core/jar_processor_extract.py": 3,
     "translation_tool/core/lang_merge_content_copy.py": 8,
     "translation_tool/core/lang_merge_extracted_assets.py": 1,
@@ -121,7 +119,7 @@ UNEXPLAINED_NOQA_BASELINE = {
     "translation_tool/utils/cache_shards.py": 2,
     "translation_tool/utils/config_manager.py": 1,
     "translation_tool/utils/jar_browser.py": 1,
-    "translation_tool/utils/text_processor.py": 3,
+    "translation_tool/utils/text_processor.py": 2,
 }
 
 

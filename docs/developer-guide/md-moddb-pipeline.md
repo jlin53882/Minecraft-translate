@@ -22,7 +22,7 @@
 ## 輸出
 
 - 路徑：`<輸出>/<來源相對路徑，語言資料夾換成 zh_tw>`；無語言資料夾的指南放內容根目錄下的 `_zh_tw/`。來源是資源包結構時，整個輸出資料夾可直接放進 `resourcepacks`，並補上 `pack.mcmeta`。
-- 只輸出「至少有一個段落已有譯文」的檔案；沒有譯文的段落保留原文。譯文要通過 `guide_structure_issues`（標籤、前綴、連結目標、程式碼標記不可被改動），否則該段保留原文。
+- 只輸出「至少有一個段落已有譯文」的檔案；沒有譯文的段落保留原文。譯文要通過 `translation_issues`（`kind=guide`：色碼、`%s` 等特殊字元，以及標籤、前綴、連結目標、程式碼標記都不可被改動），否則該段保留原文，計入摘要的 `blocks_rejected` 與問題清單（`format_mismatch`）。
 - 完成檔的人工修改保護沿用 `OutputGuard`（`.md_output_hashes.json`）：輸出檔在上次寫入後被改過就不覆蓋，計入 `skipped_manual_edit` 並提醒。
 - 輸出資料夾不可放在來源資料夾內（`MdPipelineError`）。
 - 只有發布（`publish`）才寫輸出資料夾；同步 DB 步驟即使填了輸出資料夾也只計算輸出計畫。`pack.mcmeta` 依遊戲版本換算 `pack_format`（`resolve_version_input`、`build_pack_mcmeta`），已存在時不覆寫。

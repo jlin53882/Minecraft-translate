@@ -116,15 +116,6 @@ class ModEntryStore(Mapping):
     def total_entries(self) -> int:
         return self.source.entry_count
 
-    def with_translations(self, zh_lookup: Mapping[str, object]) -> "ModEntryStore":
-        """同一份來源、換一份譯文（審查資料夾改變時）。"""
-        return ModEntryStore(
-            self.source,
-            zh_lookup,
-            capacity=self._capacity,
-            on_source_error=self._on_source_error,
-        )
-
     def set_source_error_handler(
         self, handler: Callable[[BaseException], None] | None
     ) -> None:

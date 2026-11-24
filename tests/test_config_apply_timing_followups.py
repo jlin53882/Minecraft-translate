@@ -8,7 +8,7 @@ from app import config_apply
 from app.shell import app_shell
 from app.shell.app_shell import AppShell
 from app.views import lm_view
-from translation_tool.utils import config_manager, exceptions
+from translation_tool.utils import config_manager
 
 
 def test_lm_folder_name_is_read_at_use_time(monkeypatch):
@@ -36,28 +36,6 @@ def test_lm_page_and_pipeline_share_the_lm_folder_name(monkeypatch):
         assert PipelineConfig("in", "out", config=blank).translate_output_subfolder == (
             "LM翻譯後"
         )
-
-
-def test_error_log_dir_follows_config(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        config_manager,
-        "load_config",
-        lambda *a, **k: {"logging": {"log_dir": str(tmp_path / "my_logs")}},
-    )
-    assert exceptions._resolve_error_log_dir() == tmp_path / "my_logs"
-
-
-def test_error_log_dir_falls_back_when_config_fails(monkeypatch):
-    def boom(*a, **k):
-        raise RuntimeError("config broken")
-
-    monkeypatch.setattr(config_manager, "load_config", boom)
-    monkeypatch.setattr(
-        exceptions,
-        "get_schema_default",
-        lambda path: "schema-logs" if path == "logging.log_dir" else None,
-    )
-    assert exceptions._resolve_error_log_dir().name == "schema-logs"
 
 
 class _Tasks:

@@ -1,20 +1,14 @@
-"""Markdown 的續跑標記、指紋、偵測與任務翻譯頁的續跑入口（#164）。"""
+"""舊版 Markdown 殘留續跑標記的讀取、指紋驗證、偵測與清除。"""
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 from translation_tool.core import lm_resume, lm_translator, plugin_resume
-from translation_tool.core.lm_translator_skeleton import (
-    JsonCheckpointAdapter,
-    make_checkpoint_adapter,
-)
-from translation_tool.utils import file_replace
 
 
 @pytest.fixture(autouse=True)
@@ -25,11 +19,7 @@ def _data_root(tmp_path, monkeypatch):
         "CHECKPOINT_FILE",
         str(tmp_path / "data/logs/translation_checkpoint.json"),
     )
-    with plugin_resume._ACTIVE_LOCK:
-        plugin_resume._ACTIVE.clear()
     yield
-    with plugin_resume._ACTIVE_LOCK:
-        plugin_resume._ACTIVE.clear()
 
 
 def _put(path: Path, text: str | bytes) -> Path:
@@ -131,180 +121,7 @@ class TestSourceFingerprint:
         )
 
 
-# ------------------------------------------------------------------ resume_task
-
-
-def _session(**flags):
-    return SimpleNamespace(error=False, cancel_requested=False, **flags)
-
-
-def _task(**overrides):
-    kwargs = {
-        "kind": "md",
-        "input_dir": "in",
-        "output_dir": None,
-        "options": {"step_translate": True},
-        "fingerprint_fn": lambda *_a: "fp",
-    }
-    kwargs.update(overrides)
-    return plugin_resume.resume_task(
-        **{k: v for k, v in kwargs.items() if k != "kind"}, kind=kwargs["kind"]
-    )
-
-
-class TestResumeTask:
-    def _marker(self, kind="md") -> Path:
-        path = plugin_resume.marker_path(kind)
-        _put(path, "{}")
-        return path
-
-    def test_registers_the_context_while_running_and_removes_it_after(self):
-        with _task() as ctx:
-            assert plugin_resume.active_context("md") is ctx
-            assert ctx.fingerprint == "fp"
-        assert plugin_resume.active_context("md") is None
-
-    @pytest.mark.parametrize(
-        "kwargs",
-        [
-            {"dry_run": True},
-            {"translate_enabled": False},
-            {"fingerprint_fn": lambda *_a: None},
-        ],
-    )
-    def test_no_context_and_no_marker_changes_when_resume_is_not_applicable(
-        self, kwargs
-    ):
-        marker = self._marker()
-        with _task(**kwargs) as ctx:
-            assert ctx is None
-            assert plugin_resume.active_context("md") is None
-        assert marker.exists(), "不適用時不得碰既有標記"
-
-    def test_a_fully_completed_task_clears_the_marker(self):
-        marker = self._marker()
-        with _task(session=_session()) as ctx:
-            ctx.loop_started()
-            ctx.loop_completed(3)
-        assert not marker.exists()
-
-    def test_a_task_with_no_translation_loops_also_clears_it(self):
-        """所有項目都由快取命中：沒有迴圈需要跑，任務就是完成了。"""
-        marker = self._marker()
-        with _task(session=_session()):
-            pass
-        assert not marker.exists()
-
-    def test_an_unfinished_loop_keeps_the_marker(self):
-        marker = self._marker()
-        with _task(session=_session()) as ctx:
-            ctx.loop_started()
-            ctx.loop_started()
-            ctx.loop_completed()
-        assert marker.exists()
-
-    @pytest.mark.parametrize("flag", ["error", "cancel_requested"])
-    def test_error_or_cancel_keeps_the_marker(self, flag):
-        marker = self._marker()
-        session = _session()
-        setattr(session, flag, True)
-        with _task(session=session) as ctx:
-            ctx.loop_started()
-            ctx.loop_completed()
-        assert marker.exists()
-
-    def test_a_crash_inside_the_task_keeps_the_marker(self):
-        marker = self._marker()
-        # 例如強制結束；finally 不得清除標記
-        with pytest.raises(KeyboardInterrupt), _task(session=_session()) as ctx:
-            ctx.loop_started()
-            raise KeyboardInterrupt
-        assert marker.exists()
-
-    def test_the_initial_marker_is_durable_before_any_adapter_exists(self):
-        """review：第一個批次 durable 之前被強制結束，重開後也要偵測得到。"""
-        with _task(
-            kind="md",
-            input_dir="C:/in",
-            output_dir="C:/out",
-            options={"step_translate": True, "lang_mode": "all"},
-        ):
-            marker = plugin_resume.marker_path("md")
-            assert marker.exists(), "還沒有任何翻譯批次，標記就必須已經在磁碟上"
-            data = json.loads(marker.read_text("utf-8"))
-
-        assert data["version"] == 2 and data["kind"] == "md"
-        assert (data["input_dir"], data["output_dir"]) == ("C:/in", "C:/out")
-        assert data["options"] == {"step_translate": True, "lang_mode": "all"}
-        assert data["fingerprint"] == "fp"
-        assert (data["completed_count"], data["total"]) == (0, 0)
-        assert data["status"] == "STARTED" and data["updated_at"]
-
-    def test_a_crash_before_the_first_adapter_keeps_the_initial_marker(self):
-        with pytest.raises(KeyboardInterrupt), _task(session=_session()):
-            raise KeyboardInterrupt  # 例如抽取途中被強制結束
-
-        (task,) = lm_resume.peek_interrupted_tasks()
-        assert task.kind == "md" and task.has_current_format
-        assert (task.completed, task.total) == (0, 0)
-
-    def test_the_initial_marker_is_detected_and_resumable(self, tmp_path):
-        root = _md_pack(tmp_path)
-        fp = plugin_resume.compute_source_fingerprint("md", str(root), None)
-        with (
-            pytest.raises(KeyboardInterrupt),
-            _task(input_dir=str(root), fingerprint_fn=lambda *_a: fp),
-        ):
-            raise KeyboardInterrupt
-
-        (task,) = lm_resume.peek_interrupted_tasks()
-
-        assert lm_resume.check_resume_feasibility(task).ok
-
-    def test_a_new_task_replaces_the_previous_marker_of_the_same_flow(self):
-        self._marker()  # 舊任務遺留的標記
-        with _task(options={"step_translate": True, "fresh": True}):
-            data = json.loads(plugin_resume.marker_path("md").read_text("utf-8"))
-        assert data["options"].get("fresh") is True and data["completed_count"] == 0
-
-    def test_a_failed_initial_write_never_breaks_the_task(self, monkeypatch):
-        warnings: list[str] = []
-        monkeypatch.setattr(plugin_resume, "log_warning", warnings.append)
-
-        def deny(*_a, **_k):
-            raise PermissionError("read-only")
-
-        monkeypatch.setattr(plugin_resume, "write_marker", deny)
-        with _task(session=_session()) as ctx:
-            assert ctx is not None  # 任務照常執行，adapter 之後仍可寫標記
-        assert any("初始續跑標記" in w for w in warnings)
-
-    def test_the_initial_marker_write_is_atomic_and_fsynced(self, monkeypatch):
-        synced: list[str] = []
-        real_fsync = os.fsync
-        monkeypatch.setattr(
-            os, "fsync", lambda fd: (synced.append("file"), real_fsync(fd))
-        )
-        monkeypatch.setattr(
-            file_replace, "fsync_directory", lambda path: synced.append("dir")
-        )
-
-        with _task():
-            pass
-
-        assert synced == ["file", "dir"]
-        assert not plugin_resume.marker_path("md").with_suffix(".tmp").exists()
-
-    def test_progress_accumulates_across_loops(self):
-        with _task() as ctx:
-            ctx.loop_started()
-            ctx.loop_completed(4)
-            ctx.loop_started()
-            ctx.loop_completed(2)
-            assert ctx.completed_base == 6 and ctx.all_loops_done
-
-
-# ------------------------------------------------------------------ 標記讀取
+# ------------------------------------------------------------------ 讀取標記
 
 
 class TestReadMarker:
@@ -326,93 +143,6 @@ class TestReadMarker:
         path = _put(plugin_resume.marker_path("md"), "[1]")
         assert plugin_resume.read_marker("md") is None
         assert Path(f"{path}.corrupt").exists()
-
-
-# ------------------------------------------------------------------ adapter
-
-
-def _state(processed=1, total=8):
-    return {
-        "cache_type": "md",
-        "processed": processed,
-        "total": total,
-        "completed_calls": 1,
-        "status": "AUTO",
-    }
-
-
-def _ctx(kind="md", **kwargs):
-    ctx = plugin_resume.ResumeContext(kind, "in", "out", {"opt": 1}, "stable-fp")
-    for key, value in kwargs.items():
-        setattr(ctx, key, value)
-    with plugin_resume._ACTIVE_LOCK:
-        plugin_resume._ACTIVE[kind] = ctx
-    return ctx
-
-
-class TestAdapterUnderAResumeTask:
-    def test_writes_a_version_2_marker_with_the_task_level_fingerprint(self):
-        ctx = _ctx()
-        adapter = make_checkpoint_adapter(
-            "md",
-            [{"file": "f", "path": "p", "source_text": "s", "text": "s"}],
-            target="t",
-        )
-
-        adapter(_state(processed=3, total=9))
-
-        data = json.loads(plugin_resume.marker_path("md").read_text("utf-8"))
-        assert data["version"] == 2 and data["kind"] == "md"
-        assert data["fingerprint"] == "stable-fp"
-        assert data["items_fingerprint"] == adapter.fingerprint
-        assert (data["input_dir"], data["output_dir"], data["options"]) == (
-            "in",
-            "out",
-            {"opt": 1},
-        )
-        assert (data["completed_count"], data["total"]) == (3, 9)
-        assert data["updated_at"]
-        assert ctx.loops_started == 1
-
-    def test_progress_includes_the_loops_that_already_finished(self):
-        ctx = _ctx()
-        first = make_checkpoint_adapter("md", [], target="a")
-        first(_state(processed=4, total=10))
-        first.clear()
-        second = make_checkpoint_adapter("md", [], target="b")
-
-        second(_state(processed=2, total=10))
-
-        assert ctx.completed_base == 4
-        data = json.loads(plugin_resume.marker_path("md").read_text("utf-8"))
-        assert data["completed_count"] == 6
-
-    def test_clear_only_reports_the_loop_and_keeps_the_task_marker(self):
-        ctx = _ctx()
-        adapter = make_checkpoint_adapter("md", [], target="t")
-        adapter(_state())
-
-        adapter.clear()
-
-        assert plugin_resume.marker_path("md").exists(), "整個任務完成時才清除"
-        assert ctx.loops_completed == 1
-
-    def test_without_a_task_the_legacy_behaviour_is_unchanged(self):
-        adapter = make_checkpoint_adapter("md", [], target="t")
-        adapter(_state())
-        data = json.loads(plugin_resume.marker_path("md").read_text("utf-8"))
-
-        assert "version" not in data and "kind" not in data
-        adapter.clear()
-        assert not plugin_resume.marker_path("md").exists()
-
-    def test_an_explicit_path_never_joins_a_task(self, tmp_path):
-        ctx = _ctx()
-        adapter = JsonCheckpointAdapter("md", "fp", path=tmp_path / "x.json")
-        adapter(_state())
-
-        assert ctx.loops_started == 0
-        assert "version" not in json.loads((tmp_path / "x.json").read_text("utf-8"))
 
 
 # ------------------------------------------------------------------ lm_resume

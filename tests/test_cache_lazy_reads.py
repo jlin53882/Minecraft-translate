@@ -349,6 +349,36 @@ def test_cache_update_service_reports_rejected_write(tmp_path, monkeypatch):
     assert cache_services.cache_update_dst_service("lang", "k", "乙") is False
 
 
+def test_cache_update_service_rejects_dst_that_breaks_format_tokens(monkeypatch):
+    """手動改快取譯文時，少了原文的色碼／格式符號要拒絕；還原歷史可明確放行。"""
+    from app.services_impl.cache import cache_services
+
+    monkeypatch.setattr(
+        cache_manager,
+        "get_cache_entry",
+        lambda *_: {"src": "§6Gold %s", "dst": "§6黃金%s"},
+    )
+    written: list[str] = []
+    monkeypatch.setattr(
+        cache_manager,
+        "add_to_cache",
+        lambda _t, _k, _s, dst: written.append(dst) or True,
+    )
+
+    with pytest.raises(ValueError, match="特殊字元不一致"):
+        cache_services.cache_update_dst_service("lang", "k", "黃金")
+    assert written == []
+
+    assert cache_services.cache_update_dst_service("lang", "k", "§6金%s") is True
+    assert (
+        cache_services.cache_update_dst_service(
+            "lang", "k", "黃金", allow_format_issues=True
+        )
+        is True
+    )
+    assert written == ["§6金%s", "黃金"]
+
+
 class _SpyFacade:
     def __init__(self):
         self.calls = []

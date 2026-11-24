@@ -35,8 +35,6 @@ sys.path.insert(0, str(SRC_ROOT))
 # ── 測試資料路徑（All the Mods 10 4.3） ──────────────────────────────────
 ATM10_ROOT = Path()  # 由 main() 依 --modpack-root 設定
 MODS_DIR = Path()
-KUBEJS_DIR = Path()
-FTBQUESTS_DIR = Path()
 
 # ── ANSI 顏色 ────────────────────────────────────────────────────────────
 C_GREEN = "\033[92m"
@@ -661,105 +659,6 @@ def test_merge() -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# 附加：KubeJS Pipeline（真實資料 extract only）
-# ════════════════════════════════════════════════════════════════════════
-def test_kubejs() -> bool:
-    banner("附加：KubeJS Pipeline（真實資料 extract only）")
-    ok_all = True
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        output_dir = tmp_path / "kubejs_out"
-
-        if not KUBEJS_DIR.exists():
-            ok_all &= result("KUBEJS_DIR 是否存在", False, f"{KUBEJS_DIR}")
-            return ok_all
-
-        try:
-            from app.tasks.task_session import TaskSession
-            from translation_tool.core.kubejs_translator import run_kubejs_pipeline
-
-            session = TaskSession(max_logs=300)
-            session.add_log("Test log entry")
-            ok_all &= result(
-                "TaskSession 初始化 + add_log",
-                bool(getattr(session, "logs", getattr(session, "_logs", []))),
-                "log added",
-            )
-
-            pipeline_result = run_kubejs_pipeline(
-                input_dir=str(KUBEJS_DIR),
-                output_dir=str(output_dir),
-                session=session,
-                dry_run=True,
-                step_extract=True,
-                step_translate=False,
-                step_inject=False,
-                write_new_cache=False,
-            )
-            extract_summary = pipeline_result.get("step1", {}).get("extract", {})
-            ok_all &= result(
-                "run_kubejs_pipeline extract",
-                isinstance(pipeline_result, dict)
-                and extract_summary.get("errors_count", 1) == 0
-                and pipeline_result.get("output_sync_status") == "synced",
-                f"抽取 {extract_summary.get('extracted_files', 0)} 個檔案、"
-                f"{extract_summary.get('extracted_keys_total', 0)} 個 key",
-            )
-        except Exception as e:  # noqa: BLE001
-            ok_all &= fail("run_kubejs_pipeline", e)
-
-    return ok_all
-
-
-# ════════════════════════════════════════════════════════════════════════
-# 附加：FTB Pipeline（真實 snbt 資料）
-# ════════════════════════════════════════════════════════════════════════
-def test_ftb() -> bool:
-    banner("附加：FTB Pipeline（真實 snbt 資料 export+clean only）")
-    ok_all = True
-
-    with tempfile.TemporaryDirectory() as tmp:
-        tmp_path = Path(tmp)
-        output_dir = tmp_path / "ftb_out"
-
-        if not FTBQUESTS_DIR.exists():
-            ok_all &= result("FTBQUESTS_DIR 是否存在", False, f"{FTBQUESTS_DIR}")
-            return ok_all
-
-        try:
-            from app.tasks.task_session import TaskSession
-            from translation_tool.core.ftb_translator import run_ftb_pipeline
-
-            session = TaskSession(max_logs=300)
-            pipeline_result = run_ftb_pipeline(
-                directory_path=str(
-                    ATM10_ROOT
-                ),  # 傳入 ATM10 根目錄，內部會遞迴找 config/ftbquests/quests
-                output_dir=str(output_dir),
-                session=session,
-                dry_run=True,
-                step_export=True,
-                step_clean=True,
-                step_translate=False,
-                step_inject=False,
-                write_new_cache=False,
-            )
-            raw_paths = pipeline_result.get("raw_paths", {})
-            ok_all &= result(
-                "run_ftb_pipeline export+clean",
-                isinstance(pipeline_result, dict)
-                and bool(raw_paths.get("written_langs"))
-                and "clean_paths" in pipeline_result,
-                f"語系={raw_paths.get('written_langs', [])}",
-            )
-        except Exception as e:  # noqa: BLE001
-            ok_all &= fail("run_ftb_pipeline", e)
-
-    return ok_all
-
-
-# ════════════════════════════════════════════════════════════════════════
 # 主程式
 # ════════════════════════════════════════════════════════════════════════
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -779,12 +678,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
-    global ATM10_ROOT, MODS_DIR, KUBEJS_DIR, FTBQUESTS_DIR
+    global ATM10_ROOT, MODS_DIR
     args = _parse_args(argv)
     ATM10_ROOT = args.modpack_root
     MODS_DIR = ATM10_ROOT / "mods"
-    KUBEJS_DIR = ATM10_ROOT / "kubejs"
-    FTBQUESTS_DIR = ATM10_ROOT / "config" / "ftbquests"
     print(f"\n{C_BOLD}{'─' * 60}")
     print("  minecraft_translator_flet 全功能測試")
     print(f"  資料來源：{ATM10_ROOT}")
@@ -803,8 +700,6 @@ def main(argv: list[str] | None = None) -> None:
         ("jar 提取 Extractor", test_extractor),
         ("機器翻譯 LM", test_lm),
         ("檔案合併 Merge", test_merge),
-        ("KubeJS Pipeline", test_kubejs),
-        ("FTB Pipeline", test_ftb),
     ]
 
     passed = 0
