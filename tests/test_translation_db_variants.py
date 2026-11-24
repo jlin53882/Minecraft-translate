@@ -11,6 +11,7 @@ from translation_tool.translation_db import (
     WriteBackItem,
 )
 from translation_tool.translation_db.schema import (
+    KIND_KUBEJS_LANG,
     KIND_LANG,
     SRC_AI,
     SRC_JAR_TW,
@@ -462,3 +463,30 @@ def test_v19_migration_backfills_existing_src_change_once(tmp_path):
         assert again._one("SELECT COUNT(*) FROM entry_variant")[0] == 2
     finally:
         again.close()
+
+
+def _kubejs_items(en, zh, *, companion_first=False):
+    original = ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "k", en, "", "")
+    companion = ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "k", "", zh, "")
+    return [companion, original] if companion_first else [original, companion]
+
+
+@pytest.mark.parametrize("companion_first", [False, True])
+def test_kubejs_companion_translation_attaches_to_changed_original(db, companion_first):
+    """KubeJS／FTB 的 zh_tw 是與原文分開的伴隨項目：原文變動時掛在新原文上，不掛主原文。"""
+    db.ingest(
+        VERSION, [ScanItem(KIND_KUBEJS_LANG, "ns@pack@h", "k", "Old Text", "", "")]
+    )
+    db.ingest(
+        VERSION, _kubejs_items("New Text", "新文字", companion_first=companion_first)
+    )
+    assert db._q("SELECT en_us FROM entry") == [("Old Text",)]
+    assert db._one("SELECT COUNT(*) FROM effective")[0] == 0  # 主原文沒有被掛上新譯文
+    assert db._q(
+        "SELECT v.en_us, t.zh_tw FROM entry_variant v "
+        "JOIN variant_translation t ON t.variant_id = v.id"
+    ) == [("New Text", "新文字")]
+    hit = TranslationResolver(db, VERSION).lookup(
+        KIND_KUBEJS_LANG, "ns@pack@h", "k", "New Text"
+    )
+    assert hit is not None and hit.zh_tw == "新文字"

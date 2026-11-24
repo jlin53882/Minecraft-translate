@@ -1376,7 +1376,7 @@ def _migrate_variant_backfill_v19(conn: sqlite3.Connection) -> None:
     created, skipped = variants.backfill_from_src_change(conn)
     _LOG.info(
         "[資料庫升級] 原文變動紀錄回填為其他原文：新增 %d 筆、略過 %d 筆"
-        "（找不到對應條目或與主原文相同）",
+        "（找不到對應條目、與主原文相同或已登記）",
         created,
         skipped,
     )

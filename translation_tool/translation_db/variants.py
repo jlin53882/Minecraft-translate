@@ -106,7 +106,15 @@ def add_translation(
 
     回傳是否真的新增了一列；同一變體同一來源已有譯文時回傳 False。
     """
-    vid = ensure_variant(conn, entry_id, en_us)
+    return add_variant_translation(
+        conn, ensure_variant(conn, entry_id, en_us), source, zh_tw, zh_cn
+    )
+
+
+def add_variant_translation(
+    conn: sqlite3.Connection, vid: int, source: int, zh_tw: str, zh_cn: str = ""
+) -> bool:
+    """在已存在的變體上新增一個來源的譯文（只新增、不覆蓋）；回傳是否新增了一列。"""
     cursor = conn.execute(
         "INSERT OR IGNORE INTO variant_translation "
         "(variant_id, source, zh_tw, zh_cn) VALUES (?, ?, ?, ?)",
