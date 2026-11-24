@@ -65,3 +65,44 @@ def test_advanced_filter_exposes_the_option_and_counts_it():
     assert filters.set_summary() == 1
     filters.reset()
     assert filters.has_brace_word is False
+
+
+def test_entry_filter_carries_the_brace_word_choice_from_the_panel():
+    """畫面上的選擇要進到 EntryFilter，清單、筆數與批次取代才會用同一個條件。"""
+    from types import SimpleNamespace
+
+    from app.views.moddb.entry_filters import entry_filter
+
+    advanced = advanced_filters.AdvancedFilters(lambda: None)
+    panel = SimpleNamespace(
+        review_filter=SimpleNamespace(value=None),
+        smart_review_filter=SimpleNamespace(value=None),
+        source_filter=SimpleNamespace(code=None),
+        advanced_filters=advanced,
+        version="1.21.1",
+        mod_id=None,
+        pack_mod_ids=None,
+        kind=None,
+        state="all",
+        query="",
+        query_field="all",
+        entry_ids=None,
+    )
+    assert entry_filter(panel).has_brace_word is False
+    advanced.brace_word.value = "has"
+    assert entry_filter(panel).has_brace_word is True
+
+
+def test_options_are_treated_as_filtered_when_only_the_brace_filter_is_on(db):
+    """只開這個條件時，模組／來源／類型下拉也要依條件縮小。"""
+    from types import SimpleNamespace
+
+    from app.views.moddb.panel_refresh import _resolve_entries_scope
+
+    request = {"criteria": EntryFilter(version="1.21.1", has_brace_word=True)}
+    scope = _resolve_entries_scope(db, request, SimpleNamespace(version="1.21.1"))
+    assert scope["options_are_filtered"] is True
+
+    request = {"criteria": EntryFilter(version="1.21.1")}
+    scope = _resolve_entries_scope(db, request, SimpleNamespace(version="1.21.1"))
+    assert scope["options_are_filtered"] is False
