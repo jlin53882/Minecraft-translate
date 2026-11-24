@@ -36,6 +36,7 @@ def summary_eligible(criteria: EntryFilter) -> bool:
         and not criteria.exclude_ids
         and criteria.time is None
         and criteria.smart_review is None
+        and not criteria.has_brace_word
         and not criteria.quality.active
     )
 

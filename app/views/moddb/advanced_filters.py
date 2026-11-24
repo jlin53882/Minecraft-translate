@@ -163,6 +163,11 @@ class AdvancedFilters:
             [("all", "多字或少字"), ("missing", "少了 token"), ("extra", "多了 token")],
             "all",
         )
+        self.brace_word = self._dropdown(
+            "大括號詞彙",
+            [("all", "不限"), ("has", "含 {單字}")],
+            "all",
+        )
         self.category = self._dropdown(
             "格式／標記類別",
             [
@@ -201,6 +206,7 @@ class AdvancedFilters:
             self.quality_status,
             self.direction,
             self.category,
+            self.brace_word,
             self.sort,
         ):
             control.on_select = self._selection_changed
@@ -224,7 +230,13 @@ class AdvancedFilters:
                     wrap=True,
                 ),
                 ft.Row(
-                    [self.direction, self.category, self.sort, self.sort_direction],
+                    [
+                        self.direction,
+                        self.category,
+                        self.brace_word,
+                        self.sort,
+                        self.sort_direction,
+                    ],
                     spacing=8,
                     wrap=True,
                 ),
@@ -398,6 +410,7 @@ class AdvancedFilters:
         self.quality_status.value = "all"
         self.direction.value = "all"
         self.category.value = "all"
+        self.brace_word.value = "all"
         self.sort.value = "default"
         self._sort_desc = False
         self._last_sort = "default"
@@ -549,6 +562,10 @@ class AdvancedFilters:
         )
 
     @property
+    def has_brace_word(self) -> bool:
+        return self.brace_word.value == "has"
+
+    @property
     def sort_by(self) -> str:
         value = str(self.sort.value or "default")
         # 下拉選單被程式直接改值、還沒走 _selection_changed 時，方向用該依據的預設方向
@@ -566,6 +583,8 @@ class AdvancedFilters:
         except ValueError:
             count += 1
         if self.quality_filter().active:
+            count += 1
+        if self.has_brace_word:
             count += 1
         if self.sort_by != "default":
             count += 1

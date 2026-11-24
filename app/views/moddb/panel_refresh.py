@@ -295,6 +295,7 @@ def _resolve_entries_scope(db, request: dict, settings) -> dict:
         or criteria.include_ids is not None
         or bool(criteria.exclude_ids)
         or criteria.time is not None
+        or criteria.has_brace_word
         or criteria.quality.active
     )
     if options_are_filtered and db is not None and version:

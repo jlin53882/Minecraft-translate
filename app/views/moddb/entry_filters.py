@@ -456,6 +456,7 @@ def entry_filter(panel) -> EntryFilter:
         smart_review=(None if smart in (None, "", ALL_SMART_REVIEW) else str(smart)),
         time=panel.advanced_filters.time_filter(),
         quality=panel.advanced_filters.quality_filter(),
+        has_brace_word=panel.advanced_filters.has_brace_word,
         sort_by=panel.advanced_filters.sort_by,
     )
 

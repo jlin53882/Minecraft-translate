@@ -290,6 +290,9 @@ def _select_reviewed_exact_rows(
 
 
 _QUALITY_PAGE_BUFFER_LIMIT = 10_000
+# 「{」後第一個字元不是數字、@、空白或「}」，且之後有「}」：大括號包著的詞彙（含譯成中文的
+# {成長}；不含 {0}、{}、{@pagebreak}）。GLOB 沒有重複運算，所以是超集；用來觀察，不做格式判斷。
+_BRACE_WORD_GLOB = "*{[^0-9@} ]*}*"
 _BATCH_REPLACE_STRIP_CHARS = "".join(
     chr(codepoint)
     for codepoint in (
@@ -1841,6 +1844,10 @@ class TranslationDB(
         if criteria.exclude_ids:
             where.append("e.id NOT IN (SELECT value FROM json_each(?))")
             params.append(json.dumps(criteria.exclude_ids))
+        if criteria.has_brace_word:
+            where.append(
+                f"(e.en_us GLOB '{_BRACE_WORD_GLOB}' OR f.zh_tw GLOB '{_BRACE_WORD_GLOB}')"
+            )
         if criteria.source is not None:
             where.append("f.source = ?")
             params.append(int(criteria.source))

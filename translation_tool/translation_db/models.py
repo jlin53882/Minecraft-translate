@@ -247,6 +247,8 @@ class EntryFilter:
     # 整合包版本篩選：只列這些模組識別（該整合包的 KubeJS／FTB 模組，見
     # TranslationDB.pack_mods）；None 為不限。已選模組時以模組為準。
     pack_mod_ids: tuple[str, ...] | None = None
+    # 只列原文或生效譯文含 {詞彙} 大括號詞彙（字母或中文，不含 {0}）的條目（觀察哪些被改寫、哪些被保留用）
+    has_brace_word: bool = False
 
     def __post_init__(self) -> None:
         if self.smart_review is not None and (
