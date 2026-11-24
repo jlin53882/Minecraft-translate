@@ -534,12 +534,12 @@ class TranslationDB(
         rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
         if not self.has_review_state:
             return "CASE WHEN t.checker <> '' THEN 0 ELSE 1 END", rank
-        return (
+        group = (
             "CASE WHEN t.review_status='reviewed' THEN 0 "
             "WHEN t.checker <> '' AND t.review_status IS NOT 'unreviewed' THEN 0 "
-            "ELSE 1 END",
-            rank,
+            "ELSE 1 END"
         )
+        return group, rank
 
     def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
         """回傳指定優先序使用的標準生效來源排序。"""
