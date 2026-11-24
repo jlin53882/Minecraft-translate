@@ -333,3 +333,25 @@ def test_token_occurrence_positions_match_a_line_by_line_count():
     assert [(s.token, s.start, s.end, s.line, s.column) for s in spans] == expected
     assert fd._newline_positions("a\nb\n\nc") == [1, 3, 4]
     assert fd._newline_positions("no newline") == []
+
+
+def test_named_placeholders_are_format_tokens():
+    """``{count}``、``${var}``、``{{var}}`` 弄丟或改名要被判為不一致；指南標記不算佔位符。"""
+    from translation_tool.core.format_tokens import format_tokens, token_category
+
+    assert dict(format_tokens("A {count} B ${var} C {{ name }}")) == {
+        "{count}": 1,
+        "${var}": 1,
+        "{{name}}": 1,  # 括號內的空白不影響身分
+    }
+    assert all(
+        token_category(token) == "placeholder"
+        for token in format_tokens("{count} ${var} {{name}}")
+    )
+    assert not format_tokens("{@pagebreak} {image:ftbquests:a.png width:50} {數量} {1a}")
+
+    from translation_tool.translation_db.quality import translation_issues
+
+    assert translation_issues("Value {count}", "{count} 個") == []
+    assert translation_issues("Value {count}", "{數量} 個")  # 改名
+    assert translation_issues("Hi ${var}", "嗨")  # 弄丟

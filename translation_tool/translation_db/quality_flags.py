@@ -39,7 +39,7 @@ from translation_tool.translation_db.quality import matches_quality
 # 4：<link;分類;顯示文字> 的顯示文字可翻譯
 # 3：獨立成行元件不含文字、段落空行不計文字首尾的空行
 # 2：指南條目的結構標記計入「格式不一致／一致」
-SCHEMA_VERSION = "11"
+SCHEMA_VERSION = "12"
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,

@@ -934,7 +934,7 @@ def test_reviewed_lang_glossary_matches_case_and_outer_space_variants(db):
 
 # 規則快照：判斷結果改變時這個測試會失敗。失敗代表已存的 entry.qflags 與新規則不一致，
 # 請遞增 quality_flags.SCHEMA_VERSION，並同步更新下面的版本與預期結果。
-_RULE_SNAPSHOT_VERSION = "11"
+_RULE_SNAPSHOT_VERSION = "12"
 _RULE_SNAPSHOT_CASES = (
     ("$(italic)HOT! DO NOT EAT$()", "$(italic)燙！請勿食用$()", "patchouli", False),
     ("A$(br2)B\n\n", "甲\n$(br2)乙", "patchouli", False),
@@ -973,6 +973,15 @@ _RULE_SNAPSHOT_CASES = (
         "guide",
         False,
     ),
+    # 具名佔位符：弄丟、改名都要判為不一致；原樣保留則一致
+    ("Value {count} items", "個物品", "lang", True),
+    ("Value {count} items", "{數量}個物品", "lang", True),
+    ("Value {count} items", "{count}個物品", "lang", False),
+    ("Hi ${var}", "嗨", "kubejs_script", True),
+    ("Hi {{ var }}", "嗨 {{var}}", "ftb_quests", False),
+    ("Hi {{var}}", "嗨", "lang", True),
+    # 指南／任務標記不是佔位符
+    ("Intro {@pagebreak} Tail", "前言 {@pagebreak} 結尾", "ftb_quest_lang", False),
 )
 
 

@@ -11,6 +11,13 @@
 
 > 主要內容：UI 全面重新設計（PR #106）。版本號尚未決定。
 
+### 品質檢查補上漏接的路徑
+- 語系合併：資料庫譯文的特殊字元（`§6`、`%s`、`{0}` 等）與原文不一致時不再寫進合併輸出，條目留在待翻譯。
+- 跨版本沿用：參考譯文格式有問題時不自動沿用，也不再批次套用；逐筆套用需再按一次確認。掃描摘要新增「特殊字元與原文不一致未沿用」筆數。
+- Markdown 輸出：改用完整的格式檢查（原本只檢查指南結構標記），不一致的段落保留原文，摘要新增被擋筆數。
+- 同文一致性：統一譯文格式有問題時不寫入其他成員。
+- token 掃描新增具名佔位符 `{count}`、`${var}`、`{{var}}`，品質旗標版本升為 12（既有資料庫第一次開啟時會重新計算旗標）。
+
 ### 移除沒有使用者的舊流水線與死碼
 - 刪除 Markdown、KubeJS、FTB Quests 的舊三步驟流程（`md_translation_*`、`md_pipeline_files／pairing／zh_cn`、`kubejs_translator*`、`ftb_translator*`，以及三個 `*_lmtranslator`）、`utils/exceptions.py` 與 `_task_runner.py`：目前的 Markdown 走 ModDB 流水線、KubeJS／FTB 走 `pack_pipeline`，這些模組沒有任何正式程式引用。
 - 一併刪除只被它們使用的函式（例如 `inject_ftbquests_zh_tw_from_jsons`、`load_custom_translations`、`get_formatted_duration`），以及零呼叫的 `sniffed_groups`、`guide_mark_issues`、`_retry_same_source_translations` 等。
