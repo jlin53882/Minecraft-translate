@@ -306,6 +306,38 @@ def _restore_variant_translations(
         )
 
 
+def content_fingerprint(saved: dict[str, dict]) -> list[list]:
+    """快照裡其他原文的「內容」（原文、來源、譯文、審核狀態），排序後回傳；沒有變體時為空串列。
+
+    不含編號與 ``first_seen``／``last_seen``（每次重掃都會更新），所以只有內容真的變了
+    指紋才會變。合併還原用它判斷保留條目有沒有在合併後被改動。
+    """
+    part = saved.get("entry_variant") or {}
+    if not part.get("rows"):
+        return []
+    columns = part["columns"]
+    id_i, en_i = columns.index("id"), columns.index("en_us")
+    by_id = {int(row[id_i]): [row[en_i]] for row in part["rows"]}
+    tpart = saved.get("variant_translation") or {}
+    tcolumns = tpart.get("columns") or []
+    if tcolumns:
+        owner = tcolumns.index("variant_id")
+        keep = [
+            tcolumns.index(name)
+            for name in ("source", "zh_tw", "zh_cn", "checker", "review_status")
+            if name in tcolumns
+        ]
+        translated: dict[int, list[list]] = {}
+        for row in tpart["rows"]:
+            translated.setdefault(int(row[owner]), []).append([row[i] for i in keep])
+        rows = [
+            [by_id[vid][0], sorted(translated.get(vid, []), key=repr)] for vid in by_id
+        ]
+    else:
+        rows = [[en, []] for (en,) in by_id.values()]
+    return sorted(rows, key=repr)
+
+
 def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) -> None:
     """路徑別名合併：把被合併條目的其他原文與譯文併進保留的條目（只新增、不覆蓋）。
 

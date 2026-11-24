@@ -22,7 +22,7 @@ from translation_tool.translation_db.operation_progress import (
     ProgressCallback,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
-from translation_tool.translation_db.variants import VARIANT_TABLES
+from translation_tool.translation_db.variants import VARIANT_TABLES, content_fingerprint
 from translation_tool.translation_db.variants import merge_into as merge_variants
 
 _CHUNK = 500
@@ -540,9 +540,7 @@ class DuplicateCleanupMixin:
             parts: dict[str, list[list[Any]]] = {}
             for table, data in snapshot.items():
                 if table in VARIANT_TABLES:
-                    # 其他原文（含每次重掃都會更新的 last_seen）不屬於合併安全性判斷；
-                    # 也讓還沒有這兩張表時建立的合併批次，指紋照舊可還原
-                    continue
+                    continue  # 其他原文另用「內容」判斷（見下方），不含編號與 last_seen
                 columns = list(data["columns"])
                 drop = {
                     "qflags",
@@ -555,6 +553,11 @@ class DuplicateCleanupMixin:
                 ]
                 rows = [[row[index] for index in keep] for row in data["rows"]]
                 parts[table] = sorted(rows, key=lambda row: repr(row))
+            other_originals = content_fingerprint(snapshot)
+            if other_originals:
+                # 只有真的有其他原文時才納入：沒有時指紋與還沒有這兩張表時完全相同，
+                # 舊批次照常可還原；合併後才新增的其他原文譯文會被視為保留條目已被改動
+                parts["variants"] = other_originals
             encoded = json.dumps(parts, ensure_ascii=False, sort_keys=True)
             states[int(entry_id)] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
         return states
