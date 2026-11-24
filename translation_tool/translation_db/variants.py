@@ -198,6 +198,7 @@ def backfill_from_src_change(conn: sqlite3.Connection) -> tuple[int, int]:
 
 
 _CHUNK = 500
+VARIANT_TABLES = frozenset({"entry_variant", "variant_translation"})
 
 
 def _marks(count: int) -> str:
@@ -254,6 +255,16 @@ def restore(
     part = saved.get("entry_variant")
     if not part or not part.get("rows") or not tables_available(conn):
         return
+    variant_map = _restore_variants(conn, part, entry_map)
+    _restore_variant_translations(
+        conn, saved.get("variant_translation") or {}, variant_map
+    )
+
+
+def _restore_variants(
+    conn: sqlite3.Connection, part: dict, entry_map: dict[int, int]
+) -> dict[int, int]:
+    """寫回其他原文，回傳 原變體編號 → 實際變體編號（只含已還原的條目）。"""
     columns = part["columns"]
     old_id, owner = columns.index("id"), columns.index("entry_id")
     names = [c for c in columns if c not in ("id", "entry_id")]
@@ -271,21 +282,27 @@ def restore(
         found = variant_id(conn, entry_id, record["en_us"])
         if found is not None:
             variant_map[int(row[old_id])] = found
-    tpart = saved.get("variant_translation") or {}
-    tcolumns = tpart.get("columns") or []
-    if not tcolumns:
+    return variant_map
+
+
+def _restore_variant_translations(
+    conn: sqlite3.Connection, part: dict, variant_map: dict[int, int]
+) -> None:
+    """把其他原文的譯文掛回對應後的變體（只新增、不覆蓋）。"""
+    columns = part.get("columns") or []
+    if not columns:
         return
-    tnames = [c for c in tcolumns if c not in ("id", "variant_id")]
-    tvariant = tcolumns.index("variant_id")
-    for row in tpart["rows"]:
-        new_vid = variant_map.get(int(row[tvariant]))
+    names = [c for c in columns if c not in ("id", "variant_id")]
+    owner = columns.index("variant_id")
+    for row in part["rows"]:
+        new_vid = variant_map.get(int(row[owner]))
         if new_vid is None:
             continue
-        record = dict(zip(tcolumns, row, strict=True))
+        record = dict(zip(columns, row, strict=True))
         conn.execute(
             "INSERT OR IGNORE INTO variant_translation "
-            f"(variant_id, {', '.join(tnames)}) VALUES ({_marks(len(tnames) + 1)})",
-            (new_vid, *(record[c] for c in tnames)),
+            f"(variant_id, {', '.join(names)}) VALUES ({_marks(len(names) + 1)})",
+            (new_vid, *(record[c] for c in names)),
         )
 
 
@@ -293,7 +310,8 @@ def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) ->
     """路徑別名合併：把被合併條目的其他原文與譯文併進保留的條目（只新增、不覆蓋）。
 
     與保留條目主原文相同的其他原文不搬（那是主原文）；保留條目已有的同一份其他原文只補
-    它沒有的來源。被合併條目的剩餘列隨條目一併刪除。
+    它沒有的來源，同一來源的譯文不同時保留條目優先（被合併條目的那筆隨條目刪除，
+    還原合併批次可以找回）。被合併條目的剩餘列隨條目一併刪除。
     """
     if not tables_available(conn):
         return

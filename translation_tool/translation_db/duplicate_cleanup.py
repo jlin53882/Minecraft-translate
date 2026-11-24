@@ -22,6 +22,7 @@ from translation_tool.translation_db.operation_progress import (
     ProgressCallback,
 )
 from translation_tool.translation_db.schema import KIND_GUIDE, KIND_PATCHOULI
+from translation_tool.translation_db.variants import VARIANT_TABLES
 from translation_tool.translation_db.variants import merge_into as merge_variants
 
 _CHUNK = 500
@@ -538,6 +539,10 @@ class DuplicateCleanupMixin:
             snapshot = self._snapshot_entries([entry_id])
             parts: dict[str, list[list[Any]]] = {}
             for table, data in snapshot.items():
+                if table in VARIANT_TABLES:
+                    # 其他原文（含每次重掃都會更新的 last_seen）不屬於合併安全性判斷；
+                    # 也讓還沒有這兩張表時建立的合併批次，指紋照舊可還原
+                    continue
                 columns = list(data["columns"])
                 drop = {
                     "qflags",

@@ -320,3 +320,64 @@ def test_duplicate_merge_moves_other_originals_to_the_survivor(tmp_path):
         ]  # 與主原文相同的不搬；同一份其他原文把缺的來源補上
     finally:
         db.close()
+
+
+def test_merge_fingerprint_ignores_other_originals_so_rescan_does_not_block_revert(
+    tmp_path,
+):
+    """合併還原的保留條目指紋只看既有資料表：其他原文（含重掃會更新的 last_seen）不影響，
+    所以沒有這兩張表時建立的舊批次、以及合併後重掃的批次都能還原。"""
+    from translation_tool.translation_db import variants
+
+    db = _db(tmp_path)
+    try:
+        old_id = _insert_alias(db, LEGACY_KEY)
+        current_id = _insert_alias(db, CURRENT_KEY, translation="龍血")
+        with db._tx() as conn:
+            variants.add_translation(conn, old_id, "Dragon blood v2", SRC_AI, "龍血二")
+        before = db._duplicate_states([current_id])
+        with db._tx() as conn:  # 保留條目多了其他原文：指紋不變
+            variants.add_translation(conn, current_id, "Another", SRC_AI, "另一個")
+        assert db._duplicate_states([current_id]) == before
+
+        applied = db.apply_duplicate_cleanup(
+            VERSION, db.preview_duplicate_cleanup(VERSION).token
+        )
+        survivor = db._one("SELECT id FROM entry")[0]
+        with db._tx() as conn:  # 合併後重掃同一份其他原文：last_seen 更新
+            conn.execute(
+                "UPDATE entry_variant SET last_seen='2000-01-01 00:00:00' WHERE entry_id=?",
+                (survivor,),
+            )
+            variants.ensure_variant(conn, survivor, "Dragon blood v2")
+        result = db.revert_duplicate_cleanup(applied.batch_id)
+        assert result.complete and result.conflicts == []
+    finally:
+        db.close()
+
+
+def test_merge_keeps_the_survivors_variant_translation_on_same_source_conflict(
+    tmp_path,
+):
+    """同一份其他原文、同一來源、譯文不同：保留條目優先；還原合併後被合併條目拿回自己的。"""
+    from translation_tool.translation_db import variants
+
+    db = _db(tmp_path)
+    try:
+        old_id = _insert_alias(db, LEGACY_KEY)
+        current_id = _insert_alias(db, CURRENT_KEY, translation="龍血")
+        with db._tx() as conn:
+            variants.add_translation(conn, old_id, "Shared", SRC_AI, "甲")
+            variants.add_translation(conn, current_id, "Shared", SRC_AI, "乙")
+        applied = db.apply_duplicate_cleanup(
+            VERSION, db.preview_duplicate_cleanup(VERSION).token
+        )
+        assert db._q("SELECT zh_tw FROM variant_translation") == [("乙",)]
+        assert db.revert_duplicate_cleanup(applied.batch_id).complete
+        rows = db._q(
+            "SELECT v.entry_id, t.zh_tw FROM entry_variant v "
+            "JOIN variant_translation t ON t.variant_id = v.id ORDER BY t.zh_tw"
+        )
+        assert (old_id, "甲") in rows
+    finally:
+        db.close()

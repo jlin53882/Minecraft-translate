@@ -276,3 +276,42 @@ def test_adopt_action_writes_then_reloads_and_reports_refusals(db, monkeypatch):
     entry_variant_actions.adopt_current_translation(panel, by_en["Changed"])
     assert db._q("SELECT zh_tw FROM variant_translation") == [("主譯文",)]
     assert reloaded == [1] and panel.saved_text.value.startswith("已沿用目前譯文")
+
+
+def test_adopt_action_logs_database_errors_and_reports_when_it_cannot_start(
+    db, monkeypatch
+):
+    """資料庫錯誤寫後台 log 並提示；背景無法啟動時也要告訴使用者。"""
+    import sqlite3
+    from types import SimpleNamespace
+
+    from app.views.moddb import entry_variant_actions
+
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Main", "主譯文")])
+    db.ingest("1.21.1", [ScanItem("lang", "foo", "item.foo.a", "Changed")])
+    detail = db.entry_detail(db._one("SELECT id FROM entry")[0])
+    snacks: list[str] = []
+    logged: list[str] = []
+    monkeypatch.setattr(
+        entry_variant_actions, "show_snack", lambda _p, text, *_a: snacks.append(text)
+    )
+    monkeypatch.setattr(
+        entry_variant_actions, "log_exception", lambda text: logged.append(text)
+    )
+    panel = SimpleNamespace(
+        selected=detail.entry, db=lambda: db, _page=SimpleNamespace(), _on_changed=None
+    )
+    variant = detail.variants[0]
+
+    def boom(*_a, **_k):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(db, "adopt_current_translation_for_variant", boom)
+    entry_variant_actions.adopt_current_translation(panel, variant)
+    assert logged and "沿用失敗（資料庫錯誤" in snacks[-1]
+
+    monkeypatch.setattr(
+        entry_variant_actions.entry_writes, "run_write", lambda *a, **k: False
+    )
+    entry_variant_actions.adopt_current_translation(panel, variant)
+    assert snacks[-1].startswith("沿用無法啟動")

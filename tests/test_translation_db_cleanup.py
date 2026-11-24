@@ -622,3 +622,49 @@ def test_revert_of_an_old_snapshot_without_variants_still_works(tmp_path):
             (json.dumps(payload), info.batch_id),
         )
     assert db.revert_cleanup(info.batch_id).complete
+
+
+def test_revert_remaps_variants_when_the_original_ids_were_taken(tmp_path):
+    """還原時原條目編號、原變體編號已被別的資料佔用：其他原文仍掛在還原後的條目上，
+    佔用編號的資料不受影響。"""
+    from translation_tool.translation_db import variants
+
+    db = _db(tmp_path)
+    junk = db._one("SELECT id FROM entry WHERE key='g/a.md#0'")[0]
+    with db._tx() as conn:
+        variants.add_translation(conn, junk, "Other wording", 0, "另一種說法")
+    old_vid = db._one("SELECT id FROM entry_variant")[0]
+    report_path = tmp_path / "r.json"
+    db.export_cleanup_report(VERSION, report_path)
+    _apply(db, report_path)
+    with db._tx() as conn:
+        # 別的資料占用原本的條目編號與變體編號
+        conn.execute(
+            "INSERT INTO entry (id, kind, mc_version, mod_id, key, en_us) "
+            "VALUES (?, 'lang', ?, 'x', 'taken', 'Taken')",
+            (junk, VERSION),
+        )
+        conn.execute(
+            "INSERT INTO entry_variant (id, entry_id, en_us) VALUES (?, ?, 'Squatter')",
+            (old_vid, junk),
+        )
+        conn.execute(
+            "INSERT INTO variant_translation (variant_id, source, zh_tw) "
+            "VALUES (?, 0, '佔位譯文')",
+            (old_vid,),
+        )
+    info = db.last_cleanup_batch()
+    assert db.revert_cleanup(info.batch_id).remapped >= 1
+    restored = db._one("SELECT id FROM entry WHERE key='g/a.md#0'")[0]
+    assert restored != junk
+    assert db._q(
+        "SELECT v.en_us, t.zh_tw FROM entry_variant v "
+        "JOIN variant_translation t ON t.variant_id = v.id WHERE v.entry_id = ?",
+        (restored,),
+    ) == [("Other wording", "另一種說法")]
+    assert db._q(
+        "SELECT v.en_us, t.zh_tw FROM entry_variant v "
+        "JOIN variant_translation t ON t.variant_id = v.id WHERE v.entry_id = ?",
+        (junk,),
+    ) == [("Squatter", "佔位譯文")]
+    assert db._q("PRAGMA foreign_key_check") == []

@@ -577,7 +577,7 @@ def test_adopt_current_translation_writes_unreviewed_manual_variant_translation(
     again = db.adopt_current_translation_for_variant(
         eid, "Background %s Style", "顯示 %s 背景"
     )
-    assert again == (False, "這份原文已經有人工譯文")
+    assert again == (False, "這份原文已經有譯文，請重新整理後再試")
 
 
 def test_adopt_current_translation_refuses_format_mismatch_stale_and_missing(db):
@@ -595,3 +595,16 @@ def test_adopt_current_translation_refuses_format_mismatch_stale_and_missing(db)
     ok, reason = db.adopt_current_translation_for_variant(eid, "Nope", "顯示背景")
     assert (ok, reason) == (False, "這份原文已不存在，請重新整理後再試")
     assert db._one("SELECT COUNT(*) FROM variant_translation")[0] == 0
+
+
+def test_adopt_refuses_when_the_pipeline_already_wrote_a_translation(db):
+    """畫面顯示後流水線剛寫入 AI 譯文：沿用按鈕不會再蓋過它。"""
+    eid = _adopt_setup(db)
+    db.write_back(VERSION, [_wb("Background %s Style", "AI 譯 %s")])
+    ok, reason = db.adopt_current_translation_for_variant(
+        eid, "Background %s Style", "顯示 %s 背景"
+    )
+    assert (ok, reason) == (False, "這份原文已經有譯文，請重新整理後再試")
+    assert db._q("SELECT source, zh_tw FROM variant_translation") == [
+        (SRC_AI, "AI 譯 %s")
+    ]
