@@ -260,3 +260,15 @@ def split_translated(parts: Sequence[str]) -> tuple[str, str] | None:
         ):
             return parts[idx + 1].lower(), "/".join([*parts[:idx], *parts[idx + 2 :]])
     return None
+
+
+def translated_rel(rel: str, locale: str) -> str | None:
+    """相對路徑為 Oracle 書的原文頁面或選單時，回傳譯文放置的相對路徑；其他檔案回傳 None。
+
+    版面只看路徑推測（``infer_layout``）：輸出階段不一定讀得到 ``sinytra-wiki.json``。
+    """
+    layout = infer_layout(rel)
+    member = parse_member(rel, layout)
+    if member is None or not member.is_translatable_source:
+        return None
+    return translated_path(rel, layout, locale)

@@ -20,11 +20,14 @@ from pathlib import Path
 from typing import Any
 
 from translation_tool.core.book_formats import (
+    FORMAT_ORACLE_INDEX,
     is_unsupported_format,
     resolve_book_format,
 )
 from translation_tool.core.guide_blocks import (
+    apply_meta_translations,
     extract_guide_blocks,
+    extract_meta_entries,
     front_title_line,
     has_translatable_text,
 )
@@ -34,6 +37,7 @@ from translation_tool.core.locale_path import (
     find_locale_marker,
     replace_locale,
 )
+from translation_tool.core.oracle_index import META_NAME, translated_rel
 from translation_tool.core.text_sniffer import (
     VANILLA_NON_TEXT_DIRS,
     is_project_doc_name,
@@ -283,13 +287,18 @@ def _guide_parts(path: Path, root: Path) -> Sequence[str] | None:
 def find_guide_files(root: Path) -> list[Path]:
     """依內容找出英文原文的指南檔（不看資料夾名稱）。"""
     found: list[Path] = []
-    for suffix in GUIDE_SUFFIXES:
-        for path in root.rglob(f"*{suffix}"):
+    for suffix in (*GUIDE_SUFFIXES, META_NAME):
+        pattern = suffix if suffix == META_NAME else f"*{suffix}"
+        for path in root.rglob(pattern):
             parts = _guide_parts(path, root)
             if parts is None or parts[2].lower() in VANILLA_NON_TEXT_DIRS:
                 continue
-            if is_unsupported_format(resolve_book_format("/".join(parts))):
+            book_format = resolve_book_format("/".join(parts))
+            if is_unsupported_format(book_format):
                 continue
+            is_meta = suffix == META_NAME
+            if is_meta and book_format.name != FORMAT_ORACLE_INDEX:
+                continue  # 只有 Oracle Index 的選單檔是指南內容
             locale = split_locale(parts[2:])
             if locale.other or locale.lang != "en_us":
                 continue
@@ -301,7 +310,7 @@ def find_guide_files(root: Path) -> list[Path]:
                 text = path.read_text(encoding="utf-8-sig")
             except (OSError, UnicodeDecodeError):
                 continue
-            if sniff_text_file(text, suffix, "/".join(parts)) is not None:
+            if is_meta or sniff_text_file(text, suffix, "/".join(parts)) is not None:
                 guide = GuidePath(path)
                 guide.guide_root = root
                 found.append(guide)
@@ -313,24 +322,36 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
     root = path.guide_root
     text = path.read_text(encoding="utf-8-sig")
     parts = _guide_parts(path, root) or ()
-    blocks = extract_guide_blocks(text, path.name)
-    doc = {
-        GUIDE_MARKER: True,
-        "source": text,
-        "ranges": [[b.start_line, b.end_line] for b in blocks],
-        "prefixes": [b.prefix for b in blocks],
-        "originals": [b.text for b in blocks],
-        "blocks": [b.text for b in blocks],
-    }
+    if path.name == META_NAME:
+        # Oracle Index 選單：每個顯示名稱一個區塊，寫回時依順序放回 JSON
+        texts = [value for _path, value in extract_meta_entries(text) or []]
+        doc = {
+            GUIDE_MARKER: True,
+            "meta": True,
+            "source": text,
+            "originals": texts,
+            "blocks": list(texts),
+        }
+    else:
+        blocks = extract_guide_blocks(text, path.name)
+        texts = [b.text for b in blocks]
+        doc = {
+            GUIDE_MARKER: True,
+            "source": text,
+            "ranges": [[b.start_line, b.end_line] for b in blocks],
+            "prefixes": [b.prefix for b in blocks],
+            "originals": texts,
+            "blocks": list(texts),
+        }
     mod_id = parts[1] if len(parts) > 1 else ""
     file_key = split_locale(parts[2:]).neutral if parts else path.name
     items: list[dict[str, Any]] = []
-    for index, block in enumerate(blocks):
-        if contains_cjk(block.text):
+    for index, block_text in enumerate(texts):
+        if contains_cjk(block_text):
             continue  # 原文已是中文
-        if not has_translatable_text(block.text):
+        if not has_translatable_text(block_text):
             continue  # 只有元件標籤，沒有敘述文字
-        shielded = shield_text(block.text)
+        shielded = shield_text(block_text)
         if shielded.skip_reason is not None:
             continue
         items.append(
@@ -338,7 +359,7 @@ def load_guide(path: GuidePath) -> tuple[dict, list[dict[str, Any]]]:
                 "file": str(path),
                 "path": f"blocks[{index}]",
                 "text": shielded.clean,
-                "source_text": block.text,
+                "source_text": block_text,
                 # Guide (.md/.txt) still uses the Patchouli prompt, but its
                 # cache is stored under md; .txt is part of the md bucket too.
                 "cache_type": cache_type_for_kind(KIND_GUIDE),
@@ -384,6 +405,10 @@ def finish_guide_item(item: dict[str, Any]) -> None:
 
 def render_guide(doc: dict) -> str:
     """把翻譯過的段落依行號組回原檔。"""
+    if doc.get("meta"):
+        if doc["blocks"] == doc["originals"]:
+            return str(doc["source"])
+        return apply_meta_translations(str(doc["source"]), doc["blocks"])
     lines = str(doc["source"]).splitlines()
     for (start, end), prefix, original, current in zip(
         doc["ranges"], doc["prefixes"], doc["originals"], doc["blocks"], strict=True
@@ -406,6 +431,11 @@ def guide_locale_rel(rel: Path, root: Path, locale: str) -> Path:
     ``zh_tw``.
     """
 
+    code = locale.lstrip("_")
+    oracle = translated_rel(rel.as_posix(), code)
+    if oracle is not None:
+        # Oracle Index：譯文在書資料夾底下的 translated/<語系>/；原文語系就是原檔位置
+        return rel if code.startswith("en_") else Path(oracle)
     parts = list(normalize_guideme_default_locale_rel(rel).parts)
     offset = 1 if parts and parts[0].endswith("_extracted") else 0
     # 原文已帶語系記號就原地替換：語系資料夾（含帶序號的 ``en_us_0``），或寫在檔名尾端的

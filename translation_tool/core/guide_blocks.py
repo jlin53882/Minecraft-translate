@@ -265,24 +265,51 @@ def front_title_line(prefix: str, translated: str) -> str:
     return prefix + flat
 
 
-def extract_meta_entries(text: str) -> list[tuple[str, str]] | None:
-    """Oracle Index ``_meta.json`` 的顯示名稱：``[(路徑, 文字)]``，依檔案內的順序。
+def _meta_slots(data: dict) -> list[tuple[str, dict, str]]:
+    """``_meta.json`` 內要翻譯的位置：``[(路徑, 所在物件, 欄位)]``，依檔案順序。
 
     值是字串時路徑是鍵，值是含 ``name`` 的物件時路徑是 ``鍵/name``；空字串（顯示時退回頁面標題）
-    與其他欄位（``icon`` 等）不收。JSON 無法解析或不是物件時回傳 None。
+    與其他欄位（``icon`` 等）不收。
     """
+    slots: list[tuple[str, dict, str]] = []
+    for key, value in data.items():
+        if isinstance(value, str) and value.strip():
+            slots.append((key, data, key))
+        elif isinstance(value, dict):
+            name = value.get("name")
+            if isinstance(name, str) and name.strip():
+                slots.append((f"{key}/name", value, "name"))
+    return slots
+
+
+def _load_meta(text: str) -> dict | None:
     try:
         data = json.loads(text, strict=False)
     except ValueError:
         return None
-    if not isinstance(data, dict):
+    return data if isinstance(data, dict) else None
+
+
+def extract_meta_entries(text: str) -> list[tuple[str, str]] | None:
+    """Oracle Index ``_meta.json`` 的顯示名稱：``[(路徑, 文字)]``；不是 JSON 物件時回傳 None。"""
+    data = _load_meta(text)
+    if data is None:
         return None
-    entries: list[tuple[str, str]] = []
-    for key, value in data.items():
-        if isinstance(value, str) and value.strip():
-            entries.append((key, value))
-        elif isinstance(value, dict):
-            name = value.get("name")
-            if isinstance(name, str) and name.strip():
-                entries.append((f"{key}/name", name))
-    return entries
+    return [(path, owner[field]) for path, owner, field in _meta_slots(data)]
+
+
+def apply_meta_translations(text: str, translations: Sequence[str]) -> str:
+    """把譯文依 ``extract_meta_entries`` 的順序寫回；其餘的鍵、順序與欄位（含 ``icon``）原樣保留。
+
+    譯文數量對不上或原檔不是 JSON 物件時回傳原文。
+    """
+    data = _load_meta(text)
+    if data is None:
+        return text
+    slots = _meta_slots(data)
+    if len(slots) != len(translations):
+        return text
+    for (_path, owner, field), translated in zip(slots, translations, strict=True):
+        owner[field] = translated
+    tail = "\n" if text.endswith("\n") else ""
+    return json.dumps(data, ensure_ascii=False, indent=2) + tail
