@@ -144,7 +144,7 @@ def test_variant_survives_reopening_the_database(tmp_path):
         second.close()
 
 
-def test_variant_write_is_counted_as_external_free_change(db):
+def test_variant_write_back_bumps_cache_generation(db):
     """變體寫入走 ``_tx``，快取世代照常遞增（統計與清單快取不會讀到舊資料）。"""
     _seed(db)
     before = db._one("SELECT value FROM meta WHERE key='data_gen'")[0]
@@ -190,3 +190,133 @@ def test_variant_query_has_no_temp_sort_and_old_schema_reads_main_rows(tmp_path)
         assert [r[2] for r in readonly.load_mod("foo")] == ["Show Background"]
     finally:
         readonly.close()
+
+
+def test_variant_uses_database_priority_not_instance_priority(tmp_path):
+    """沒有指定優先序時，變體與主原文一樣用資料庫 meta 的共用優先序。"""
+    path = tmp_path / "p.db"
+    first = TranslationDB(path)
+    _seed(first)
+    first.write_back(VERSION, [_wb("Background Style", "AI 譯")])
+    vid = first._one("SELECT id FROM entry_variant")[0]
+    with first._tx() as conn:
+        conn.execute(
+            "INSERT INTO variant_translation (variant_id, source, zh_tw) VALUES (?,?,?)",
+            (vid, SRC_JAR_TW, "模組自帶"),
+        )
+        conn.execute(
+            "UPDATE meta SET value=? WHERE key='priority'",
+            (f"{SRC_MANUAL},{SRC_JAR_TW},{SRC_AI}",),
+        )
+    first.close()
+    # 以相反的優先序開啟、且不同步：主原文列看 effective（meta 的優先序），變體必須一致
+    second = TranslationDB(
+        path, priority=(SRC_AI, SRC_JAR_TW, SRC_MANUAL), sync_priority=False
+    )
+    try:
+        rows = {r[2]: r[4] for r in second.load_mod("foo")}
+        assert rows["Background Style"] == "模組自帶"
+    finally:
+        second.close()
+
+
+def test_variant_is_found_by_cross_version_lookup_but_never_filled(db):
+    """寫回不補其他版本；流水線開啟跨版本沿用時，原文相同的其他版本查得到。"""
+    _seed(db)
+    db.write_back(VERSION, [_wb("Background Style", "背景樣式")])
+    cross = TranslationResolver(db, "1.20.1", cross_version=True)
+    hit = cross.lookup(KIND_LANG, "foo", "item.foo.a", "Background Style")
+    assert hit is not None and hit.cross and hit.zh_tw == "背景樣式"
+    off = TranslationResolver(db, "1.20.1", cross_version=False)
+    assert off.lookup(KIND_LANG, "foo", "item.foo.a", "Background Style") is None
+
+
+def test_load_mod_statements_for_variants_have_no_temp_sort(db):
+    """實際執行的變體載入語句（不是抄一份）的查詢計畫不得臨時排序。"""
+    _seed(db)
+    db.write_back(VERSION, [_wb("Background Style", "背景樣式")])
+    captured: list[str] = []
+    with db._lock:
+        db._conn.set_trace_callback(captured.append)
+    try:
+        db.load_mod("foo")
+        db.load_mod_for_priority("foo", (SRC_MANUAL, SRC_JAR_TW, SRC_AI))
+    finally:
+        with db._lock:
+            db._conn.set_trace_callback(None)
+    variant_sql = [
+        q for q in captured if "FROM entry_variant" in q or "entry_variant v" in q
+    ]
+    assert variant_sql, "沒有抓到變體載入語句"
+    for sql in variant_sql:
+        plan = " ".join(str(r[-1]) for r in db._q("EXPLAIN QUERY PLAN " + sql))
+        assert "TEMP B-TREE" not in plan, sql
+
+
+def test_external_sql_write_to_variant_tables_bumps_change_sequence(db):
+    """外部 SQL 直接改變體表也會使統計快取失效（change_tracker 有追蹤）。"""
+    _seed(db)
+    db.write_back(VERSION, [_wb("Background Style", "背景樣式")])
+
+    def seq() -> int:
+        row = db._one("SELECT value FROM meta WHERE key='ext_change_seq'")
+        return int(row[0]) if row else 0
+
+    before = seq()
+    with db._lock:
+        db._conn.execute("UPDATE variant_translation SET zh_tw='外部修改'")
+        db._conn.commit()
+    after_translation = seq()
+    with db._lock:
+        db._conn.execute("UPDATE entry_variant SET en_us=en_us || ' '")
+        db._conn.commit()
+    assert after_translation > before and seq() > after_translation
+
+
+def test_write_back_same_batch_variants_and_blank_main_original(db):
+    """同批次：同原文第二筆算略過、不同新原文各建變體；主原文只有空白視為未知。"""
+    _seed(db)
+    stats = db.write_back(
+        VERSION,
+        [
+            _wb("Second Wording", "第二種"),
+            _wb("Second Wording", "重複"),
+            _wb("Third Wording", "第三種"),
+        ],
+    )
+    assert stats.variant_written == 2 and stats.skipped == 1
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 2
+
+    db.ingest(VERSION, [ScanItem(KIND_LANG, "foo", "blank", "   ", "", "")])
+    blank = db.write_back(VERSION, [_wb("Real Text", "真實", key="blank")])
+    assert blank.variant_written == 0 and blank.written == 1
+    assert db._one("SELECT en_us FROM entry WHERE key='blank'")[0] == "Real Text"
+
+
+def test_v17_database_with_data_upgrades_to_v18_and_keeps_translations(tmp_path):
+    """舊資料庫（有資料、沒有變體表）升到 v18 後譯文仍在，並能開始寫變體。"""
+    import sqlite3
+
+    path = tmp_path / "v17.db"
+    first = TranslationDB(path)
+    _seed(first)
+    first.close()
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        "DROP TABLE variant_translation; DROP TABLE entry_variant; "
+        "UPDATE meta SET value='17' WHERE key='schema_version';"
+    )
+    raw.commit()
+    raw.close()
+    upgraded = TranslationDB(path)
+    try:
+        assert (
+            upgraded._one("SELECT value FROM meta WHERE key='schema_version'")[0]
+            == "18"
+        )
+        assert upgraded._q("SELECT zh_tw FROM effective") == [("顯示背景",)]
+        assert list(tmp_path.glob("v17.db.pre-schema-v18-*.bak"))
+        stats = upgraded.write_back(VERSION, [_wb("Background Style", "背景樣式")])
+        assert stats.variant_written == 1
+    finally:
+        upgraded.close()

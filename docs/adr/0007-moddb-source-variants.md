@@ -18,8 +18,10 @@
 - 變體的讀寫集中在 `variants.py`，其他模組只呼叫它的函式，不直接寫這兩張表的 SQL。
 - AI 寫回（`TranslationDB.write_back`）遇到原文與主原文不同：主原文不動、照舊記錄 `src_change`，
   譯文存成該條目這份原文的變體（只新增、不覆蓋；不補其他版本的空白）。
-- 流水線的 `TranslationResolver` 透過 `load_mod`／`load_mod_for_priority` 讀到變體列，格式與主原文
-  相同、使用同一套來源優先序，`lookup` 依原文選出相同的那一份。
+- 流水線的 `TranslationResolver`（一鍵流水線、機器翻譯頁、語系合併 `MergeDbFill` 與指南流水線都經由它）透過 `load_mod`／`load_mod_for_priority` 讀到變體列，格式與主原文
+  相同、使用同一套來源優先序（沒有指定優先序時取資料庫 `meta` 的共用優先序，與 `effective` 投影一致），
+  `lookup` 依原文選出相同的那一份。流水線開啟跨版本沿用時，變體與主原文一樣可能成為跨版本命中；
+  `write_back` 不把變體補到其他版本的空白。
 - 條目清單、統計、審核、跨版本沿用、版本差異審核與 `jar_english` 只看 `entry`／`effective`，
   不受變體影響。
 - 不自動把舊譯文沿用到新原文：舊譯文是照另一段原文翻的，語意改變時會誤導。

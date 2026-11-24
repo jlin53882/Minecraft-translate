@@ -5043,7 +5043,7 @@ class TranslationDB(
                     ).lastrowid
                 elif (
                     row[1] != item.en_us
-                    and row[1]
+                    and row[1].strip()
                     and loose_text(row[1]) != loose_text(item.en_us)
                 ):
                     conn.execute(
@@ -5060,7 +5060,7 @@ class TranslationDB(
                     continue
                 else:
                     eid = row[0]
-                    if not row[1]:  # 原文原本未知：補上
+                    if not row[1].strip():  # 原文原本未知（空白）：補上
                         conn.execute(
                             "UPDATE entry SET en_us=? WHERE id=?", (item.en_us, eid)
                         )
@@ -6108,8 +6108,12 @@ class TranslationDB(
         self, mod_id: str, priority: tuple[int, ...] | None
     ) -> list[tuple[str, str, str, str, str, int]]:
         """模組的其他原文（變體）生效譯文；舊版 schema 唯讀開啟時沒有變體表，回傳空串列。"""
-        group, rank = self._priority_parts(priority)
         with self._lock:
+            if priority is None:
+                # 與主原文列（effective 投影）同一套：資料庫 meta 裡的共用優先序，
+                # 不是這個執行個體開啟時帶入的優先序
+                priority = self._stored_priority(self._conn)
+            group, rank = self._priority_parts(priority)
             return variants.load_rows(self._conn, group, rank, mod_id)
 
     def _load_mod_for_priority_sql(self, priority: tuple[int, ...]) -> str:
