@@ -15,6 +15,7 @@ from translation_tool.core.text_sniffer import is_placeholder_text
 from translation_tool.plugins.md.md_extract_qa import extract_blocks
 
 _FRONT_RULE = re.compile(r"^---\s*$")
+_TOP_TITLE = re.compile(r"^(title:\s*)(.*?)\s*$")
 _NAV_KEY = re.compile(r"^(\s*)navigation:\s*$")
 _TITLE_LINE = re.compile(r"^(\s+title:\s*)(.*?)\s*$")
 _ANY_TAG = re.compile(r"<[^<>]*>")
@@ -28,6 +29,22 @@ class GuideBlock:
     start_line: int  # 1-based
     end_line: int
     prefix: str = ""  # 只有 front matter 標題用：行首（含縮排與 ``title:``）
+
+
+def _top_level_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
+    """front matter 最上層 ``title:`` 的 ``(行號 1-based, 行首, 值)``；沒有則 None。"""
+    if not lines or not _FRONT_RULE.match(lines[0]):
+        return None
+    for number, line in enumerate(lines[1:], start=2):
+        if _FRONT_RULE.match(line):
+            return None
+        title = _TOP_TITLE.match(line)
+        if title:
+            value = title.group(2)
+            if len(value) >= 2 and value[0] in "'\"" and value[-1] == value[0]:
+                value = value[1:-1]
+            return (number, title.group(1), value) if value else None
+    return None
 
 
 def _front_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
@@ -229,7 +246,10 @@ def extract_guide_blocks(text: str, name: str) -> list[GuideBlock]:
         GuideBlock(b.text, b.start_line, b.end_line)
         for b in extract_blocks(text, name, "all")
     ]
-    title = _front_title(text.splitlines())
+    lines = text.splitlines()
+    title = _front_title(lines)
+    if title is None and name.lower().endswith(".mdx"):
+        title = _top_level_title(lines)  # Oracle Index 頁面的標題
     if title is not None:
         number, prefix, value = title
         blocks.append(GuideBlock(value, number, number, prefix))

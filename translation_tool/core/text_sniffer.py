@@ -18,6 +18,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from translation_tool.core.locale_path import LOCALE_CODE
+from translation_tool.core.oracle_index import split_translated
 
 TEXT_SUFFIXES = (".md", ".mdx", ".txt", ".json", ".lang", ".snbt")
 
@@ -89,6 +90,12 @@ class LocaleSplit:
 def split_locale(parts: Sequence[str]) -> LocaleSplit:
     """從路徑片段找出語系記號並回傳去掉記號後的中性路徑。"""
     rest = list(parts)
+    oracle = split_translated(rest)
+    if oracle is not None:
+        # Oracle Index：譯文放在 ``translated/<語系>/`` 底下，中性路徑與原文頁相同
+        code, neutral = oracle
+        known = code in _SOURCE_LANGS
+        return LocaleSplit(code if known else None, not known, neutral)
     for idx, part in enumerate(rest):
         stem = part.rsplit(".", 1)[0] if idx == len(rest) - 1 else part
         match = _LOCALE_TOKEN.match(stem)

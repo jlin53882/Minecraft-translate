@@ -140,13 +140,16 @@ def test_known_custom_formats_are_not_generic_patchouli_or_json():
     )
 
 
-def test_unsupported_custom_docs_are_not_detected_as_guides(tmp_path: Path):
-    oracle = tmp_path / "assets" / "oracle_index" / "books" / "docs" / "index.mdx"
-    oracle.parent.mkdir(parents=True)
-    oracle.write_text(
-        "# Oracle docs\n\nThis is a long documentation paragraph that must not become a game guide.\n",
+def test_oracle_pages_are_guides_but_its_assets_are_not(tmp_path: Path):
+    page = tmp_path / "assets" / "oracle_index" / "books" / "b" / "content" / "i.mdx"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "# Oracle docs\n\nThis is a long documentation paragraph for the player to read.\n",
         encoding="utf-8",
     )
+    asset = page.parents[1] / "assets" / "notes.mdx"
+    asset.parent.mkdir(parents=True)
+    asset.write_text(page.read_text(encoding="utf-8"), encoding="utf-8")
     ordinary = tmp_path / "assets" / "things" / "lavender" / "entries" / "almanac.md"
     ordinary.parent.mkdir(parents=True)
     ordinary.write_text(
@@ -157,21 +160,35 @@ def test_unsupported_custom_docs_are_not_detected_as_guides(tmp_path: Path):
     found = {
         path.relative_to(tmp_path).as_posix() for path in find_guide_files(tmp_path)
     }
-    assert "assets/oracle_index/books/docs/index.mdx" not in found
+    assert "assets/oracle_index/books/b/content/i.mdx" in found
+    assert "assets/oracle_index/books/b/assets/notes.mdx" not in found
     assert "assets/things/lavender/entries/almanac.md" in found
 
 
-def test_unsupported_mdx_is_ignored_by_archive_sniffer(tmp_path: Path):
+def test_oracle_pages_are_paired_with_their_translations_by_the_archive_sniffer(
+    tmp_path: Path,
+):
     jar = tmp_path / "oracle.jar"
+    base = "assets/oracle_index/books/b"
     with zipfile.ZipFile(jar, "w") as archive:
         archive.writestr(
-            "assets/oracle_index/books/docs/index.mdx",
-            "# Oracle docs\n\nThis is a long documentation paragraph that must not become a game guide.\n",
+            f"{base}/content/i.mdx",
+            "---\ntitle: Overview\n---\n\nThe machine stores energy for later use.\n",
         )
+        archive.writestr(
+            f"{base}/translated/zh_tw/content/i.mdx",
+            "---\ntitle: 概覽\n---\n\n這台機器會儲存能量供之後使用。\n",
+        )
+        archive.writestr(f"{base}/assets/n.mdx", "A page in the assets folder.\n")
 
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=())
     assert result.error == ""
-    assert not any(item.kind == "guide" for item in result.items)
+    guides = {i.en_us: i.zh_tw for i in result.items if i.kind == "guide"}
+    assert guides == {
+        "The machine stores energy for later use.": "這台機器會儲存能量供之後使用。",
+        "Overview": "概覽",
+    }
+    assert {i.key.split("#")[0] for i in result.items} == {"books/b/content/i.mdx"}
 
 
 def test_invalid_non_book_json_is_not_reported_as_invalid_book(tmp_path: Path):

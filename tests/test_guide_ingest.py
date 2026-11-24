@@ -412,7 +412,8 @@ def test_mdx_guides_are_imported_like_markdown(tmp_path):
     )
     result = scan_jar(jar, ScanOptions(version="1.21.1"), dir_names=("books",))
     assert [i.en_us for i in result.items] == [
-        "The Scale Module can be placed in the upgrade slots of a device."
+        "The Scale Module can be placed in the upgrade slots of a device.",
+        "Scale Module",  # front matter 的 title
     ]
 
 
