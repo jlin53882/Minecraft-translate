@@ -3313,7 +3313,7 @@ def test_manual_save_asks_twice_when_the_text_breaks_format_tokens(db_path):
 
     entry_writes.save_entry(panel)
     assert "特殊字元不一致" in panel.saved_text.value
-    assert panel._format_ack == (entry.id, "黃金錠")
+    assert panel._format_ack == ("save", entry.id, "黃金錠")
     assert db.list_entries("1.21.1")[0][0].zh_tw != "黃金錠"  # 還沒寫入
 
     assert entry_writes.needs_format_ack(panel, entry, "黃金錠") is None  # 第二次放行
@@ -3322,4 +3322,26 @@ def test_manual_save_asks_twice_when_the_text_breaks_format_tokens(db_path):
     # 改了文字就要重新確認；格式一致的文字不需要確認
     assert entry_writes.needs_format_ack(panel, entry, "金錠")
     assert entry_writes.needs_format_ack(panel, entry, "§6黃金%s錠") is None
+    db.close()
+
+
+def test_format_ack_for_save_does_not_unlock_review(db_path):
+    """儲存與審核各自確認：對同一段文字按過「儲存」的提醒，不會讓「審核」第一次就放行。"""
+    from app.views.moddb import entries_panel, entry_writes
+
+    db = TranslationDB(db_path)
+    db.ingest(
+        "1.21.1",
+        [ScanItem(KIND_LANG, "foo", "item.gold", "§6Gold %s ingot", "", source=SRC_AI)],
+    )
+    entry = db.list_entries("1.21.1")[0][0]
+    panel = entries_panel.EntriesPanel(mock_page(), lambda: db)
+
+    assert entry_writes.needs_format_ack(panel, entry, "黃金錠", "save")  # 提醒
+    assert entry_writes.needs_format_ack(panel, entry, "黃金錠", "save") is None
+    assert entry_writes.needs_format_ack(panel, entry, "黃金錠", "save")  # 又要提醒
+    assert entry_writes.needs_format_ack(
+        panel, entry, "黃金錠", "review"
+    )  # 審核另外提醒
+    assert entry_writes.needs_format_ack(panel, entry, "黃金錠", "review") is None
     db.close()

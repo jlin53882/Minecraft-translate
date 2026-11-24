@@ -103,6 +103,7 @@ def test_mirrored_record_is_not_fed_back_into_ui():
         logger.info("一般後台訊息")
     finally:
         logger.removeHandler(handler)
+        handler.set_session(None)  # 解除目前執行緒的任務歸屬，不污染之後的測試
 
     assert [e.text for e in session.snapshot()["logs"]] == ["一般後台訊息"]
 

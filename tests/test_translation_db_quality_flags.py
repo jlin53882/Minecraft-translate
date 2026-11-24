@@ -996,6 +996,11 @@ _FLAG_SNAPSHOT_CASES = (
     ("Hello &oworld&r", "你好世界", "kubejs_lang", True),
     ("Hello &oworld&r", "你好世界", "ftb_quest_lang", True),
     ("Plain text", "純文字", "lang", False),
+    # 具名佔位符（旗標版本 12）
+    ("Value {count} items", "個物品", "lang", True),
+    ("Value {count} items", "{count}個物品", "lang", False),
+    ("Hi ${var}", "嗨", "kubejs_lang", True),
+    ("Hi {{ var }}", "嗨 {{var}}", "ftb_quest_lang", False),
 )
 
 

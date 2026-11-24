@@ -589,3 +589,42 @@ def test_registry_owned_query_error_is_terminal_failure(monkeypatch):
     assert failures[0].terminal_reason == "failed"
     assert failures[0].error is failure
     assert notifications == [("error", f"搜尋失敗：{failure}")]
+
+
+def test_restore_from_history_bypasses_the_format_check(monkeypatch):
+    """還原歷史紀錄是「回到先前狀態」：以 allow_format_issues=True 放行格式檢查。"""
+    from app.views.cache_manager import cache_view_history as cache_history_module
+
+    tasks = []
+
+    class LoopPage(FakePage):
+        def run_task(self, handler, *args):
+            tasks.append((handler, args))
+
+    view = _prepare_cache_action_view(LoopPage())
+    view.query_selected_result = {"cache_type": "lang", "key": "k1", "shard": "s1"}
+    view.query_history_selected_event = {"old_dst": "舊值"}
+    view.query_detail_dst = ft.TextField(value="現值")
+    view.query_results = [{"cache_type": "lang", "key": "k1", "preview": "現值"}]
+    view._history_now_ts = lambda: "2026-02-12T02:00:00+08:00"
+    view._history_append_event = lambda ctype, event: None
+    view._render_query_results = lambda: None
+    view._render_query_detail = lambda: None
+    calls = []
+    monkeypatch.setattr(
+        cache_history_module,
+        "cache_update_dst_service",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or True,
+    )
+    monkeypatch.setattr(
+        cache_history_module, "cache_save_all_service", lambda **_k: {"ok": True}
+    )
+    monkeypatch.setattr(
+        cache_history_module, "cache_get_entry_service", lambda *_a: {"dst": "現值"}
+    )
+
+    CacheView._on_apply_selected_history(view, None)
+    handler, args = tasks.pop(0)
+    asyncio.run(handler(*args))
+
+    assert calls == [(("lang", "k1", "舊值"), {"allow_format_issues": True})]

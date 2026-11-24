@@ -26,6 +26,8 @@ from translation_tool.translation_db.quality import matches_quality
 
 # 旗標定義版本；``quality.py``／``guide_format.py`` 的判斷結果改變時遞增
 # （``tests/test_translation_db_quality_flags.py`` 的規則快照會在規則改變時失敗提醒）。
+# 12：token 掃描新增具名佔位符 ``{name}``、``${var}``、``{{var}}``；舊旗標會把弄丟這類
+#     佔位符的條目判為一致，必須重算。
 # 11：移除「標記順序不同」診斷（合理的語序調整不是格式錯誤）；舊版旗標可能把這類條目
 #     標成不一致，必須重算。
 # 10：一般語系（lang 等）只含 ``&`` 色碼或 ``<tag>`` 自訂標記時，``matches_quality`` 也會做

@@ -45,7 +45,7 @@
     "app/views/moddb/bulk_review_dialog.py": 949,
     "app/views/moddb/entries_panel.py": 1127,
     "app/views/moddb/repair_reviewer.py": 830,
-    "app/views/moddb/review_scope_dialog.py": 842,
+    "app/views/moddb/review_scope_dialog.py": 844,
     "app/views/moddb/same_text_review_dialog.py": 1017,
     "app/views/moddb/scan_panel.py": 824,
     "app/views/moddb/smart_review_batch_reviewer.py": 1118,
@@ -53,7 +53,7 @@
     "app/views/moddb/smart_review_run_panel.py": 899,
     "app/views/moddb/species_dialog.py": 950,
     "app/views/moddb/translate_panel.py": 1122,
-    "app/views/moddb/version_diff_dialog.py": 1046,
+    "app/views/moddb/version_diff_dialog.py": 1062,
     "app/views/moddb_view.py": 966
   }
 }

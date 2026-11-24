@@ -973,6 +973,13 @@ def reference_issues(row: CrossVersionRow, ref: VersionRef) -> list[str]:
     return translation_issues(row.en_us, ref.zh_tw, kind=row.kind)
 
 
+def target_issues(row: CrossVersionRow) -> list[str]:
+    """目標目前譯文與自己原文的格式差異；沒有原文或沒有譯文時回傳空串列。"""
+    if not row.en_us or not row.target_zh_tw:
+        return []
+    return translation_issues(row.en_us, row.target_zh_tw, kind=row.kind)
+
+
 def _reuse_one(
     db: TranslationDB,
     conn: sqlite3.Connection,

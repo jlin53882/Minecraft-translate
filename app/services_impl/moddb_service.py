@@ -73,6 +73,7 @@ from translation_tool.translation_db.cross_version_review import (
     CrossVersionRow,
     VersionRef,
     reference_issues,
+    target_issues,
 )
 from translation_tool.translation_db.models import QUALITY_TOKEN_CATEGORIES
 from translation_tool.translation_db.quality import token_issues, whitespace_note
@@ -203,6 +204,7 @@ __all__ = [
     "species_scope_options",
     "strip_quotes",
     "summarize_database",
+    "target_issues",
     "token_category",
     "token_issues",
     "version_choices",
@@ -411,7 +413,8 @@ def _reject_unknown_translation_source(session, source: int) -> None:
 def _report_format_mismatch(session, db, options, report) -> None:
     """匯入完成後，統計本次匯入的條目中譯文與原文特殊字元不一致的筆數並提示。
 
-    只提示、不改變匯入結果：模組自帶或簡轉繁的譯文照常寫入 DB，不一致的在輸出端會被擋下，
+    只提示、不改變匯入結果：模組自帶或簡轉繁的譯文照常寫入 DB。各輸出流程的處理不同
+    （語系合併保留並警告、Markdown 與 KubeJS／FTB 輸出會擋下或回報），
     也能用條目校對的「token 不一致」篩選找出來。
     """
     if options.dry_run or not report.touched_entry_ids:
@@ -425,7 +428,7 @@ def _report_format_mismatch(session, db, options, report) -> None:
         _log_both(
             session,
             f"⚠️ 本次匯入的條目中有 {report.format_mismatch:,} 筆譯文的特殊字元"
-            "（色碼、%s、{0} 等）與原文不一致；仍已匯入，輸出時不會被採用，"
+            "（色碼、%s、{0} 等）與原文不一致；仍已匯入，輸出時部分流程會擋下或回報，"
             "可在條目校對用「token 不一致」篩選檢視。",
             "warning",
         )

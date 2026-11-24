@@ -19,6 +19,7 @@ from app.services_impl.moddb_service import (
     VersionRef,
     pack_label,
     reference_issues,
+    target_issues,
 )
 from app.services_impl.moddb_source_service import source_catalog_for, source_label
 from app.tasks.operation_registry import (
@@ -144,6 +145,9 @@ def _ref_name(kind: str, ref: VersionRef) -> str:
 
 class VersionDiffDialog:
     """版本差異審核：預設以各條目最近審核的版本當參考，可固定特定版本。"""
+
+    # 「保留目標譯文」遇到格式問題時，已提醒過的條目編號（再按一次才放行）
+    _keep_ack: int | None = None
 
     def __init__(
         self,
@@ -723,11 +727,13 @@ class VersionDiffDialog:
             row.entry_id,
             ref.entry_id,
         ):
-            if row.target_reviewed:
-                return "確認覆蓋已審核譯文並套用"
+            reasons = []
+            if row.source_changed:
+                reasons.append("原文不同")
             if reference_issues(row, ref):
-                return "確認套用（特殊字元與原文不一致）"
-            return "確認套用（原文不同）"
+                reasons.append("特殊字元與原文不一致")
+            base = "確認覆蓋已審核譯文並套用" if row.target_reviewed else "確認套用"
+            return f"{base}（{'、'.join(reasons)}）" if reasons else base
         if row.conflict:
             return f"套用 {_ref_name(row.kind, ref)} 的譯文"
         return "套用參考譯文"
@@ -914,6 +920,16 @@ class VersionDiffDialog:
         db = self.get_db()
         if db is None or self._busy:
             return
+        if self._keep_ack != row.entry_id and target_issues(row):
+            # 把有格式問題的譯文標成已審核前，先提醒一次（與條目人工審核一致）
+            self._keep_ack = row.entry_id
+            show_snack(
+                self.page,
+                "目標譯文的特殊字元與原文不一致；確定要保留並標為已審核，請再按一次",
+                C.GOLD,
+            )
+            return
+        self._keep_ack = None
         self._set_busy(True, "標記目標譯文為已審核…")
 
         def work() -> None:

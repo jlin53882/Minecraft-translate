@@ -68,6 +68,7 @@ CacheView（主入口；did_mount／will_unmount 以 mount generation 丟棄已�
 ### 分片區
 - **分片讀取的執行緒契約**：`_load_shard_rows` / `_load_shard_keys` 只查 `shard_reader` 的記憶（檔案簽名未變就不再解析 JSON）；`_fetch_overview`（載入總覽的背景執行緒）與 `run_cache_action` 的背景工作結束前呼叫 `_warm_shard_cache` 預熱（含歷史索引 `warm_history_index`）。單筆 SRC/DST 先以 `cache_get_entry_service` 取得，找不到才由 `_request_shard_entry` 以 OperationRegistry 背景呼叫 `_load_shard_entry`（經 `shard_reader.shard_raw` 讀取整個分片，保留既有 LRU）。選取變更或卸載時丟棄晚到結果。歷史紀錄 `cache_history_store`：讀取以 `{key: events}` 索引記憶，冷索引只在背景解析，append 就地更新；整份 json 鏡像由單一背景執行緒寫入（`history_flush` 可等待）。
 - `_load_shard_rows` → `_load_shard_keys(cache_type, filename)` → `_on_select_shard_key` → `_load_shard_entry` → `_render_shard_src_panel` / `_render_shard_dst_panel`
+- dst 編輯：新的 dst 與 src 的特殊字元不一致時，`cache_update_dst_service` 拒絕並拋出 `ValueError`（顯示為失敗訊息）；兩個「還原歷史」入口（`_on_apply_selected_history`、`_on_shard_apply_selected_history`）以 `allow_format_issues=True` 放行。
 - dst 編輯：`_on_shard_dst_apply` / `_on_shard_dst_revert` / `_on_shard_dst_copy` / `_on_shard_dst_restore_latest`
 - 動態高度計算：`_dynamic_*_height/width` 系列（`_on_page_resized` 觸發；經 `app/ui/page_resize.py` 向 AppShell 的 resize 派送訂閱，`will_unmount` 取消）
 - 分片工作區：`_open_shard_workspace_tab` / `_on_back_to_shard_list` / `_on_select_shard_row`

@@ -263,7 +263,7 @@ class ReviewScopeController:
             return
         if self._previewing:
             return  # 上一次審核範圍查詢還沒回來
-        warning = entry_writes.needs_format_ack(panel, entry, entry.zh_tw)
+        warning = entry_writes.needs_format_ack(panel, entry, entry.zh_tw, "review")
         if warning:
             show_snack(panel._page, warning, C.GOLD)
             return

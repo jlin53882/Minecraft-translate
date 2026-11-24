@@ -120,9 +120,10 @@ def _select_next_if_gone(panel, entry_id, selected_index) -> None:
 
 
 # ---------------------------------------------------------------- 手動儲存
-def needs_format_ack(panel, entry, text: str) -> str | None:
+def needs_format_ack(panel, entry, text: str, action: str = "save") -> str | None:
     """譯文與原文的特殊字元不一致時，要求使用者對「同一段文字」再按一次才放行。
 
+    ``action`` 區分是「儲存」還是「審核」：兩個動作各自確認，不會因為先前對其中一個按過就放行另一個。
     回傳要顯示的提醒文字；沒有問題、或同一段文字已經確認過時回傳 None。
     人工編輯不強制擋下（使用者可能刻意調整），但不能在沒注意到的情況下存入或審核。
     """
@@ -133,10 +134,10 @@ def needs_format_ack(panel, entry, text: str) -> str | None:
     if not result.has_issues:
         panel._format_ack = None
         return None
-    if panel._format_ack == (entry.id, text):
+    if panel._format_ack == (action, entry.id, text):
         panel._format_ack = None  # 已確認：這一次放行
         return None
-    panel._format_ack = (entry.id, text)
+    panel._format_ack = (action, entry.id, text)
     detail = "、".join([*result.legacy_messages, *result.extra_guide_issues][:3])
     return (
         "譯文與原文的特殊字元不一致"
