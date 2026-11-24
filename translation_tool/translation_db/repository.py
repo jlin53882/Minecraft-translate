@@ -527,16 +527,24 @@ class TranslationDB(
             else f"entry {alias}"
         )
 
-    def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
-        """回傳指定優先序使用的標準生效來源排序。"""
+    def _priority_parts(
+        self, priority: tuple[int, ...] | None = None
+    ) -> tuple[str, str]:
+        """指定優先序的生效來源排序，拆成（已校驗／已審核優先, 來源名次）兩個運算式。"""
         rank = self._rank if priority is None else rank_sql(tuple(priority), "t.source")
         if not self.has_review_state:
-            return f"CASE WHEN t.checker <> '' THEN 0 ELSE 1 END, {rank}"
+            return "CASE WHEN t.checker <> '' THEN 0 ELSE 1 END", rank
         return (
             "CASE WHEN t.review_status='reviewed' THEN 0 "
             "WHEN t.checker <> '' AND t.review_status IS NOT 'unreviewed' THEN 0 "
-            f"ELSE 1 END, {rank}"
+            "ELSE 1 END",
+            rank,
         )
+
+    def _priority_order(self, priority: tuple[int, ...] | None = None) -> str:
+        """回傳指定優先序使用的標準生效來源排序。"""
+        group, rank = self._priority_parts(priority)
+        return f"{group}, {rank}"
 
     # ------------------------------------------------------------------ 基礎
     def close(self) -> None:
@@ -5842,7 +5850,7 @@ class TranslationDB(
             "SELECT e.kind, e.key, e.en_us, e.mc_version, f.zh_tw, f.source "
             "FROM entry e JOIN effective f ON f.entry_id = e.id WHERE e.mod_id = ?",
             (mod_id,),
-        ) + self._q(variants.load_rows_sql(self._priority_order()), (mod_id,))
+        ) + self._load_variant_rows(mod_id, None)
 
     def _reviewed_lang_candidate_rows(
         self, mod_id: str, mc_version: str | None
@@ -6092,9 +6100,17 @@ class TranslationDB(
 
         含條目的其他原文（變體）譯文，與主原文用同一套優先序。
         """
-        return self._q(self._load_mod_for_priority_sql(priority), (mod_id,)) + self._q(
-            variants.load_rows_sql(self._priority_order(priority)), (mod_id,)
-        )
+        return self._q(
+            self._load_mod_for_priority_sql(priority), (mod_id,)
+        ) + self._load_variant_rows(mod_id, priority)
+
+    def _load_variant_rows(
+        self, mod_id: str, priority: tuple[int, ...] | None
+    ) -> list[tuple[str, str, str, str, str, int]]:
+        """模組的其他原文（變體）生效譯文；舊版 schema 唯讀開啟時沒有變體表，回傳空串列。"""
+        group, rank = self._priority_parts(priority)
+        with self._lock:
+            return variants.load_rows(self._conn, group, rank, mod_id)
 
     def _load_mod_for_priority_sql(self, priority: tuple[int, ...]) -> str:
         """建立合併解析器使用的模組範圍排序查詢。"""

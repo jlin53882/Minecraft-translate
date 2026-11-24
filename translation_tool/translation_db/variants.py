@@ -7,7 +7,7 @@
 （與 ``entry`` / ``translation`` 同形）。決策與取捨見 ``docs/adr/0007-moddb-source-variants.md``。
 
 本模組獨佔這兩張表的讀寫：其他模組只呼叫這裡的函式，不直接寫 SQL。變體只影響流水線的
-譯文查詢（``TranslationResolver`` 讀 ``load_rows_sql``）；條目清單、統計、審核、跨版本沿用
+譯文查詢（``TranslationResolver`` 讀 ``load_rows``）；條目清單、統計、審核、跨版本沿用
 都只看 ``entry``／``effective``，不受影響。
 """
 
@@ -15,34 +15,46 @@ from __future__ import annotations
 
 import sqlite3
 
-# 與 ``repository.load_mod`` 相同的欄位順序：(類型, 鍵值, 原文, 版本, 譯文, 來源)
-_ROW_COLUMNS = (
-    "ranked.kind, ranked.key, ranked.en_us, ranked.mc_version, "
-    "ranked.zh_tw, ranked.source"
-)
+
+def tables_available(conn: sqlite3.Connection) -> bool:
+    """變體表是否存在（舊版 schema 的資料庫以唯讀開啟時不會升級，沒有這兩張表）。"""
+    row = conn.execute(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' "
+        "AND name IN ('entry_variant', 'variant_translation')"
+    ).fetchone()
+    return bool(row and row[0] == 2)
 
 
-def load_rows_sql(order_by: str) -> str:
-    """一個模組所有變體的生效譯文查詢（參數：``mod_id``）。
+def load_rows(
+    conn: sqlite3.Connection, group_expr: str, rank_expr: str, mod_id: str
+) -> list[tuple[str, str, str, str, str, int]]:
+    """一個模組所有變體的生效譯文，欄位與 ``repository.load_mod`` 相同。
 
-    ``order_by`` 是 ``t``（``variant_translation``）別名的來源排序（與條目的生效譯文
-    使用同一套優先序）；每個變體只取排序第一的譯文。CROSS JOIN 讓 SQLite 從該模組的
-    條目出發逐層探查，不先排序整張譯文表。
+    ``(類型, 鍵值, 原文, 版本, 譯文, 來源)``。``group_expr``／``rank_expr`` 是 ``t``
+    （``variant_translation``）別名的來源排序運算式（與條目的生效譯文同一套優先序）：
+    SQL 只取回運算式的值、不排序（臨時排序的成本隨模組的變體數成長），每個變體取
+    ``(group, rank)`` 最小的譯文，同分取先出現者。沒有變體表時回傳空串列。
+    CROSS JOIN 讓 SQLite 從該模組的條目出發逐層探查，不掃整張譯文表。
     """
-    return f"""
-        SELECT {_ROW_COLUMNS}
-        FROM (
-            SELECT e.kind, e.key, v.en_us, e.mc_version, t.zh_tw, t.source,
-                   ROW_NUMBER() OVER (
-                       PARTITION BY t.variant_id ORDER BY {order_by}
-                   ) AS rn
-            FROM entry e
-            CROSS JOIN entry_variant v ON v.entry_id = e.id
-            CROSS JOIN variant_translation t ON t.variant_id = v.id
-            WHERE e.mod_id = ? AND t.zh_tw <> ''
-        ) AS ranked
-        WHERE ranked.rn = 1
-    """
+    if not tables_available(conn):
+        return []
+    rows = conn.execute(
+        f"""
+        SELECT v.id, e.kind, e.key, v.en_us, e.mc_version, t.zh_tw, t.source,
+               {group_expr}, {rank_expr}
+        FROM entry e
+        CROSS JOIN entry_variant v ON v.entry_id = e.id
+        CROSS JOIN variant_translation t ON t.variant_id = v.id
+        WHERE e.mod_id = ? AND t.zh_tw <> ''
+        """,
+        (mod_id,),
+    ).fetchall()
+    best: dict[int, tuple[tuple[int, int], tuple[str, str, str, str, str, int]]] = {}
+    for vid, kind, key, en_us, version, zh_tw, source, group, rank in rows:
+        order = (group, rank)
+        if vid not in best or order < best[vid][0]:
+            best[vid] = (order, (kind, key, en_us, version, zh_tw, source))
+    return [row for _order, row in best.values()]
 
 
 def variant_id(conn: sqlite3.Connection, entry_id: int, en_us: str) -> int | None:

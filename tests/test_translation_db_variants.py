@@ -151,3 +151,42 @@ def test_variant_write_is_counted_as_external_free_change(db):
     db.write_back(VERSION, [_wb("Background Style", "背景樣式")])
     after = db._one("SELECT value FROM meta WHERE key='data_gen'")[0]
     assert after != before
+
+
+def test_variant_query_has_no_temp_sort_and_old_schema_reads_main_rows(tmp_path):
+    """查詢計畫不得臨時排序；舊 schema（沒有變體表）唯讀開啟仍讀得到主原文譯文。"""
+    import sqlite3
+
+    path = tmp_path / "old.db"
+    first = TranslationDB(path)
+    _seed(first)
+    first.write_back(VERSION, [_wb("Background Style", "背景樣式")])
+    group, rank = first._priority_parts()
+    plan = " ".join(
+        str(r[-1])
+        for r in first._q(
+            "EXPLAIN QUERY PLAN SELECT v.id, "
+            f"{group}, {rank} FROM entry e "
+            "CROSS JOIN entry_variant v ON v.entry_id = e.id "
+            "CROSS JOIN variant_translation t ON t.variant_id = v.id "
+            "WHERE e.mod_id = ? AND t.zh_tw <> ''",
+            ("foo",),
+        )
+    )
+    assert "TEMP B-TREE" not in plan
+    first.close()
+
+    raw = sqlite3.connect(path)
+    raw.executescript(
+        "DROP TABLE variant_translation; DROP TABLE entry_variant; "
+        "UPDATE meta SET value='17' WHERE key='schema_version';"
+    )
+    raw.commit()
+    raw.close()
+    readonly = TranslationDB(path, readonly=True)
+    try:
+        rows = readonly.load_mod_for_priority("foo", (SRC_MANUAL, SRC_JAR_TW, SRC_AI))
+        assert [(r[2], r[4]) for r in rows] == [("Show Background", "顯示背景")]
+        assert [r[2] for r in readonly.load_mod("foo")] == ["Show Background"]
+    finally:
+        readonly.close()
