@@ -30,6 +30,7 @@ class GuideBlock:
     start_line: int  # 1-based
     end_line: int
     prefix: str = ""  # 只有 front matter 標題用：行首（含縮排與 ``title:``）
+    key: str = ""  # 只有 ``_meta.json`` 區塊用：在 JSON 內的路徑（鍵或 ``鍵/name``）
 
 
 def _top_level_title(lines: Sequence[str]) -> tuple[int, str, str] | None:
@@ -243,6 +244,12 @@ def has_translatable_text(text: str) -> bool:
 
 
 def extract_guide_blocks(text: str, name: str) -> list[GuideBlock]:
+    if name == "_meta.json":
+        # Oracle Index 選單：每個顯示名稱一個區塊（沒有行號，寫回走 apply_meta_translations）
+        return [
+            GuideBlock(value, 0, 0, key=path)
+            for path, value in extract_meta_entries(text) or []
+        ]
     blocks = [
         GuideBlock(b.text, b.start_line, b.end_line)
         for b in extract_blocks(text, name, "all")

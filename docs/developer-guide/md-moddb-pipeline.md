@@ -13,6 +13,17 @@
 | LM 翻譯 | `translation_runner`（服務層提供） | `run_moddb_translate_service`，只翻本次來源的模組、只翻指南條目 |
 | 輸出 | `export_md_overlay` | 以 `TranslationResolver` 查 DB 生效譯文，`render_guide` 組回原檔，寫到輸出資料夾 |
 
+## Oracle Index 書
+
+來源資料夾內 Oracle Index 書（`assets/oracle_index/books/<書>/`）的 `.mdx` 頁面與 `_meta.json` 也會掃描（`_guide_files`、`_oracle_locale`）：
+
+- 原文是 `content/`、`docs/`（舊版 `.content/`、書根目錄）底下的檔案；`translated/<語系>/`（舊版 `.translated`）底下的 `zh_tw`、`zh_cn` 譯文與原文配對，其他語系略過；素材與 `data/` 不處理。
+- 條目身分是模組 `oracle_index`、鍵 `books/<書>/<原文相對路徑>#<序號>`，與 jar 掃描入庫的條目相同，兩邊共用同一批條目。
+- `_meta.json` 的譯文依 JSON 路徑對應原文（缺的鍵為空字串），不要求區塊數相同；頁面仍要求段落數相同。
+- 輸出到 `<輸出>/assets/oracle_index/books/<書>/translated/zh_tw/…`；選單保留原檔全部的鍵與 `icon` 等欄位。人工修改保護與其他指南相同。
+
+路徑與格式規則見 [Oracle Index 書籍的路徑契約](oracle-index-books.md)。
+
 ## 條目身分
 
 - 路徑是 `assets|data/<模組>/…` 時：`mod_id` 是模組 ID，鍵值是「中性路徑#段落序號」，與 jar 指南流程（`guide_translation.load_guide`）相同，所以兩邊共用同一批條目。

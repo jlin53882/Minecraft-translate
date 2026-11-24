@@ -3,7 +3,7 @@
 Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `assets/oracle_index/books/<書>/`：頁面是 `.mdx`，每個資料夾的選單名稱放在 `_meta.json`。
 路徑規則集中在 `translation_tool/core/oracle_index.py`（純函式，不讀檔案、不翻譯、不寫檔），測試在 `tests/test_oracle_index.py`。
 掃描與配對已接上：`book_formats.py` 把內容與文件區的 `.mdx` 頁面視為可翻譯的指南（`resolve_book_format`、`is_unsupported_format`），`_meta.json` 的選單名稱也進同一個指南流程；素材與 `data/` 仍不進通用流程。
-翻譯與輸出走 jar 提取的指南流程（`find_guide_files`、`load_guide`、`render_guide`）；資料夾式的 Markdown 流水線（`md_pipeline`）只處理 `.md`，不處理 Oracle 書。
+翻譯與輸出走 jar 提取的指南流程（`find_guide_files`、`load_guide`、`render_guide`）；資料夾式的 Markdown 流水線（`md_pipeline`）也處理 Oracle 書，見 [md-moddb-pipeline.md](md-moddb-pipeline.md)。
 
 契約依據 Oracle Index 1.4.1，以反組譯確認；整合包內會用到它的書是 Oritech（新版版面）與 mffs（舊版版面）。
 
@@ -35,6 +35,8 @@ Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `ass
 - 掃描 jar 與掃描已解壓資料夾時讀不到 `sinytra-wiki.json`，用 `infer_layout` 只看路徑推測版面；遊戲的實際判斷（`layout_from_wiki_meta`）留給輸出階段使用。
 - `_kind_of`（`sniff_groups.py`）對 Oracle 頁面不再靠內容判斷，路徑確認是頁面就是指南。
 - `.mdx` 頁面 front matter 最上層的 `title:` 與內文段落一起抽取，標題區塊排在所有段落之後（`guide_blocks.extract_guide_blocks`）；其他副檔名仍只抽 `navigation.title`。
+
+- 資料庫掃描（`scan_jar`、`scan_folder_generator`）與 jar／zip 的其他指南走同一條路，由「手冊／指南」選項（`ScanOptions.include_patchouli`，預設開）控制；條目的類型是 `guide`、模組是 `oracle_index`。
 
 ## 選單（`_meta.json`）
 
@@ -77,6 +79,7 @@ Oracle Index（模組 id `oracle_index`）把模組的遊戲內文件放在 `ass
 | `schema` 寫成數字 `1` 視為新版 | 由 Gson 行為推論 |
 | `type` 欄位未被讀取 | 由找不到使用處推論 |
 | 提取 Oritech／mffs 後的翻譯輸出：頁面與選單組回、輸出路徑、選單保留全部鍵（31 個選單檔、1,198 個頁面區塊） | 已用真實 jar 驗證 |
+| 資料庫掃描 Oritech／mffs 的 jar：寫入 1,409 筆 `guide` 條目（模組 `oracle_index`） | 已用真實 jar 驗證 |
 | 掃描 Oritech／mffs 的 jar：原文頁與 `translated/<語系>/` 譯文頁配對、`title:` 與 `_meta.json` 名稱抽出（Oritech 186 筆、zh_cn 對上 182 筆；mffs 15 筆） | 已用真實 jar 驗證 |
 | 遊戲內實際顯示 `translated/zh_tw/` 的選單與頁面 | 未實機驗證 |
 

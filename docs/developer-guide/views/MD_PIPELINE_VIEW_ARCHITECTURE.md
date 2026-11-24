@@ -32,6 +32,8 @@
 
 ## 與其他 View 的關係
 
+來源範圍除了指南 `.md`，也包含 Oracle Index 書的 `.mdx` 與 `_meta.json`（後端行為，頁面沒有額外控制項）。
+
 與 KubeJS／FTB 流水線頁共用 `pipeline_workbench`、`PipelineProgressPanel`、`LmDbOptions` 與同一個 ModDB；兩者各自限制同一時間只有一個執行，彼此不互斥。
 
 ## 維護注意
