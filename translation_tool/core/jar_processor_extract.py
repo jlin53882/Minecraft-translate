@@ -21,6 +21,10 @@ from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
 from typing import Any
 
+from translation_tool.core.modonomicon_literals import (
+    collect_mod_literals,
+    main_lang_mod_id,
+)
 from translation_tool.utils.bounded_executor import bounded_as_completed
 from translation_tool.utils.cancellation import (
     TaskCancelled,
@@ -336,6 +340,39 @@ def _reconcile_extracted_wrappers(
     _write_extraction_manifest(manifest_path, current_sources)
 
 
+def _with_book_literals_bytes(
+    jar_path: str | Path, member: str, data: bytes, budget: ZipReadBudget
+) -> bytes:
+    """模組主語系檔 ``en_us.json`` 補上 Modonomicon 書籍內的字面英文，其他檔案原樣回傳。
+
+    書籍把英文直接寫在 JSON 裡，遊戲以那句英文當語系鍵；補成「鍵 = 原文」的條目後，
+    後面的合併與翻譯流程才看得到它們。沒有可補的條目時不動原始位元組。
+    """
+    mod_id = main_lang_mod_id(member)
+    if mod_id is None:
+        return data
+    try:
+        en = json.loads(data.decode("utf-8-sig"), strict=False)
+    except (UnicodeDecodeError, ValueError):
+        return data
+    if not isinstance(en, dict):
+        return data
+
+    def read_book(name: str) -> Any:
+        try:
+            return json.loads(read_limited(zf, name, MAX_FILE_BYTES, budget=budget))
+        except ArchiveBudgetError:
+            raise  # 整包累計超限：不能寫出只含部分書籍的語系檔，交給外層中止這個 JAR
+        except (ValueError, ZipSizeError):
+            return None
+
+    with zipfile.ZipFile(jar_path, "r") as zf:
+        extra = collect_mod_literals(zf.namelist(), read_book, mod_id, en)
+    if not extra:
+        return data
+    return json.dumps({**en, **extra}, ensure_ascii=False, indent=2).encode("utf-8")
+
+
 def _entry_output_path(
     output_root: str,
     jar_filename_base: str,
@@ -425,6 +462,10 @@ def _extract_scanned_entries(
             skipped_count += 1
             continue
 
+        if not entry.is_nested:
+            source_data = _with_book_literals_bytes(
+                jar_path, normalized_path, source_data, budget
+            )
         source_hash = get_file_hash_fn(source_data)
         raise_if_cancelled()
         if os.path.exists(final_output_path):
@@ -629,6 +670,9 @@ def extract_from_jar_impl(
                         skipped_count += 1
                         continue
 
+                source_data = _with_book_literals_bytes(
+                    jar_path, normalized_path, source_data, budget
+                )
                 source_hash = get_file_hash_fn(source_data)
                 raise_if_cancelled()
 

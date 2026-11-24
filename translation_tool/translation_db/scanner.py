@@ -29,11 +29,16 @@ from translation_tool.core.book_dirs import find_book_dir_index
 from translation_tool.core.book_formats import is_neutral_pages_candidate
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
+    extract_meta_entries,
     has_translatable_text,
 )
 from translation_tool.core.lang_codec import parse_lang_text
 from translation_tool.core.lang_merge_dict import contains_cjk
 from translation_tool.core.lm_config_rules import is_translatable_field
+from translation_tool.core.modonomicon_literals import (
+    collect_mod_literals,
+    main_lang_mod_id,
+)
 from translation_tool.core.neutral_book_json import load_neutral_book_json
 from translation_tool.core.patchouli_compat import (
     find_patchouli_marker_issue,
@@ -628,6 +633,44 @@ def _aligned_blocks(
     return other
 
 
+class _MetaBlocks:
+    """``_meta.json`` 的區塊：原文決定順序，譯文依鍵對上原文的區塊（缺的鍵為空字串）。"""
+
+    def __init__(self, zf: zipfile.ZipFile, budget: ZipReadBudget) -> None:
+        self._zf, self._budget = zf, budget
+        self._paths: list[str] | None = None
+
+    def _entries(self, member: str | None) -> list[tuple[str, str]] | None:
+        if member is None:
+            return None
+        try:
+            text = read_limited(self._zf, member, budget=self._budget).decode(
+                "utf-8-sig"
+            )
+        except UnicodeDecodeError:
+            return None
+        return extract_meta_entries(text)
+
+    def source(self, member: str | None) -> list[str] | None:
+        entries = self._entries(member)
+        if entries is None:
+            return None
+        self._paths = [path for path, _text in entries]
+        return [text for _path, text in entries]
+
+    def translation(
+        self, _zf: zipfile.ZipFile, _budget: ZipReadBudget, member: str | None
+    ) -> list[str] | None:
+        entries = self._entries(member)
+        if entries is None:
+            return None
+        if self._paths is None:
+            # 沒有原文：選單序號是原文的順序，譯文自己的順序（缺鍵、換順序）會對到錯的條目，不匯入
+            return None
+        found = dict(entries)
+        return [found.get(path, "") for path in self._paths]
+
+
 def _guide_items(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -637,19 +680,22 @@ def _guide_items(
 ) -> list[ScanItem]:
     """指南（.md／.txt）：每個可翻譯段落一個條目，鍵值是 ``檔案鍵#段落序號``。"""
     kind, mod_id, file_key = ident_key
-    en = _read_blocks(zf, budget, members.get("en_us"))
+    read, align = _read_blocks, _aligned_blocks
+    if file_key.endswith("/_meta.json"):
+        # Oracle Index 選單：譯文依鍵對應原文（譯文可以缺鍵或換順序），不靠段落數
+        meta = _MetaBlocks(zf, budget)
+        en = meta.source(members.get("en_us"))
+        read, align = meta.translation, lambda _en, other, _member: other
+    else:
+        en = read(zf, budget, members.get("en_us"))
     if en is None and not options.translated:
         return []  # 掃描 jar 以原文為準；沒有原文就沒有可匯入的條目
     tw = cn = None
     # 翻譯 ZIP 固定讀 zh_tw；zh_cn 只在使用者開啟「讀取自帶 zh_cn」時讀取。
     if options.read_jar_translations or options.translated:
-        tw = _aligned_blocks(
-            en, _read_blocks(zf, budget, members.get("zh_tw")), members.get("zh_tw")
-        )
+        tw = align(en, read(zf, budget, members.get("zh_tw")), members.get("zh_tw"))
     if options.read_jar_translations:
-        cn = _aligned_blocks(
-            en, _read_blocks(zf, budget, members.get("zh_cn")), members.get("zh_cn")
-        )
+        cn = align(en, read(zf, budget, members.get("zh_cn")), members.get("zh_cn"))
     if en is None and tw is not None and cn is not None and len(tw) != len(cn):
         # 沒有原文可對齊，繁中與簡中段落數不同就無法逐段對應：只匯入繁中
         log_info(
@@ -845,6 +891,29 @@ def _build_scan_items(
     return out
 
 
+def _with_book_literals(
+    zf: zipfile.ZipFile,
+    budget: ZipReadBudget,
+    en_member: str,
+    en: dict,
+) -> dict:
+    """模組主語系檔補上 Modonomicon 書籍內的字面英文（鍵與原文相同）；既有的鍵不覆蓋。"""
+    mod_id = main_lang_mod_id(en_member)
+    if mod_id is None:
+        return en
+
+    def read_book(name: str) -> dict | None:
+        try:
+            return _read_json_member(zf, budget, name)
+        except ArchiveBudgetError:
+            raise  # 整包累計超限：不能只補部分書籍，交給外層中止這個 JAR
+        except ZipSizeError:
+            return None  # 單一書籍過大：只略過那一本
+
+    extra = collect_mod_literals(zf.namelist(), read_book, mod_id, en)
+    return {**en, **extra} if extra else en
+
+
 def _items_for_group(
     zf: zipfile.ZipFile,
     budget: ZipReadBudget,
@@ -861,6 +930,8 @@ def _items_for_group(
         return _advancement_items(zf, budget, ident_key, members)
     en_member = members.get("en_us")
     en = _read_json_member(zf, budget, en_member)
+    if kind == "lang" and en_member and isinstance(en, dict):
+        en = _with_book_literals(zf, budget, en_member, en)
     if not options.translated and en is None:
         return []  # 掃描 jar 以原文為準；沒有 en_us 就沒有可匯入的條目
 
