@@ -600,7 +600,8 @@ class MarkdownPipelineView(ft.Column):
             f"輸出：計畫 {summary.get('output_planned', 0):,} 檔、"
             f"寫出 {summary.get('output_files', 0):,} 檔\n"
             f"已有譯文 {summary.get('blocks_translated', 0):,} 段、"
-            f"尚無譯文 {summary.get('blocks_missing', 0):,} 段、"
+            f"尚無譯文 {summary.get('blocks_missing', 0):,} 段"
+            f"（其中特殊字元與原文不一致 {summary.get('blocks_rejected', 0):,} 段，輸出保留原文）、"
             f"人工修改略過 {summary.get('skipped_manual_edit', 0):,} 檔"
         )
         self.result_text.value = (

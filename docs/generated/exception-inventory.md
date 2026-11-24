@@ -4,11 +4,11 @@
 > 範圍：`app/`、`translation_tool/`、`main.py` 內所有帶 `noqa: BLE001／S110／S112` 的位置。
 > 命令列 QA 工具（`md_extract_qa.py`、`md_inject_qa.py`）的 `print` 為刻意保留，不在此表。
 
-共 **339** 項；其中 **84** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
+共 **342** 項；其中 **84** 項尚未在程式碼內寫明原因（以「分類」說明處理方式）。
 
 | 分類 | 數量 | 意義 |
 |---|---|---|
-| 已記錄／回報 | 307 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
+| 已記錄／回報 | 310 | 例外處理本身有 log、提示、回報錯誤事件或重新丟出；寬鬆捕捉是為了不中斷整批流程 |
 | UI／畫面保護 | 17 | UI 層的畫面更新、icon 快取等；失敗只影響顯示，不影響資料 |
 | 盡力而為（靜默） | 15 | 引擎層、只有 `pass`／`continue`／回傳常數；失敗不影響結果（例如進度回報、還原失敗時以原始例外為準） |
 
@@ -28,6 +28,7 @@
 | `app/icon_scan_pool.py:icon_scan_executor` | BLE001 | 已記錄／回報 | 行程池無法啟動（打包、權限等）時退回執行緒 |
 | `app/icon_scan_pool.py:_stream_once` | BLE001 | 已記錄／回報 | worker 回報異常：該 JAR 視為失敗，其他照常 |
 | `app/services.py:run_untranslated_check_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `app/services.py:run_format_consistency_check_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_variant_compare_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_english_residue_check_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `app/services.py:run_variant_compare_tsv_service` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
@@ -42,6 +43,7 @@
 | `app/services_impl/moddb_retranslate_service.py:_flush_repair_cache` | BLE001 | 已記錄／回報 | DB results survive cache failure |
 | `app/services_impl/moddb_retranslate_service.py:run_moddb_retranslate_service` | BLE001 | 已記錄／回報 | service boundary reports failure in TaskSession |
 | `app/services_impl/moddb_service.py:warm_stats_quietly` | BLE001 | 已記錄／回報 | 統計預熱失敗不影響任務結果 |
+| `app/services_impl/moddb_service.py:_report_format_mismatch` | BLE001 | 已記錄／回報 | 統計只是提示，失敗不能讓已提交的匯入變成失敗 |
 | `app/services_impl/moddb_service.py:_reuse_reviewed_after_scan` | BLE001 | 已記錄／回報 | 沿用是匯入後的選用步驟，失敗不能讓已提交的匯入變成失敗 |
 | `app/services_impl/moddb_service.py:run_moddb_scan_service` | BLE001 | 已記錄／回報 | 背景任務：任何失敗都要回報到 session，不可讓執行緒默默結束 |
 | `app/services_impl/moddb_smart_review_service.py:_apply_moddb_smart_review_legacy_batch` | BLE001 | 已記錄／回報 | one bad candidate must not stop the batch |
@@ -225,6 +227,7 @@
 | `app/views/rules_view.py:RulesView._scroll_table_to_top` | BLE001 | 已記錄／回報 | 捲動只是輔助，失敗不影響編輯 |
 | `app/views/rules_view.py:RulesView._focus_new_rule` | BLE001 | 已記錄／回報 | 取得焦點只是輔助 |
 | `translation_tool/checkers/english_residue_checker.py:check_english_residue_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
+| `translation_tool/checkers/format_consistency_checker.py:check_format_consistency_generator` | BLE001 | 已記錄／回報 | 單檔失敗只回報，不中斷整批 |
 | `translation_tool/checkers/untranslated_checker.py:check_untranslated_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/variant_comparator.py:compare_variants_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |
 | `translation_tool/checkers/variant_comparator.py:compare_variants_generator` | BLE001 | 已記錄／回報 | 錯誤已記錄或回報給呼叫端，不中斷整批流程 |

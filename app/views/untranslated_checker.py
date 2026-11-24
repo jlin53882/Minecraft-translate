@@ -18,7 +18,17 @@ class UntranslatedChecker(ft.Container):
 
     用途：封裝「翻譯 Key 缺失檢查」的 UI 與邏輯。
     維護注意：此元件依賴外部傳入的 task_runner (QCBase 實例)。
+    同樣是「en_us／zh_tw 兩個來源資料夾＋報告輸出資料夾」的檢查（例如格式一致性）以子類別
+    覆寫下列類別屬性即可，不必複製版面與選資料夾的邏輯。
     """
+
+    DESCRIPTION = (
+        "比對 en_us 與 zh_tw 的 key，列出繁中缺漏的條目（值仍是英文的不在此檢查範圍）。"
+    )
+    OUT_LABEL = "未翻譯報告 輸出資料夾"
+    START_LABEL = "開始檢查"
+    START_ICON = ft.Icons.SEARCH_OFF
+    SERVICE = staticmethod(run_untranslated_check_service)
 
     def __init__(
         self,
@@ -40,11 +50,9 @@ class UntranslatedChecker(ft.Container):
         self.tw_dir = kit.text_field(
             "繁中 (zh_tw) 來源資料夾", mono=True, expand=True, path=True
         )
-        self.out_dir = kit.text_field(
-            "未翻譯報告 輸出資料夾", mono=True, expand=True, path=True
-        )
+        self.out_dir = kit.text_field(self.OUT_LABEL, mono=True, expand=True, path=True)
         self.start_button = kit.button(
-            "開始檢查", "primary", icon=ft.Icons.SEARCH_OFF, on_click=self._on_start
+            self.START_LABEL, "primary", icon=self.START_ICON, on_click=self._on_start
         )
 
         # --- 先呼叫父類初始化 ---
@@ -60,7 +68,7 @@ class UntranslatedChecker(ft.Container):
         return ft.Column(
             [
                 ft.Text(
-                    "比對 en_us 與 zh_tw 的 key，列出繁中缺漏的條目（值仍是英文的不在此檢查範圍）。",
+                    self.DESCRIPTION,
                     size=12.5,
                     color=C.MUTED,
                 ),
@@ -179,7 +187,7 @@ class UntranslatedChecker(ft.Container):
         ]
 
         self.task_runner.task_worker(
-            run_untranslated_check_service,
+            self.SERVICE,
             (en_dir, tw_dir, out_dir),
             controls_to_disable=controls,
         )

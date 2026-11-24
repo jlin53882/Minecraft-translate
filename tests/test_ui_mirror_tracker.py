@@ -188,7 +188,12 @@ def test_backend_record_from_an_unknown_task_is_compatible_with_any_task(caplog)
         logging.getLogger("core").info("池內訊息")  # 沒有 task scope
         session.add_log("池內訊息")
 
-    assert not [r for r in caplog.records if getattr(r, "ui_mirrored", False)]
+    mirrored = [
+        r
+        for r in caplog.records
+        if r.getMessage() == "池內訊息" and getattr(r, "ui_mirrored", False)
+    ]
+    assert not mirrored
 
 
 def test_tracker_task_attribution_follows_each_thread(caplog):

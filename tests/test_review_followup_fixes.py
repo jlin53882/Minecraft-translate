@@ -208,3 +208,189 @@ def test_version_diff_mod_options_list_only_mods_with_differences(monkeypatch):
     dialog._loaded(1, [], ["alpha", "beta", "gamma"], None, None, (key, "beta", None))
     assert shown[-1] == [vdd.ALL_MODS, "beta"]
     assert dialog._mod_options.options(None) == []
+
+
+def test_single_apply_asks_again_when_the_reference_breaks_format_tokens():
+    """參考譯文少了原文的色碼：逐筆套用要再按一次確認，並以明確確認的項目送出。"""
+    dialog = _bare_dialog()
+    ref = VersionRef(2, "1.20.1", "參考", 1, "", "", mod_id="m", en_us="§6New")
+    row = CrossVersionRow(
+        1, KIND_LANG, "m", "k", "§6New", "目標", 1, False, (ref,), 1, False
+    )
+
+    dialog._apply_one(row, ref)
+    assert dialog.applied == [] and dialog._confirm_row == (1, 2)
+    assert "特殊字元" in dialog._apply_label(row, ref)
+
+    dialog._apply_one(row, ref)
+    assert len(dialog.applied) == 1
+    assert dialog.applied[0][0].confirmed_quality is True
+
+
+def test_scan_summary_counts_imported_translations_with_format_mismatch(db):
+    """模組自帶譯文的特殊字元與原文不一致：照常匯入，摘要提示筆數。"""
+    from app.services_impl.moddb_service import _report_format_mismatch
+
+    db.ingest(
+        "26.1",
+        [
+            ScanItem(KIND_LANG, "m", "bad", "§6Gold %s", "黃金"),  # 少了 §6 與 %s
+            ScanItem(KIND_LANG, "m", "ok", "§6Gold %s", "§6黃金%s"),
+            ScanItem(KIND_LANG, "m", "plain", "Plain", "純文字"),
+        ],
+    )
+    session, logs, summaries = _session()
+    report = ScanReport(version="26.1")
+    report.touched_entry_ids.update(
+        int(r[0]) for r in db._q("SELECT id FROM entry WHERE mc_version='26.1'")
+    )
+
+    _report_format_mismatch(session, db, ScanOptions(version="26.1"), report)
+
+    assert report.format_mismatch == 1
+    assert summaries[-1]["format_mismatch"] == 1
+    assert any("特殊字元" in str(entry) for entry in logs)
+    # 仍已匯入
+    assert (
+        db._one(
+            "SELECT zh_tw FROM effective f JOIN entry e ON e.id=f.entry_id WHERE e.key='bad'"
+        )[0]
+        == "黃金"
+    )
+
+
+def test_scan_summary_skips_format_count_for_dry_run_and_empty_scans(db):
+    from app.services_impl.moddb_service import _report_format_mismatch
+
+    session, logs, summaries = _session()
+    report = ScanReport(version="26.1")
+    _report_format_mismatch(session, db, ScanOptions(version="26.1"), report)
+    report.touched_entry_ids.add(1)
+    _report_format_mismatch(
+        session, db, ScanOptions(version="26.1", dry_run=True), report
+    )
+    assert report.format_mismatch == 0 and not logs and not summaries
+
+
+def test_confirm_label_names_every_reason_including_format_issues():
+    """已審核的目標＋格式不一致的參考：確認按鈕要一併說明，不能只顯示覆蓋已審核。"""
+    dialog = _bare_dialog()
+    ref = VersionRef(2, "1.20.1", "參考", 1, "", "", mod_id="m", en_us="§6New")
+    both = CrossVersionRow(
+        1, KIND_LANG, "m", "k", "§6New", "目標", 1, True, (ref,), 1, False
+    )
+    dialog._apply_one(both, ref)
+    label = dialog._apply_label(both, ref)
+    assert "覆蓋已審核譯文" in label and "特殊字元與原文不一致" in label
+
+    changed_and_bad = CrossVersionRow(
+        1, KIND_LANG, "m", "k", "§6New", "目標", 1, False, (ref,), 1, True
+    )
+    dialog._confirm_row = None
+    dialog._apply_one(changed_and_bad, ref)
+    label = dialog._apply_label(changed_and_bad, ref)
+    assert "原文不同" in label and "特殊字元與原文不一致" in label
+
+    plain = _row(reviewed=True, changed=False)
+    dialog._confirm_row = None
+    dialog._apply_one(plain, plain.reference)
+    assert dialog._apply_label(plain, plain.reference) == "確認覆蓋已審核譯文並套用"
+
+
+def test_keep_target_asks_again_when_the_target_breaks_format_tokens(monkeypatch):
+    """保留目標譯文（標為已審核）：目標格式有問題時，第一次只提醒，再按一次才執行。"""
+    dialog = _bare_dialog()
+    dialog._busy = False
+    reviewed = []
+    dialog.get_db = lambda: SimpleNamespace(
+        review_manual=lambda *a, **k: reviewed.append(a)
+    )
+    dialog._set_busy = lambda *a, **k: None
+    dialog._launch_write = lambda work, name: work()
+    dialog._post = lambda fn, *a: None
+    dialog.page = object()
+    shown = []
+    monkeypatch.setattr(
+        "app.views.moddb.version_diff_dialog.show_snack",
+        lambda page, text, color=None, **k: shown.append(text),
+    )
+    ref = VersionRef(2, "1.20.1", "參考", 1, "", "", mod_id="m", en_us="§6New")
+    bad = CrossVersionRow(
+        1, KIND_LANG, "m", "k", "§6New", "目標", 1, False, (ref,), 1, False
+    )
+
+    dialog._keep_target(bad)
+    assert shown and "特殊字元" in shown[0] and reviewed == []
+
+    dialog._keep_target(bad)
+    assert len(reviewed) == 1
+
+
+def test_translate_page_reuse_skips_references_with_broken_format(db):
+    """翻譯頁的跨版本沿用：來源版本的譯文格式已壞時不複製，讓那筆留給 AI。"""
+    db.ingest("1.20.1", [ScanItem(KIND_LANG, "m", "k", "§6Gold %s", "黃金")])
+    db.ingest("1.20.1", [ScanItem(KIND_LANG, "m", "ok", "§6Gold %s", "§6黃金%s")])
+    db.ingest(
+        "26.1",
+        [
+            ScanItem(KIND_LANG, "m", "k", "§6Gold %s"),
+            ScanItem(KIND_LANG, "m", "ok", "§6Gold %s"),
+        ],
+    )
+
+    reused = db.reuse_from_other_versions("26.1")
+
+    assert reused == 1
+    rows = {
+        r[0]: r[1]
+        for r in db._q(
+            "SELECT e.key, f.zh_tw FROM entry e LEFT JOIN effective f "
+            "ON f.entry_id=e.id WHERE e.mc_version='26.1'"
+        )
+    }
+    assert rows["ok"] == "§6黃金%s"
+    assert not rows["k"]
+
+
+def test_consume_scan_counts_format_mismatch_before_reusing_references(monkeypatch):
+    """匯入完成後先統計格式不一致，再做跨版本沿用（兩者都只在掃描成功且沒取消時執行）。"""
+    from app.services_impl import moddb_service as service
+
+    report = ScanReport(version="26.1")
+    monkeypatch.setattr(
+        service, "scan_folder_generator", lambda *a, **k: iter([{"report": report}])
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        service, "_report_format_mismatch", lambda *a: calls.append("mismatch")
+    )
+    monkeypatch.setattr(
+        service, "_reuse_reviewed_after_scan", lambda *a: calls.append("reuse")
+    )
+    session, _, _ = _session()
+
+    service._consume_scan(
+        session, object(), "folder", ScanOptions(version="26.1"), lambda: False, 1
+    )
+    assert calls == ["mismatch", "reuse"]
+
+    calls.clear()
+    service._consume_scan(
+        session, object(), "folder", ScanOptions(version="26.1"), lambda: True, 1
+    )
+    assert calls == []
+
+
+def test_scan_panel_shows_the_summary_row_for_format_mismatch_alone():
+    from app.views.moddb import scan_panel
+    from tests.conftest import mock_filepicker, mock_page
+
+    panel = scan_panel.ScanPanel(
+        mock_page(), mock_filepicker(), lambda: None, defer_initial_refresh=True
+    )
+    panel._apply_reuse_summary({"format_mismatch": 3})
+    assert panel.reuse_row_summary.visible is True
+    assert "3" in panel.reuse_text.value and "不一致" in panel.reuse_text.value
+
+    panel._apply_reuse_summary({})
+    assert panel.reuse_row_summary.visible is False

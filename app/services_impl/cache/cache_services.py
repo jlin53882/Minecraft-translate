@@ -16,6 +16,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from translation_tool.core.lm_format_policy import kind_for_item
+from translation_tool.translation_db.quality import translation_issues
 from translation_tool.utils import cache_manager
 from translation_tool.utils.log_unit import log_debug, log_error, log_warning
 
@@ -275,14 +277,29 @@ def cache_get_entry_service(cache_type: str, key: str) -> dict[str, Any] | None:
     return cache_manager.get_cache_entry(cache_type, key)
 
 
-def cache_update_dst_service(cache_type: str, key: str, new_dst: str) -> bool:
-    """更新指定快取條目的翻譯結果（dst）；僅更新記憶體快取，未寫回磁碟。"""
+def cache_update_dst_service(
+    cache_type: str, key: str, new_dst: str, *, allow_format_issues: bool = False
+) -> bool:
+    """更新指定快取條目的翻譯結果（dst）；僅更新記憶體快取，未寫回磁碟。
+
+    新的 dst 與原文（src）的特殊字元（色碼、``%s``、``{0}`` 等）不一致時拒絕並拋出
+    ``ValueError``：這樣的快取項目讀取時一定會被品質檢查退回，存了也不會被翻譯流程採用。
+    還原歷史紀錄這類「回到先前狀態」的呼叫可傳 ``allow_format_issues=True``。
+    """
 
     entry = cache_manager.get_cache_entry(cache_type, key)
     if not entry:
         return False
 
     src = entry.get("src", "")
+    if not allow_format_issues:
+        issues = translation_issues(
+            src, new_dst, kind=kind_for_item({"cache_type": cache_type})
+        )
+        if issues:
+            raise ValueError(
+                "譯文與原文的特殊字元不一致，未更新：" + "、".join(issues[:3])
+            )
     return cache_manager.add_to_cache(cache_type, key, src, new_dst)
 
 

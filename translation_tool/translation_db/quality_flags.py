@@ -19,12 +19,15 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterable
 
 from translation_tool.translation_db.models import QualityFilter
 from translation_tool.translation_db.quality import matches_quality
 
 # 旗標定義版本；``quality.py``／``guide_format.py`` 的判斷結果改變時遞增
 # （``tests/test_translation_db_quality_flags.py`` 的規則快照會在規則改變時失敗提醒）。
+# 12：token 掃描新增具名佔位符 ``{name}``、``${var}``、``{{var}}``；舊旗標會把弄丟這類
+#     佔位符的條目判為一致，必須重算。
 # 11：移除「標記順序不同」診斷（合理的語序調整不是格式錯誤）；舊版旗標可能把這類條目
 #     標成不一致，必須重算。
 # 10：一般語系（lang 等）只含 ``&`` 色碼或 ``<tag>`` 自訂標記時，``matches_quality`` 也會做
@@ -39,7 +42,7 @@ from translation_tool.translation_db.quality import matches_quality
 # 4：<link;分類;顯示文字> 的顯示文字可翻譯
 # 3：獨立成行元件不含文字、段落空行不計文字首尾的空行
 # 2：指南條目的結構標記計入「格式不一致／一致」
-SCHEMA_VERSION = "11"
+SCHEMA_VERSION = "12"
 BITS = {
     "missing_translation": 1,
     "whitespace": 2,
@@ -52,6 +55,8 @@ BITS = {
 SAME_AS_SOURCE = 64
 # 每批重算的條目數：初次安裝 70 萬條目時分批提交，中斷後下次開啟從剩下的待重算條目接續
 SETTLE_CHUNK = 20_000
+# 以條目編號查旗標時每批的編號數（SQLite 變數上限的安全範圍內）
+_COUNT_CHUNK = 500
 
 _FILTERS = {status: QualityFilter(status=status) for status in BITS}
 # 與條目清單預設排序（模組、類型、key、編號）相同的欄位順序，分頁不必另外排序
@@ -288,6 +293,24 @@ def settle(conn: sqlite3.Connection, *, limit: int | None = None) -> int:
         )
         done += len(rows)
     return done
+
+
+def count_mismatch(conn: sqlite3.Connection, entry_ids: Iterable[int]) -> int:
+    """指定條目中，生效譯文與原文特殊字元不一致（``mismatch`` 位元）的筆數。
+
+    旗標還沒重算（NULL）的條目不計入，所以結果是下限；匯入交易提交前已重算，正常不會有待重算。
+    """
+    ids = sorted({int(i) for i in entry_ids})
+    total = 0
+    for start in range(0, len(ids), _COUNT_CHUNK):
+        part = ids[start : start + _COUNT_CHUNK]
+        marks = ",".join("?" * len(part))
+        total += conn.execute(
+            f"SELECT COUNT(*) FROM entry WHERE id IN ({marks}) "
+            f"AND qflags IS NOT NULL AND (qflags & {BITS['mismatch']}) != 0",
+            part,
+        ).fetchone()[0]
+    return total
 
 
 def verify(conn: sqlite3.Connection) -> list[tuple]:

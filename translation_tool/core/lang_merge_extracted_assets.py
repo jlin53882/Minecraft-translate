@@ -44,6 +44,7 @@ from translation_tool.core.lang_merge_provenance import (
     provenance_batch,
     write_translation_provenance,
 )
+from translation_tool.core.lang_merge_quality import warn_format_mismatches
 from translation_tool.core.official_locale import official_exact_translation
 from translation_tool.translation_db import DbSettings
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
@@ -711,6 +712,7 @@ def _merge_extracted_to_assets(
                     db_lookup=db_lookup,
                     official_lookup=official_exact_translation,
                 )
+                warn_format_mismatches(final_tw, en_data, f"[MergeExt→Assets] {modid} ")
             except Exception as exc:  # noqa: BLE001 - 失敗已記錄，不中斷批次流程
                 mod_error = f"{modid}: merge failed: {exc}"
                 log_warning(f"[MergeExt→Assets] {mod_error}")

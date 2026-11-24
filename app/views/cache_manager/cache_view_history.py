@@ -157,7 +157,9 @@ class CacheHistoryMixin:
         old_dst_now = str(self.shard_dst_original or "")
 
         def work():
-            done = cache_update_dst_service(ctype, key, new_dst)
+            done = cache_update_dst_service(
+                ctype, key, new_dst, allow_format_issues=True
+            )
             if not done:
                 raise RuntimeError("找不到目標 key")
 
@@ -491,7 +493,9 @@ class CacheHistoryMixin:
         old_dst_now = str(current.get("dst", ""))
 
         def work():
-            done = cache_update_dst_service(ctype, key, new_dst)
+            done = cache_update_dst_service(
+                ctype, key, new_dst, allow_format_issues=True
+            )
             if not done:
                 raise RuntimeError("找不到目標 key")
 

@@ -23,11 +23,12 @@ from app.ui.snack import show_snack
 
 # 導入新的拆分元件
 from app.views._log import LogView
+from app.views.format_consistency_checker import FormatConsistencyChecker
 from app.views.qc_base import QCBase
 from app.views.untranslated_checker import UntranslatedChecker
 from translation_tool.utils.log_unit import log_debug
 
-# 三種檢驗模式（key、標題、說明、圖示、色組）
+# 檢驗模式（key、標題、說明、圖示、色組）
 QC_MODES = (
     (
         "untranslated",
@@ -35,6 +36,13 @@ QC_MODES = (
         "比對 en_us 與 zh_tw 的 key",
         ft.Icons.FIND_IN_PAGE_OUTLINED,
         "dia",
+    ),
+    (
+        "format_consistency",
+        "格式一致性",
+        "譯文與原文的特殊字元是否一致",
+        ft.Icons.RULE,
+        "red",
     ),
     (
         "compare_json",
@@ -56,7 +64,7 @@ QC_MODES = (
 class QCView(ft.Column):
     """QC 品質檢驗頁：先選一種檢驗模式，再填路徑並執行；日誌共用同一塊。
 
-    維護注意：三種模式的欄位 / 按鈕屬性名稱是對外（測試、其他頁）依賴的介面，改名前先確認呼叫點。
+    維護注意：各模式的欄位 / 按鈕屬性名稱是對外（測試、其他頁）依賴的介面，改名前先確認呼叫點。
     """
 
     def __init__(self, page: ft.Page, file_picker: ft.FilePicker):
@@ -117,6 +125,10 @@ class QCView(ft.Column):
 
         # --- 「未翻譯檢查」元件 (PR1 拆分) ---
         self.untranslated_checker = UntranslatedChecker(
+            page, file_picker, self.task_runner
+        )
+        # --- 「格式一致性檢查」元件：版面與選資料夾沿用上面的元件 ---
+        self.format_checker = FormatConsistencyChecker(
             page, file_picker, self.task_runner
         )
 
@@ -271,8 +283,15 @@ class QCView(ft.Column):
             icon=ft.Icons.FIND_IN_PAGE_OUTLINED,
             tone="dia",
         )
+        format_panel = kit.section_card(
+            "格式一致性檢查",
+            self.format_checker,
+            icon=ft.Icons.RULE,
+            tone="red",
+        )
         self.mode_panels = {
             "untranslated": untranslated_panel,
+            "format_consistency": format_panel,
             "compare_json": json_panel,
             "compare_tsv": tsv_panel,
         }

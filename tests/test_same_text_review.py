@@ -282,6 +282,28 @@ def test_apply_writes_reviewed_manual_rows_and_keeps_old_translations(db):
     assert _groups(db) == []  # 統一後沒有不一致了
 
 
+def test_canonical_that_drops_format_tokens_is_not_applied(db):
+    """統一譯文少了色碼／格式符號：不寫入其他成員，只計數。"""
+    en = "§6Gold %s ingot"
+    db.ingest(
+        VERSION,
+        [
+            _item("a", en, "黃金錠"),  # 少了 §6 與 %s，卻被審核成統一譯文
+            _item("b", en, "§6黃金%s錠", source=SRC_JAR_TW),
+            _item("c", en, ""),
+        ],
+    )
+    _review(db, "a", "黃金錠")
+    (group,) = _groups(db)
+
+    result = db.apply_same_text_canonical(_apply_items(group, "黃金錠"), actor="測試")
+
+    assert result.applied == 0
+    assert result.quality_blocked == 2
+    assert _zh(db, "b") == "§6黃金%s錠"
+    assert _zh(db, "c") != "黃金錠"
+
+
 def test_reviewed_members_need_explicit_overwrite(db):
     db.ingest(VERSION, [_item("a", "Close", "關閉"), _item("b", "Close", "閉合")])
     _review(db, "a", "關閉")

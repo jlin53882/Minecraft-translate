@@ -152,7 +152,7 @@ flowchart TD
 - **歷史狀態**：`CacheHistoryState` 提供初始值，`history_window_source` 記錄目前開啟的來源。
 - **分片讀取**：`app/views/cache_manager/shard_reader.py` 以檔案簽章為 key 快取分片摘要與 raw 內容；`warm_shard_summaries` 在背景預熱，渲染時不必再解析 JSON。
 - **磁碟資料**：快取分片位於 `cache_root/<cache_type>/`；歷史位於 `cache_root/cache_history/<cache_type>/`，包含 `jsonl/`（含 `.history.active` 指標檔）與 `json/`（鏡像，最多保留 `max_per_file` 筆，預設 10000）。
-- **記憶體快取**：`cache_update_dst_service` 透過 `add_to_cache` 修改 `cache_manager` 的記憶體字典；寫回磁碟由 `save_translation_cache` 負責，只寫入 session 中待寫入的條目。
+- **記憶體快取**：`cache_update_dst_service` 透過 `add_to_cache` 修改 `cache_manager` 的記憶體字典；新的譯文與原文的特殊字元不一致時拒絕並拋出 `ValueError`（這樣的項目讀取時會被品質檢查退回，存了也不會被採用），還原歷史紀錄的呼叫以 `allow_format_issues=True` 放行；寫回磁碟由 `save_translation_cache` 負責，只寫入 session 中待寫入的條目。
 
 ## 錯誤處理
 

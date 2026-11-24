@@ -1767,7 +1767,11 @@ def test_saving_keeps_newlines_codes_and_surrounding_whitespace(special_entries)
     panel._page._run_all_tasks()
     panel.tw_field.value = " §c警告§r %s\n第二行\n"
     panel._on_text_change()
-    panel._save()
+    panel._save()  # 與原文的特殊字元不一致（多了 §c／§r）：第一次只提醒，不寫入
+    panel._page._run_all_tasks()
+    assert "特殊字元不一致" in panel.saved_text.value
+    assert panel.db().get_entry(panel.selected.id).zh_tw != " §c警告§r %s\n第二行\n"
+    panel._save()  # 同一段文字再按一次才存入
     panel._page._run_all_tasks()
     stored = panel.db().get_entry(panel.selected.id).zh_tw
     assert stored == " §c警告§r %s\n第二行\n"
@@ -3151,3 +3155,25 @@ def test_batch_replace_scale_warning_only_for_large_replacements():
     assert "不可取消" in text and "背景機翻可能寫入失敗" in text
     assert "停止機翻或縮小篩選範圍" in text
     assert "約需 5 秒" in batch_replace_scale_warning(LARGE_REPLACE_THRESHOLD)
+
+
+def test_review_asks_again_when_the_effective_translation_breaks_format_tokens(
+    special_entries, monkeypatch
+):
+    """審核（標為已審核）前，格式不一致的譯文要先提醒；提醒時不開啟審核範圍預覽。"""
+    panel = special_entries
+    entry = next(r for r in panel.rows if r.key == "tip.a")
+    panel.select(entry.id)
+    panel._page._run_all_tasks()
+    panel.tw_field.value = panel.selected.zh_tw  # 審核要求編輯框等於目前生效譯文
+    shown = []
+    monkeypatch.setattr(
+        "app.views.moddb.review_scope_dialog.show_snack",
+        lambda page, text, color=None, **k: shown.append(text),
+    )
+
+    panel._confirm()
+
+    assert shown and "特殊字元" in shown[0]
+    assert panel._format_ack == ("review", entry.id, panel.selected.zh_tw)
+    assert panel._review_controller._previewing is False

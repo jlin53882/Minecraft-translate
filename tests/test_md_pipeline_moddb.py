@@ -165,6 +165,50 @@ def test_existing_db_translation_is_reused_without_runner(tmp_path, db):
     assert "庫:This is the first paragraph of the guide and you can read it." in final
 
 
+def test_output_keeps_english_when_a_translation_drops_format_tokens(tmp_path, db):
+    """譯文少了色碼／格式符號時，輸出保留原文，不放行；並計入報告與問題清單。"""
+    text = (
+        "# Title\n\n"
+        "Press §6Gold %s now to craft the ingot in the machine.\n\n"
+        "This is the second paragraph which explains how the machine works.\n"
+    )
+    src = tmp_path / "in"
+    _write(src / "assets" / "demo" / "guide" / "intro.md", text)
+    out = tmp_path / "out"
+    options = MdPipelineOptions(
+        version="1.21.1",
+        dry_run=False,
+        publish=True,
+        output_root=str(out),
+        translate_missing=True,
+    )
+
+    def runner(db_, scan, opts, session):
+        for item in scan.items:
+            if item.en_us.startswith("Press"):
+                translated = "按下黃金來合成。"  # 少了 §6 與 %s
+            elif item.en_us.startswith("#"):
+                translated = "# 標題"  # 保留標題前綴
+            else:
+                translated = "譯:" + item.en_us
+            db_.write_back(
+                opts.version, [_wb(item, translated)], fill_other_versions=False
+            )
+        return {"status": "DONE", "written": len(scan.items)}
+
+    report = run_md_pipeline(db, src, options, translation_runner=runner)
+
+    final = (out / "assets" / "demo" / "guide" / "_zh_tw" / "intro.md").read_text(
+        encoding="utf-8"
+    )
+    assert "Press §6Gold %s now" in final  # 保留原文
+    assert "按下黃金來合成" not in final
+    assert "譯:This is the second paragraph" in final
+    assert report.output.blocks_rejected == 1
+    assert any(i["reason"] == "format_mismatch" for i in report.output.issues)
+    assert report.as_dict()["blocks_rejected"] == 1
+
+
 def test_manually_edited_output_is_not_overwritten(tmp_path, db):
     src = tmp_path / "in"
     guide = _write(src / "pack" / "en_us" / "guide.md", EN)

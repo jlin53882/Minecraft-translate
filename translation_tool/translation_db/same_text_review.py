@@ -38,6 +38,7 @@ from .content_identity import (
     pack_scope_of,
     same_text_kinds,
 )
+from .quality import translation_issues
 from .query_interrupt import QueryCancelled
 from .schema import SRC_CROSS_VERSION, SRC_MANUAL
 from .sql_helpers import effective_review_sql, reference_locale_sql
@@ -183,6 +184,7 @@ class SameTextApplyResult:
     applied: int = 0
     skipped_reviewed: int = 0  # 目標已審核且項目不允許覆蓋
     unchanged: int = 0  # 目標譯文已經是統一譯文
+    quality_blocked: int = 0  # 統一譯文的特殊字元與目標原文不一致，未寫入
     duplicates: int = 0  # 同一批內重複的條目（只套用第一筆）
     stale: int = 0  # 套用時畫面資料已過期而略過
     history_id: int | None = None  # 任一筆歷史編號，可傳給 ``TranslationDB.revert``
@@ -654,7 +656,7 @@ def _collect(
 def _current_target(conn: sqlite3.Connection, item: SameTextApplyItem) -> tuple | None:
     return conn.execute(
         "SELECT e.en_us, ft.zh_tw, ft.source, "
-        f"{effective_review_sql('ft', True)}, tt.revision "
+        f"{effective_review_sql('ft', True)}, tt.revision, e.kind "
         "FROM entry e LEFT JOIN effective ft ON ft.entry_id = e.id "
         "LEFT JOIN translation tt ON tt.entry_id = e.id AND tt.source = ft.source "
         "WHERE e.id = ?",
@@ -677,7 +679,7 @@ def _current_canonical(
 
 def _target_unchanged(item: SameTextApplyItem, target: tuple) -> bool:
     """目標的原文、譯文、來源、審核狀態與 revision 都與畫面所見相同。"""
-    en_us, zh_tw, source, status, revision = target
+    en_us, zh_tw, source, status, revision, _kind = target
     return (
         en_us == item.expected_en_us
         and (zh_tw or "") == item.expected_target_zh_tw
@@ -701,8 +703,8 @@ def _canonical_unchanged(
 
 
 def _check(conn: sqlite3.Connection, item: SameTextApplyItem) -> str:
-    """重新確認一筆；結果是 ``ok``、``stale``、``reviewed``（目標已審核且不允許覆蓋）
-    或 ``unchanged``。"""
+    """重新確認一筆；結果是 ``ok``、``stale``、``reviewed``（目標已審核且不允許覆蓋）、
+    ``unchanged`` 或 ``quality``（統一譯文的特殊字元與目標原文不一致）。"""
     target = _current_target(conn, item)
     canonical = _current_canonical(conn, item)
     if (
@@ -717,6 +719,8 @@ def _check(conn: sqlite3.Connection, item: SameTextApplyItem) -> str:
         return "unchanged"
     if item.expected_target_reviewed and not item.allow_overwrite_reviewed:
         return "reviewed"
+    if translation_issues(target[0], item.zh_tw, kind=target[5]):
+        return "quality"
     return "ok"
 
 
@@ -812,6 +816,8 @@ def apply_canonical(
                 result.skipped_reviewed += 1
             elif outcome == "unchanged":
                 result.unchanged += 1
+            elif outcome == "quality":
+                result.quality_blocked += 1
             else:
                 hid = _write_canonical(conn, item, batch, actor)
                 result.applied += 1
