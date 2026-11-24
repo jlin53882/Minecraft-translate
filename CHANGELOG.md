@@ -21,7 +21,7 @@
 - 掃描匯入完成後，摘要顯示本次匯入的譯文中特殊字元與原文不一致的筆數（仍照常匯入；各輸出流程再依自己的規則保留、擋下或回報）。
 - 語系合併：模組作者自帶的 zh_tw、zh_cn 轉繁與既有譯文照常保留，但合併日誌會警告格式不一致的筆數與前幾筆。
 - QC 頁新增「格式一致性」檢查：逐檔比對 en_us 與 zh_tw，把特殊字元不一致的條目輸出成報告。
-- token 掃描新增具名佔位符 `{count}`、`${var}`、`{{var}}`，品質旗標版本升為 12（既有資料庫第一次開啟時會重新計算旗標）。
+- token 掃描只認 `{0}` 這類數字佔位符；`{count}`、`${var}`、`{{var}}` 不當成必須保留的 token（大括號包字母單字可能是可翻譯的詞）。品質旗標版本為 13（既有資料庫第一次開啟時會重新計算旗標）。
 
 ### 移除沒有使用者的舊流水線與死碼
 - 刪除 Markdown、KubeJS、FTB Quests 的舊三步驟流程（`md_translation_*`、`md_pipeline_files／pairing／zh_cn`、`kubejs_translator*`、`ftb_translator*`，以及三個 `*_lmtranslator`）、`utils/exceptions.py` 與 `_task_runner.py`：目前的 Markdown 走 ModDB 流水線、KubeJS／FTB 走 `pack_pipeline`，這些模組沒有任何正式程式引用。
