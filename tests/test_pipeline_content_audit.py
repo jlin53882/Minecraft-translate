@@ -631,3 +631,46 @@ def test_oracle_meta_json_is_routed_to_the_pending_guide_tree(tmp_path: Path) ->
     pending = tmp_path / "patchouli_output" / "待翻譯" / book / "content" / "_meta.json"
     assert pending.is_file()
     assert by_source["info.json"]["reason"] == "unsupported_other_output_format"
+
+
+def _oracle_menus(tmp_path: Path, official: dict[str, str]) -> list[dict]:
+    import json
+
+    book = "assets/oracle_index/books/b"
+    english = tmp_path / "other_output" / book / "content" / "_meta.json"
+    english.parent.mkdir(parents=True)
+    english.write_text(json.dumps({"a": "Arcane", "b": "Basic"}), encoding="utf-8")
+    translated = (
+        tmp_path / "other_output" / book / "translated" / "zh_tw" / "content"
+    ) / "_meta.json"
+    translated.parent.mkdir(parents=True)
+    translated.write_text(json.dumps(official, ensure_ascii=False), encoding="utf-8")
+    return classify_other_output_assets(tmp_path)
+
+
+def test_partial_oracle_menu_translation_is_not_kept_as_the_official_menu(
+    tmp_path: Path,
+) -> None:
+    records = _oracle_menus(tmp_path, {"a": "奧術"})
+
+    by_reason = {r["reason"]: r for r in records}
+    assert "oracle_menu_translation_incomplete" in by_reason
+    assert "english_text_queued_for_guide_translation" in by_reason
+    book = "assets/oracle_index/books/b"
+    emitted = tmp_path / book / "translated" / "zh_tw" / "content" / "_meta.json"
+    assert not emitted.exists()
+    pending = tmp_path / "patchouli_output" / "待翻譯" / book / "content" / "_meta.json"
+    assert pending.is_file()
+
+
+def test_complete_oracle_menu_translation_is_still_preserved(tmp_path: Path) -> None:
+    records = _oracle_menus(tmp_path, {"a": "奧術", "b": "基礎"})
+
+    reasons = {r["reason"] for r in records}
+    assert "official_translation_preserved" in reasons
+    assert "oracle_menu_translation_incomplete" not in reasons
+    emitted = (
+        tmp_path / "assets/oracle_index/books/b/translated/zh_tw/content/_meta.json"
+    )
+    assert emitted.is_file()
+    assert "english_text_queued_for_guide_translation" not in reasons

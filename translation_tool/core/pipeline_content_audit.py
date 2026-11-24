@@ -18,6 +18,7 @@ from typing import Any
 
 from translation_tool.core.guide_blocks import (
     extract_guide_blocks,
+    extract_meta_entries,
     has_translatable_text,
 )
 from translation_tool.core.guide_translation import (
@@ -30,7 +31,7 @@ from translation_tool.core.locale_path import (
     find_locale_marker,
     has_locale_dir,
 )
-from translation_tool.core.oracle_index import is_translatable_meta
+from translation_tool.core.oracle_index import is_translatable_meta, split_translated
 
 _TEXT_SUFFIXES = frozenset({".md", ".mdx", ".txt"})
 _LATIN_WORD = re.compile(r"[A-Za-z]{2,}")
@@ -149,6 +150,54 @@ def _is_official_translation(relative: Path, text: str) -> bool:
     return marker is not None and marker.kind != KIND_NAME and contains_cjk(text)
 
 
+def _is_incomplete_oracle_menu(relative: Path, text: str, source_root: Path) -> bool:
+    """Oracle Index 的譯文選單少了原文選單的鍵。
+
+    譯文選單會整份取代原文，缺的鍵在遊戲裡直接消失，所以不能當作完整的官方譯文保留；
+    原文選單要留下來送翻譯，由翻譯流程補齊每個鍵。
+    """
+
+    assets_rel = Path("assets", relative)
+    if not is_translatable_meta(assets_rel.as_posix()):
+        return False
+    split = split_translated(assets_rel.parts)
+    if split is None:
+        return False
+    original = source_root.parent / split[1]
+    if not original.is_file():
+        return False
+    try:
+        translated = extract_meta_entries(text)
+        source = extract_meta_entries(original.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError):
+        return False
+    if translated is None or source is None:
+        return False
+    return not {key for key, _ in source} <= {key for key, _ in translated}
+
+
+def _incomplete_oracle_menus(source_root: Path) -> set[str]:
+    """``other_output`` 內不完整的 Oracle 譯文選單（相對 ``assets`` 的比對鍵）。
+
+    和官方譯文鍵一樣要在分類開始前算好：分類會把處理完的原文選單移走，之後就比對不到鍵了。
+    """
+
+    found: set[str] = set()
+    for path in source_root.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source_root)
+        if not _is_text_source(relative):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError):
+            continue
+        if _is_incomplete_oracle_menu(relative, text, source_root):
+            found.add(Path("assets", relative).as_posix().casefold())
+    return found
+
+
 def _official_translation_keys(source_root: Path) -> set[str]:
     """``other_output`` 內模組自帶、可直接保留的繁中指南／文字檔（相對 ``assets`` 的比對鍵）。
 
@@ -168,7 +217,9 @@ def _official_translation_keys(source_root: Path) -> set[str]:
             text = path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeError):
             continue  # 讀不出來的檔案由分類迴圈記為 parse_failed
-        if _is_official_translation(relative, text):
+        if _is_official_translation(relative, text) and not _is_incomplete_oracle_menu(
+            relative, text, source_root
+        ):
             keys.add(Path("assets", relative).as_posix().casefold())
     return keys
 
@@ -204,6 +255,7 @@ def _route_text_source(
     scan_root: Path,
     pending_root: Path,
     official_keys: set[str],
+    incomplete_menus: frozenset[str] = frozenset(),
 ) -> dict[str, str]:
     """決定一個 ``other_output`` 文字檔的去向，回傳 manifest 欄位；處理完的來源會被移走。
 
@@ -213,6 +265,9 @@ def _route_text_source(
 
     text = source.read_text(encoding="utf-8-sig")
     assets_rel = Path("assets", relative)
+    if assets_rel.as_posix().casefold() in incomplete_menus:
+        source.unlink()
+        return {"status": "excluded", "reason": "oracle_menu_translation_incomplete"}
     official = _is_official_translation(relative, text)
     if official or (
         contains_cjk(text) and not _needs_guide_translation(text, source.name)
@@ -262,6 +317,7 @@ def classify_other_output_assets(
 
     pending_root = root / "patchouli_output" / pending_folder_name
     official_keys = _official_translation_keys(source_root)
+    incomplete_menus = frozenset(_incomplete_oracle_menus(source_root))
     records: list[dict[str, Any]] = []
 
     for source in sorted(
@@ -290,6 +346,7 @@ def classify_other_output_assets(
                     scan_root=source_root.parent,
                     pending_root=pending_root,
                     official_keys=official_keys,
+                    incomplete_menus=incomplete_menus,
                 )
             )
         except (OSError, UnicodeError) as exc:
