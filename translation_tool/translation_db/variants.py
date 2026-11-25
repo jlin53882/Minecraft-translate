@@ -30,6 +30,14 @@ class VariantRow:
     last_seen: str
 
 
+# 其他原文「沒有譯文」：沒有任何 ``zh_tw`` 不是空字串的譯文（不論來源）。``v`` 是 ``entry_variant``。
+# 批次機翻的候選與範圍筆數（``untranslated_rows``、``count_untranslated``）共用同一個定義，兩邊的筆數才會一致。
+UNTRANSLATED_SQL = (
+    "NOT EXISTS (SELECT 1 FROM variant_translation t "
+    "WHERE t.variant_id = v.id AND t.zh_tw <> '')"
+)
+
+
 def tables_available(conn: sqlite3.Connection) -> bool:
     """變體表是否存在（舊版 schema 的資料庫以唯讀開啟時不會升級，沒有這兩張表）。"""
     row = conn.execute(
@@ -138,10 +146,19 @@ def add_translation(
 def add_variant_translation(
     conn: sqlite3.Connection, vid: int, source: int, zh_tw: str, zh_cn: str = ""
 ) -> bool:
-    """在已存在的變體上新增一個來源的譯文（只新增、不覆蓋）；回傳是否新增了一列。"""
+    """在已存在的變體上新增一個來源的譯文；回傳是否新增或補上了內容。
+
+    只新增、不覆蓋有內容的譯文；同一來源已有一列但 ``zh_tw`` 是空字串（沒有內容的譯文
+    等於沒有譯文）時補上內容，否則這份其他原文永遠停在「未翻譯」。
+    """
     cursor = conn.execute(
-        "INSERT OR IGNORE INTO variant_translation "
-        "(variant_id, source, zh_tw, zh_cn) VALUES (?, ?, ?, ?)",
+        "INSERT INTO variant_translation (variant_id, source, zh_tw, zh_cn) "
+        "VALUES (?, ?, ?, ?) ON CONFLICT (variant_id, source) DO UPDATE SET "
+        "zh_tw = excluded.zh_tw, "
+        "zh_cn = CASE WHEN variant_translation.zh_cn = '' "
+        "THEN excluded.zh_cn ELSE variant_translation.zh_cn END, "
+        "updated_at = CURRENT_TIMESTAMP, revision = variant_translation.revision + 1 "
+        "WHERE variant_translation.zh_tw = '' AND excluded.zh_tw <> ''",
         (vid, source, zh_tw, zh_cn),
     )
     return bool(cursor.rowcount)
@@ -219,6 +236,44 @@ def backfill_from_src_change(conn: sqlite3.Connection) -> tuple[int, int]:
     after = int(conn.execute("SELECT COUNT(*) FROM entry_variant").fetchone()[0])
     created = after - before
     return created, max(total - created, 0)
+
+
+def _squash(text: str) -> str:
+    return "".join(text.casefold().split())
+
+
+def purge_trivial_untranslated(conn: sqlite3.Connection) -> int:
+    """刪除與主原文「只差大小寫或空白」、且沒有任何譯文的其他原文，回傳刪除筆數。
+
+    這種原文不算原文變動（``same_original``），``write_back`` 會把它的譯文存到主條目，
+    其他原文本身永遠沒有譯文；留著會讓批次機翻每次都重送。先以去掉空白、casefold 後相同篩出候選，
+    再用 ``same_original`` 複核；沒有要刪的就不寫入。
+    """
+    if not tables_available(conn):
+        return 0
+    from .content_identity import same_original  # 與 variants 互相引用，延後匯入
+
+    trivial = [
+        vid
+        for vid, kind, main, other in conn.execute(
+            "SELECT v.id, e.kind, e.en_us, v.en_us FROM entry_variant v "
+            "JOIN entry e ON e.id = v.entry_id "
+            "WHERE NOT EXISTS (SELECT 1 FROM variant_translation t WHERE t.variant_id = v.id)"
+        )
+        # 先用便宜的「去掉所有空白、casefold 後相同」篩（SQL 的 lower 只處理 ASCII，
+        # 篩不出 ``CAFÉ``／``café``），再用 same_original 複核
+        if _squash(main or "") == _squash(other or "")
+        and same_original(kind, main or "", other or "")
+    ]
+    for start in range(0, len(trivial), 500):
+        chunk = trivial[start : start + 500]
+        conn.execute(
+            f"DELETE FROM entry_variant WHERE id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        )
+    if trivial:
+        conn.commit()
+    return len(trivial)
 
 
 _CHUNK = 500
@@ -389,3 +444,60 @@ def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) ->
             "WHERE variant_id=?",
             (target, vid),
         )
+
+
+def _untranslated_where(
+    version: str, mod_ids: list[str] | None, kind: str | None
+) -> tuple[str, list]:
+    where = f"e.mc_version = ? AND v.en_us <> '' AND {UNTRANSLATED_SQL}"
+    params: list = [version]
+    if mod_ids:
+        where += f" AND e.mod_id IN ({','.join('?' * len(mod_ids))})"
+        params += list(mod_ids)
+    if kind:
+        where += " AND e.kind = ?"
+        params.append(kind)
+    return where, params
+
+
+def untranslated_rows(
+    conn: sqlite3.Connection,
+    version: str,
+    mod_ids: list[str] | None = None,
+    kind: str | None = None,
+) -> list[tuple[int, int, str, str, str, str]]:
+    """沒有譯文的其他原文 ``(變體編號, 條目編號, 類型, 模組, 鍵值, 這份原文)``。
+
+    順序與未翻譯條目相同（類型、模組、鍵值，同條目的其他原文依編號）。SQL 不排序：變體驅動、
+    以條目主鍵探查，排序在記憶體做（排序量是這個範圍的其他原文數，通常遠小於條目數）。
+    沒有變體表（舊 schema 唯讀開啟）回傳空串列。
+    """
+    if not tables_available(conn):
+        return []
+    where, params = _untranslated_where(version, mod_ids, kind)
+    rows = conn.execute(
+        "SELECT v.id, e.id, e.kind, e.mod_id, e.key, v.en_us "
+        "FROM entry_variant v CROSS JOIN entry e ON e.id = v.entry_id "
+        f"WHERE {where}",
+        params,
+    ).fetchall()
+    return sorted(rows, key=lambda r: (r[2], r[3], r[4], r[0]))
+
+
+def count_untranslated(
+    conn: sqlite3.Connection,
+    version: str,
+    mod_ids: list[str] | None = None,
+    kind: str | None = None,
+) -> int:
+    """沒有譯文的其他原文筆數（範圍與 ``untranslated_rows`` 相同）。"""
+    if not tables_available(conn):
+        return 0
+    where, params = _untranslated_where(version, mod_ids, kind)
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM entry_variant v "
+            f"CROSS JOIN entry e ON e.id = v.entry_id WHERE {where}",
+            params,
+        ).fetchone()[0]
+    )

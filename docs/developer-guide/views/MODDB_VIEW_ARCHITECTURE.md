@@ -178,6 +178,8 @@ View 不自行判斷格式，一律透過 `app/services_impl/moddb_format_diff_s
 
 「單次上限」欄位逐字輸入時由 `TranslatePanel._limit_debouncer`（`Debouncer`，`LIMIT_TYPING_DELAY`）延遲：停頓或按 Enter 時 `TranslatePanel._commit_limit` 才取消等待中的計時並呼叫 `_on_limit_changed` 重算範圍，數值沒變就不重算；既有的格式修復預覽在輸入當下就作廢（候選集依舊上限產生），只有重算範圍才延遲；欄位不用失焦觸發（避免重繪造成的失焦立刻重算，也保留 `SyncTextField` 的失焦同步）。格式修復預覽（`retranslation_controller.preview`）開始前先 `_commit_limit`，避免等待中的變更之後清掉這次預覽；`will_unmount` 取消等待中的計時。範圍列的模組包版本與模組連動由 `PackModScope` 負責，類型選單由 `KindScopeDropdown`（`kind_scope_dropdown.py`）負責選項與選值；兩者都不查資料庫，清單來自背景快照或 `refresh_scope`。格式修復執行中的進度面板是 `repair_card.RepairProgressPanel`（版面、`show_live` 更新與 `reset`），`TranslatePanel` 只在 `_apply_repair_live` 準備即時資料後交給它。
 
+批次機翻的「包含其他原文」開關（`TranslatePanel.variants_row`，預設關閉）決定 `TranslateOptions.include_variants`，並納入 `TranslatePanel._scope_key` 與背景刷新請求的 `variants` 鍵（`ModDbView`）。`panel_refresh._translate_scope_counts` 是範圍筆數的唯一計算處：開關開啟時未翻譯筆數與合併組數都加上沒有譯文的其他原文（`count_scope_untranslated`、`count_untranslated_variants`），畫面執行緒的同步後備路徑（`TranslatePanel._refresh_counts`）走同一組函式。候選的組裝在 `app/services_impl/moddb_translate_variants.py`：其他原文以負的變體編號接在條目列後面，`moddb_translate_service._load_merged_selection` 只在條目已讀完時接上，之後合併、分批、品質檢查沿用條目的流程；寫回走 `TranslationDB.write_back`，原文與主原文不同的結果存成其他原文（`WriteBackStats.variant_written`），負編號不是條目，品質退回時不進可開啟的清單（`_record_quality_rejection`）。「修復既有譯文」不受這個開關影響。
+
 格式修復卡片（`create_repair_card`）的「只有換行數不同」與「連已審核的譯文一起修復」兩個開關都接到 `TranslatePanel._on_repair_candidate_rule_changed`：候選規則改變時清掉既有預覽、需重新預覽；`TranslatePanel.build_options` 把後者轉成 `TranslateOptions.repair_include_reviewed`。
 
 Mod DB 譯文修復（`moddb_retranslate_service`）在項目上掛 `_quality_gate`（`_repair_validation_issues`），翻譯端的品質重試因此使用與寫回驗證相同的規則；重試結果由 `_count_quality_retry` 累計到報告。
