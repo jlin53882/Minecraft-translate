@@ -31,7 +31,7 @@ class VariantRow:
 
 
 # 其他原文「沒有譯文」：沒有任何 ``zh_tw`` 不是空字串的譯文（不論來源）。``v`` 是 ``entry_variant``。
-# 清單與批次機翻共用同一個定義，兩邊的筆數才會一致。
+# 批次機翻的候選與範圍筆數（``untranslated_rows``、``count_untranslated``）共用同一個定義，兩邊的筆數才會一致。
 UNTRANSLATED_SQL = (
     "NOT EXISTS (SELECT 1 FROM variant_translation t "
     "WHERE t.variant_id = v.id AND t.zh_tw <> '')"
@@ -227,6 +227,39 @@ def backfill_from_src_change(conn: sqlite3.Connection) -> tuple[int, int]:
     after = int(conn.execute("SELECT COUNT(*) FROM entry_variant").fetchone()[0])
     created = after - before
     return created, max(total - created, 0)
+
+
+def purge_trivial_untranslated(conn: sqlite3.Connection) -> int:
+    """刪除與主原文「只差大小寫或空白」、且沒有任何譯文的其他原文，回傳刪除筆數。
+
+    這種原文不算原文變動（``same_original``），``write_back`` 會把它的譯文存到主條目，
+    其他原文本身永遠沒有譯文；留著會讓批次機翻每次都重送。SQL 先以去掉空白、不分大小寫
+    （ASCII）後相同篩出候選，Python 再用 ``same_original`` 複核；沒有要刪的就不寫入。
+    """
+    if not tables_available(conn):
+        return 0
+    from .content_identity import same_original  # 與 variants 互相引用，延後匯入
+
+    compact = "lower(replace(replace(replace(replace({0}, ' ', ''), char(9), ''), char(10), ''), char(13), ''))"
+    trivial = [
+        row[0]
+        for row in conn.execute(
+            "SELECT v.id, e.kind, e.en_us, v.en_us FROM entry_variant v "
+            "JOIN entry e ON e.id = v.entry_id "
+            "WHERE NOT EXISTS (SELECT 1 FROM variant_translation t WHERE t.variant_id = v.id) "
+            f"AND {compact.format('e.en_us')} = {compact.format('v.en_us')}"
+        )
+        if same_original(row[1], row[2] or "", row[3] or "")
+    ]
+    for start in range(0, len(trivial), 500):
+        chunk = trivial[start : start + 500]
+        conn.execute(
+            f"DELETE FROM entry_variant WHERE id IN ({','.join('?' * len(chunk))})",
+            chunk,
+        )
+    if trivial:
+        conn.commit()
+    return len(trivial)
 
 
 _CHUNK = 500

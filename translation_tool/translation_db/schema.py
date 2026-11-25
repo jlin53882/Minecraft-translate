@@ -398,8 +398,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
     _install_schema_v3_objects(conn)
     conn.commit()
     _purge_trivial_src_changes(conn)
+    _purge_trivial_variants(conn)
     _install_smart_review_objects(conn)
     _install_derived_tables(conn)
+
+
+def _purge_trivial_variants(conn: sqlite3.Connection) -> None:
+    """刪除與主原文只差大小寫或空白、沒有譯文的其他原文（升級回填留下的舊資料）。"""
+    from translation_tool.translation_db import variants
+
+    removed = variants.purge_trivial_untranslated(conn)
+    if removed:
+        _LOG.info("[資料庫] 清掉 %d 筆與主原文只差大小寫或空白的其他原文", removed)
 
 
 def _purge_trivial_src_changes(conn: sqlite3.Connection) -> None:

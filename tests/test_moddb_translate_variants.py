@@ -318,3 +318,57 @@ def test_panel_refresh_snapshot_counts_variants_only_when_asked(db_path):
         assert on["merged_groups"] == off["merged_groups"] + 1
     finally:
         db.close()
+
+
+def test_unlimited_scope_includes_modules_that_only_have_other_originals(
+    db_path, monkeypatch
+):
+    """單次上限 0（不限）：沒有未翻譯條目、只有其他原文的模組也要送，預覽與實際一致。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        VERSION,
+        [
+            _known_lang_item("foo", "item.foo.a", "Untranslated"),
+            _known_lang_item("bar", "item.bar.a", "Old Text", "舊文字"),
+        ],
+    )
+    db.ingest(VERSION, [_known_lang_item("bar", "item.bar.a", "New Text")])
+    db.close()
+    sent: list[str] = []
+    fake_engine(monkeypatch, lambda t: sent.append(t) or "譯:" + t)
+    options = TranslateOptions(version=VERSION, include_variants=True, limit=0)
+    preview = estimate_scope_plan(
+        _db(db_path), version=VERSION, limit=0, include_variants=True
+    )
+    assert preview[0] == 2  # 預覽也算進只有其他原文的模組
+    summary = run(options)["summary"]
+    assert sorted(sent) == ["New Text", "Untranslated"]
+    assert summary["variant_written"] == 1 and summary["remaining"] == 0
+
+
+def test_trivial_untranslated_variants_are_purged_when_the_db_opens(db_path):
+    """與主原文只差大小寫的其他原文（升級回填留下）沒有譯文，開啟資料庫時清掉。"""
+    db = TranslationDB(db_path)
+    db.ingest(
+        VERSION,
+        [
+            _known_lang_item("foo", "item.foo.a", "Show Background", "顯示背景"),
+            _known_lang_item("foo", "item.foo.b", "Old Text"),
+        ],
+    )
+    db.ingest(VERSION, [_known_lang_item("foo", "item.foo.b", "Real Change")])
+    entry_a = db._q("SELECT id FROM entry WHERE key='item.foo.a'")[0][0]
+    db._conn.execute(
+        "INSERT INTO entry_variant (entry_id, en_us, first_seen, last_seen) "
+        "VALUES (?, 'Show background', 't', 't')",
+        (entry_a,),
+    )
+    db._conn.commit()
+    db.close()
+    reopened = TranslationDB(db_path)
+    try:
+        assert reopened._q("SELECT en_us FROM entry_variant ORDER BY en_us") == [
+            ("Real Change",)
+        ]  # 只差大小寫的清掉，真正的原文變動留著
+    finally:
+        reopened.close()

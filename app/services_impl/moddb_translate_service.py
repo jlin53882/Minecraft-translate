@@ -410,7 +410,7 @@ def _load_merged_selection(
         else 0
     )
     fetch = limit * 2
-    while fetch * 4 <= total:
+    while limit and fetch * 4 <= total:  # 沒有上限（0）時不讀前綴，直接讀整個範圍
         rows, locales, main_count = load(mod_ids, fetch)
         window = select_merged_rows(rows, locales, limit)
         if main_count < fetch:  # 排除可沿用條目後已讀完整個範圍
