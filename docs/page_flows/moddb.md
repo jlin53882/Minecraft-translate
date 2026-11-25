@@ -412,3 +412,14 @@ flowchart TD
 條目詳情（`app/views/moddb/entry_metadata.py` 的 `build_entry_metadata`，由 `entries_panel` 傳入來源目錄）在「鍵值相同、原文不同」時列出「另有 N 個原文版本（流水線專用）」：每份其他原文（`TranslationDB.entry_detail` 的 `EntryDetail.variants`，`variants.entry_variants` 依資料庫共用優先序挑每份的生效譯文，新的在前）顯示原文，以及譯文與來源，或「尚無譯文」；最多展開 `MAX_VARIANTS_SHOWN` 份、每份原文與譯文最多 `MAX_VARIANT_CHARS` 字，其餘收合成「另有 N 份較舊的原文未展開」，避免長段落把儲存與審核按鈕推到畫面外。這些譯文只供一鍵流水線與機器翻譯頁查詢，不是本條目的譯文，不影響上方的生效譯文。資料庫升級時 `schema._migrate_variant_backfill_v19` 呼叫 `variants.backfill_from_src_change`，把既有 `src_change` 登記成沒有譯文的其他原文（找不到條目或與主原文相同的略過，冪等）；與主原文只差大小寫或空白（`same_original`）、而且沒有任何譯文的其他原文，在開啟資料庫時由 `schema._purge_trivial_variants`（`variants.purge_trivial_untranslated`）刪除，因為這種原文的 AI 譯文會被 `write_back` 存到主條目，其他原文本身永遠沒有譯文，留著會讓批次機翻每次都重送。
 
 條目詳情的「沿用目前譯文」（`entry_variant_actions.adopt_current_translation`）只出現在沒有譯文的其他原文旁、且條目有目前譯文時：按下後以 `entry_writes.run_write` 背景呼叫 `TranslationDB.adopt_current_translation_for_variant`，在同一個交易內檢查畫面上的譯文仍是目前生效譯文、其他原文仍存在且還沒有任何譯文（流水線剛寫入的 AI 譯文不會被蓋過）、`translation_issues` 沒有特殊字元差異，才用 `variants.adopt_translation` 寫成來源「人工」、未審核的其他原文譯文；被拒絕時只顯示原因並記後台 log，資料庫錯誤記 `log_exception`，背景無法啟動時也提示，成功後 `entry_writes.after_data_change` 重整並顯示「已沿用目前譯文給這份原文」。資料庫清理（`CleanupMixin._snapshot_entries`／`_restore_children`）與路徑別名合併（`DuplicateCleanupMixin._merge_duplicate_entry`）分別以 `variants.snapshot`／`variants.restore` 與 `variants.merge_into` 處理其他原文與譯文：刪除前存進快照、還原時以新編號寫回（舊快照沒有這兩張表則略過）、合併時併進保留的條目（與保留條目主原文相同的不搬，同一份其他原文只補缺的來源，同一來源譯文不同時保留條目優先，還原合併批次可找回被合併條目的那筆）。合併還原判斷保留條目有沒有被改動的指紋（`_duplicate_states`）對其他原文只納入內容（`variants.content_fingerprint`：原文、來源、譯文、審核狀態，不含編號與每次重掃都會更新的 `last_seen`），而且條目沒有其他原文時完全不加入，所以沒有這兩張表時建立的舊批次、合併後重掃的批次都能還原；合併後才在其他原文上新增譯文（例如按「沿用目前譯文」或流水線寫回）會被視為保留條目已被改動，還原時保留並報告衝突，不會靜默丟掉。
+
+## 「其他原文」頁籤
+
+頁籤排在「條目校對」之後，瀏覽鍵值相同、原文與條目主原文不同的內容（`VariantsPanel`，`app/views/moddb/variants_panel.py`）：左側清單、右側把主原文與這份其他原文並排顯示，長段落在各自的文字框內捲動、可選取，與主原文不同的字元以紅底標出（`variant_detail.build_variant_detail`，沿用 `text_compare.text_control`）。第一版只讀，只有一個寫入動作「沿用目前譯文」。
+
+- 篩選：遊戲版本（只列有其他原文的版本）、模組、譯文狀態（全部／沒有譯文／已有譯文，「沒有譯文」與批次機翻同一個 `variants.UNTRANSLATED_SQL`）、關鍵字（鍵值、模組、其他原文、主原文，按 Enter）；每頁 `PAGE_SIZE` 份，新建立的在前。
+- 載入：頁籤自己負責，不走 `panel_refresh` 的共用快照流程（`moddb_view.SELF_LOADING_TABS`）。`VariantsPanel.reload` 以 `run_read` 在 worker 呼叫 `TranslationDB.list_variants`／`variant_versions`／`variant_mods`（`variant_listing.list_page`），結果排回畫面執行緒；每次請求遞增世代，較舊的結果丟棄；頁碼超出（資料變少）回到最後一頁。
+- 過期：資料庫被寫入（`ModDbView._invalidate_database_snapshots`）時 `VariantsPanel.mark_stale`，目前就在這個頁籤時由 `_refresh_active_panel` 重新載入，在別的頁籤時回來才載入（`VariantsPanel.activate`）；離開頁籤時還在途中的載入由 `will_unmount` 丟棄並標成過期。切到頁籤時 `ModDbView.show_tab` 先送出分頁堆疊的顯示狀態，載入中也看得到頁籤。
+- 沿用目前譯文：只在這份原文沒有譯文、而條目有目前譯文時出現（標題列右側）；與條目詳情共用 `entry_variant_actions.adopt_for_variant`（背景寫入、過期與特殊字元不一致時拒絕並顯示原因、資料庫錯誤寫後台 log），成功後通知上層使所有快照失效，清單重新載入並保留選取。
+- 沒有其他原文或沒有資料庫時右側顯示說明；載入失敗顯示錯誤並在下次顯示時重試。
+- 機器翻譯其他原文在批次機翻頁勾選「包含其他原文」，這個頁籤不提供編輯、審核或機翻。

@@ -480,3 +480,19 @@ large datasets. Real scroll-frame timing and the longest blocking synchronous
 handler require renderer instrumentation beyond this first baseline. Add those
 measurements only with a deterministic interaction and an explicit owner; do not
 infer event-loop blocking from Python construction time alone.
+
+## Mod DB 其他原文清單
+
+「其他原文」頁籤（`TranslationDB.list_variants`，`variant_listing.list_page`）以 `entry_variant` 驅動：`CROSS JOIN entry` 固定連接順序，以變體編號倒序取當頁編號（`ORDER BY v.id DESC LIMIT/OFFSET`，沿主鍵倒序掃描，EXPLAIN 沒有 `USE TEMP B-TREE FOR ORDER BY`），再用編號讀完整欄位並在記憶體挑每份原文的生效譯文。版本與模組選單在 `variant_versions`／`variant_mods` 以聚合取得，版本順序在記憶體排序。`tests/test_moddb_no_temp_sort.py` 涵蓋這些查詢。
+
+暫存資料庫微基準（20 萬條目、5 萬份其他原文，其中 1 萬份有譯文；一次量測、同一台機器）：
+
+| 查詢 | 耗時 |
+| --- | --- |
+| 第一頁（全部） | 約 18 ms |
+| 第 1000 頁（offset 29,970） | 約 32 ms |
+| 只看沒有譯文／已有譯文 | 約 39 ms／29 ms |
+| 搜尋關鍵字 | 約 42 ms |
+| 版本清單／模組清單 | 約 22 ms／20 ms |
+
+總筆數（`COUNT(*)`）與當頁讀取都需要掃描符合條件的變體，成本隨其他原文數成長，與條目數幾乎無關；數十萬份其他原文時仍需再量測。

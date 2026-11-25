@@ -37,14 +37,17 @@ from app.views.moddb.panel_refresh import (
 )
 from app.views.moddb.scan_panel import ScanPanel
 from app.views.moddb.translate_panel import TranslatePanel
+from app.views.moddb.variants_panel import VariantsPanel
 from translation_tool.utils.log_unit import log_debug
 
 TABS = (
     ("overview", "總覽"),
     ("entries", "條目校對"),
+    ("variants", "其他原文"),
     ("scan", "掃描匯入"),
     ("translate", "批次機翻"),
 )
+SELF_LOADING_TABS = frozenset({"overview", "variants"})
 PANEL_REFRESH_MESSAGES = {
     "entries": "背景更新條目資料中…",
     "scan": "背景更新版本清單中…",
@@ -109,8 +112,9 @@ class ModDbView(ft.Column):
         self._data_revision = 0
         self._panel_refresh_loading: set[str] = set()
         self._panel_refresh_generation = {key: 0 for key, _label in TABS}
+        # 總覽與「其他原文」各自載入，不走共用的頁籤快照流程
         self._panel_refresh_needed = {
-            key: True for key, _label in TABS if key != "overview"
+            key: True for key, _label in TABS if key not in SELF_LOADING_TABS
         }
         self._pending_panel_results = {}
         self._entries_settings = None  # 最近一次條目載入用的設定（第二階段選項沿用）
@@ -137,6 +141,9 @@ class ModDbView(ft.Column):
                 entry_id
             ),
         )
+        self.variants = VariantsPanel(
+            page, self.get_db, on_database_changed=self._on_database_changed
+        )
         self.scan = ScanPanel(
             page,
             file_picker,
@@ -154,6 +161,7 @@ class ModDbView(ft.Column):
         self._panels = {
             "overview": self.overview,
             "entries": self.entries,
+            "variants": self.variants,
             "scan": self.scan,
             "translate": self.translate,
         }
@@ -382,6 +390,11 @@ class ModDbView(ft.Column):
             elif self._overview_needs_refresh and (update or not background):
                 self._request_overview_refresh()
             elif update:
+                self._safe_update()
+        elif key == "variants":
+            if update or not background:
+                self.variants.activate()
+            if update:  # 分頁堆疊的顯示狀態要送出，載入中也先看到這個頁籤
                 self._safe_update()
         elif key in self._panel_refresh_needed:
             self._activate_panel(key, background=background, update=update)
@@ -872,6 +885,7 @@ class ModDbView(ft.Column):
     def _invalidate_database_snapshots(self) -> None:
         self._data_revision += 1
         self._overview_needs_refresh = True
+        self.variants.mark_stale()
         self.entries._filter_only_refresh = False
         self.entries._page_only_refresh = False
         self.entries._defer_options_refresh = False
@@ -892,6 +906,8 @@ class ModDbView(ft.Column):
         """資料庫更新後刷新目前頁籤（有背景排程時在 worker 讀取，結果以 ticket 丟棄過期者）。"""
         if self.tab == "overview":
             self._request_overview_refresh()
+        elif self.tab == "variants":
+            self.variants.activate()
         else:
             # 目前頁籤已顯示：條目頁只需要輕量的「載入中」提示，不必重畫整個頁籤
             self._activate_panel(
@@ -912,6 +928,7 @@ class ModDbView(ft.Column):
         self._panel_refresh_loading.clear()
         self._pending_panel_results.clear()
         self._options_loader.cancel()
+        self.variants.will_unmount()
         self.scan.will_unmount()
         self.translate.will_unmount()
 
