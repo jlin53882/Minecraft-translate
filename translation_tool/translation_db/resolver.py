@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from translation_tool.translation_db.content_identity import same_original
 from translation_tool.translation_db.identity import (
     classify_file,
     classify_sniffed_book_file,
@@ -59,12 +60,18 @@ class Hit:
 class ResolverStats:
     hit_target: int = 0
     hit_cross: int = 0
+    # 命中的原文只差大小寫或同一行內空白（只在實際回傳命中時計，也已計入 hit_target／hit_cross）
+    hit_loose: int = 0
     en_mismatch: int = 0  # 資料庫有同鍵值，但原文不同
     miss: int = 0
 
 
 class TranslationResolver:
-    """以 ``(類型, 模組, 鍵值, 原文)`` 查詢目標版本的既有譯文。"""
+    """以 ``(類型, 模組, 鍵值, 原文)`` 查詢目標版本的既有譯文。
+
+    原文先逐字比對；沒有逐字相同的才退回寬鬆比對（``same_original``）（不分大小寫、同一行內連續空白視為一個），
+    與掃描判斷「原文已變動」的規則一致。
+    """
 
     def __init__(
         self,
@@ -145,26 +152,58 @@ class TranslationResolver:
             setattr(self.stats, field, getattr(self.stats, field) + 1)
 
     def lookup(self, kind: str, mod_id: str, key: str, en_us: str) -> Hit | None:
+        """依目標版本優先查譯文：目標逐字 → 目標寬鬆 → 其他版本逐字 → 其他版本寬鬆。
+
+        寬鬆＝``same_original``（不分大小寫、同一行內連續空白視為一個，且沒有該類型品質檢查的硬結構差異），與掃描判斷「原文已變動」
+        同一套規則；換行位置與 ``%s``／``%S`` 這類格式碼的大小寫仍視為不同原文。寬鬆命中的
+        譯文前後空白改成與查詢的原文一致（譯文是別種寫法的原文翻的，前後空白不一定相同）。
+        """
         if not en_us:
             return None
         cands = self._mod_table(mod_id).get((kind, key))
         if not cands:
             self._bump("miss")
             return None
-        same = [c for c in cands if c[0] == en_us]
-        if not same:
-            self._bump("en_mismatch")
-            return None
-        own = next((c for c in same if c[1] == self.version), None)
+        exact = [c for c in cands if c[0] == en_us]
+        own = next((c for c in exact if c[1] == self.version), None)
         if own is not None:
             self._bump("hit_target")
             return Hit(own[2], own[3], own[1], False)
+        loose = [c for c in cands if c[0] != en_us and same_original(kind, c[0], en_us)]
+        own = next((c for c in loose if c[1] == self.version), None)
+        if own is not None:
+            self._bump("hit_target")
+            self._bump("hit_loose")
+            return Hit(_match_edges(en_us, own[0], own[2]), own[3], own[1], False)
+        others = exact or loose
+        if not others:
+            self._bump("en_mismatch")
+            return None
         if not self.cross_version:
             self._bump("miss")
             return None
-        best = min(same, key=lambda c: abs(version_number(c[1]) - self._target))
+        best = min(others, key=lambda c: abs(version_number(c[1]) - self._target))
         self._bump("hit_cross")
-        return Hit(best[2], best[3], best[1], True)
+        if others is exact:
+            return Hit(best[2], best[3], best[1], True)
+        self._bump("hit_loose")
+        return Hit(_match_edges(en_us, best[0], best[2]), best[3], best[1], True)
+
+
+def _edges(text: str) -> tuple[str, str]:
+    return text[: len(text) - len(text.lstrip())], text[len(text.rstrip()) :]
+
+
+def _match_edges(en_us: str, stored_en: str, zh_tw: str) -> str:
+    """寬鬆命中的譯文：前後空白與查詢的原文不一致時才改成與查詢的原文相同。
+
+    資料庫那份原文與查詢的原文前後空白相同時，譯文原樣使用（原文與譯文刻意不同的空白，
+    例如 ``Speed: `` 譯成 ``速度：``，不動）；譯文內部的空白不動。
+    """
+    wanted = _edges(en_us)
+    if _edges(stored_en) == wanted:
+        return zh_tw
+    return f"{wanted[0]}{zh_tw.strip()}{wanted[1]}"
 
 
 def item_identity(item: dict[str, Any], root: str | Path):

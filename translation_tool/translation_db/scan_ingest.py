@@ -21,7 +21,7 @@ from translation_tool.core.source_locale import (
     locale_from_source_selector,
     normalize_source_locale,
 )
-from translation_tool.translation_db.content_identity import loose_text
+from translation_tool.translation_db.content_identity import same_original
 from translation_tool.translation_db.identity import canonical_entry_key
 from translation_tool.translation_db.models import EntryOrigin, IngestStats, ScanItem
 from translation_tool.translation_db.schema import SRC_JAR_CN, SRC_JAR_TW, SRC_MANUAL
@@ -190,7 +190,7 @@ def ingest_groups(
                 eid = target.add_entry(kind, mod_id, item.key, item.en_us)
                 known[item.key] = (eid, item.en_us)
                 stats.new_entries += 1
-            elif _source_changed(cur[1], item.en_us):
+            elif _source_changed(kind, cur[1], item.en_us):
                 target.record_src_change(kind, mod_id, item.key, cur[1], item.en_us)
                 # 新原文登記成條目的其他原文；這個項目隨附的譯文是照新原文翻的，
                 # 掛在變體上（不掛到舊的主原文）。主原文與既有譯文不動。
@@ -247,13 +247,14 @@ def ingest_groups(
     return stats
 
 
-def _source_changed(existing: str, incoming: str) -> bool:
-    """原文是否已變動：兩邊都有原文且不同；只差大小寫或空白不算（沿用既有原文，照常補譯文）。"""
+def _source_changed(kind: str, existing: str, incoming: str) -> bool:
+    """原文是否已變動：兩邊都有原文且不同；只差大小寫或空白、且沒有硬結構差異不算
+    （沿用既有原文，照常補譯文）。"""
     return (
         existing != incoming
         and bool(incoming)
         and bool(existing.strip())
-        and loose_text(existing) != loose_text(incoming)
+        and not same_original(kind, existing, incoming)
     )
 
 
@@ -273,7 +274,7 @@ def _changed_source_keys(
         if not item.en_us:
             continue
         cur = _find_existing(known, kind, item)
-        if cur is not None and _source_changed(cur[1], item.en_us):
+        if cur is not None and _source_changed(kind, cur[1], item.en_us):
             changed[canonical_entry_key(kind, item.key)] = item.en_us
     return changed
 

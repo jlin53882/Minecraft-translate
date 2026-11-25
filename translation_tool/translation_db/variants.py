@@ -16,6 +16,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
+from translation_tool.translation_db.content_identity import same_original
+
 
 @dataclass(frozen=True)
 class VariantRow:
@@ -78,9 +80,31 @@ def variant_id(conn: sqlite3.Connection, entry_id: int, en_us: str) -> int | Non
     return None if row is None else int(row[0])
 
 
+def _loose_variant_id(
+    conn: sqlite3.Connection, entry_id: int, en_us: str
+) -> int | None:
+    """條目上與 ``en_us`` 視為同一句（``same_original``：只差大小寫或同一行內空白，
+    且沒有硬結構差異）的其他原文；沒有逐字相同的才找。"""
+    row = conn.execute("SELECT kind FROM entry WHERE id=?", (entry_id,)).fetchone()
+    if row is None:
+        return None
+    for vid, existing in conn.execute(
+        "SELECT id, en_us FROM entry_variant WHERE entry_id=?", (entry_id,)
+    ).fetchall():
+        if same_original(row[0], existing, en_us):
+            return int(vid)
+    return None
+
+
 def ensure_variant(conn: sqlite3.Connection, entry_id: int, en_us: str) -> int:
-    """取得（沒有就建立）條目上這份原文的變體，並更新「最後被看到」時間。"""
+    """取得（沒有就建立）條目上這份原文的變體，並更新「最後被看到」時間。
+
+    只差大小寫或同一行內空白的原文視為同一份（與主原文的「原文已變動」判斷一致），
+    不會為它多建一份。
+    """
     found = variant_id(conn, entry_id, en_us)
+    if found is None:
+        found = _loose_variant_id(conn, entry_id, en_us)
     if found is not None:
         conn.execute(
             "UPDATE entry_variant SET last_seen=CURRENT_TIMESTAMP WHERE id=?",
@@ -347,11 +371,13 @@ def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) ->
     """
     if not tables_available(conn):
         return
-    main = conn.execute("SELECT en_us FROM entry WHERE id=?", (survivor_id,)).fetchone()
+    main = conn.execute(
+        "SELECT kind, en_us FROM entry WHERE id=?", (survivor_id,)
+    ).fetchone()
     for vid, en_us in conn.execute(
         "SELECT id, en_us FROM entry_variant WHERE entry_id=?", (duplicate_id,)
     ).fetchall():
-        if main is not None and main[0] == en_us:
+        if main is not None and same_original(main[0], main[1], en_us):
             continue
         target = ensure_variant(conn, survivor_id, en_us)
         conn.execute(

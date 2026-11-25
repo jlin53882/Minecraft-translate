@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from translation_tool.core.format_tokens import format_token_spans
+
 from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG, KIND_LANG
 
 PACK_KINDS = (KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
@@ -84,25 +86,57 @@ _FORMAT_CODE = re.compile(
 )
 
 
+def _protected_spans(line: str) -> list[tuple[int, int]]:
+    """一行裡大小寫有語義的片段：格式控制碼（``%s``…）與品質檢查保護的 token
+    （``§`` 色碼、Patchouli 巨集 ``$(…)``、``{0}``）。回傳合併後不重疊、依序的區間。"""
+    spans = [m.span() for m in _FORMAT_CODE.finditer(line)]
+    spans += [(start, end) for _tok, start, end in format_token_spans(line)]
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def loose_text(text: str) -> str:
     """比較原文用的寬鬆形式：不分大小寫、同一行內連續空白視為一個。
 
     新版整合包或模組常只改原文的大小寫或空白，譯文仍然適用，所以這樣的差異視為內容相同
-    （跨版本沿用、版本差異審核與掃描時的「原文已變動」判斷都用它）。
-    有語義的差異會保留：換行位置（影響遊戲內版面）與格式控制碼的大小寫（``%s`` 與 ``%S`` 的
-    格式化結果不同）。
+    （跨版本沿用、版本差異審核、流水線查詢與掃描時的「原文已變動」判斷都用它）。
+    有語義的差異會保留：換行位置（影響遊戲內版面），以及格式控制碼與品質檢查保護的 token
+    的大小寫（``%s`` 與 ``%S`` 的格式化結果不同；``§A`` 與 ``§a``、``$(k:Jump)`` 與
+    ``$(k:jump)`` 在品質檢查裡是不同的 token，譯文不能互換）。
     """
     lines = []
     for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         out: list[str] = []
         last = 0
-        for m in _FORMAT_CODE.finditer(line):
-            out.append(line[last : m.start()].casefold())
-            out.append(m.group())
-            last = m.end()
+        for start, end in _protected_spans(line):
+            out.append(line[last:start].casefold())
+            out.append(line[start:end])
+            last = end
         out.append(line[last:].casefold())
         lines.append(" ".join("".join(out).split()))
     return "\n".join(lines)
+
+
+def same_original(kind: str, left: str, right: str) -> bool:
+    """兩份原文視為同一句（譯文可以通用）：逐字相同，或只差大小寫／同一行內空白，
+    而且對 ``kind`` 的品質檢查沒有硬結構差異。
+
+    ``loose_text`` 不知道類型，指南的連結目標（``](https://…/Guide)``）、行內程式碼等硬結構
+    只有該類型的品質檢查看得出來；這些結構不同的兩份原文，譯文不能互換
+    （``translation_issues`` 會拒絕），所以不能當同一句。
+    """
+    if left == right:
+        return True
+    if loose_text(left) != loose_text(right):
+        return False
+    from translation_tool.translation_db.quality import translation_issues
+
+    return not translation_issues(left, right, kind=kind)
 
 
 def other_version_sql(left: str, right: str) -> str:

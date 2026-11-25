@@ -25,6 +25,7 @@ from translation_tool.translation_db import (
     load_db_settings,
     open_db,
 )
+from translation_tool.translation_db.content_identity import loose_text
 from translation_tool.translation_db.quality import translation_issues
 from translation_tool.translation_db.schema import KIND_LANG
 from translation_tool.utils.log_unit import log_debug, log_info, log_warning
@@ -91,7 +92,7 @@ class MergeDbFill:
             hit = self.resolver.lookup(KIND_LANG, mod_id, key, en)
             if not (hit and hit.zh_tw and value_fully_translated(hit.zh_tw)):
                 return None
-            if hit.zh_tw == en:
+            if loose_text(hit.zh_tw) == loose_text(en):
                 with self._lock:
                     self.skipped_same_as_source += 1
                 return None

@@ -53,9 +53,9 @@ from translation_tool.translation_db.content_identity import (
     content_mod_sql,
     content_mod_value,
     content_table_sql,
-    loose_text,
     pack_label,
     same_content_sql,
+    same_original,
     same_text_kinds,
 )
 from translation_tool.translation_db.cross_version_review import (
@@ -5045,7 +5045,7 @@ class TranslationDB(
                 elif (
                     row[1] != item.en_us
                     and row[1].strip()
-                    and loose_text(row[1]) != loose_text(item.en_us)
+                    and not same_original(item.kind, row[1], item.en_us)
                 ):
                     conn.execute(
                         "INSERT OR IGNORE INTO src_change "
