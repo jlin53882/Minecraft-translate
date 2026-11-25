@@ -40,6 +40,7 @@ from translation_tool.translation_db import (
     parallel_scan,
     quality_flags,
     stat_summary,
+    variant_listing,
     variants,
 )
 from translation_tool.translation_db.bulk_review import BulkReviewMixin
@@ -5607,6 +5608,41 @@ class TranslationDB(
                 )
 
         return [tuple(row) for row in self._cached(key, load, persist=False)]
+
+    def list_variants(
+        self,
+        version: str,
+        *,
+        status: str = variant_listing.STATUS_ALL,
+        search: str = "",
+        mod_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[variant_listing.VariantListRow], int]:
+        """一頁其他原文（新建立的在前）與符合條件的總筆數（「其他原文」頁籤用，只讀）。"""
+        with self._lock:
+            group, rank = self._priority_parts(self._stored_priority(self._conn))
+            return variant_listing.list_page(
+                self._conn,
+                version,
+                group,
+                rank,
+                status=status,
+                search=search,
+                mod_id=mod_id,
+                limit=limit,
+                offset=offset,
+            )
+
+    def variant_versions(self) -> list[str]:
+        """有其他原文的遊戲版本。"""
+        with self._lock:
+            return variant_listing.versions_with_variants(self._conn)
+
+    def variant_mods(self, version: str) -> list[str]:
+        """某版本有其他原文的模組。"""
+        with self._lock:
+            return variant_listing.mods_with_variants(self._conn, version)
 
     def count_untranslated_variants(
         self,
