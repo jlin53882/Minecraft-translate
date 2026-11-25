@@ -783,6 +783,7 @@ class ModDbView(ft.Column):
                 "kind": self.translate.kind_filter.kind,
                 "limit": self.translate.limit(),
                 "reuse": bool(self.translate.reuse_row.value),
+                "variants": bool(self.translate.variants_row.value),
             }
         raise ValueError(f"未知 Mod DB 頁籤：{key}")
 

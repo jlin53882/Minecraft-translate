@@ -30,6 +30,14 @@ class VariantRow:
     last_seen: str
 
 
+# 其他原文「沒有譯文」：沒有任何 ``zh_tw`` 不是空字串的譯文（不論來源）。``v`` 是 ``entry_variant``。
+# 清單與批次機翻共用同一個定義，兩邊的筆數才會一致。
+UNTRANSLATED_SQL = (
+    "NOT EXISTS (SELECT 1 FROM variant_translation t "
+    "WHERE t.variant_id = v.id AND t.zh_tw <> '')"
+)
+
+
 def tables_available(conn: sqlite3.Connection) -> bool:
     """變體表是否存在（舊版 schema 的資料庫以唯讀開啟時不會升級，沒有這兩張表）。"""
     row = conn.execute(
@@ -389,3 +397,60 @@ def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) ->
             "WHERE variant_id=?",
             (target, vid),
         )
+
+
+def _untranslated_where(
+    version: str, mod_ids: list[str] | None, kind: str | None
+) -> tuple[str, list]:
+    where = f"e.mc_version = ? AND v.en_us <> '' AND {UNTRANSLATED_SQL}"
+    params: list = [version]
+    if mod_ids:
+        where += f" AND e.mod_id IN ({','.join('?' * len(mod_ids))})"
+        params += list(mod_ids)
+    if kind:
+        where += " AND e.kind = ?"
+        params.append(kind)
+    return where, params
+
+
+def untranslated_rows(
+    conn: sqlite3.Connection,
+    version: str,
+    mod_ids: list[str] | None = None,
+    kind: str | None = None,
+) -> list[tuple[int, int, str, str, str, str]]:
+    """沒有譯文的其他原文 ``(變體編號, 條目編號, 類型, 模組, 鍵值, 這份原文)``。
+
+    順序與未翻譯條目相同（類型、模組、鍵值，同條目的其他原文依編號）。SQL 不排序：變體驅動、
+    以條目主鍵探查，排序在記憶體做（排序量是這個範圍的其他原文數，通常遠小於條目數）。
+    沒有變體表（舊 schema 唯讀開啟）回傳空串列。
+    """
+    if not tables_available(conn):
+        return []
+    where, params = _untranslated_where(version, mod_ids, kind)
+    rows = conn.execute(
+        "SELECT v.id, e.id, e.kind, e.mod_id, e.key, v.en_us "
+        "FROM entry_variant v CROSS JOIN entry e ON e.id = v.entry_id "
+        f"WHERE {where}",
+        params,
+    ).fetchall()
+    return sorted(rows, key=lambda r: (r[2], r[3], r[4], r[0]))
+
+
+def count_untranslated(
+    conn: sqlite3.Connection,
+    version: str,
+    mod_ids: list[str] | None = None,
+    kind: str | None = None,
+) -> int:
+    """沒有譯文的其他原文筆數（範圍與 ``untranslated_rows`` 相同）。"""
+    if not tables_available(conn):
+        return 0
+    where, params = _untranslated_where(version, mod_ids, kind)
+    return int(
+        conn.execute(
+            "SELECT COUNT(*) FROM entry_variant v "
+            f"CROSS JOIN entry e ON e.id = v.entry_id WHERE {where}",
+            params,
+        ).fetchone()[0]
+    )

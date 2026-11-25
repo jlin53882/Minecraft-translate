@@ -162,6 +162,13 @@ class TranslatePanel(ft.Column):
             True,
             on_change=lambda _e: self._on_limit_changed(),
         )
+        self.variants_row = kit.SwitchRow(
+            "包含其他原文",
+            "也翻譯鍵值相同、原文與主原文不同（模組更新後改過）而且沒有譯文的其他原文；"
+            "譯文只供一鍵流水線與機器翻譯頁查詢，來源「AI 機翻」。預設不含",
+            False,
+            on_change=lambda _e: self._on_limit_changed(),
+        )
         self.cache_row = kit.SwitchRow(
             "每次寫入新快取分片",
             "結果一律也寫入「快取資料」資料夾的翻譯快取。關閉（預設）時寫入編號分片，滿 2,500 筆自動換下一片；"
@@ -185,6 +192,7 @@ class TranslatePanel(ft.Column):
                     ),
                     self.count_text,
                     self.reuse_row,
+                    self.variants_row,
                     self.cache_row,
                     kit.hint_text(
                         "只翻譯「沒有任何譯文」的條目，不會動既有的人工、模組自帶或匯入譯文。"
@@ -492,6 +500,9 @@ class TranslatePanel(ft.Column):
             db.count_reusable(version, mods, kind=kind) if self.reuse_row.value else 0
         )
         merged = db.count_untranslated_merged(version, mods, kind=kind)
+        if self.variants_row.value:  # 其他原文沒有可沿用的譯文，也不併入條目的組數估算
+            extra = db.count_untranslated_variants(version, mods, kind=kind)
+            missing, merged = missing + extra, merged + extra
         self._set_count_text(missing, reusable, merged_groups=merged)
 
     def _refresh_counts_after_run(self) -> None:
@@ -578,13 +589,14 @@ class TranslatePanel(ft.Column):
         retranslation_controller.update_start_button(self, running=running)
 
     def _scope_key(self) -> tuple:
-        """預覽批數適用的範圍：版本、模組、類型、上限與是否沿用其他版本。"""
+        """預覽批數適用的範圍：版本、模組、類型、上限、是否沿用其他版本與是否包含其他原文。"""
         return (
             self.version_dd.value or "",
             tuple(self.mod_ids()),
             self.kind_filter.kind,
             self.limit(),
             bool(self.reuse_row.value),
+            bool(self.variants_row.value),
         )
 
     def build_options(self, *, dry_run: bool = False) -> TranslateOptions:
@@ -595,6 +607,7 @@ class TranslatePanel(ft.Column):
             limit=self.limit(),
             dry_run=dry_run,
             reuse_other_versions=bool(self.reuse_row.value),
+            include_variants=bool(self.variants_row.value),
             new_cache_shard=bool(self.cache_row.value),
             repair_newline_only=(
                 self._repair_mode == "quality_mismatch"

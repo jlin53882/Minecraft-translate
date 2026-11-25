@@ -266,6 +266,8 @@ flowchart TD
 
 範圍列依序是遊戲版本、模組包版本、模組、類型與單次上限。單次上限逐字輸入時不重算範圍：停止輸入約 0.7 秒、或按 Enter 才重算筆數（`TranslatePanel._commit_limit`），輸入中不會被背景重載打斷。類型選單（`TranslatePanel.kind_dd`，`KindScopeDropdown`）列出該遊戲版本資料庫裡出現過的類型（`TranslationDB.kinds`），預設「全部類型」；換版本後選的類型不在新清單裡時退回全部。選了類型時 `TranslateOptions.kind` 讓未翻譯計數、可沿用計數、待翻列（`untranslated_entries`）、沿用其他版本（`reuse_from_other_versions`）與結束後的範圍計數都只算這個類型；背景範圍快照（`panel_refresh._load_translate_snapshot`）以請求中的 `kind` 計數並回傳 `kinds`。
 
+範圍卡的開關「包含其他原文」（`TranslatePanel.variants_row`，預設關閉；不持久化，與「先沿用其他版本的相同譯文」一樣每次開啟預設）決定 `TranslateOptions.include_variants`：勾選後，沒有譯文的其他原文（`variants.UNTRANSLATED_SQL`：沒有任何非空譯文，與其他原文清單共用同一個定義）也成為候選。候選列用負的變體編號（`moddb_translate_variants.variant_candidate_rows`，格式與條目相同，所以合併相同原文、分批、品質檢查都不必改），排在條目後面，只在條目已讀完時接上（`_load_merged_selection` 的 `load`）；與條目原文相同的其他原文合併成同一組、只送 AI 一次。翻完由 `TranslationDB.write_back` 寫回：原文與條目主原文不同時存成該條目的其他原文（來源 AI 機翻、不補其他版本、不動主原文與生效譯文），統計 `variant_written` 並計入 `written`。其他原文沒有可沿用的跨版本譯文，不受「先沿用其他版本」影響；品質檢查與條目相同（以這份原文對照譯文），不一致時不寫入，也不列進可在條目校對開啟的清單（負編號不是條目，`_record_quality_rejection`）。範圍筆數（`panel_refresh._load_translate_snapshot`、`TranslatePanel._refresh_counts`）、預覽的「此範圍仍未翻譯」與結束後的剩餘筆數（`count_scope_untranslated`）都把其他原文算進去。預覽與日誌的說明帶「其中其他原文 N 份」（`TranslateReport.variant_candidates`）。
+
 ```mermaid
 flowchart TD
     A["按「開始機翻」或「預覽」→ TranslatePanel.start_clicked"] --> B["build_options 建立 TranslateOptions"]

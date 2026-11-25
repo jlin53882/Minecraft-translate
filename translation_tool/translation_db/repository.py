@@ -5588,6 +5588,39 @@ class TranslationDB(
         )
         return self._cached(key, lambda: self._one(sql, params)[0])
 
+    def untranslated_variant_entries(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        kind: str | None = None,
+    ) -> list[tuple[int, int, str, str, str, str]]:
+        """沒有譯文的其他原文 ``(變體編號, 條目編號, 類型, 模組, 鍵值, 這份原文)``（批次機翻用）。"""
+        key = "untranslated_variants:" + json.dumps(
+            [version, list(mod_ids or ()), kind], ensure_ascii=False
+        )
+
+        def load() -> list[tuple[int, int, str, str, str, str]]:
+            with self._lock:
+                return variants.untranslated_rows(
+                    self._conn, version, list(mod_ids or ()), kind
+                )
+
+        return [tuple(row) for row in self._cached(key, load, persist=False)]
+
+    def count_untranslated_variants(
+        self,
+        version: str,
+        mod_ids: Sequence[str] | None = None,
+        *,
+        kind: str | None = None,
+    ) -> int:
+        """沒有譯文的其他原文筆數。"""
+        with self._lock:
+            return variants.count_untranslated(
+                self._conn, version, list(mod_ids or ()), kind
+            )
+
     def untranslated_entries(
         self,
         version: str,

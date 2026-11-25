@@ -34,6 +34,11 @@ from app.services_impl.moddb_translate_report import (
     write_quality_report,
     write_replace_rule_conflicts,
 )
+from app.services_impl.moddb_translate_variants import (
+    count_scope_untranslated,
+    is_variant_row,
+    variant_candidate_rows,
+)
 from app.services_impl.pipelines._pipeline_logging import (
     ensure_pipeline_logging,
     mirror_session_log,
@@ -127,6 +132,8 @@ class TranslateOptions:
     repair_sync_other_versions: bool = False
     # 格式修復：連已審核（含舊資料人工譯文）的項目也送 AI；預設略過，避免改寫已審核譯文
     repair_include_reviewed: bool = False
+    # 也翻譯沒有譯文的其他原文（鍵值相同、原文與主原文不同）；預設不含
+    include_variants: bool = False
 
 
 @dataclass
@@ -138,7 +145,11 @@ class TranslateReport:
     merged: int = 0  # 因相同原文合併、不必另外送 AI 的條目數
     reused: int = 0  # 沿用其他版本譯文（未呼叫 AI）
     translated: int = 0  # AI 已回傳
-    written: int = 0  # 已寫入資料庫
+    written: int = 0  # 已寫入資料庫（含其他原文）
+    variant_candidates: int = (
+        0  # 候選中沒有譯文的其他原文筆數（含同組；勾選「包含其他原文」才有）
+    )
+    variant_written: int = 0  # 其中已寫入其他原文的筆數
     flagged: int = 0  # 特殊字元與原文不一致，未寫入（含同組條目）
     flagged_twins: int = 0  # 品質退回的代表條目底下、一併未寫入的同組條目數
     status: str = "DONE"
@@ -185,6 +196,8 @@ class TranslateReport:
             "reused": self.reused,
             "translated": self.translated,
             "written": self.written,
+            "variant_candidates": self.variant_candidates,
+            "variant_written": self.variant_written,
             "flagged": self.flagged,
             "flagged_entries": dict(self.flagged_entries),
             "status": self.status,
@@ -334,10 +347,17 @@ def estimate_scope_plan(
     limit: int = 0,
     reuse_other_versions: bool = True,
     kind: str | None = None,
+    include_variants: bool = False,
 ) -> tuple[int, int]:
     """回傳相同原文合併後實際送 AI 的筆數，以及共用 planner 規劃的批數。"""
     selection, locales = _load_merged_selection(
-        db, version, mod_ids, limit, exclude_reusable=reuse_other_versions, kind=kind
+        db,
+        version,
+        mod_ids,
+        limit,
+        exclude_reusable=reuse_other_versions,
+        kind=kind,
+        include_variants=include_variants,
     )
     items = _grouped_items(db, list(selection.rows), locales=locales)
     _attach_translation_sessions(
@@ -357,6 +377,7 @@ def _load_merged_selection(
     *,
     exclude_reusable: bool,
     kind: str | None,
+    include_variants: bool = False,
 ) -> tuple[MergedSelection, dict[int, str | None]]:
     """讀出要送 AI 的未翻譯條目並合併相同原文，回傳（合併結果, 來源語系）。
 
@@ -364,27 +385,41 @@ def _load_merged_selection(
     不足上限就加倍），再只重讀這些組所屬模組（同一個命名空間的所有模組包版本）的全部待翻列。同組條目
     一定在同一個內容模組裡，而前綴的每一列都在重讀範圍內且排在最前面，所以前 ``limit`` 組與
     同組條目都和「讀出整個範圍再分組」相同。
+
+    ``include_variants``：沒有譯文的其他原文排在條目後面，只在條目已讀完（整個範圍，或前綴比
+    要求的短）時接上；其他原文沒有可沿用的跨版本譯文，不受 ``exclude_reusable`` 影響。
     """
 
     def load(mods, fetch):
         rows = db.untranslated_entries(
             version, list(mods), fetch, exclude_reusable=exclude_reusable, kind=kind
         )
-        return rows, db.source_locales_for_entries([int(row[0]) for row in rows])
+        locales = db.source_locales_for_entries([int(row[0]) for row in rows])
+        main_count = len(rows)
+        if include_variants and (fetch is None or main_count < fetch):
+            extra, extra_locales = variant_candidate_rows(db, version, mods, kind)
+            rows, locales = [*rows, *extra], {**locales, **extra_locales}
+        return rows, locales, main_count
 
     # 前綴要讀到整個範圍的不小部分時，直接讀整個範圍比反覆加倍再重讀便宜
-    total = db.count_untranslated(version, list(mod_ids), kind=kind) if limit else 0
+    total = (
+        count_scope_untranslated(
+            db, version, mod_ids, kind, include_variants=include_variants
+        )
+        if limit
+        else 0
+    )
     fetch = limit * 2
     while fetch * 4 <= total:
-        rows, locales = load(mod_ids, fetch)
+        rows, locales, main_count = load(mod_ids, fetch)
         window = select_merged_rows(rows, locales, limit)
-        if len(rows) < fetch:  # 排除可沿用條目後已讀完整個範圍
+        if main_count < fetch:  # 排除可沿用條目後已讀完整個範圍
             return window, locales
         if window.ai_count >= limit:
             break
         fetch *= 2
     else:
-        rows, locales = load(mod_ids, None)
+        rows, locales, _main = load(mod_ids, None)
         return select_merged_rows(rows, locales, limit), locales
     namespaces = {row[2].split("@", 1)[0] for row in window.rows}
     related = [
@@ -392,7 +427,7 @@ def _load_merged_selection(
         for mod in (mod_ids or db.mods(version))
         if mod.split("@", 1)[0] in namespaces
     ]
-    rows, locales = load(related, None)
+    rows, locales, _main = load(related, None)
     return select_merged_rows(rows, locales, limit), locales
 
 
@@ -404,6 +439,7 @@ def estimate_scope_batches(
     limit: int = 0,
     reuse_other_versions: bool = True,
     kind: str | None = None,
+    include_variants: bool = False,
 ) -> int:
     """Return the planned batch count for the exact filtered AI rows."""
     return estimate_scope_plan(
@@ -413,6 +449,7 @@ def estimate_scope_batches(
         limit=limit,
         reuse_other_versions=reuse_other_versions,
         kind=kind,
+        include_variants=include_variants,
     )[1]
 
 
@@ -569,13 +606,18 @@ def _noop_cache(*_args, **_kwargs) -> bool:
 
 
 def _merge_summary_text(report: TranslateReport) -> str:
-    """相同原文合併的說明（沒有合併時為空字串）；預覽與實際機翻共用同一段文字。"""
-    if not report.merged:
-        return ""
-    return (
-        f"相同原文合併：{report.candidates:,} 筆條目只送 AI {report.ai_items:,} 筆"
-        f"（{report.merged:,} 筆同原文條目沿用同一個譯文）"
-    )
+    """相同原文合併與「包含其他原文」的說明（都沒有時為空字串）；預覽與實際機翻共用同一段文字。"""
+    parts = []
+    if report.merged:
+        parts.append(
+            f"相同原文合併：{report.candidates:,} 筆條目只送 AI {report.ai_items:,} 筆"
+            f"（{report.merged:,} 筆同原文條目沿用同一個譯文）"
+        )
+    if report.variant_candidates:
+        parts.append(
+            f"其中其他原文 {report.variant_candidates:,} 份（譯文只供流水線使用）"
+        )
+    return "；".join(parts)
 
 
 def _select_rows(
@@ -600,13 +642,25 @@ def _select_rows(
         options.limit,
         exclude_reusable=preview_reuse,
         kind=kind,
+        include_variants=options.include_variants,
     )
     rows = list(selection.rows)
     report.candidates = selection.entry_count
     report.ai_items = selection.ai_count
     report.merged = selection.merged_count
+    report.variant_candidates = sum(
+        1
+        for row in (*rows, *(r for group in selection.twins.values() for r in group))
+        if is_variant_row(row[0])
+    )
     report.remaining = (
-        db.count_untranslated(options.version, mods, kind=kind)
+        count_scope_untranslated(
+            db,
+            options.version,
+            mods,
+            kind,
+            include_variants=options.include_variants,
+        )
         if options.dry_run
         else report.candidates
     )
@@ -687,7 +741,8 @@ def _flush_buffer(session, db, version, buffer, report, failures) -> None:
             continue
         buffer.clear()
         failures["db_error"] = ""
-        report.written += done.written
+        report.written += done.written + done.variant_written
+        report.variant_written += done.variant_written
         return
 
 
@@ -734,10 +789,11 @@ def _record_quality_rejection(
     issues = list(item.get("_quality_issues") or ())
     if not issues:
         issues = list(_quality_issues_for_item(item, source, translated))
-    if isinstance(entry_id, int):
+    if isinstance(entry_id, int) and not is_variant_row(entry_id):
         report.flagged_entries[entry_id] = translated
     for twin in twins:
-        report.flagged_entries[int(twin[0])] = translated
+        if not is_variant_row(twin[0]):  # 其他原文不是條目，不能在條目校對開啟
+            report.flagged_entries[int(twin[0])] = translated
     if len(report.flagged_samples) < _FLAGGED_LOG_LIMIT:
         report.flagged_samples.append(
             f"{item.get('_mod_id', '')} / {item.get('path', '')}：{'、'.join(issues)}"
@@ -950,8 +1006,12 @@ def _translation_lm_cfg(lm_config: Any) -> dict[str, Any]:
 def _count_scope_remaining(db, options: TranslateOptions) -> int | None:
     """執行結束後整個範圍仍未翻譯的筆數（與預覽的「此範圍仍未翻譯」同一個查詢）。"""
     try:
-        return db.count_untranslated(
-            options.version, list(options.mod_ids), kind=options.kind
+        return count_scope_untranslated(
+            db,
+            options.version,
+            options.mod_ids,
+            options.kind,
+            include_variants=options.include_variants,
         )
     except sqlite3.Error:
         logger.warning("Mod 資料庫機翻：讀取範圍內未翻譯筆數失敗", exc_info=True)

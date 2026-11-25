@@ -346,19 +346,13 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
     mod_ids = (mod,) if mod != ALL_MODS else (tuple(pack_mods) if pack else ())
     kinds = db.kinds(version) if db and version else []
     kind = request.get("kind") if request.get("kind") in kinds else None
-    missing = (
-        db.count_untranslated(version, mod_ids, kind=kind) if db and version else 0
-    )
-    reusable = (
-        db.count_reusable(version, mod_ids, kind=kind)
-        if db and version and request.get("reuse")
-        else 0
-    )
-    # 相同原文合併後的組數（SQL 估算，不建立 items）；精確送 AI 筆數由預覽計算
-    merged_groups = (
-        db.count_untranslated_merged(version, mod_ids, kind=kind)
-        if db and version
-        else 0
+    missing, reusable, merged_groups = _translate_scope_counts(
+        db,
+        version,
+        mod_ids,
+        kind,
+        reuse=bool(request.get("reuse")),
+        variants=bool(request.get("variants")),
     )
     # 背景刷新只更新快速計數；完整批次規劃由預覽／開始翻譯時的 service
     # 使用同一份 items、session 與 planner 計算，避免每次範圍變更都掃完整版本。
@@ -377,6 +371,26 @@ def _load_translate_snapshot(db, request: dict, snapshot: dict) -> dict:
         planned_batches=None,
     )
     return snapshot
+
+
+def _translate_scope_counts(
+    db, version, mod_ids, kind, *, reuse: bool, variants: bool
+) -> tuple[int, int, int]:
+    """批次機翻範圍的快速計數：（未翻譯, 可沿用, 相同原文合併後的組數估算）。
+
+    ``variants``＝勾選「包含其他原文」：沒有譯文的其他原文也算進未翻譯與組數估算
+    （它們沒有可沿用的跨版本譯文，也不併入條目的組數估算，所以以上限估計）。
+    """
+    if not db or not version:
+        return 0, 0, 0
+    missing = db.count_untranslated(version, mod_ids, kind=kind)
+    reusable = db.count_reusable(version, mod_ids, kind=kind) if reuse else 0
+    # 相同原文合併後的組數（SQL 估算，不建立 items）；精確送 AI 筆數由預覽計算
+    merged_groups = db.count_untranslated_merged(version, mod_ids, kind=kind)
+    if variants:
+        extra = db.count_untranslated_variants(version, mod_ids, kind=kind)
+        missing, merged_groups = missing + extra, merged_groups + extra
+    return missing, reusable, merged_groups
 
 
 def _database_identity(db):
