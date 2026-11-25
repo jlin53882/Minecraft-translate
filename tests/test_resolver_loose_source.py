@@ -215,3 +215,65 @@ def test_merging_duplicates_does_not_keep_a_variant_equal_to_the_main_original_l
         )
     finally:
         db.close()
+
+
+def test_loose_hit_keeps_the_translation_as_is_when_both_originals_have_the_same_edges(
+    db,
+):
+    """資料庫原文與查詢的原文前後空白相同：譯文原樣（原文與譯文刻意不同的空白不動）。"""
+    _seed(db, en="Speed: ", tw="速度：")
+    hit = TranslationResolver(db, VERSION).lookup(KIND_LANG, "foo", KEY, "speed: ")
+    assert hit is not None and hit.zh_tw == "速度："
+
+
+def test_loose_cross_version_hit_also_takes_the_queried_texts_edges(db):
+    db.ingest("1.20.1", [ScanItem(KIND_LANG, "foo", KEY, "Show", "顯示", "")])
+    resolver = TranslationResolver(db, VERSION, cross_version=True)
+    hit = resolver.lookup(KIND_LANG, "foo", KEY, " show")
+    assert hit is not None and hit.cross and hit.zh_tw == " 顯示"
+
+
+@pytest.mark.parametrize(
+    ("stored", "queried"),
+    [
+        ("Press $(k:Jump) to jump", "Press $(k:jump) to jump"),  # Patchouli 巨集
+        ("§aGreen", "§AGreen"),  # § 色碼在品質檢查裡是不同 token
+    ],
+)
+def test_protected_token_case_differences_are_a_different_original(db, stored, queried):
+    """品質檢查保護的 token（巨集、§ 色碼）大小寫不同，譯文不能互換：不是寬鬆相等。"""
+    _seed(db, en=stored, tw="譯")
+    resolver = TranslationResolver(db, VERSION)
+    assert resolver.lookup(KIND_LANG, "foo", KEY, queried) is None
+    assert resolver.stats.en_mismatch == 1 and resolver.stats.hit_loose == 0
+
+
+def test_text_around_protected_tokens_is_still_compared_loosely(db):
+    _seed(db, en="Press $(k:Jump) TO Jump", tw="按 $(k:Jump) 跳躍")
+    hit = TranslationResolver(db, VERSION).lookup(
+        KIND_LANG, "foo", KEY, "press $(k:Jump) to  jump"
+    )
+    assert hit is not None and hit.zh_tw == "按 $(k:Jump) 跳躍"
+
+
+def test_other_originals_differing_only_in_a_protected_token_case_are_kept_apart(db):
+    """兩份只差巨集大小寫的其他原文各自存譯文，不會因為共用同一份而卡住第二份。"""
+    _seed(db, en="Main", tw="主")
+    db.write_back(
+        VERSION,
+        [WriteBackItem(KIND_LANG, "foo", KEY, "Press $(k:Jump)", "按 $(k:Jump)")],
+    )
+    db.write_back(
+        VERSION,
+        [WriteBackItem(KIND_LANG, "foo", KEY, "Press $(k:jump)", "按 $(k:jump)")],
+    )
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 2
+    resolver = TranslationResolver(db, VERSION)
+    assert (
+        resolver.lookup(KIND_LANG, "foo", KEY, "Press $(k:Jump)").zh_tw
+        == "按 $(k:Jump)"
+    )
+    assert (
+        resolver.lookup(KIND_LANG, "foo", KEY, "Press $(k:jump)").zh_tw
+        == "按 $(k:jump)"
+    )

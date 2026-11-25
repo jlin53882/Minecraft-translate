@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import re
 
+from translation_tool.core.format_tokens import format_token_spans
+
 from .schema import KIND_FTB_QUEST_LANG, KIND_KUBEJS_LANG, KIND_LANG
 
 PACK_KINDS = (KIND_KUBEJS_LANG, KIND_FTB_QUEST_LANG)
@@ -84,22 +86,37 @@ _FORMAT_CODE = re.compile(
 )
 
 
+def _protected_spans(line: str) -> list[tuple[int, int]]:
+    """一行裡大小寫有語義的片段：格式控制碼（``%s``…）與品質檢查保護的 token
+    （``§`` 色碼、Patchouli 巨集 ``$(…)``、``{0}``）。回傳合併後不重疊、依序的區間。"""
+    spans = [m.span() for m in _FORMAT_CODE.finditer(line)]
+    spans += [(start, end) for _tok, start, end in format_token_spans(line)]
+    merged: list[tuple[int, int]] = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def loose_text(text: str) -> str:
     """比較原文用的寬鬆形式：不分大小寫、同一行內連續空白視為一個。
 
     新版整合包或模組常只改原文的大小寫或空白，譯文仍然適用，所以這樣的差異視為內容相同
-    （跨版本沿用、版本差異審核與掃描時的「原文已變動」判斷都用它）。
-    有語義的差異會保留：換行位置（影響遊戲內版面）與格式控制碼的大小寫（``%s`` 與 ``%S`` 的
-    格式化結果不同）。
+    （跨版本沿用、版本差異審核、流水線查詢與掃描時的「原文已變動」判斷都用它）。
+    有語義的差異會保留：換行位置（影響遊戲內版面），以及格式控制碼與品質檢查保護的 token
+    的大小寫（``%s`` 與 ``%S`` 的格式化結果不同；``§A`` 與 ``§a``、``$(k:Jump)`` 與
+    ``$(k:jump)`` 在品質檢查裡是不同的 token，譯文不能互換）。
     """
     lines = []
     for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         out: list[str] = []
         last = 0
-        for m in _FORMAT_CODE.finditer(line):
-            out.append(line[last : m.start()].casefold())
-            out.append(m.group())
-            last = m.end()
+        for start, end in _protected_spans(line):
+            out.append(line[last:start].casefold())
+            out.append(line[start:end])
+            last = end
         out.append(line[last:].casefold())
         lines.append(" ".join("".join(out).split()))
     return "\n".join(lines)

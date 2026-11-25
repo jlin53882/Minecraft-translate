@@ -175,7 +175,7 @@ class TranslationResolver:
         if own is not None:
             self._bump("hit_target")
             self._bump("hit_loose")
-            return Hit(_match_edges(en_us, own[2]), own[3], own[1], False)
+            return Hit(_match_edges(en_us, own[0], own[2]), own[3], own[1], False)
         others = exact or loose
         if not others:
             self._bump("en_mismatch")
@@ -188,14 +188,23 @@ class TranslationResolver:
         if others is exact:
             return Hit(best[2], best[3], best[1], True)
         self._bump("hit_loose")
-        return Hit(_match_edges(en_us, best[2]), best[3], best[1], True)
+        return Hit(_match_edges(en_us, best[0], best[2]), best[3], best[1], True)
 
 
-def _match_edges(en_us: str, zh_tw: str) -> str:
-    """寬鬆命中的譯文：前後空白改成與查詢的原文相同（譯文本身內部的空白不動）。"""
-    lead = en_us[: len(en_us) - len(en_us.lstrip())]
-    trail = en_us[len(en_us.rstrip()) :]
-    return f"{lead}{zh_tw.strip()}{trail}"
+def _edges(text: str) -> tuple[str, str]:
+    return text[: len(text) - len(text.lstrip())], text[len(text.rstrip()) :]
+
+
+def _match_edges(en_us: str, stored_en: str, zh_tw: str) -> str:
+    """寬鬆命中的譯文：前後空白與查詢的原文不一致時才改成與查詢的原文相同。
+
+    資料庫那份原文與查詢的原文前後空白相同時，譯文原樣使用（原文與譯文刻意不同的空白，
+    例如 ``Speed: `` 譯成 ``速度：``，不動）；譯文內部的空白不動。
+    """
+    wanted = _edges(en_us)
+    if _edges(stored_en) == wanted:
+        return zh_tw
+    return f"{wanted[0]}{zh_tw.strip()}{wanted[1]}"
 
 
 def item_identity(item: dict[str, Any], root: str | Path):
