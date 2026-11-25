@@ -354,21 +354,52 @@ def test_trivial_untranslated_variants_are_purged_when_the_db_opens(db_path):
         [
             _known_lang_item("foo", "item.foo.a", "Show Background", "顯示背景"),
             _known_lang_item("foo", "item.foo.b", "Old Text"),
+            _known_lang_item("foo", "item.foo.c", "CAFÉ"),
         ],
     )
     db.ingest(VERSION, [_known_lang_item("foo", "item.foo.b", "Real Change")])
-    entry_a = db._q("SELECT id FROM entry WHERE key='item.foo.a'")[0][0]
-    db._conn.execute(
-        "INSERT INTO entry_variant (entry_id, en_us, first_seen, last_seen) "
-        "VALUES (?, 'Show background', 't', 't')",
-        (entry_a,),
-    )
+    for key, text in (("item.foo.a", "Show background"), ("item.foo.c", "café")):
+        entry_id = db._q("SELECT id FROM entry WHERE key=?", (key,))[0][0]
+        db._conn.execute(
+            "INSERT INTO entry_variant (entry_id, en_us, first_seen, last_seen) "
+            "VALUES (?, ?, 't', 't')",
+            (entry_id, text),
+        )
     db._conn.commit()
     db.close()
     reopened = TranslationDB(db_path)
     try:
         assert reopened._q("SELECT en_us FROM entry_variant ORDER BY en_us") == [
             ("Real Change",)
-        ]  # 只差大小寫的清掉，真正的原文變動留著
+        ]  # 只差大小寫（含非 ASCII）的清掉，真正的原文變動留著
     finally:
         reopened.close()
+
+
+def test_an_empty_ai_translation_row_is_filled_by_the_batch_run(db_path, monkeypatch):
+    """變體已有一列空字串的 AI 譯文（算沒有譯文）：機翻要補上內容，不能每次重送。"""
+    _seed(db_path)
+    db = _db(db_path)
+    try:
+        vid = db._q("SELECT id FROM entry_variant WHERE en_us='Draw Layer'")[0][0]
+        db._conn.execute(
+            "INSERT INTO variant_translation (variant_id, source, zh_tw) VALUES (?, ?, '')",
+            (vid, SRC_AI),
+        )
+        db._conn.commit()
+    finally:
+        db.close()
+    fake_engine(monkeypatch, lambda t: "翻:" + t)
+    summary = run(TranslateOptions(version=VERSION, include_variants=True))["summary"]
+    assert summary["variant_written"] == 1 and summary["remaining"] == 0
+    db = _db(db_path)
+    try:
+        assert db._q(
+            "SELECT t.zh_tw FROM variant_translation t "
+            "JOIN entry_variant v ON v.id = t.variant_id "
+            "WHERE v.en_us='Draw Layer' AND t.source=?",
+            (SRC_AI,),
+        ) == [("翻:Draw Layer",)]
+        assert db.count_untranslated_variants(VERSION) == 0
+    finally:
+        db.close()
