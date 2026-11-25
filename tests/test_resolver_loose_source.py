@@ -357,3 +357,58 @@ def test_write_back_with_a_different_link_target_becomes_a_variant_not_the_main_
         ],
     )
     assert stats.variant_written == 1 and stats.written == 0
+
+
+def test_reopening_the_database_keeps_a_guide_link_target_change_record(tmp_path):
+    """開啟資料庫的舊紀錄清理與掃描用同一個定義：連結目標大小寫不同是真的原文變動，不能被清掉。"""
+    path = tmp_path / "keep.db"
+    first = TranslationDB(path)
+    first.ingest(VERSION, [ScanItem(GUIDE, "foo", GKEY, LINK_UP, "", "")])
+    first.ingest(VERSION, [ScanItem(GUIDE, "foo", GKEY, LINK_LOW, "", "")])
+    first.ingest(VERSION, [ScanItem(KIND_LANG, "foo", KEY, "Show Background", "", "")])
+    with first._tx() as conn:  # 舊版留下的只差大小寫的紀錄：應被清掉
+        conn.execute(
+            "INSERT INTO src_change (kind, mc_version, mod_id, key, old_en, new_en) "
+            "VALUES ('lang', ?, 'foo', ?, 'Show Background', 'show background')",
+            (VERSION, KEY),
+        )
+    assert first._one("SELECT COUNT(*) FROM src_change")[0] == 2
+    first.close()
+    second = TranslationDB(path)
+    try:
+        assert second._q("SELECT kind FROM src_change") == [(GUIDE,)]
+    finally:
+        second.close()
+
+
+def test_loose_text_itself_keeps_the_case_of_protected_tokens():
+    from translation_tool.translation_db.content_identity import loose_text
+
+    for a, b in [
+        ("§aGreen", "§AGreen"),
+        ("Press $(k:Jump)", "Press $(k:jump)"),
+        ("Value: %s", "Value: %S"),
+    ]:
+        assert loose_text(a) != loose_text(b), (a, b)
+    assert loose_text("Press $(k:Jump) TO  Jump") == loose_text(
+        "press $(k:Jump) to jump"
+    )
+
+
+def test_merge_into_moves_a_guide_variant_that_differs_only_in_a_link_target(tmp_path):
+    from translation_tool.translation_db import variants
+
+    db = TranslationDB(tmp_path / "g.db")
+    try:
+        _guide_seed(db, en=LINK_UP, tw="閱讀")
+        db.ingest(VERSION, [ScanItem(GUIDE, "foo", "guide/dup.md#0", "Other", "", "")])
+        survivor = db._one("SELECT id FROM entry WHERE key=?", (GKEY,))[0]
+        duplicate = db._one("SELECT id FROM entry WHERE key='guide/dup.md#0'")[0]
+        with db._tx() as conn:
+            variants.add_translation(conn, duplicate, LINK_LOW, 0, "譯")
+            variants.merge_into(conn, survivor, duplicate)
+        assert db._q(
+            "SELECT en_us FROM entry_variant WHERE entry_id=?", (survivor,)
+        ) == [(LINK_LOW,)]
+    finally:
+        db.close()
