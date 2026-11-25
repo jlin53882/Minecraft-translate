@@ -16,7 +16,7 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass
 
-from translation_tool.translation_db.content_identity import loose_text
+from translation_tool.translation_db.content_identity import same_original
 
 
 @dataclass(frozen=True)
@@ -83,12 +83,15 @@ def variant_id(conn: sqlite3.Connection, entry_id: int, en_us: str) -> int | Non
 def _loose_variant_id(
     conn: sqlite3.Connection, entry_id: int, en_us: str
 ) -> int | None:
-    """條目上與 ``en_us`` 只差大小寫或同一行內空白的其他原文（沒有逐字相同的才找）。"""
-    target = loose_text(en_us)
+    """條目上與 ``en_us`` 視為同一句（``same_original``：只差大小寫或同一行內空白，
+    且沒有硬結構差異）的其他原文；沒有逐字相同的才找。"""
+    row = conn.execute("SELECT kind FROM entry WHERE id=?", (entry_id,)).fetchone()
+    if row is None:
+        return None
     for vid, existing in conn.execute(
         "SELECT id, en_us FROM entry_variant WHERE entry_id=?", (entry_id,)
     ).fetchall():
-        if loose_text(existing) == target:
+        if same_original(row[0], existing, en_us):
             return int(vid)
     return None
 
@@ -368,11 +371,13 @@ def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) ->
     """
     if not tables_available(conn):
         return
-    main = conn.execute("SELECT en_us FROM entry WHERE id=?", (survivor_id,)).fetchone()
+    main = conn.execute(
+        "SELECT kind, en_us FROM entry WHERE id=?", (survivor_id,)
+    ).fetchone()
     for vid, en_us in conn.execute(
         "SELECT id, en_us FROM entry_variant WHERE entry_id=?", (duplicate_id,)
     ).fetchall():
-        if main is not None and loose_text(main[0]) == loose_text(en_us):
+        if main is not None and same_original(main[0], main[1], en_us):
             continue
         target = ensure_variant(conn, survivor_id, en_us)
         conn.execute(

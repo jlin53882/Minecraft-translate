@@ -122,6 +122,23 @@ def loose_text(text: str) -> str:
     return "\n".join(lines)
 
 
+def same_original(kind: str, left: str, right: str) -> bool:
+    """兩份原文視為同一句（譯文可以通用）：逐字相同，或只差大小寫／同一行內空白，
+    而且對 ``kind`` 的品質檢查沒有硬結構差異。
+
+    ``loose_text`` 不知道類型，指南的連結目標（``](https://…/Guide)``）、行內程式碼等硬結構
+    只有該類型的品質檢查看得出來；這些結構不同的兩份原文，譯文不能互換
+    （``translation_issues`` 會拒絕），所以不能當同一句。
+    """
+    if left == right:
+        return True
+    if loose_text(left) != loose_text(right):
+        return False
+    from translation_tool.translation_db.quality import translation_issues
+
+    return not translation_issues(left, right, kind=kind)
+
+
 def other_version_sql(left: str, right: str) -> str:
     """``right`` 是 ``left`` 的「其他版本」的條件（跨版本沿用與版本差異審核使用）。
 

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from translation_tool.translation_db.content_identity import loose_text
+from translation_tool.translation_db.content_identity import same_original
 from translation_tool.translation_db.identity import (
     classify_file,
     classify_sniffed_book_file,
@@ -69,7 +69,7 @@ class ResolverStats:
 class TranslationResolver:
     """以 ``(類型, 模組, 鍵值, 原文)`` 查詢目標版本的既有譯文。
 
-    原文先逐字比對；沒有逐字相同的才退回 ``loose_text``（不分大小寫、同一行內連續空白視為一個），
+    原文先逐字比對；沒有逐字相同的才退回寬鬆比對（``same_original``）（不分大小寫、同一行內連續空白視為一個），
     與掃描判斷「原文已變動」的規則一致。
     """
 
@@ -154,7 +154,7 @@ class TranslationResolver:
     def lookup(self, kind: str, mod_id: str, key: str, en_us: str) -> Hit | None:
         """依目標版本優先查譯文：目標逐字 → 目標寬鬆 → 其他版本逐字 → 其他版本寬鬆。
 
-        寬鬆＝``loose_text``（不分大小寫、同一行內連續空白視為一個），與掃描判斷「原文已變動」
+        寬鬆＝``same_original``（不分大小寫、同一行內連續空白視為一個，且沒有該類型品質檢查的硬結構差異），與掃描判斷「原文已變動」
         同一套規則；換行位置與 ``%s``／``%S`` 這類格式碼的大小寫仍視為不同原文。寬鬆命中的
         譯文前後空白改成與查詢的原文一致（譯文是別種寫法的原文翻的，前後空白不一定相同）。
         """
@@ -169,8 +169,7 @@ class TranslationResolver:
         if own is not None:
             self._bump("hit_target")
             return Hit(own[2], own[3], own[1], False)
-        target = loose_text(en_us)
-        loose = [c for c in cands if c[0] != en_us and loose_text(c[0]) == target]
+        loose = [c for c in cands if c[0] != en_us and same_original(kind, c[0], en_us)]
         own = next((c for c in loose if c[1] == self.version), None)
         if own is not None:
             self._bump("hit_target")

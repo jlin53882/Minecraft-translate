@@ -277,3 +277,83 @@ def test_other_originals_differing_only_in_a_protected_token_case_are_kept_apart
         resolver.lookup(KIND_LANG, "foo", KEY, "Press $(k:jump)").zh_tw
         == "按 $(k:jump)"
     )
+
+
+# ------------------------------------------------ 指南：連結目標大小寫是硬結構
+GUIDE = "guide"
+LINK_UP = "Read [the guide](https://example.org/Guide)"
+LINK_LOW = "Read [the guide](https://example.org/guide)"
+GKEY = "guide/intro.md#0"
+
+
+def _guide_seed(db, en=LINK_UP, tw="閱讀[指南](https://example.org/Guide)"):
+    db.ingest(VERSION, [ScanItem(GUIDE, "foo", GKEY, en, tw, "")])
+
+
+def test_same_original_respects_guide_hard_structure():
+    from translation_tool.translation_db.content_identity import same_original
+
+    assert not same_original(GUIDE, LINK_UP, LINK_LOW)  # 連結目標大小寫不同
+    assert same_original(
+        GUIDE, LINK_UP, LINK_UP.replace("the guide", "THE GUIDE")
+    )  # 連結文字大小寫
+    assert same_original("lang", "Show Background", "show  background")
+
+
+def test_lookup_does_not_treat_a_different_link_target_as_the_same_original(db):
+    _guide_seed(db)
+    resolver = TranslationResolver(db, VERSION)
+    assert resolver.lookup(GUIDE, "foo", GKEY, LINK_LOW) is None
+    assert resolver.stats.en_mismatch == 1 and resolver.stats.hit_loose == 0
+    assert resolver.lookup(
+        GUIDE, "foo", GKEY, LINK_UP.replace("the guide", "The Guide")
+    ).zh_tw
+
+
+def test_scan_registers_a_different_link_target_as_a_changed_original(db):
+    _guide_seed(db)
+    stats = db.ingest(VERSION, [ScanItem(GUIDE, "foo", GKEY, LINK_LOW, "", "")])
+    assert stats.en_changed == 1
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 1
+
+
+def test_two_guide_originals_differing_only_in_a_link_target_keep_separate_translations(
+    db,
+):
+    """卡住第二份譯文的情境：兩份只差連結目標大小寫的其他原文各自存自己的譯文。"""
+    _guide_seed(db, en="Main text", tw="主")
+    db.write_back(
+        VERSION,
+        [
+            WriteBackItem(
+                GUIDE, "foo", GKEY, LINK_UP, "閱讀[指南](https://example.org/Guide)"
+            )
+        ],
+    )
+    db.write_back(
+        VERSION,
+        [
+            WriteBackItem(
+                GUIDE, "foo", GKEY, LINK_LOW, "閱讀[指南](https://example.org/guide)"
+            )
+        ],
+    )
+    assert db._one("SELECT COUNT(*) FROM entry_variant")[0] == 2
+    resolver = TranslationResolver(db, VERSION)
+    assert resolver.lookup(GUIDE, "foo", GKEY, LINK_UP).zh_tw.endswith("/Guide)")
+    assert resolver.lookup(GUIDE, "foo", GKEY, LINK_LOW).zh_tw.endswith("/guide)")
+
+
+def test_write_back_with_a_different_link_target_becomes_a_variant_not_the_main_entrys(
+    db,
+):
+    _guide_seed(db)
+    stats = db.write_back(
+        VERSION,
+        [
+            WriteBackItem(
+                GUIDE, "foo", GKEY, LINK_LOW, "閱讀[指南](https://example.org/guide)"
+            )
+        ],
+    )
+    assert stats.variant_written == 1 and stats.written == 0
