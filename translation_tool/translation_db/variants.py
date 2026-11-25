@@ -372,7 +372,7 @@ def merge_into(conn: sqlite3.Connection, survivor_id: int, duplicate_id: int) ->
     for vid, en_us in conn.execute(
         "SELECT id, en_us FROM entry_variant WHERE entry_id=?", (duplicate_id,)
     ).fetchall():
-        if main is not None and main[0] == en_us:
+        if main is not None and loose_text(main[0]) == loose_text(en_us):
             continue
         target = ensure_variant(conn, survivor_id, en_us)
         conn.execute(

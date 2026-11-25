@@ -60,9 +60,8 @@ class Hit:
 class ResolverStats:
     hit_target: int = 0
     hit_cross: int = 0
-    hit_loose: int = (
-        0  # 命中的原文只差大小寫或同一行內的空白（已計入 hit_target／hit_cross）
-    )
+    # 命中的原文只差大小寫或同一行內空白（只在實際回傳命中時計，也已計入 hit_target／hit_cross）
+    hit_loose: int = 0
     en_mismatch: int = 0  # 資料庫有同鍵值，但原文不同
     miss: int = 0
 
@@ -153,32 +152,50 @@ class TranslationResolver:
             setattr(self.stats, field, getattr(self.stats, field) + 1)
 
     def lookup(self, kind: str, mod_id: str, key: str, en_us: str) -> Hit | None:
+        """依目標版本優先查譯文：目標逐字 → 目標寬鬆 → 其他版本逐字 → 其他版本寬鬆。
+
+        寬鬆＝``loose_text``（不分大小寫、同一行內連續空白視為一個），與掃描判斷「原文已變動」
+        同一套規則；換行位置與 ``%s``／``%S`` 這類格式碼的大小寫仍視為不同原文。寬鬆命中的
+        譯文前後空白改成與查詢的原文一致（譯文是別種寫法的原文翻的，前後空白不一定相同）。
+        """
         if not en_us:
             return None
         cands = self._mod_table(mod_id).get((kind, key))
         if not cands:
             self._bump("miss")
             return None
-        same = [c for c in cands if c[0] == en_us]
-        if not same:
-            # 原文只差大小寫或同一行內的空白：與掃描、跨版本沿用同一套（loose_text），
-            # 視為同一句，不是原文變動；換行位置與 %s／%S 這類格式碼的大小寫仍視為不同
-            target = loose_text(en_us)
-            same = [c for c in cands if loose_text(c[0]) == target]
-            if not same:
-                self._bump("en_mismatch")
-                return None
-            self._bump("hit_loose")
-        own = next((c for c in same if c[1] == self.version), None)
+        exact = [c for c in cands if c[0] == en_us]
+        own = next((c for c in exact if c[1] == self.version), None)
         if own is not None:
             self._bump("hit_target")
             return Hit(own[2], own[3], own[1], False)
+        target = loose_text(en_us)
+        loose = [c for c in cands if c[0] != en_us and loose_text(c[0]) == target]
+        own = next((c for c in loose if c[1] == self.version), None)
+        if own is not None:
+            self._bump("hit_target")
+            self._bump("hit_loose")
+            return Hit(_match_edges(en_us, own[2]), own[3], own[1], False)
+        others = exact or loose
+        if not others:
+            self._bump("en_mismatch")
+            return None
         if not self.cross_version:
             self._bump("miss")
             return None
-        best = min(same, key=lambda c: abs(version_number(c[1]) - self._target))
+        best = min(others, key=lambda c: abs(version_number(c[1]) - self._target))
         self._bump("hit_cross")
-        return Hit(best[2], best[3], best[1], True)
+        if others is exact:
+            return Hit(best[2], best[3], best[1], True)
+        self._bump("hit_loose")
+        return Hit(_match_edges(en_us, best[2]), best[3], best[1], True)
+
+
+def _match_edges(en_us: str, zh_tw: str) -> str:
+    """寬鬆命中的譯文：前後空白改成與查詢的原文相同（譯文本身內部的空白不動）。"""
+    lead = en_us[: len(en_us) - len(en_us.lstrip())]
+    trail = en_us[len(en_us.rstrip()) :]
+    return f"{lead}{zh_tw.strip()}{trail}"
 
 
 def item_identity(item: dict[str, Any], root: str | Path):

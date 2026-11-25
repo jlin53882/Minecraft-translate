@@ -39,7 +39,7 @@ def test_case_and_inline_whitespace_differences_still_hit(db, queried):
     _seed(db)
     resolver = TranslationResolver(db, VERSION)
     hit = resolver.lookup(KIND_LANG, "foo", KEY, queried)
-    assert hit is not None and hit.zh_tw == "顯示背景"
+    assert hit is not None and hit.zh_tw.strip() == "顯示背景"  # 前後空白跟著查詢的原文
     assert resolver.stats.hit_loose == 1 and resolver.stats.en_mismatch == 0
 
 
@@ -103,3 +103,115 @@ def test_other_original_is_not_duplicated_by_a_case_only_difference(db):
     assert (
         resolver.lookup(KIND_LANG, "foo", KEY, "Background style").zh_tw == "背景樣式"
     )
+
+
+# ------------------------------------------------ 版本優先序、統計、前後空白、保留原文
+def _two_versions(
+    db, *, target_en, target_tw, other_en, other_tw, other_version="1.20.1"
+):
+    db.ingest(VERSION, [ScanItem(KIND_LANG, "foo", KEY, target_en, target_tw, "")])
+    db.ingest(other_version, [ScanItem(KIND_LANG, "foo", KEY, other_en, other_tw, "")])
+
+
+@pytest.mark.parametrize("cross", [True, False])
+def test_target_version_loose_match_beats_other_version_exact_match(db, cross):
+    """目標版本寬鬆相等的譯文優先於其他版本逐字相同的譯文（關閉跨版本沿用時也要查得到）。"""
+    _two_versions(
+        db,
+        target_en="Show background",
+        target_tw="目標版本",
+        other_en="Show Background",
+        other_tw="舊版本",
+    )
+    resolver = TranslationResolver(db, VERSION, cross_version=cross)
+    hit = resolver.lookup(KIND_LANG, "foo", KEY, "Show Background")
+    assert hit is not None and hit.zh_tw == "目標版本" and not hit.cross
+    assert resolver.stats.hit_target == 1 and resolver.stats.hit_loose == 1
+
+
+def test_exact_candidate_wins_over_a_loose_one_of_the_same_version_rank(db):
+    """其他版本之間：逐字相同優先於寬鬆相同（即使寬鬆那個版本比較近）。"""
+    db.ingest(
+        "1.20.1", [ScanItem(KIND_LANG, "foo", KEY, "Show Background", "逐字", "")]
+    )
+    db.ingest(
+        "1.21.0", [ScanItem(KIND_LANG, "foo", KEY, "Show background", "寬鬆", "")]
+    )
+    resolver = TranslationResolver(db, VERSION, cross_version=True)
+    hit = resolver.lookup(KIND_LANG, "foo", KEY, "Show Background")
+    assert hit is not None and hit.zh_tw == "逐字" and hit.cross
+    assert resolver.stats.hit_loose == 0
+
+
+def test_loose_match_in_another_version_is_ignored_when_cross_version_is_off(db):
+    db.ingest("1.20.1", [ScanItem(KIND_LANG, "foo", KEY, "Show background", "舊", "")])
+    resolver = TranslationResolver(db, VERSION, cross_version=False)
+    assert resolver.lookup(KIND_LANG, "foo", KEY, "Show Background") is None
+    assert resolver.stats.miss == 1 and resolver.stats.hit_loose == 0
+
+
+def test_loose_cross_version_hit_is_counted_once(db):
+    db.ingest("1.20.1", [ScanItem(KIND_LANG, "foo", KEY, "Show background", "舊", "")])
+    resolver = TranslationResolver(db, VERSION, cross_version=True)
+    hit = resolver.lookup(KIND_LANG, "foo", KEY, "Show Background")
+    assert hit is not None and hit.cross
+    stats = resolver.stats
+    assert (stats.hit_cross, stats.hit_loose, stats.miss, stats.en_mismatch) == (
+        1,
+        1,
+        0,
+        0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "queried", "expected"),
+    [
+        ("Show", " Show", " 顯示"),  # 查詢的原文有前導空白：譯文跟著有
+        (" Show ", "Show", "顯示"),  # 查詢的原文沒有：譯文不帶資料庫那份的空白
+        ("Value:\t%s", "value: %s", "值：%s"),  # 內部空白不影響前後
+    ],
+)
+def test_loose_hit_takes_the_queried_texts_leading_and_trailing_whitespace(
+    db, stored, queried, expected
+):
+    translation = {"Show": "顯示", " Show ": " 顯示 ", "Value:\t%s": "值：%s"}[stored]
+    _seed(db, en=stored, tw=translation)
+    hit = TranslationResolver(db, VERSION).lookup(KIND_LANG, "foo", KEY, queried)
+    assert hit is not None and hit.zh_tw == expected
+
+
+def test_merge_fill_keeps_the_source_for_a_deliberately_untranslated_proper_noun(db):
+    """資料庫存 'Create' → 'Create'（刻意維持原文）：用 'CREATE' 查也不能當成已翻譯。"""
+    from translation_tool.core.lang_merge_db import MergeDbFill
+
+    _seed(db, en="Create", tw="Create")
+    fill = MergeDbFill(db, VERSION, cross_version=False)
+    final, pending, hits = fill.fill("foo", {}, {KEY: "CREATE"})
+    assert hits == 0 and final == {} and pending == {KEY: "CREATE"}
+    assert fill.skipped_same_as_source == 1 and fill.filled == 0
+
+
+def test_merging_duplicates_does_not_keep_a_variant_equal_to_the_main_original_loosely(
+    tmp_path,
+):
+    """別名合併：與保留條目主原文只差大小寫的其他原文不搬。"""
+    from translation_tool.translation_db import variants
+
+    db = TranslationDB(tmp_path / "m.db")
+    try:
+        _seed(db, en="Show Background", tw="顯示背景")
+        db.ingest(VERSION, [ScanItem(KIND_LANG, "foo", "dup", "Other", "", "")])
+        survivor = db._one("SELECT id FROM entry WHERE key=?", (KEY,))[0]
+        duplicate = db._one("SELECT id FROM entry WHERE key='dup'")[0]
+        with db._tx() as conn:
+            variants.add_translation(conn, duplicate, "show background", 0, "x")
+            variants.merge_into(conn, survivor, duplicate)
+        assert (
+            db._one("SELECT COUNT(*) FROM entry_variant WHERE entry_id=?", (survivor,))[
+                0
+            ]
+            == 0
+        )
+    finally:
+        db.close()
