@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from translation_tool.translation_db.content_identity import loose_text
 from translation_tool.translation_db.identity import (
     classify_file,
     classify_sniffed_book_file,
@@ -59,12 +60,19 @@ class Hit:
 class ResolverStats:
     hit_target: int = 0
     hit_cross: int = 0
+    hit_loose: int = (
+        0  # 命中的原文只差大小寫或同一行內的空白（已計入 hit_target／hit_cross）
+    )
     en_mismatch: int = 0  # 資料庫有同鍵值，但原文不同
     miss: int = 0
 
 
 class TranslationResolver:
-    """以 ``(類型, 模組, 鍵值, 原文)`` 查詢目標版本的既有譯文。"""
+    """以 ``(類型, 模組, 鍵值, 原文)`` 查詢目標版本的既有譯文。
+
+    原文先逐字比對；沒有逐字相同的才退回 ``loose_text``（不分大小寫、同一行內連續空白視為一個），
+    與掃描判斷「原文已變動」的規則一致。
+    """
 
     def __init__(
         self,
@@ -153,8 +161,14 @@ class TranslationResolver:
             return None
         same = [c for c in cands if c[0] == en_us]
         if not same:
-            self._bump("en_mismatch")
-            return None
+            # 原文只差大小寫或同一行內的空白：與掃描、跨版本沿用同一套（loose_text），
+            # 視為同一句，不是原文變動；換行位置與 %s／%S 這類格式碼的大小寫仍視為不同
+            target = loose_text(en_us)
+            same = [c for c in cands if loose_text(c[0]) == target]
+            if not same:
+                self._bump("en_mismatch")
+                return None
+            self._bump("hit_loose")
         own = next((c for c in same if c[1] == self.version), None)
         if own is not None:
             self._bump("hit_target")
